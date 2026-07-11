@@ -1,22 +1,22 @@
 # Synopsys 常见文件格式说明
 
 - **`*.vg`, `*.g.v`** – Verilog gate-level netlist file.  
-  Verilog 门级网表文件。有时用这些扩展名区分 RTL 源文件与门级网表。
+  Verilog 门级网表文件。
 
 - **`*.svf`** – Automated Setup File.  
-  自动设置文件。帮助 Formality 处理设计流程中其他工具引入的设计变更；用于辅助比较点（compare-point）匹配与形式验证，便于对齐待验证设计中的比较点。每加载一个 SVF，Formality 会解析并保存其内容，供基于名称的比较点匹配阶段使用。
+  自动设置文件。帮助 Formality 处理设计流程中其他工具引入的设计变更；用于辅助比较点（compare-point）匹配与形式验证，便于对齐待验证设计中的比较点。
 
 - **`*.ddc`** – Synopsys internal database format.  
   Synopsys 内部数据库格式。官方推荐用于保存门级网表。
 
 - **`*.vcd`** – Value Change Dump format.  
-  值变化转储格式，用于保存信号翻转波形。因是文本格式，文件往往很大。可用 `vcd2vpd`、`vpd2vcd`、`vcd2saif` 等工具做格式转换。
+  值变化转储格式，用于保存信号翻转波形。因是文本格式，文件往往很大。
 
 - **`*.vpd`** – VCD Plus.  
   Synopsys 专有的压缩二进制波形格式，同样用于保存信号翻转轨迹。
 
 - **`*.saif`** – Switching Activity Interchange Format.  
-  开关活动交换格式，用于存储信号翻转活动。支持 signal、port、generate、枚举、record、array、integer 等。
+  开关活动交换格式，用于存储信号翻转活动。
 
 - **`*.tcl`** – Tool Command Language script.  
   Tcl 脚本。Synopsys 工具的主要驱动/脚本语言。
@@ -45,10 +45,10 @@
 
 - **`*.plib`** – Physical Library source file.  
   物理库源文件。包含物理版图相关信息，用于：
-  - Floorplanning（布局规划）
-  - RC estimation（RC 估算）
-  - Placement（布局）
-  - Routing（布线）
+  - Floorplanning
+  - RC estimation
+  - Placement
+  - Routing
 
 - **`*.pdb`** – Physical Library.  
   物理库。`.plib` 的编译版本。
