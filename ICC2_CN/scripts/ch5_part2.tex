@@ -1,0 +1,191 @@
+% ============================================================
+\section{插入 Via Ladder}
+\subsection*{Inserting Via Ladders}
+
+Via ladder（亦称 via pillar）是自 pin 层向上堆叠至上层、供路由器连接的堆叠 via。Via ladder 可降低 via 电阻，改善性能与电迁移鲁棒性。
+
+使用 via ladder 前须：
+\begin{itemize}
+  \item 在设计的工艺数据中定义 via ladder 规则（见「定义 Via Ladder 规则」）；
+  \item 在全局布线\textbf{之前}插入 via ladder。
+\end{itemize}
+
+插入方法：
+\begin{itemize}
+  \item 布线前优化中的自动插入；
+  \item 基于约束的插入：\cmd{insert\_via\_ladders}；
+  \item 手动插入：\cmd{create\_via\_ladder}。
+\end{itemize}
+
+\begin{seeAlsoBox}
+查询 Via Ladder；移除 Via Ladder；控制 Via Ladder 连接。
+\end{seeAlsoBox}
+
+\subsection{定义 Via Ladder 规则}
+\subsubsection*{Defining Via Ladder Rules}
+
+Via ladder 规则定义各级的行数与每行 cut 数，可在 technology file 中定义，或用 \cmd{create\_via\_rule} 创建。以下三种方式可创建等价规则：
+
+\textbf{方式 1}：在 technology file 的 \texttt{ViaRule} 段中定义（含 \texttt{cutLayerNameTbl}、\texttt{numCutRowsTbl}、\texttt{numCutsPerRowTbl}、\texttt{upperMetalMinLengthTbl}、\texttt{cutXMinSpacingTbl}、\texttt{cutYMinSpacingTbl}、\texttt{maxNumStaggerTracksTbl}、\texttt{forHighPerformance}、\texttt{forElectromigration} 等）。详见 \textit{Synopsys Technology File and Routing Rules Reference Manual}。
+
+\textbf{方式 2}：命令行详细规格 + 属性：
+\begin{lstlisting}
+icc2_shell> create_via_rule -name VL1 -cut_layer_names {VIA1 VIA2} \
+   -cut_names {CUT1A CUT2A} -cut_rows {2 2} -cuts_per_row {2 2}
+icc2_shell> set_attribute [get_via_rules VL1] \
+   upper_metal_min_length_table {L1 L2}
+icc2_shell> set_attribute [get_via_rules VL1] \
+   for_high_performance false
+icc2_shell> set_attribute [get_via_rules VL1] \
+   for_electro_migration true
+\end{lstlisting}
+
+\textbf{方式 3}：先创建空规则再设属性（\appopt{cut\_layer\_name\_table\_size}、\appopt{cut\_layer\_name\_table}、\appopt{num\_cuts\_per\_row\_table} 等）。
+
+无论创建方式如何，工具对 via rule 一视同仁。可用 \cmd{get\_via\_rules}、\cmd{remove\_via\_rules}、\cmd{report\_via\_rules}、\cmd{list\_attributes -application -class via\_rule}，以及 \cmd{write\_tech\_file} 保存。
+
+\subsection{为电迁移 Via Ladder 生成规则}
+\subsubsection*{Generating Via Ladder Rules for Electromigration Via Ladders}
+
+可用 \cmd{generate\_via\_ladder\_template -config\_file} 根据 XML 配置生成规则与约束脚本，输出：
+\begin{itemize}
+  \item 模板脚本（默认 \texttt{auto\_gen\_via\_ladder\_template.tcl}，可用 \opt{-template\_file} 改名）：含 \cmd{create\_via\_rule} 与 \cmd{set\_attribute}；
+  \item 关联脚本（默认 \texttt{auto\_gen\_via\_ladder\_association.tcl}，可用 \opt{-association\_file} 改名）：含 \cmd{set\_via\_ladder\_candidate}，并将 pin 的 \appopt{is\_em\_via\_ladder\_required} 设为 \cmd{true}。
+\end{itemize}
+
+配置文件基本结构：
+\begin{lstlisting}
+<EmRule>
+   <Template name="rule_name">
+      <Layer name="layer_name" row_number="cuts_per_row"
+         [max_stagger_tracks="count"] ... />
+   </Template>
+   <Pin name="pin_name">
+      <Template name="rule_name"/>
+   </Pin>
+</EmRule>
+\end{lstlisting}
+
+工具从 technology file 推导 cut 层、cut 名与各金属层最小长度。
+
+\begin{noteBox}
+运行 \cmd{generate\_via\_ladder\_template} 前须打开 block，以确保可访问工艺数据。
+\end{noteBox}
+
+\begin{lstlisting}
+icc2_shell> generate_via_ladder_template -config_file vl_config
+\end{lstlisting}
+
+\subsection{为性能 Via Ladder 生成规则}
+\subsubsection*{Generating Via Ladder Rules for Performance Via Ladders}
+
+使用 \cmd{setup\_performance\_via\_ladder} 生成性能 via ladder 规则与关联。默认：
+\begin{itemize}
+  \item 生成至 M5 的规则（\opt{-max\_layer} 可改）；输出 XML（默认 \texttt{auto\_perf\_via\_ladder\_rule.xml}）与规则脚本（默认 \texttt{auto\_perf\_via\_ladder\_rule.tcl}）；也可用 \cmd{generate\_via\_rules\_for\_performance}；
+  \item 将规则关联到无 \appopt{dont\_use} 的库单元 pin（\opt{-dont\_use} 可包含 dont\_use 单元；\opt{-lib\_pins} 可限定 pin）；输出关联脚本（默认 \texttt{auto\_perf\_via\_ladder\_association.tcl}）；也可用 \cmd{associate\_performance\_via\_ladder}；
+  \item 运行所生成的脚本。
+\end{itemize}
+
+\subsection{基于约束的 Via Ladder 插入}
+\subsubsection*{Constraint-Based Via Ladder Insertion}
+
+步骤：
+\begin{enumerate}
+  \item 定义 via ladder 规则；
+  \item 用 \cmd{set\_via\_ladder\_rules} / \cmd{set\_via\_ladder\_constraints} 定义约束；
+  \item \cmd{insert\_via\_ladders} 插入；
+  \item \cmd{verify\_via\_ladders} 验证。
+\end{enumerate}
+
+\subsubsection{定义 Via Ladder 约束}
+\subsubsection*{Defining Via Ladder Constraints}
+
+约束指定在哪些 pin 上插入何种模板；可定义全局与 instance 级约束，冲突时 instance 级优先。另可用 \cmd{set\_via\_ladder\_candidate} 为特定 pin 指定候选（布线前优化在时序关键路径上插入时使用）。用 \cmd{report\_via\_ladder\_constraints} 报告。
+
+\textbf{全局约束}（via ladder rules）：\cmd{set\_via\_ladder\_rules}。映射选项：\opt{-master\_pin\_map}/\opt{-master\_pin\_map\_file}（格式 \texttt{\{\{lib\_cell/pin \{via\_ladder\_list\}\}...\}}）、\opt{-default\_ladders}。作用范围：\opt{-all\_instances\_of}、\opt{-all\_clock\_outputs}、\opt{-all\_clock\_inputs}、\opt{-all\_pins\_driving}。报告/移除：\cmd{report\_via\_ladder\_rules}、\cmd{remove\_via\_ladder\_rules}。
+
+\textbf{Instance 级约束}：
+\begin{lstlisting}
+icc2_shell> set_via_ladder_constraints -pins {u1/i1 u2/i2} \
+   {VL1 VL2 VL3}
+\end{lstlisting}
+移除用 \cmd{remove\_via\_ladder\_constraints}。
+
+\subsubsection{插入 Via Ladder}
+\subsubsection*{Inserting Via Ladders}
+
+\cmd{insert\_via\_ladders} 默认行为与常用选项：
+\begin{itemize}
+  \item 默认不删除已有 ladder；用 \opt{-clean true} 先清除；
+  \item 默认针对约束中全部 pin（信号与时钟）；用 \opt{-nets} 限定网络；
+  \item 每个目标 pin 插入一个 ladder；多模板时选用首个不导致 DRC 的模板；全导致 DRC 时默认选 DRC 代价最低者；
+  \item \opt{-ignore\_routing\_shape\_drcs true}：检查时忽略详细布线形状；
+  \item \opt{-relax\_line\_end\_via\_enclosure\_rule true}：放松线端 cut enclosure；
+  \item \opt{-relax\_pin\_layer\_metal\_spacing\_rules true}：ladder 完全包在 pin 内时放松 pin 层间距；
+  \item \opt{-allow\_drcs false}：禁止产生 DRC 的插入；
+  \item \opt{-strictly\_honor\_cut\_table true}：仅用模板中的 cut；
+  \item \opt{-shift\_vias\_on\_transition\_layers true}：过渡层 cut 偏离 track 以改善 DRC；
+  \item \opt{-ndr\_on\_top\_layer\_only true}：仅顶层遵循非默认宽度；
+  \item \opt{-connect\_within\_metal}/\opt{-connect\_within\_metal\_for\_via\_ladder}：要求 pin 层上方 via 完全落在 pin（含延伸）内；
+  \item \opt{-allow\_patching true}：允许 enclosure 打补丁以满足最小长度；
+  \item \opt{-auto\_stagger true}：规则未定义最大 stagger track 时仍允许 stagger；
+  \item \opt{-verbose true}/\opt{-user\_debug true}：报告插入状态与失败详情（内部/硬/软 DRC）。
+\end{itemize}
+
+\begin{noteBox}
+若 pin 过小无法容纳任一指定 ladder，则不插入。
+\end{noteBox}
+
+\subsubsection{保护 Via Ladder}
+\subsubsection*{Protecting Via Ladders}
+
+\begin{lstlisting}
+icc2_shell> set_app_options -name design.enable_via_ladder_protection \
+   -value true
+\end{lstlisting}
+为 \cmd{true} 时，\cmd{remove\_shapes}、\cmd{remove\_vias}、\cmd{remove\_objects}、\cmd{set\_attribute}、\cmd{set\_via\_def}、\cmd{add\_to\_edit\_group} 仅处理不属于 via ladder 的对象；属于 ladder 的对象会警告并跳过。
+
+\subsubsection{验证与更新}
+\subsubsection*{Verifying and Updating Via Ladders}
+
+\cmd{verify\_via\_ladders} 检查 ladder 是否匹配约束并正确连到 pin；可用 \opt{-nets} 限定。若插入时用了 \opt{-shift\_vias\_on\_transition\_layers true}，验证时也须使用，否则会误报。\opt{-report\_all\_via\_ladders false} 可将每类报告限制为 40 条。
+
+更新方式：\cmd{refresh\_via\_ladders}；或在 \cmd{route\_group}/\cmd{route\_auto}/\cmd{route\_eco} 中由 \appopt{route.auto\_via\_ladder.update\_during\_route}（默认 \cmd{true}）自动更新。相关应用选项包括 \appopt{route.auto\_via\_ladder.connect\_within\_metal}、\appopt{route.auto\_via\_ladder.auto\_stagger}、\appopt{route.auto\_via\_ladder.report\_all\_via\_ladders}、\appopt{route.auto\_via\_ladder.update\_on\_route\_group\_nets\_only} 等。
+
+\subsubsection{手动插入}
+\subsubsection*{Manual Via Ladder Insertion}
+
+\begin{enumerate}
+  \item 用 \cmd{create\_shape}/\cmd{create\_via} 创建组成形状；
+  \item 用 \cmd{create\_via\_ladder -shapes} 创建 ladder（名称形如 \texttt{VIA\_LADDER\_n}）。
+\end{enumerate}
+可选属性选项：\opt{-via\_rule}、\opt{-electromigration}、\opt{-high\_performance}、\opt{-pattern\_must\_join}、\opt{-pin}。
+
+查询：\cmd{get\_via\_ladders}、\cmd{report\_via\_ladders}。移除：
+\begin{lstlisting}
+icc2_shell> remove_via_ladders *
+\end{lstlisting}
+\opt{-nets} 可限定网络。
+
+% ============================================================
+\section{检查可布线性}
+\subsection*{Checking Routability}
+
+布局完成后，用 \cmd{check\_routability} 检查 block 是否具备详细布线条件。默认检查：
+\begin{itemize}
+  \item \textbf{被阻塞的标准单元端口}：物理 pin 均不可达则视为 blocked。可达判定：pin 内有伸向邻层的 via、pin 层上存在不少于搜索范围的路径，或较短路径止于邻层 via。默认搜索范围为 2 倍 layer pitch（\opt{-standard\_cell\_search\_range}，最大 10）。\opt{-connect\_standard\_cells\_within\_pins true} 检查 via 是否完全在 pin 内。\opt{-check\_standard\_cell\_blocked\_ports false} 可关闭。
+  \item \textbf{被阻塞的顶层/宏端口}：默认搜索距离为 10 倍 pitch（\opt{-blocked\_range}/\opt{-blocked\_range\_via\_side}，最大 40）。\opt{-obey\_direction\_preference true} 要求沿优选方向可达。\opt{-check\_non\_standard\_cell\_blocked\_ports false} 可关闭。
+  \item \textbf{越界 pin}（\opt{-check\_out\_of\_boundary false} 可关）；
+  \item \textbf{最小网格违例}（\opt{-check\_min\_grid false} 可关）；
+  \item \textbf{非法 via 定义}（未着色 via array 行列不超过 20；custom/非对称 simple via 不超过 1000 cut；via 定义总数不超过 65535——不可关闭）；
+  \item \textbf{非法 real metal via cut blockage}（\opt{-check\_via\_cut\_blockage false} 可关）；
+  \item \textbf{最小宽度设置}（NDR 最小宽/屏蔽宽不超过 technology 最大宽——不可关闭）。
+\end{itemize}
+
+可选检查（需显式打开）：\opt{-check\_pg\_blocked\_ports}、\opt{-check\_redundant\_pg\_shapes}、\opt{-check\_routing\_track\_space}、\opt{-check\_frozen\_net\_blocked\_ports}、\opt{-check\_no\_net\_pins}、\opt{-check\_real\_metal\_blockage\_overlap\_pin}、\opt{-check\_lib\_via\_cut\_blockage}、\opt{-check\_shield}、\opt{-via\_ladder}。
+
+Pin 连接控制：\opt{-obey\_access\_edges}、\opt{-access\_edge\_whole\_side}、\opt{-report\_no\_access\_edge}、\opt{-allow\_via\_rotation}。
+
+Blocked port 检查会考虑 \cmd{set\_ignored\_layers}/\cmd{set\_routing\_rule}/\cmd{set\_clock\_routing\_rules} 的软/硬层约束及 \appopt{route.common.freeze\_layer\_by\_layer\_name} 等；\opt{-honor\_layer\_constraints false} 可忽略层约束。
+
+错误数据默认名为 \texttt{check\_routability.err}（\opt{-error\_data} 可改），随 block 保存；可用 error browser 查看。

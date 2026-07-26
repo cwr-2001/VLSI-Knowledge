@@ -1,0 +1,545 @@
+% ============================================================
+\section{布线应用选项}
+\subsection*{Routing Application Options}
+
+工具提供影响全部三个布线引擎的选项，以及分别影响全局布线、轨道分配、详细布线的选项。详见 man 页：\texttt{route.common\_options}、\texttt{route.global\_options}、\texttt{route.track\_options}、\texttt{route.detail\_options}。
+
+执行布线命令时，已设置（或工具代设）的选项会写入布线日志。要显示全部布线选项（含未设置者）：
+\begin{lstlisting}
+icc2_shell> set_app_options \
+   -name route.common.verbose_level -value 1
+\end{lstlisting}
+
+% ============================================================
+\section{时钟网络布线}
+\subsection*{Routing Clock Nets}
+
+在布线其余网络前先布时钟网，使用 \cmd{route\_group}：
+\begin{lstlisting}
+icc2_shell> route_group -all_clock_nets
+\end{lstlisting}
+也可用 \opt{-nets} 指定部分时钟网。该命令对时钟网依次执行全局布线、轨道分配与详细布线。
+
+\begin{itemize}
+  \item 普通时钟网使用 A-tree 布线以最小化各 pin 到 driver 的距离；
+  \item 时钟 mesh 默认 Steiner；设 \appopt{route.common.clock\_topology} 为 \cmd{comb} 可改用 comb；
+  \item 默认忽略已有全局布线；\opt{-reuse\_existing\_global\_route true} 可增量复用；
+  \item 若已有详细布线则做增量详细布线；
+  \item 默认最多 40 次 search-and-repair；\opt{-max\_detail\_route\_iterations} 可改。
+\end{itemize}
+
+\begin{noteBox}
+若违例已全部修复或判定无法再修，Zroute 会在达到最大迭代前提前停止。
+\end{noteBox}
+
+% ============================================================
+\section{关键网络布线}
+\subsection*{Routing Critical Nets}
+
+\begin{lstlisting}
+icc2_shell> route_group -nets collection_of_critical_nets
+icc2_shell> route_group -from_file file_name
+\end{lstlisting}
+
+若网络关联 routing corridor，则在该区域内布线。全局布线视 corridor 为硬约束；轨道分配与详细布线视之为软约束。
+
+默认忽略已有全局布线，复用 dangling wire 与已有详细布线。\opt{-reuse\_existing\_global\_route true} 做增量全局布线（与 corridor 不兼容）；\opt{-utilize\_dangling\_wires false} 禁用 dangling 复用；\opt{-stop\_after\_global\_route true} 在全局布线后停止。
+
+默认不修 soft DRC；可设：
+\begin{lstlisting}
+icc2_shell> set_app_options \
+   -name route.common.post_group_route_fix_soft_violations \
+   -value true
+\end{lstlisting}
+
+% ============================================================
+\section{次级电源与地 Pin 布线}
+\subsection*{Routing Secondary Power and Ground Pins}
+
+步骤：
+\begin{enumerate}
+  \item 确认标准单元 frame view 中次级 PG pin 属性正确；
+  \item 设置布线约束；
+  \item 用 \cmd{route\_group} 布线。
+\end{enumerate}
+
+\subsection{验证属性}
+\subsubsection*{Verifying the Secondary Power and Ground Pin Attributes}
+
+必需属性：\appopt{is\_secondary\_pg}=\cmd{true}；\appopt{port\_type}=\cmd{power} 或 \cmd{ground}。
+
+\begin{lstlisting}
+icc2_shell> report_attributes -application \
+   [get_lib_pins -of_objects reflib/cell/frame -all \
+      -filter "name == attr_name"]
+\end{lstlisting}
+
+\subsection{设置约束并布线}
+\subsubsection*{Setting Constraints and Routing}
+
+可与信号布线类似设置层约束、单连接、\appopt{route.common.connect\_within\_pins\_by\_layer\_name}、\appopt{route.common.number\_of\_secondary\_pg\_pin\_connections}（簇内最大 pin 数，0 表示不限）、NDR 等。若要将次级 PG 与 tie-off 分离约束，设 \appopt{route.common.separate\_tie\_off\_from\_secondary\_pg} 为 \cmd{true}。
+
+Topology ECO 努力由 \appopt{route.detail.topology\_eco\_effort\_level} 控制：\cmd{off}（默认）/\cmd{low}（1 次）/\cmd{medium}（4 次）/\cmd{high}（8 次）。
+
+\begin{lstlisting}
+icc2_shell> route_group -nets VDD1
+icc2_shell> add_buffer {TOP/U1001/Z} {libA/BUFHVT} \
+   -new_cell_names mynewHVT
+icc2_shell> legalize_placement
+icc2_shell> connect_pg_net -automatic
+icc2_shell> route_group -nets {VDD2}
+\end{lstlisting}
+
+% ============================================================
+\section{信号网络布线}
+\subsection*{Routing Signal Nets}
+
+信号布线前，全部时钟网须已布线且无违例。方法：
+\begin{itemize}
+  \item 独立命令：\cmd{route\_global}、\cmd{route\_track}、\cmd{route\_detail}（适合定制流程或大块分步）；每条命令开始读入、结束更新 block，\textbf{不}检查输入数据完整性；
+  \item 自动布线：\cmd{route\_auto}（依次全局、轨道、详细；适合验证收敛、拥塞与 DRC QoR）。
+\end{itemize}
+
+信号布线可插入冗余 via（见「在信号网上插入冗余 Via」）。
+
+\subsection{全局布线}
+\subsubsection*{Global Routing}
+
+布线前设置 \texttt{route.common\_options} 与 \texttt{route.global\_options}。默认非时序驱动。全局路由器将 block 划分为 global routing cell（默认宽度等于标准单元高度，与 row 对齐），按 blockage、pin、track 计算容量与需求，报告 overflow。
+
+先进节点可开 via 密度建模：
+\begin{lstlisting}
+set_app_options -name route.global.via_cut_modeling -value true
+\end{lstlisting}
+
+两阶段：phase 0 初始布线；随后多轮 rip-up/reroute 减拥塞。Effort：\cmd{minimum}/\cmd{low}/\cmd{medium}（默认，最多 3 轮）/\cmd{high}（4）/\cmd{ultra}（6）。\appopt{route.global.force\_full\_effort} 可强制跑满轮次。
+
+结束后库中保存 g-link/g-via（供后续步骤；轨道分配与详细布线后移除）与拥塞数据。默认仅硬拥塞；\appopt{route.global.export\_soft\_congestion\_maps}=\cmd{true} 可保存软拥塞。
+
+设计规划阶段探索：\cmd{route\_global -floorplan true}；层次化可用 \opt{-virtual\_flat all\_routing} 或 \cmd{top\_and\_interface\_routing\_only}。
+
+\subsubsection{时序驱动全局布线}
+\subsubsection*{Timing-Driven Global Routing}
+
+\begin{lstlisting}
+set_app_options -name route.global.timing_driven -value true
+\end{lstlisting}
+流程：算延时 $\rightarrow$ phase0 $\rightarrow$ 两轮减拥塞 $\rightarrow$ 更新时序 $\rightarrow$ 识别新关键网 $\rightarrow$ 再多轮重布关键网。Effort 与 \appopt{route.global.advance\_node\_timing\_driven\_effort}（\cmd{low}/\cmd{medium}/\cmd{high}）共同决定重布轮数（见表~\ref{tab:tdgr-phases}）。\appopt{route.global.timing\_driven\_effort\_level} 默认 \cmd{high}，偏重时序 QoR。
+
+\begin{table}[htbp]
+\centering
+\caption{时序驱动全局布线重布轮数（示意）}
+\label{tab:tdgr-phases}
+\begin{tabular}{@{}llll@{}}
+\toprule
+\cmd{-effort\_level} & advance=\cmd{low} & \cmd{medium} & \cmd{high}（默认） \\
+\midrule
+low & 2 & 2 & 2 \\
+medium（默认） & 3 & 3 & 5 \\
+high & 4 & 4 & 6 \\
+ultra & 6 & 6 & 8 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{串扰驱动与增量全局布线}
+\subsubsection*{Crosstalk-Driven and Incremental Global Routing}
+
+\begin{lstlisting}
+set_app_options -name route.global.crosstalk_driven -value true
+set_app_options -name time.si_enable_analysis -value true
+# 增量：
+route_global -reuse_existing_global_route true
+\end{lstlisting}
+
+\subsection{轨道分配}
+\subsubsection*{Track Assignment}
+
+须先完成全局布线。\cmd{route\_track} 为各全局布线分配实际 track，并重布重叠导线。完成后不再保留全局布线。
+
+\begin{noteBox}
+轨道分配用实际金属形状替换全局布线后，block 中不再包含全局布线。
+\end{noteBox}
+
+时序/串扰驱动：\appopt{route.track.timing\_driven}、\appopt{route.track.crosstalk\_driven}（及 \appopt{time.si\_enable\_analysis}）。
+
+\subsection{详细布线}
+\subsubsection*{Detail Routing}
+
+须先完成全局布线与轨道分配。详细路由器按分区查找 DRC，rip-up/reroute 修复，并并发处理天线规则、优化 via 数与线长。
+
+默认：整块布线（\opt{-coordinates} 可限区域）；首轮均匀分区、后续按违例分布调整；最多 40 轮（\opt{-max\_number\_iterations}）；非时序驱动。相关选项：\appopt{route.detail.optimize\_partition\_size\_for\_drc}、\appopt{route.detail.drc\_convergence\_effort\_level}、\appopt{route.detail.force\_max\_number\_iterations}、\appopt{route.detail.timing\_driven}、\appopt{route.common.rc\_driven\_setup\_effort\_level}、\appopt{route.detail.repair\_shorts\_over\_macros\_effort\_level}、\appopt{route.common.post\_detail\_route\_fix\_soft\_violations}。
+
+增量详细布线须用 \opt{-incremental true}（否则从 iteration 0 重开）：
+\begin{lstlisting}
+icc2_shell> route_detail -incremental true
+\end{lstlisting}
+
+\begin{noteBox}
+增量详细布线不修复 open net；须用 ECO 布线（\cmd{route\_eco}）。
+\end{noteBox}
+
+Early mode：\cmd{set\_qor\_strategy -mode early -stage pnr}。可用 \appopt{route.detail.save\_after\_iterations} 在指定轮次保存 block。\appopt{route.detail.report\_ignore\_drc} 可从汇总中排除特定 DRC。
+
+\subsection{自动布线}
+\subsubsection*{Routing Signal Nets by Using Automatic Routing}
+
+\begin{lstlisting}
+icc2_shell> route_auto
+\end{lstlisting}
+
+默认忽略已有全局布线，顺序执行全局、轨道、详细，步骤间不保存。选项：\opt{-reuse\_existing\_global\_route}、\opt{-stop\_after\_track\_assignment}、\opt{-max\_detail\_route\_iterations}、\opt{-save\_after\_global\_route}/\opt{-save\_after\_track\_assignment}/\opt{-save\_after\_detail\_route}、\opt{-save\_cell\_prefix}。
+
+时序驱动：将 \appopt{route.global.timing\_driven}、\appopt{route.track.timing\_driven}、\appopt{route.detail.timing\_driven} 均设为 \cmd{true}。串扰驱动：另开 \appopt{route.global.crosstalk\_driven}、\appopt{route.track.crosstalk\_driven} 与 \appopt{time.si\_enable\_analysis}。
+
+% ============================================================
+\section{网络屏蔽}
+\subsection*{Shielding Nets}
+
+Zroute 按屏蔽规则中的宽度与间距生成屏蔽导线。除同层屏蔽外，还可对上一层/下一层做同轴屏蔽（coaxial shielding，图~\ref{fig:coaxial-shield}），隔离更好但更耗布线资源。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.2cm}\textit{（原书 Figure 80：Coaxial Shielding）}\vspace{1.2cm}}}
+\caption{同轴屏蔽}
+\label{fig:coaxial-shield}
+\end{figure}
+
+\begin{itemize}
+  \item \textbf{布线前屏蔽}（preroute）：覆盖更好，但可能造成信号布线拥塞；常用于关键时钟；
+  \item \textbf{布线后屏蔽}（postroute）：对可布线性影响极小，保护较弱。
+\end{itemize}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.2cm}\textit{（原书 Figure 81：Zroute Shielding Flow）}\vspace{1.2cm}}}
+\caption{Zroute 屏蔽流程}
+\label{fig:shield-flow}
+\end{figure}
+
+\subsection{定义并分配屏蔽规则}
+\subsubsection*{Defining and Assigning Shielding Rules}
+
+用 \cmd{create\_routing\_rule} 的 \opt{-shield\_widths}/\opt{-shield\_spacings} 定义；时钟网用 \cmd{set\_clock\_routing\_rules}（仅 CTS 前），信号网用 \cmd{set\_routing\_rule}。建议仅对高频/关键时钟用屏蔽，低频时钟用双倍间距。
+
+\subsection{布线前屏蔽}
+\subsubsection*{Performing Preroute Shielding}
+
+时钟树布线后、信号布线前，用 \cmd{create\_shields} 按规则加屏蔽。默认：对所有有屏蔽规则且未 frozen 的网；忽略短于 4 pitch 的导线（\appopt{route.common.min\_shield\_length\_by\_layer\_name} 可按层改）；屏蔽接到地网（\opt{-with\_ground} 或 \appopt{route.common.shielding\_nets}）；同层屏蔽。
+
+同轴屏蔽：\opt{-coaxial\_above}/\opt{-coaxial\_below}，配合 \opt{-coaxial\_above\_skip\_tracks} 等或 \opt{-coaxial\_skip\_tracks\_on\_layers} 或用户间距选项（不可混用）。\opt{-align\_to\_shape\_end}、\opt{-preferred\_direction\_only} 等可进一步控制。
+
+\begin{lstlisting}
+icc2_shell> create_shields -nets $clock_nets \
+   -coaxial_below true -coaxial_below_skip_tracks 0 \
+   -with_ground VSS
+\end{lstlisting}
+
+命令报告基于网络与线长的平均屏蔽率。若与 \cmd{report\_shields} 略有差异，以 \cmd{report\_shields} 为准（通常 $<$3\%，最多约 5\%）。
+
+\subsection{信号布线中的软屏蔽规则}
+\subsubsection*{Soft Shielding Rules During Signal Routing}
+
+有屏蔽规则但未预屏蔽的网，Zroute 在全局/轨道/详细全程预留屏蔽空间，详细布线结束报告 soft spacing (shielding) 违例；\textbf{并不}真正插入屏蔽，须事后再跑 \cmd{create\_shields}。仅预留同层屏蔽空间。若希望有 PG 可用时不预留，设 \appopt{route.common.allow\_pg\_as\_shield}=\cmd{true}。
+
+\subsection{布线后屏蔽与增量屏蔽}
+\subsubsection*{Postroute and Incremental Shielding}
+
+布线后同样用 \cmd{create\_shields}。若用 \opt{-nets} 且无 NDR，则用 technology 默认宽间距。产生 DRC 时自动做最多 5 轮详细布线；仍有违例可 \cmd{route\_detail -incremental true}；若破坏 tie-off，改用 \cmd{route\_eco}。
+
+增量屏蔽：将 \appopt{route.common.reshield\_modified\_nets} 设为 \cmd{unshield} 或 \cmd{reshield}（默认 \cmd{off}）。仅支持工具内修改的网络，DEF 外部修改不支持。
+
+查询屏蔽形状：\cmd{get\_shapes -shield\_only}。报告：\cmd{report\_shields}（\opt{-per\_layer true}）。布线中启用屏蔽检查：\appopt{route.common.check\_shield}=\cmd{true}。
+
+\begin{lstlisting}
+# 示例：时钟预屏蔽 + 关键网后屏蔽
+create_routing_rule shield_rule \
+  -shield_widths {M1 0.1 M2 0.1 M3 0.1 M4 0.1 M5 0.1 M6 0.3} \
+  -shield_spacings {M1 0.1 M2 0.1 M3 0.1 M4 0.1 M5 0.1 M6 0.3}
+set_clock_routing_rules -clocks CLK -rules shield_rule
+synthesize_clock_trees
+route_group -all_clock_nets -reuse_existing_global_route true
+create_shields -nets $clock_nets -with_ground VSS
+set_routing_rule -rule shield_rule $critical_nets
+route_auto
+create_shields -nets $critical_nets -with_ground VSS
+\end{lstlisting}
+
+% ============================================================
+\section{执行布线后优化}
+\subsection*{Performing Postroute Optimization}
+
+两类优化：
+\begin{itemize}
+  \item \textbf{逻辑优化}：改善时序/面积/功耗 QoR，修逻辑 DRC，并做合法化与 ECO 布线——\cmd{route\_opt}；
+  \item \textbf{可布线性优化}：加大单元间距以修 pin access 引起的布线 DRC——\cmd{optimize\_routability}。
+\end{itemize}
+若两者都跑，先逻辑后可布线性。
+
+\subsection{布线后逻辑优化}
+\subsubsection*{Performing Postroute Logic Optimization}
+
+前置：设计已完全布线并合法化，逻辑/布线 DRC 不过多。用 \cmd{check\_legality}、\cmd{check\_routes} 验证。推荐流程：
+\begin{enumerate}
+  \item \cmd{compute\_clock\_latency} 更新时钟延时；
+  \item 运行两次 \cmd{route\_opt}（第一次合法化/ECO 可能影响时序，第二次再优化）。
+\end{enumerate}
+
+\cmd{route\_opt} 步骤：提取并更新时序（默认 PrimeTime 延时引擎，需 O-2018.06 及以后 Library Manager 生成的库；可用 \cmd{check\_consistency\_settings}）$\rightarrow$ 启用的优化 $\rightarrow$ 合法化 $\rightarrow$ ECO 布线。
+
+默认优化 data path 的 setup/hold/面积/逻辑 DRC。额外优化见表~\ref{tab:route-opt-enable}。
+
+\begin{table}[htbp]
+\centering
+\caption{启用 \cmd{route\_opt} 额外优化的应用选项}
+\label{tab:route-opt-enable}
+\begin{tabularx}{\textwidth}{@{}X X@{}}
+\toprule
+\textbf{优化} & \textbf{应用选项} \\
+\midrule
+并发时钟与数据（CCD）及时钟逻辑 DRC & \appopt{route\_opt.flow.enable\_ccd}=\cmd{true} \\
+时钟逻辑 DRC（未开 CCD 时） & \appopt{route\_opt.flow.enable\_cto}=\cmd{true} \\
+时钟树面积回收 & \appopt{route\_opt.flow.enable\_clock\_power\_recovery}=\cmd{area} \\
+时钟树功耗回收 & 同上 $=\cmd{power}$ \\
+功耗优化 & \appopt{route\_opt.flow.enable\_power}=\cmd{true} \\
+机器学习路径优化 & \appopt{route\_opt.flow.enable\_ml\_opto}=\cmd{true} 且 PBA=\cmd{path} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{noteBox}
+\cmd{route\_opt} 仅遵从 \texttt{route\_opt} 应用选项；除 \appopt{opt.common.allow\_physical\_feedthrough} 外不遵从 \texttt{opt} 选项。
+\end{noteBox}
+
+PBA：\appopt{time.pba\_optimization\_mode}=\cmd{path}（推荐）或 \cmd{exhaustive}。ECO 阶段默认 5 轮详细布线（\appopt{route.detail.eco\_max\_number\_of\_iterations}）；\appopt{route\_opt.eco\_route.mode}=\cmd{track} 可改做轨道分配。
+
+签核时序违例可用 \cmd{set\_route\_opt\_target\_endpoints}（\opt{-setup\_timing}/\opt{-hold\_timing}）指定目标后跑 \cmd{route\_opt}，再 \opt{-reset}。Size-only 模式：\appopt{route\_opt.flow.size\_only\_mode} 取 \cmd{true\_footprint}/\cmd{footprint}/\cmd{equal}/\cmd{equal\_or\_smaller}。
+
+\subsection{使用 hyper\_route\_opt}
+\subsubsection*{Performing Postroute Optimization Using hyper\_route\_opt}
+
+可用单次 \cmd{hyper\_route\_opt} 减少迭代次数；设置与 \cmd{route\_opt} 相同。可选 Tcl 回调 \cmd{snps\_hyper\_route\_opt\_post\_eco} 控制 metal fill、PG augmentation 等。之后仍可用 \cmd{set\_route\_opt\_target\_endpoints}+\cmd{route\_opt} 收尾，或 \cmd{route\_detail -incremental} 修剩余布线 DRC。
+
+\subsection{修复 Pin Access 引起的 DRC}
+\subsubsection*{Fixing DRC Violations Caused by Pin Access Issues}
+
+\begin{lstlisting}
+optimize_routability
+# 预览：
+optimize_routability -check_drc_rules
+# 完成后移除 keepout：
+optimize_routability -remove_keepouts
+\end{lstlisting}
+
+分析邻接单元违例，在违例侧加 keepout（默认 site 宽，\opt{-keepout\_width} 可指定；\opt{-flip} 可尝试翻转）。须随后 \cmd{route\_eco} 或 \opt{-route}；\appopt{route.common.eco\_fix\_drc\_in\_changed\_area\_only}=\cmd{on} 可仅在变更区修 DRC。
+
+% ============================================================
+\section{分析并修复信号电迁移违例}
+\subsection*{Analyzing and Fixing Signal Electromigration Violations}
+
+信号电迁移由线宽缩小与高速开关导致电流密度升高引起，可造成短路或开路。流程：
+\begin{enumerate}
+  \item \cmd{read\_signal\_em\_constraints} 加载约束（ITF 或 ALF）；
+  \item \cmd{read\_saif} 或 \cmd{set\_switching\_activity} 标注开关活动；
+  \item \cmd{report\_signal\_em} 分析；
+  \item \cmd{fix\_signal\_em} 修复。
+\end{enumerate}
+
+\begin{lstlisting}
+open_block block1_routed
+read_signal_em_constraints em.itf
+read_saif block1.saif
+report_signal_em -violated -verbose > block1.signal_em.rpt
+fix_signal_em
+\end{lstlisting}
+
+ITF：\opt{-encrypted} 可读加密文件。ALF：\opt{-format ALF}。约束以查找表存入设计库。
+
+分析计算 average / RMS / peak 电流。相关应用选项见表~\ref{tab:em-appopts}（如 \appopt{em.net\_delta\_temperature}、\appopt{em.net\_global\_rms\_relaxation\_factor}、\appopt{em.net\_min\_duty\_ratio}、\appopt{em.net\_use\_waveform\_duration}、\appopt{em.net\_violation\_rule\_types} 等）。
+
+\begin{table}[htbp]
+\centering
+\caption{信号电迁移分析应用选项（节选）}
+\label{tab:em-appopts}
+\begin{tabularx}{\textwidth}{@{}l l X@{}}
+\toprule
+\textbf{选项} & \textbf{默认} & \textbf{说明} \\
+\midrule
+\appopt{em.net\_delta\_temperature} & 5.0 & RMS 查找用 $\Delta T$ \\
+\appopt{em.net\_duration\_condition\_for\_peak} & 0.0 & peak 检查 duration \\
+\appopt{em.net\_global\_rms\_relaxation\_factor} & 1.0 & RMS 全局松弛因子 \\
+\appopt{em.net\_use\_waveform\_duration} & false & 是否用波形 duration \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\cmd{fix\_signal\_em} 通过加宽金属的 NDR 并做 ECO 布线修复；每调用一轮，有残留须再跑。可用 \opt{-nets} 限定。
+
+% ============================================================
+\section{执行 ECO 布线}
+\subsection*{Performing ECO Routing}
+
+修改网络后须用 \cmd{route\_eco} 重连，顺序执行全局、轨道、详细布线。默认考虑时序与串扰（会提取并更新时序）；若不需要可关闭各引擎的 timing/crosstalk\_driven 选项以加速。
+
+默认：处理全部 open net（\opt{-nets} 可限定）；忽略已有全局布线（\opt{-reuse\_existing\_global\_route true} 可增量）；复用 dangling wire（\opt{-utilize\_dangling\_wires false} 可关）；最多 40 轮详细布线；在整块修硬 DRC。
+
+\begin{itemize}
+  \item \opt{-open\_net\_driven true}：仅在 open net 邻域修 DRC；
+  \item \opt{-reroute modified\_nets\_only} 或 \cmd{modified\_nets\_first\_then\_others}；
+  \item \appopt{route.common.post\_eco\_route\_fix\_soft\_violations}=\cmd{true} 修 soft DRC。
+\end{itemize}
+
+报告变更网络时默认前 100 条；\opt{-max\_reported\_nets -1} 报告全部。
+
+% ============================================================
+\section{在 GUI 中布线}
+\subsection*{Routing Nets in the GUI}
+
+在活动 layout 视图用 Create Route 工具交互布线（Edit 工具栏按钮，或 \textbf{Create $>$ Route}）。默认忽略 routing blockage（可在 Mouse Tool Options 中改为遵从）；使用 technology 宽间距而忽略 NDR（同样可在面板中开启遵从 NDR）。
+
+\begin{noteBox}
+Create Route 工具不遵从 \cmd{create\_routing\_guide} 定义的 routing guide；也不使用 NDR 中的屏蔽宽/间距。
+\end{noteBox}
+
+修改已布线网络的 GUI 工具：Area Push、Spread Wires、Stretch Connected、Quick Connect。面板上的 Help 可打开 man 页。
+
+% ============================================================
+\section{清理已布线网络}
+\subsection*{Cleaning Up Routed Nets}
+
+\begin{lstlisting}
+icc2_shell> remove_redundant_shapes
+icc2_shell> remove_redundant_shapes -nets my_net \
+   -remove_loop_shapes true
+\end{lstlisting}
+
+默认基于设计视图中已存 DRC 信息移除 dangling/floating 形状；\opt{-initial\_drc\_from\_input false} 则先跑 \cmd{check\_routes}。可用 \opt{-nets}/\opt{-layers}/\opt{-route\_types} 限定。不改拓扑、不碰 terminal；不处理 open net 或有 DRC 的网。\opt{-remove\_dangling\_shapes false}、\opt{-remove\_floating\_shapes false}、\opt{-remove\_loop\_shapes true}、\opt{-report\_changed\_nets true}。清理后应重新做 DRC 验证。
+
+% ============================================================
+\section{分析布线结果}
+\subsection*{Analyzing the Routing Results}
+
+\subsection{拥塞报告与拥塞图}
+\subsubsection*{Generating a Congestion Report and Map}
+
+\begin{lstlisting}
+icc2_shell> report_congestion
+\end{lstlisting}
+
+默认用库中拥塞图；若无则跑 congestion-map-only 全局布线。选项：\opt{-rerun\_global\_router}、\opt{-boundary}、\opt{-layers}、\opt{-mode global\_route\_cell\_edge\_based}、\opt{-include\_soft\_congestion\_maps}。
+
+GUI：\textbf{View $>$ Map $>$ Global Route Congestion}。图~\ref{fig:cong-map}、图~\ref{fig:cong-grc} 示意拥塞图与 GRC 上的 overflow（如 18/9 表示需求 18、供给 9）。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}\textit{（原书 Figure 82：Global Route Congestion Map）}\vspace{1.0cm}}}
+\caption{全局布线拥塞图}
+\label{fig:cong-map}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}\textit{（原书 Figure 83：Global Route Overflow on Global Routing Cell）}\vspace{1.0cm}}}
+\caption{Global Routing Cell 上的 Overflow}
+\label{fig:cong-grc}
+\end{figure}
+
+拥塞计算模式：各层 overflow 之和（默认，忽略 underflow），或总 demand 减总 supply（含 underflow，结果更乐观）。
+
+\subsection{用 Zroute 做设计规则检查}
+\subsubsection*{Performing Design Rule Checking Using Zroute}
+
+\begin{lstlisting}
+icc2_shell> check_routes
+\end{lstlisting}
+
+默认检查布线 DRC、open net、天线与 voltage area 违例（排除 user/frozen/PG 网）。可用 \opt{-nets}、\opt{-check\_from\_user\_shapes}、\opt{-check\_from\_frozen\_shapes}；\opt{-drc}/\opt{-open\_net}/\opt{-antenna}/\opt{-voltage\_area} 可分别关闭。\opt{-coordinates} 做区域检查（与 \opt{-nets} 互斥；区域检查不做 open/天线/tie-to-rail）。
+
+错误写入 \texttt{zroute.err}。可用 DRC query 命令或 error browser 分析。基于 check\_routes 结果的增量详细布线：
+\begin{lstlisting}
+icc2_shell> route_detail -incremental true \
+   -initial_drc_from_input true
+\end{lstlisting}
+
+\subsection{签核 DRC、外部工具与 LVS}
+\subsubsection*{Signoff DRC, External Tools, and LVS}
+
+\begin{itemize}
+  \item 签核：\cmd{signoff\_check\_drc} / \cmd{signoff\_fix\_drc}（需 IC Validator 许可证）；
+  \item 外部 Calibre：\cmd{read\_drc\_error\_file} 导入扁平 Calibre 错误文件；
+  \item LVS：\cmd{check\_lvs} 检查 short/open/floating（\opt{-checks}、\opt{-nets}、\opt{-max\_errors}、\opt{-treat\_terminal\_as\_voltage\_source}、\opt{-open\_reporting detailed}、\opt{-report\_floating\_pins} 等）。
+\end{itemize}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}\textit{（原书 Figure 84：Layout With Power and Ground Terminals）}\vspace{1.0cm}}}
+\caption{含电源/地 Terminal 的版图}
+\label{fig:pg-terminals}
+\end{figure}
+
+\subsection{报告布线结果与线长}
+\subsubsection*{Reporting Routing Results and Wire Length}
+
+\cmd{report\_design -routing}：各层信号/PG 形状数与线长、HV 分布、via 统计与 double via 转换率等（\opt{-hierarchical} 可含整棵物理层次）。
+
+\cmd{report\_wirelength}：按层与方向汇总线长（含 global/detail、Virtual、BestAvailable；支持斜线）。
+
+\subsection{DRC 查询命令}
+\subsubsection*{Using the DRC Query Commands}
+
+\begin{lstlisting}
+icc2_shell> get_drc_error_data -all
+icc2_shell> open_drc_error_data zroute.err
+icc2_shell> get_drc_error_types -error_data zroute.err
+icc2_shell> get_drc_errors -error_data zroute.err \
+   -filter {type_name == "Diff net spacing"}
+\end{lstlisting}
+
+属性示例：\appopt{type\_name}、\appopt{bbox}、\appopt{objects}、\appopt{shape}。完整列表：\cmd{list\_attributes -application -class drc\_error}。
+
+% ============================================================
+\section{保存布线信息}
+\subsection*{Saving Route Information}
+
+\begin{lstlisting}
+icc2_shell> write_routes
+\end{lstlisting}
+
+生成可复现金属形状与 via（含属性）的 Tcl 脚本；\textbf{不}包含 routing blockage（后者用 \cmd{write\_floorplan}）。
+
+% ============================================================
+\section{推导掩模颜色}
+\subsection*{Deriving Mask Colors}
+
+布线命令通常会分配 mask 颜色。对未着色形状，用 \cmd{derive\_mask\_constraint} 从最近底层 track 推导（宽线占多 track 时取与下一空闲 track 相反颜色）。
+
+\begin{lstlisting}
+icc2_shell> derive_mask_constraint \
+   [get_shapes -of_objects [get_nets net1]]
+icc2_shell> derive_mask_constraint -derive_cut_mask \
+   [get_vias -within {{600 600} {700 700}}]
+icc2_shell> derive_mask_constraint -follow_pin_mask \
+   [get_shapes -of_objects [get_nets net1]]
+icc2_shell> derive_mask_constraint -follow_wider_object_mask \
+   [get_shapes -of_objects [get_nets net1]]
+\end{lstlisting}
+
+\begin{seeAlsoBox}
+详见第~1~章「多重图案化概念」。
+\end{seeAlsoBox}
+
+% ============================================================
+\section{插入与移除 Cut Metal 形状}
+\subsection*{Inserting and Removing Cut Metal Shapes}
+
+Cut metal 用于双图案化设计以减小线端最小间距。Cut metal 层及尺寸在 technology file 的 Layer 段由 \texttt{cutMetalWidth}、\texttt{cutMetalHeight}/\texttt{cutMetalExtension} 定义；与同 mask 号金属层对应（如 cutMetal1 $\leftrightarrow$ metal1）。
+
+布线定稿后：
+\begin{lstlisting}
+icc2_shell> create_cut_metals
+icc2_shell> remove_cut_metals
+\end{lstlisting}
+
+插入条件：优选方向间距等于 \texttt{cutMetalWidth}、该处尚无 cut metal、金属层有对应 cut metal 层。可插在 net--net、net--PG、PG--obstruction 及子单元内金属之间，并传播颜色。
+
+写出 DEF 须 \cmd{write\_def -version 5.8}；写出 GDSII/OASIS 须 \cmd{write\_gds}/\cmd{write\_oasis} 的 \opt{-connect\_below\_cut\_metal}。布线变更后须先 \cmd{remove\_cut\_metals} 再重新插入。

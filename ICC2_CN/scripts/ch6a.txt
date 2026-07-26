@@ -1,0 +1,1853 @@
+                                                                                          Feedback
+
+
+
+
+6
+Chip Finishing and Design for Manufacturing
+     The IC Compiler II tool provides chip finishing and design for manufacturing and yield
+     capabilities that you can apply throughout the various stages of the design flow to address
+     process design issues encountered during chip manufacturing.
+     For information about the chip finishing and design for manufacturing features, see the
+     following topics:
+      • Inserting Tap Cells
+      • Performing Boundary Cell Insertion
+      • Finding and Fixing Antenna Violations
+      • Inserting Redundant Vias
+      • Optimizing Wire Length and Via Count
+      • Reducing Critical Areas
+      • Inserting Metal-Insulator-Metal Capacitors
+      • Inserting Filler Cells
+      • Inserting Metal Fill
+
+
+Inserting Tap Cells
+     A tap cell is a special nonlogic cell with a well tie, substrate tie, or both. These cells are
+     typically used when most or all of the standard cells in the library contain no substrate
+     or well taps. Generally, the design rules specify the maximum distance allowed between
+     every transistor in a standard cell and a well or substrate tap.
+     Before global placement (during the floorplanning stage), you can insert tap cells in the
+     block to form a two-dimensional array structure to ensure that all standard cells placed
+     subsequently comply with the maximum diffusion-to-tap distance limit. After you insert
+     the tap cells, visually check to ensure that all standard-cell placeable areas are properly
+     protected by tap cells.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                         466
+V-2023.12
+                                                                                                                                               Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Tap Cells
+
+
+     The IC Compiler II tool provides two methods to insert a tap cell array:
+                                                            • Insert the tap cell array based on the site rows and the maximum distance between tap
+                                                              cells
+                                                              To use this method, use the create_tap_cells command, as described in Using the
+                                                              create_tap_cells Command.
+                                                            • Insert the tap cell array using a specified offset and pitch, and optionally insert
+                                                              additional tap cells near the boundary
+                                                              To use this method, use the create_cell_array command, as described in Using the
+                                                              create_cell_array Command.
+     Advanced nodes often require the insertion of additional tap cells to manage the substrate
+     and well noise. You can use the following capabilities to insert additional tap cells after
+     standard tap cell insertion:
+                                                            • Insertion of tap walls
+                                                              A tap wall is a row or column of tap cells placed linearly without any gaps between
+                                                              cells. You can insert a tap wall outside or inside of the boundary of a block, macro, or
+                                                              hard placement blockage. A tap wall that is outside a boundary is called an exterior tap
+                                                              wall. A tap wall that is inside a boundary is called an interior tap wall.
+                                                               ◦ To insert an exterior tap wall, use the create_exterior_tap_walls command, as
+                                                                 described in Inserting Exterior Tap Walls.
+                                                               ◦ To insert an interior tap wall, use the create_interior_tap_walls command, as
+                                                                 described in Inserting Interior Tap Walls.
+                                                            • Insertion of tap meshes
+                                                              A tap mesh is a two-dimensional array of tap cells with a tap cell in each mesh window.
+                                                              To insert a tap mesh, use the create_tap_meshes command, as described in Inserting
+                                                              Tap Meshes.
+                                                            • Insertion of dense tap arrays
+                                                              A dense tap array is a tap cell array whose tap distance is smaller than the tap distance
+                                                              used by the create_tap_cells command. To insert a dense tap array, use the
+                                                              create_dense_tap_cells command, as described in Inserting Dense Tap Arrays.
+
+
+     Using the create_tap_cells Command
+     To add a tap cell array based on the site rows, use the create_tap_cells command. You
+     add_tap_cell_array commandcommandsadd_tap_cell_array
+
+
+
+
+     must specify the name of the library cell to use for tap cell insertion (-lib_cell option)
+     and the maximum distance, in microns, between tap cells (-distance option).
+
+
+
+IC Compiler™ II Implementation User Guide                                                                                                            467
+V-2023.12
+                                                                                         Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Tap Cells
+
+
+     For example,
+     icc2_shell> create_tap_cells -lib_cell myreflib/mytapcell -distance 30
+
+     Note:
+         If the place.legalize.enable_pin_color_alignment_check application
+         option is true (its default is false), the command ensures that internal cell
+         pins and metal of the tap cells align with a routing track of the appropriate color
+         when inserting the tap cells and shifts the tap cells to avoid violating color
+         alignment. To avoid signoff DRC errors due to this shifting, reduce the tap
+         distance slightly when this application option is true.
+     By default, the create_tap_cells command inserts tap cells in every row for the entire
+     block. The tool starts inserting the tap cells at the left edge of the row and uses the
+     specified tap distance to determine the location of the subsequent tap cells. In addition, if
+     a tap cell does not exist within the minimum tap distance (half the specified tap distance)
+     from each row edge adjacent to the block’s boundary, a hard macro, or a hard placement
+     blockage, the tool inserts an additional tap cell. Figure 85 shows the default tap cell
+     placement for a block that uses the every-row insertion pattern. Note that extra tap cells
+     are added to the right of the hard macro to ensure that a tap cell exists within the minimum
+     tap distance from the edge of the hard macro.
+
+Figure 85     Default Tap Cell Placement
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                      468
+V-2023.12
+                                                                                         Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Tap Cells
+
+
+     You can modify the following aspects of the default behavior:
+      • The library cell used for tap cell insertion on rows with a mirrored (MX) orientation
+         Use the -mirrored_row_lib_cell option to specify the library cell to use for mirrored
+         rows.
+      • The pattern used to insert the tap cells
+         Use the -pattern option to specify one of the following tap cell insertion patterns:
+          ◦ every_row (the default)
+             This pattern inserts tap cells in every row. For this pattern, the tap distance
+             specified with the -distance option should be approximately twice the maximum
+             diffusion-to-tap value specified in the technology design rules.
+          ◦ every_other_row
+             This pattern inserts tap cells only in the odd-numbered rows. For this pattern, the
+             tap distance specified with the -distance option should be approximately twice the
+             maximum diffusion-to-tap value specified in the technology design rules.
+          ◦ stagger
+             This pattern inserts tap cells in every row with the tap cells in even rows offset by
+             half the offset value (-offset option) relative to the odd rows, which produces
+             a checkerboard-like pattern. For this pattern, the tap distance specified with the
+             -distance option should be approximately four times the maximum diffusion-to-tap
+             value specified in the technology design rules.
+      • The offset from the left edge of the row
+         Use the -offset option to shift the pattern startpoint to the right by the specified
+         distance in microns.
+      • The handling of fixed cells
+         By default, tap cells are inserted at the computed tap locations, regardless of whether
+         a fixed cell occupies that location. Use the -skip_fixed_cells option to prevent the
+         insertion of tap cells in locations occupied by fixed cells. By default, when you use
+         this option, the command considers the fixed cell as a blockage and breaks the row
+         at the fixed cell, which can result in a tap cell being inserted on each side of the fixed
+         cell. To prevent tap cells from overlapping fixed cells without breaking the row, use the
+         -preserve_distance_continuity option with the -skip_fixed_cells option. When
+         you use both options, the command shifts the tap cell to avoid overlap with the fixed
+         cell. The -preserve_distance_continuity option shifts only those tap cells whose
+         computed tap location is occupied by an instance of one of the specified library cells.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                       469
+V-2023.12
+                                                                                         Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Tap Cells
+
+
+         For example, the following command shifts tap cells whose computed tap location is
+         occupied by a fixed instance of the mylib/cell1 library cell:
+         icc2_shell> create_tap_cells -lib_cell mylib/tap -distance 30 \
+            -skip_fixed_cells -preserve_distance_continuity mylib/cell1
+
+         When you use the -skip_fixed_cells option, you can also specify the minimum
+         horizontal spacing between the boundary and a corner tap cell that is above or below a
+         blocked area by using the -min_horizontal_periphery_spacing option. This option
+         specifies the minimum number of unit tiles between the boundary and an affected
+         corner tap cell.
+         Figure 86 shows how using this option affects the tap cell placement both with and
+         without boundary cells.
+
+   Figure 86      Tap Cell Boundary Row Spacing
+                -min_horizontal_periphery_spac                      -min_horizontal_periphery_spac
+
+
+
+
+      • The addition of extra tap cells
+         You can use one or both of the following methods to prevent the insertion of extra tap
+         cells:
+          ◦ Use the -row_end_tap_bypass option to specify that the boundary cells contain
+            taps, so additional tap cells are not inserted at the boundary. Note that the
+            command does not verify that the block has boundary cells or that the boundary
+            cells actually contain taps.
+          ◦ Use the -at_distance_only option to allow the insertion of tap cells only at the
+            specified tap distance, half of the tap distance, or one fourth of the tap distance (for
+            the stagger pattern only). Note that using this option can cause DRC violations.
+      • The regions in which to insert tap cells
+         Use the -voltage area option to restrict the tap cell insertion to the specified voltage
+         areas.
+
+
+
+IC Compiler™ II Implementation User Guide                                                        470
+V-2023.12
+                                                                                                                                             Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Tap Cells
+
+
+                                                            • The naming convention used to identify the inserted tap cell instances
+                                                              By default, the tool uses the following naming convention for inserted tap cells:
+                                                              tapfiller!library_cell_name!number
+                                                              Use the -separator option to change the separator character from its default of “!.”
+                                                              To identify the tap cells inserted in a specific run, use the -prefix option to specify a
+                                                              prefix string. When you use this option, the tool uses the following naming convention:
+                                                              tapfiller!prefix!library_cell_name!number
+
+
+     Using the create_cell_array Command
+     To add a tap cell array with specific placement, use the create_cell_array command.
+     add_tap_cell_array commandcommandsadd_tap_cell_array
+
+
+
+
+     You must specify the name of the library cell to use for tap cell insertion (-lib_cell
+     option), and the x- and y-pitches.
+     For example,
+     icc2_shell> create_cell_array -lib_cell myreflib/mytapcell \
+        -x_pitch 10 -y_pitch 10
+
+     By default, the create_cell_array command inserts a tap cell in each location in the
+     specified grid for the entire block. The tool starts inserting the tap cells at the bottom-left
+     of the core area and uses the specified x- and y-pitches to determine the location of the
+     subsequent tap cells. The inserted tap cells are snapped to the site rows and placed in the
+     default orientation for the site row. If a location is occupied by a fixed cell, hard macro, soft
+     macro, or power-switch cell, the command does not insert a tap cell at that location.
+     You can modify the following aspects of the default behavior:
+                                                            • The region in which to insert tap cells
+                                                              Use the -voltage area option to restrict the tap cell insertion to the specified voltage
+                                                              areas.
+                                                              Use the -boundary option to restrict the tap cell insertion to the specified region.
+                                                              If you use both options, the command inserts tap cells only in the overlapping region.
+                                                            • The offset from the insertion region boundary
+                                                              Use the -x_offset option to shift the pattern startpoint to the right by the specified
+                                                              distance in microns.
+                                                              Use the -y_offset option to shift the pattern startpoint up by the specified distance in
+                                                              microns.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                                                                              471
+V-2023.12
+                                                                                        Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Tap Cells
+
+
+      • The insertion pattern
+         Use the -checkerboard option to insert a tap cell in every other location in the
+         specified grid.
+          ◦ To place a tap cell in the lower-left corner, use the -checkerboard even option.
+          ◦ To keep the lower-left corner empty, use the -checkerboard odd option.
+         In some design methodologies, you must insert a tap cell in empty spaces in the
+         checkerboard pattern that are above or below specific cells, such as critical area
+         breaker cells or boundary cells. To enable the insertion of these extra tap cells, use the
+         -preserve_boundary_row_lib_cells option to specify the affected library cells.
+
+      • The snapping behavior
+         To disable snapping of the inserted tap cells to the site rows, set the
+         -snap_to_site_row false option. When you set this option to false, the tool uses
+         R0 as the default orientation for the inserted cells.
+
+      • The orientation of the inserted tap cell instances
+         To specify the orientation of the inserted tap cells, use the -orient option to specify
+         one of the following orientation values: R0, R90, R180, R270, MX, MY, MXR90, or MYR90.
+      • The naming convention used to identify the inserted tap cell instances
+         By default, the tool uses the following naming convention for inserted tap cells:
+         headerfooter__library_cell_name_R#_C#_number
+         To identify the tap cells inserted in a specific run, use the -prefix option to specify a
+         prefix string. When you use this option, the tool uses the following naming convention:
+         prefix__library_cell_name_R#_C#_number
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                       472
+V-2023.12
+                                                                                          Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Tap Cells
+
+
+
+     Inserting Exterior Tap Walls
+     An exterior tap wall is a row or column of tap cells that is placed outside the boundary of a
+     block, macro, or hard placement blockage. The tap cells in the tap wall are placed linearly
+     without any gaps between cells.
+     To insert an exterior tap wall, use the create_exterior_tap_walls command. You must
+     specify the following information:
+      • The tap cell used in the tap wall (the -lib_cell option)
+         By default, the command inserts the tap cells with R0 orientation. To place the cells
+         with a different orientation, use the -orientation option.
+         If the design has a FinFET grid, follow these guidelines when selecting the tap cell to
+         ensure proper insertion of the tap wall:
+          ◦ For horizontal tap walls, ensure that the cell’s width in the specified orientation is an
+            integer multiple of the x-pitch of the FinFET grid
+          ◦ For vertical tap walls, ensure that the cell’s height in the specified orientation is an
+            integer multiple of the y-pitch of the FinFET grid
+         By default, the tool uses the following naming convention for inserted tap cells:
+         extTapWall__library_cell_name_R#_C#_number
+         To identify the tap cells inserted in a specific run, use the -prefix option to specify a
+         prefix string. When you use this option, the tool uses the following naming convention:
+         prefix__library_cell_name_R#_C#_number
+      • The side along which to insert the tap wall (the -side option)
+         You can specify only a single side, top, bottom, right, or left. To insert a tap wall on
+         more than one side, run the command multiple times.
+      • The tap insertion region (the -bbox option)
+         You specify the tap insertion region by specifying the lower-left and upper-right corners
+         of its bounding box:
+         -bbox {{llx lly} {urx ury}}
+
+         The bounding box must span a portion of the object’s edge on the specified side
+         along which to insert the tap wall. If the bounding box spans multiple edges along
+         the specified side, the command inserts the tap wall along the longest edge. If the
+         bounding box does not span any edges of the specified side, the command issues an
+         error message.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                         473
+V-2023.12
+                                                                                             Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Tap Cells
+
+
+         By default, a horizontal tap wall starts at the left edge of the specified bounding box
+         and abuts the top or bottom boundary edge; a vertical tap wall starts at the bottom
+         edge of the specified bounding box and abuts the left or right boundary edge. To
+         specify margins for the tap wall insertion, use the -x_margin and -y_margin options.
+         If the specified region, including the margins, is too small to fit a tap wall, the command
+         does not insert tap cells.
+         You should ensure that the insertion region does not contain any placement blockages,
+         fixed cells, or macros. These obstructions can prevent the insertion of the tap cells and
+         result in an incomplete or missing tap wall.
+     When inserting the tap wall, the command does not honor the standard cell rows or sites
+     and does not cross the object boundary. After insertion, the command fixes the placement
+     of the inserted tap cells.
+
+
+     Inserting Interior Tap Walls
+     An interior tap wall is a row or column of tap cells that is placed inside the boundary of the
+     standard cell placement area of a block, a macro, hard placement blockage, or nondefault
+     voltage area.
+     Note:
+         You can insert interior tap walls only for designs with a single site definition.
+     To insert an interior tap wall, use the create_interior_tap_walls command. You must
+     specify the following information:
+      • The tap cell used in the tap wall (the -lib_cell option)
+         The specified tap cell must be a single-height cell that matches the row height and site
+         width.
+         By default, the command inserts the tap cells with the row orientation. To place the
+         cells with a different orientation, use the -orientation option.
+         By default, the tool uses the following naming convention for inserted tap cells:
+         tapfiller__library_cell_name_R#_C#_number
+         To identify the tap cells inserted in a specific run, use the -prefix option to specify a
+         prefix string. When you use this option, the tool uses the following naming convention:
+         prefix__library_cell_name_R#_C#_number
+      • The side along which to insert the tap wall (the -side option)
+         You can specify only a single side, top, bottom, right, or left. To insert a tap wall on
+         more than one side, run the command multiple times.
+
+
+
+IC Compiler™ II Implementation User Guide                                                          474
+V-2023.12
+                                                                                          Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Tap Cells
+
+
+     By default, the tap cells are placed along all edges on the specified side of the standard
+     cell placement area with no gaps between the tap cells.
+      • To specify the tap insertion region, use the -bbox option to specify the lower-left and
+        upper-right corners of its bounding box:
+         -bbox {{llx lly} {urx ury}}
+
+         When you use this option, the command inserts a tap wall along the longest edge
+         on the specified side of the placeable area encompassed by the bounding box. The
+         alignment of the tap wall depends on the number of corners of the edge segment
+         encompassed by the bounding box.
+          ◦ If the edge segment does not contain a corner, the tap wall starts at the left edge for
+            a horizontal tap wall or the bottom edge for a vertical tap wall.
+          ◦ If the edge segment contains one corner, the tap wall starts at that corner.
+          ◦ If the edge segment contains two corners along the specified side, the tap wall
+            starts at the left edge for a horizontal tap wall or the bottom edge for a vertical tap
+            wall.
+             For a horizontal tap wall with two corners, the spacing between the last two cells
+             might be shortened to align with the right corner. If there is not enough space, the
+             last cell might not abut the right corner.
+      • For horizontal tap walls, you can specify a gap distance between tap cells by using the
+        -x_spacing option.
+
+         If you specify a value smaller than the tap cell width, the command uses a spacing of
+         zero. If you specify a value that is not a multiple of the site width, the command rounds
+         it down to a multiple of the site width.
+     When inserting the tap wall, the command honors the standard cell rows and sites; if the
+     rows and sites are not defined, the command does not insert tap cells. Obstructions such
+     as placement blockages, fixed cells, and macros can prevent the insertion of the tap cells
+     and result in an incomplete or missing tap wall.
+     After insertion, the command fixes the placement of the inserted tap cells.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                         475
+V-2023.12
+                                                                                        Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Tap Cells
+
+
+
+     Inserting Tap Meshes
+     A tap mesh is a two-dimensional array of tap cells with a tap cell in each mesh window. A
+     tap mesh is typically inserted outside of a place and route block, but you can insert one in
+     any area that is either completely inside or completely outside the core area.
+     To insert a tap mesh, use the create_tap_meshes command. You must specify the
+     following information:
+      • The tap cell used in the tap mesh (the -lib_cell option)
+         By default, the command inserts the tap cells with R0 orientation. To place the cells
+         with a different orientation, use the -orientation option.
+         By default, the tool uses the following naming convention for inserted tap cells:
+         headerfooter__library_cell_name_R#_C#_number
+         To identify the tap cells inserted in a specific run, use the -prefix option to specify a
+         prefix string. When you use this option, the tool uses the following naming convention:
+         prefix__library_cell_name_R#_C#_number
+      • The tap insertion region (the -bbox option)
+         You specify the tap insertion region by specifying the lower-left and upper-right corners
+         of its bounding box:
+         -bbox {{llx lly} {urx ury}}
+
+      • The mesh window (the -mesh_window option)
+         You specify the size of the mesh window by specifying an integer value for the pitch in
+         the x- and y-directions.
+         -mesh_window {x_pitch y_pitch}
+
+         The mesh window is aligned with the lower-left corner of the tap insertion region.
+     When inserting the tap mesh, the command does not honor the standard cell rows or sites.
+     It places a tap cell in the lower-left corner of each mesh window. If that location is blocked,
+     the command uses the closest available location, which is measured as the Manhattan
+     distance to the lower-left corner of the mesh window. If there is no available location, the
+     command issues a warning and does not place a tap cell in that mesh window.
+     After insertion, the command fixes the placement of the inserted tap cells.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                        476
+V-2023.12
+                                                                                        Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Tap Cells
+
+
+
+     Inserting Dense Tap Arrays
+     A dense tap array is a tap cell array whose tap distance is smaller than the tap distance
+     used by the create_tap_cells command.
+     To insert a dense tap array, use the create_dense_tap_cells command. You must
+     specify the following information:
+      • The tap cell used in the tap wall (the -lib_cell option)
+         You must specify the same tap cell as when you ran the create_tap_cells command.
+         By default, the tool uses the following naming convention for inserted tap cells:
+         tapfiller!library_cell_name!number
+         Use the -separator option to change the separator character from its default of “!.”
+         To identify the tap cells inserted in a specific run, use the -prefix option to specify a
+         prefix string. When you use this option, the tool uses the following naming convention:
+         tapfiller!prefix!library_cell_name!number
+      • The tap distance (the -distance option)
+         The specified distance must be smaller than the tap distance used by the
+         create_tap_cells command.
+
+      • The tap insertion region (the -bbox option)
+         You specify the tap insertion region by specifying the lower-left and upper-right corners
+         of its bounding box:
+         -bbox {{llx lly} {urx ury}}
+
+     The create_dense_tap_cells command first removes the existing tap cells
+     that are completely within the tap insertion region, and then reinserts the tap cells
+     with the specified tap distance to create a denser array in the specified region. To
+     avoid tap rule violations, specify the same tap cell insertion pattern as was used
+     by the create_tap_cells command. The create_dense_tap_cells command
+     supports the following options to control the tap cell insertion: -offset, -pattern,
+     -skip_fixed_cells, and -at_distance_only. For details about these options, see the
+     man page.
+     After insertion, the command fixes the placement of the inserted tap cells.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                       477
+V-2023.12
+                                                                                       Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Performing Boundary Cell Insertion
+
+
+
+Performing Boundary Cell Insertion
+     Before placing the standard cells, you can add boundary cells to the block. Boundary
+     cells consist of end-cap cells, which are added to the ends of the cell rows and around the
+     boundaries of objects such as the core area, hard macros, blockages, and voltage areas,
+     and corner cells, which fill the empty space between horizontal and vertical end-cap cells.
+     End-cap cells are typically nonlogic cells such as a decoupling capacitor for the power rail.
+     Because the tool accepts any standard cell as an end-cap cell, ensure that you specify
+     suitable end-cap cells.
+     To insert boundary cells,
+      1. Specify the boundary cell insertion requirements by using the
+         set_boundary_cell_rules command, as described in Specifying the Boundary Cell
+         Insertion Requirements.
+      2. Insert the boundary cells based on the specified rules by using the
+         compile_boundary_cells or compile_targeted_boundary_cells command, as
+         described in Inserting Boundary Cells.
+      3. Verify the boundary cell placement by using the check_boundary_cells or
+         check_targeted_boundary_cells command, as described in Verifying the Boundary
+         Cell Placement.
+     This process supports a single site definition per run. The compile_boundary_cells
+     and compile_targeted_boundary_cells commands determine the site definition based
+     on the library cells specified with the set_boundary_cell_rules command, and insert
+     boundary cells only in the regions that use this site definition. If your design has multiple
+     site definitions, you must run this process one time for each site definition.
+
+
+     Specifying the Boundary Cell Insertion Requirements
+     To specify the boundary cell insertion requirements, use the set_boundary_cell_rules
+     command. You use this command to specify the following requirements:
+      • The library cells to use for the boundary cells, as described in Specifying the Library
+        Cells for Boundary Cell Insertion
+      • The rules used to place the boundary cells, as described in Specifying Boundary Cell
+        Placement Rules
+      • The naming convention used for the inserted cells, as described in Specifying the
+        Naming Convention for Boundary Cells
+      • The creation of routing guides to honor the metal cut allowed and forbidden preferred
+        grid extension rules, as described in Creating Routing Guides During Boundary Cell
+        Insertion
+
+
+IC Compiler™ II Implementation User Guide                                                         478
+V-2023.12
+                                                                                          Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Performing Boundary Cell Insertion
+
+
+         Note:
+             This feature is supported only by the compile_boundary_cells command;
+             it is not supported by the compile_targeted_boundary_cells command.
+      • The creation of placement blockages to honor the minimum jog and minimum
+        separation rules, as described in Creating Placement Blockages During Boundary Cell
+        Insertion
+         Note:
+             This feature is supported only by the compile_boundary_cells command;
+             it is not supported by the compile_targeted_boundary_cells command.
+     Note:
+         The settings specified by the set_boundary_cell_rules command are saved
+         in the design library.
+
+     See Also
+      • Reporting the Boundary Cell Insertion Requirements
+
+     Specifying the Library Cells for Boundary Cell Insertion
+     Boundary cells include both end-cap cells placed on the left, right, top, and bottom
+     boundaries, and inside and outside corner cells. You can specify different library cells for
+     each boundary cell type. To specify the library cells, use the following options with the
+     set_boundary_cell_rules command:
+
+      • -left_boundary_cell and -right_boundary_cell
+         These options specify a single library cell that is used for the end-cap cells for the left
+         and right boundaries, respectively.
+      • -top_boundary_cells and -bottom_boundary_cells
+         These options specify a list of library cells that are used for the end-cap cells for the top
+         and bottom boundaries, respectively. The command inserts the cells in the specified
+         order. If the remaining space is smaller than the current cell, the command inserts the
+         next cell in order that fits in the remaining space.
+         For a vertical-row block, rows start at the bottom and end at the top, so the top
+         boundary is along the left side of the block and the bottom boundary is along the right
+         side of the block.
+         For the flipped rows in a double-back block, the top boundary cells are used on the
+         bottom boundaries and the bottom boundary cells are used on the top boundaries.
+      • -top_tap_cell and -bottom_tap_cell
+
+
+
+IC Compiler™ II Implementation User Guide                                                         479
+V-2023.12
+                                                                                         Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Performing Boundary Cell Insertion
+
+
+         These options specify a single library cell that is used for the tap cells on the top and
+         bottom boundary rows, respectively. The tool inserts the tap cells to ensure that the
+         end-cap cells inserted on the top and bottom boundary rows comply with the maximum
+         diffusion-to-tap distance limit.
+      • -top_left_outside_corner_cell, -top_right_outside_corner_cell,
+        -bottom_left_outside_corner_cell, and -bottom_right_outside_corner_cell
+
+         These options specify a single library cell that is used for each outside corner location.
+      • -top_left_inside_corner_cells, -top_right_inside_corner_cells,
+        -bottom_left_inside_corner_cells, and -bottom_right_inside_corner_cells
+
+         These options specify a list of library cells for each inside corner location. The tool
+         inserts the first corner cell that matches the size of the inside corner. If none matches
+         exactly, it inserts the first cell that can be placed without violating any rules.
+     Figure 87 shows the boundary and corner cell locations for a horizontal-row block with two
+     hard macros or blockages. Note that the cell locations are flipped when the row is flipped.
+
+Figure 87     Boundary Cell Locations
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                        480
+V-2023.12
+                                                                                        Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Performing Boundary Cell Insertion
+
+
+     Specifying Boundary Cell Placement Rules
+     By default,
+      • When you run the compile_boundary_cells command, the tool places the boundary
+        cells in their default orientation around the core area, hard macros, and hard placement
+        blockages.
+      • When you run the compile_targeted_boundary_cells command, the tool places the
+        boundary cells in their default orientation around the specified objects.
+     To flip the boundary cell orientations, use one or more of the
+     following options with the set_boundary_cell_rules command:
+     -mirror_left_boundary_cell, -mirror_right_boundary_cell,
+     -mirror_left_outside_corner_cell, -mirror_right_outside_corner_cell,
+     -mirror_left_inside_corner_cell, -mirror_right_inside_corner_cell,
+     -mirror_left_inside_horizontal_abutment_cell, and
+     -mirror_right_inside_horizontal_abutment_cell. You cannot flip the orientation of
+     the top and bottom boundary cells.
+     In addition, when you use the compile_boundary_cells command, you can modify the
+     following aspects of the default placement behavior:
+      • Swapping of the top and bottom inside corner cells on flipped rows
+         Use the -do_not_swap_top_and_bottom_inside_corner_cell option with the
+         set_boundary_cell_rules command to prevent the command from using the bottom
+         inside corner cell on the top inside corner of flipped rows and the top inside corner cell
+         on the bottom inside corner of flipped rows.
+      • Consideration of voltage areas
+         Use the -at_va_boundary option with the set_boundary_cell_rules command to
+         insert horizontal boundary cells on both sides of the voltage area boundaries.
+      • Existence of one-unit-tile gaps
+         Use the -no_1x option with the set_boundary_cell_rules command to prevent
+         boundary cell insertion from creating one-unit-tile gaps. When you use this option, the
+         command does not insert boundary cells on a row when the row length equals two
+         times the corner cell width plus one unit tile width. Note that if the row length equals
+         two times the corner cell width, the command does insert boundary cells.
+      • Distance between tap cells
+         Use the -tap_distance option with the set_boundary_cell_rules command to
+         specify the distance in microns between the tap cells inserted on the top and bottom
+         boundary rows.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                       481
+V-2023.12
+                                                                                       Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Performing Boundary Cell Insertion
+
+
+      • Insertion of boundary cells on short rows
+         Use the -min_row_width option with the set_boundary_cell_rules command
+         to prevent insertion of boundary cells on short rows. This option defines the width
+         threshold for inserting boundary cells on a row. If the row width is less than the
+         specified value, the command does not insert boundary cells on the row.
+      • Insertion of boundary cells in child blocks
+         Use the -insert_into_blocks option with the set_boundary_cell_rules command
+         to recursively insert boundary cells in the child blocks. By default, the tool does not
+         insert boundary cells in the child blocks.
+
+     Specifying the Naming Convention for Boundary Cells
+     By default, the tool uses the following naming convention for inserted boundary cells:
+     boundarycell!library_cell_name!number
+     To change the separator character from its default of “!,” use the -separator option with
+     the set_boundary_cell_rules command..
+     To identify the boundary cells inserted in a specific run, use the -prefix option with the
+     set_boundary_cell_rules command to specify a prefix string. When you use this option,
+     the tool uses the following naming convention:
+     boundarycell!prefix!library_cell_name!number
+
+     Creating Routing Guides During Boundary Cell Insertion
+     If your technology file defines metal cut allowed and forbidden preferred grid extension
+     rules, you can create routing guides for these rules during boundary cell insertion by using
+     the -add_metal_cut_allowed option with the set_boundary_cell_rules command.
+     When you use this option, the compile_boundary_cells command creates the following
+     routing guides:
+      • Metal cut allowed routing guides, which cover the area taken up by all the placeable
+        site rows reduced by the vertical shrink factor, which is 50 percent of the smallest site
+        row height
+      • Forbidden preferred grid extension routing guides, which cover the remaining area up
+        to the block boundary
+     Note:
+         This feature is supported only by the compile_boundary_cells command; it is
+         not supported by the compile_targeted_boundary_cells command.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                      482
+V-2023.12
+                                                                                        Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Performing Boundary Cell Insertion
+
+
+     Creating Placement Blockages During Boundary Cell Insertion
+     If your technology has minimum jog or minimum separation requirements, you can
+     create placement blockages for these requirements during boundary cell insertion
+     with the compile_boundary_cells command by using the following options with the
+     set_boundary_cell_rules command:
+
+      • -min_horizontal_jog
+         If a horizontal edge of a macro, including its hard keepout margin, hard placement
+         blockage, or voltage area, including its guard band, is less than the specified value,
+         the compile_boundary_cells -add_placement_blockage command creates a
+         placement blockage to prevent a violation.
+      • -min_vertical_jog
+         If a vertical edge of a macro, including its hard keepout margin, hard placement
+         blockage, or voltage area, including its guard band, is less than the specified value,
+         the compile_boundary_cells -add_placement_blockage command creates a
+         placement blockage to prevent a violation.
+      • -min_horizontal_separation
+         If the continuous horizontal placement area is less than the specified value, the
+         compile_boundary_cells -add_placement_blockage command creates a
+         placement blockage to prevent a violation.
+      • -min_vertical_separation
+         If the continuous vertical placement area is less than the specified value, the
+         compile_boundary_cells -add_placement_blockage command creates a
+         placement blockage to prevent a violation.
+     Note:
+         By default, the compile_boundary_cells command checks the specified
+         rules, but does not create the placement blockages. To create the placement
+         blockages, you must use the -add_placement_blockage option with the
+         compile_boundary_cells command.
+
+         This feature is supported only by the compile_boundary_cells command; it is
+         not supported by the compile_targeted_boundary_cells command.
+
+
+     Reporting the Boundary Cell Insertion Requirements
+     To report the boundary cell insertion requirements specified by the
+     set_boundary_cell_rules command, use the report_boundary_cell_rules
+     command. This command reports only the user-specified settings; it does not report any
+     default settings.
+
+
+IC Compiler™ II Implementation User Guide                                                         483
+V-2023.12
+                                                                                    Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Performing Boundary Cell Insertion
+
+
+
+     Removing Boundary Cell Insertion Requirements
+     To remove one or more of the boundary cell insertion requirements specified by the
+     set_boundary_cell_rules command, use the remove_boundary_cell_rules
+     command.
+
+
+     Inserting Boundary Cells
+     The IC Compiler II tool provides several methods for inserting boundary cells, depending
+     on where you want to insert the boundary cells.
+      • To insert boundary cells around the core area, hard macros, and placement blockages,
+        use the compile_boundary_cells command.
+      • To insert boundary cells only around one or more voltage areas, use the
+        compile_boundary_cells command with the -voltage_area option.
+
+      • To insert boundary cells only around specific objects, use the
+        compile_targeted_boundary_cells command with the -target_objects option.
+        You can use this command to insert boundary cells around specific macros, voltage
+        areas, voltage area shapes, placement blockages, routing blockages, and the core
+        area.
+     The set_boundary_cell_rules command configures boundary cell insertion for both
+     the compile_boundary_cells and compile_targeted_boundary_cells commands.
+     However, some rules are honored only by the compile_boundary_cells command. For
+     details, see Specifying the Boundary Cell Insertion Requirements.
+
+
+     Verifying the Boundary Cell Placement
+     After inserting the boundary cells with the compile_boundary_cells command, verify the
+     placement by using the check_boundary_cells command. To create an error data file to
+     view the errors in the error browser, use the -error_view option. For information about
+     using the error browser, see the IC Compiler II Graphical User Interface User Guide.
+     This command checks the boundary cell placement for the following issues:
+      • Missing boundary or corner cells
+         This check verifies that there are boundary and corner cells around the entire
+         boundary, with no gaps. Figure 88 shows a valid placement, as well as errors caused
+         by missing cells.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                   484
+V-2023.12
+                                                                                       Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Finding and Fixing Antenna Violations
+
+
+   Figure 88      Check for Missing Boundary or Corner Cells
+
+
+
+
+         Note:
+             For established nodes, boundary cells are inserted only on the left and right
+             sides. In this case, the command verifies only that there are no gaps on
+             these sides.
+      • Incorrect boundary or corner cells
+         This check verifies that the library cells used for the boundary and corner cells match
+         the cells specified by the set_boundary_cell_rules command.
+      • Incorrect orientation of boundary cells
+         This check verifies that the orientation of each boundary cell matches the allowed
+         orientations specified by the set_boundary_cell_rules command.
+      • Short rows and edges
+         This check verifies that each row of boundary cells is wider than the value
+         specified by the set_boundary_cell_rules -min_row_width option and that
+         the horizontal edges of each blockage are greater than the value specified by the
+         set_boundary_cell_rules -min_horizontal_jog option.
+
+
+
+Finding and Fixing Antenna Violations
+     In chip manufacturing, gate oxide can be easily damaged by electrostatic discharge. The
+     static charge that is collected on wires during the multilevel metalization process can
+     damage the device or lead to a total chip failure. The phenomenon of an electrostatic
+     charge being discharged into the device is referred to as either antenna or charge-
+     collecting antenna problems.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                      485
+V-2023.12
+                                                                                      Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Finding and Fixing Antenna Violations
+
+
+     To prevent antenna problems, the tool verifies that for each input pin the metal antenna
+     area divided by the gate area is less than the maximum antenna ratio given by the
+     foundry:
+     (antenna-area)/(gate-area) < (max-antenna-ratio)
+     This check is based on the global and layer-specific antenna rules defined for the block
+     and the antenna properties of the cells in the block.
+     The antenna flow consists of the following steps:
+      1. Define the antenna rules.
+      2. Specify the antenna properties of the pins and ports.
+      3. Analyze and fix the antenna violations.
+
+
+     Defining Antenna Rules
+     Antenna rules define how to calculate the maximum antenna ratio for the nets in a block,
+     as well as the antenna ratio for a pin. You must define a global antenna rule by using the
+     define_antenna_rule command. You can also specify layer-specific antenna rules by
+     using the define_antenna_layer_rule command. The tool uses the global antenna rule
+     whenever a layer-specific antenna rule does not exist.
+     The following topics describe how to define the antenna rules:
+      • Calculating the Maximum Antenna Ratio
+      • Calculating the Antenna Ratio for a Pin
+
+     Calculating the Maximum Antenna Ratio
+     To control the method used to calculate the maximum allowable antenna ratio, you must
+     specify the following information:
+      • How much protection the diodes provide (the diode protection mode)
+         To specify the diode protection mode, use the -diode_mode option with the
+         define_antenna_rule command, as described in Setting the Diode Protection Mode.
+         This is a required option of the define_antenna_rule command.
+      • How to perform antenna ratio calculation with diode protection (the diode ratio vector)
+         To specify the diode ratio vector, use the -diode_ratio option with the
+         define_antenna_layer_rule command, as described in Specifying the Diode Ratio
+         Vector. This is a required option of the define_antenna_layer_rule command.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                       486
+V-2023.12
+                                                                                             Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Finding and Fixing Antenna Violations
+
+
+     Setting the Diode Protection Mode
+     The diode protection mode specifies how much protection the diodes provide.
+     Advanced technology designs often use cells and macros with different gate oxide
+     thicknesses, which affect the antenna rule calculations. The IC Compiler II tool uses gate
+     classes to represent the various gate oxide thicknesses. The tool supports up to four gate
+     oxide thicknesses: gate class 0, gate class 1, gate class 2, and gate class 3. If a cell pin
+     does not have gate class data, it is treated as gate class 0.
+     The IC Compiler II tool supports 18 diode protection modes, most of which support only a
+     single gate oxide thickness. For advanced technology designs that use cells and macros
+     with different gate oxide thicknesses, you must use one of the diode protection modes that
+     support multiple gate oxide thicknesses: 14, 16, and 18.
+     To specify the diode protection mode, use the -diode_mode option with the
+     define_antenna_rule command. This is a required option of the define_antenna_rule
+     command.
+     Table 28 defines how each of the diode protection mode settings affect the maximum
+     antenna ratio for a net. The diode protection mode also affects the computation of the
+     maximum antenna ratio for individual diodes. The antenna ratio calculation formulas for
+     diodes are shown in Table 30; these formulas use the values in the diode ratio vector
+     specified in the -diode_ratio option of the define_antenna_layer_rule command, as
+     described in Specifying the Diode Ratio Vector.
+Table 28      Diode Protection Mode Settings
+
+      Diode protection mode       Definition
+
+      0                           The diodes do not provide any protection.
+
+      1                           The diodes provide unlimited protection.
+                                  In this mode, the highest metal layer is not checked for antenna
+                                  violations because the input-to-output connection is completed when
+                                  the highest metal layer is formed.
+
+      2                           Diode protection is limited; if more than one diode is connected, the
+                                  largest value of the maximum antenna ratio for all diodes is used.
+
+      3                           Diode protection is limited; if more than one diode is connected, the
+                                  sum of the maximum antenna ratios for all diodes is used.
+
+      4                           Diode protection is limited; if more than one diode is connected, the
+                                  sum of the diode-protection values for all diodes is used to compute
+                                  the maximum antenna ratio.
+
+      5                           Diode protection is limited; the maximum diode-protection value for all
+                                  diodes is used to calculate the equivalent gate area.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                             487
+V-2023.12
+                                                                                               Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Finding and Fixing Antenna Violations
+
+
+Table 28      Diode Protection Mode Settings (Continued)
+
+      Diode protection mode       Definition
+
+      6                           Diode protection is limited; the sum of the diode-protection values for
+                                  all diodes is used to calculate the equivalent gate area.
+
+      7                           Diode protection is limited; the maximum diode-protection value for all
+                                  diodes is used to calculate the equivalent metal area.
+
+      8                           Diode protection is limited; the sum of the diode-protection values for
+                                  all diodes is used to calculate the equivalent metal area.
+
+      9                           Diode protection is limited; scaling is based on maximum diode
+                                  protection.
+
+      10                          Diode protection is limited; scaling is based on total diode protection.
+
+      11                          Diode protection is limited; scaling is based on maximum diode
+                                  protection.
+
+      12                          Diode protection is limited; scaling is based on total diode protection.
+
+      13                          Obsolete.
+
+      14                          Diode protection is limited; two separate calculation formulas.
+                                  Supports gate classes.
+
+      15                          Internal use only.
+
+      16                          Diode protection is limited; if more than one diode is connected, the
+                                  sum of the diode-protection values for all diodes is used to compute
+                                  the maximum antenna ratio. Supports gate classes.
+
+      17                          Diode protection is limited; the sum of the diode-protection values for
+                                  all diodes is used to calculate the equivalent gate area. The gate area
+                                  calculation is done separately for the input and output pins.
+
+      18                          Diode protection is limited; if more than one diode is connected, the
+                                  sum of the diode-protection values for all diodes is used to compute
+                                  the maximum antenna ratio. Supports gate classes and calculation
+                                  depends on whether the pin is connected to a diode.
+
+
+     Specifying the Diode Ratio Vector
+     The diode ratio vector specifies the values used to calculate the maximum antenna
+     ratio. To specify the diode ratio vector, use the -diode_ratio option with the
+     define_antenna_layer_rule command. If you do not specify a diode ratio, the tool uses
+     {0 0 1 0 0}. The actual usage of the diode ratio vector depends on the diode mode that
+     was specified in the define_antenna_rule -diode_mode option.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                               488
+V-2023.12
+                                                                                                Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Finding and Fixing Antenna Violations
+
+
+     Table 29 shows the format of the diode ratio vector for the various diode modes. Table 30
+     shows how the vector values are used to calculate the maximum antenna ratio for each
+     diode mode. In this table,
+      • dp represents the diode protection value specified for an output pin. For information
+        about specifying this value, see Specifying Antenna Properties.
+      • layerMaxRatio represents the maximum antenna ratio for the layer, as specified
+        by the -ratio option of the define_antenna_layer_rule command or one the
+        -metal_ratio or -cut_ratio option of the define_antenna_rule command if the
+        layer-specific value is not defined.
+     For examples of the maximum antenna ratio calculations, see
+      • Example for Diode Modes 2, 3, and 4
+      • Example for Diode Modes 5 and 6
+      • Example for Diode Modes 7 and 8
+      • Example for Diode Mode 14 With Multiple Gate Oxide Thicknesses
+Table 29         Diode Ratio Vector Formats
+
+      Diode modes        Format
+
+      2-10, 17           {v0 v1 v2 v3 [v4]}
+                         The v4 value represents the upper limit of the diode protection and is optional. If
+                         you do not specify the v4 value, it is assumed to be 0, which means there is no
+                         upper limit.
+
+      11, 12             {{v0 v1 v2 v3 [v4]}{s0 s1 s2 s2 s4 s5}}
+                         The second vector, {s0 s1 s2 s3 s4 s5}, specifies scaling values.
+
+      14                 {v01 v11 v21 v31 v41 v51 v61 v71 v81 v91}
+                         {v02 v12 v22 v32 v42 v52 v62 v72 v82 v92}
+                         {v03 v13 v23 v33 v43 v53 v63 v73 v83 v93}
+                         {v04 v14 v24 v34 v44 v54 v64 v74 v84 v94}
+                         You specify one 10-value vector for each of the four gate classes.
+
+      16                 {v01 v11 v21 v31 v41 v51 v61 v71}
+                         {v02 v12 v22 v32 v42 v52 v62 v72}
+                         {v03 v13 v23 v33 v43 v53 v63 v73}
+                         {v04 v14 v24 v34 v44 v54 v64 v74}
+                         You specify one 8-value vector for each of the four gate classes.
+
+      18                 {v01 v11 v21 v31 v41 v51 v61 v71 v81 v91 v101 v111}
+                         {v02 v12 v22 v32 v42 v52 v62 v72 v82 v92 v102 v112}
+                         {v03 v13 v23 v33 v43 v53 v63 v73 v83 v93 v103 v113}
+                         {v04 v14 v24 v34 v44 v54 v64 v74 v84 v94 v104 v114}
+                         You specify one 12-value vector for each of the four gate classes.
+
+
+
+IC Compiler™ II Implementation User Guide                                                                489
+V-2023.12
+                                                                                             Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Finding and Fixing Antenna Violations
+
+
+Table 30        Antenna Ratio Calculation Based on Diode Mode
+
+      Diode mode       Calculation
+
+      0, 1             Not used
+
+      2, 3, 4          • If dp>v0 and v4<>0,
+                         antenna_ratio = min (((dp + v1) * v2 + v3), v4)
+                       • If dp>v0 and v4=0,
+                         antenna_ratio = (dp + v1) * v2 + v3
+                       • If dp<=v0,
+                         antenna_ratio = layerMaxRatio
+
+      5                antenna_ratio = metal_area / (gate_area + equi_gate_area)
+                        • If max_diode_protection>v0 and v4<>0,
+                          equi_gate_area = min (((max_diode_protection + v1) * v2 + v3), v4)
+                        • If max_diode_protection>v0 and v4=0,
+                          equi_gate_area = (max_diode_protection + v1) * v2 + v3
+                        • If max_diode_protection<=v0,
+                          equi_gate_area = 0
+
+      6                antenna_ratio = metal_area / (gate_area + equi_gate_area)
+                        • If total_diode_protection>v0 and v4<>0,
+                          equi_gate_area = min (((total_diode_protection + v1) * v2 + v3), v4)
+                        • If total_diode_protection>v0 and v4=0,
+                          equi_gate_area = (total_diode_protection + v1) * v2 + v3
+                        • If total_diode_protection<=v0,
+                          equi_gate_area = 0
+
+      7                antenna_ratio = (metal_area - equi_metal_area) / gate_area
+                        • If max_diode_protection>v0 and v4<>0,
+                          equi_metal_area = min (((max_diode_protection + v1) * v2 + v3), v4)
+                        • If max_diode_protection>v0 and v4=0,
+                          equi_metal_area = (max_diode_protection + v1) * v2 + v3
+                        • If max_diode_protection<=v0,
+                          equi_metal_area = 0
+                        • If equi_metal_area>metal_area,
+                          equi_metal_area = metal_area
+
+      8                antenna_ratio = (metal_area - equi_metal_area) / gate_area
+                        • If total_diode_protection>v0 and v4<>0,
+                          equi_metal_area = min (((total_diode_protection + v1) * v2 + v3), v4)
+                        • If total_diode_protection>v0 and v4=0,
+                          equi_metal_area = (total_diode_protection + v1) * v2 + v3
+                        • If total_diode_protection<=v0,
+                          equi_metal_area = 0
+                        • If equi_metal_area > metal_area,
+                          equi_metal_area = metal_area
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                          490
+V-2023.12
+                                                                                           Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Finding and Fixing Antenna Violations
+
+
+Table 30      Antenna Ratio Calculation Based on Diode Mode (Continued)
+
+      Diode mode      Calculation
+
+      9               antenna_ratio = scale * metal_area / gate_area
+                       • If max_diode_protection>v0,
+                         scale = max (1 / ((max_diode_protection + v1) * v2 + v3), v4)
+                       • If max_diode_protection<=v0,
+                         scale = 1.0
+
+      10              antenna_ratio = scale * metal_area / gate_area
+                       • If total_diode_protection>v0,
+                         scale = max (1 / ((total_diode_protection + v1) * v2 + v3), v4)
+                       • If total_diode_protection<= v0,
+                         scale = 1.0
+
+      11              antenna_ratio = scale * metal_area / gate_area
+                       • If max_diode_protection<v0,
+                         scale = s0
+                       • If max_diode_protection<v1,
+                         scale = s1
+                       • If max_diode_protection<v2,
+                         scale = s2
+                       • If max_diode_protection<v3,
+                         scale = s3
+                       • If max_diode_protection<v4,
+                         scale = s4
+                       • If max_diode_protection>=v4,
+                         scale = s5
+
+      12              antenna_ratio = scale * metal_area / gate_area
+                       • If total_diode_protection<v0,
+                         scale = s0
+                       • If total_diode_protection<v1,
+                         scale = s1
+                       • If total_diode_protection<v2,
+                         scale = s2
+                       • If total_diode_protection<v3,
+                         scale = s3
+                       • If total_diode_protection<v4,
+                         scale = s4
+                       • If total_diode_protection>=v4,
+                         scale = s5
+
+      13              N/A
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                        491
+V-2023.12
+                                                                                            Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Finding and Fixing Antenna Violations
+
+
+Table 30      Antenna Ratio Calculation Based on Diode Mode (Continued)
+
+      Diode mode      Calculation
+
+      14              If connected to a diode,
+                       • (metal or via area) / (gate-area) <= (dp*v1 + v2) // formula1
+                          and
+                          (metal or via area) / (v5*gate-area + v6* dp) <= v7// formula2
+                      If not connected to a diode,
+                       • (metal or via area) / (gate-area) <= v3 // formula1
+                          and
+                          (metal or via area) / (v8 * gate-area) <= v9 // formula2
+
+      15              N/A
+
+      16               • If dp>v0 and v4<>0,
+                         allowable max-antenna-ratio = min (((dp + v1) * v2 + v3), v4)
+                       • If dp>v0 and v4=0,
+                         allowable max-antenna-ratio = (dp + v1) * v2 + v3
+                       • If dp<=v0,
+                         allowable max-antenna-ratio = layerMaxRatio
+                       • If (gate-area <= v5),
+                         antenna-ratio = antenna-area/(gate-area + v6*dp)
+                         else
+                         antenna-ratio = antenna-area/ (gate-area + v6*dp + v7)
+
+      17              antenna_ratio = metal_area / (gate_area + equi_gate_area)
+                       • If total_diode_protection>v0 and v4<>0,
+                         equi_gate_area = min (((total_diode_protection + v1) * v2 + v3), v4)
+                       • If total_diode_protection>v0 and v4=0,
+                         equi_gate_area = (total_diode_protection + v1) * v2 + v3
+                       • If total_diode_protection<=v0,
+                         equi_gate_area = 0
+
+      18              If connected to a diode,
+                       • If dp>v0 and v4<>0,
+                          allowable max-antenna-ratio = min (((dp + v1) * v2 + v3), v4)
+                       • If dp>v0 and v4=0,
+                          allowable max-antenna-ratio = (dp + v1) * v2 + v3
+                       • If dp<=v0,
+                          allowable max-antenna-ratio = layerMaxRatio
+                       • If (gate-area <= v5),
+                          antenna-ratio = antenna-area/(gate-area + v6*dp)
+                          else
+                          antenna-ratio = antenna-area/(gate-area + v6*dp + v7)
+                      If not connected to a diode,
+                       • If (gate-area < v8),
+                          allowable max-antenna-ratio = v9
+                          else
+                                                                         v11
+                          allowable-max-antenna-ratio = v10*(gate-area)
+                       • antenna-ratio = (antenna-area)/(gate-area)
+
+
+
+IC Compiler™ II Implementation User Guide                                                         492
+V-2023.12
+                                                                                           Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Finding and Fixing Antenna Violations
+
+
+     Example for Diode Modes 2, 3, and 4
+     Assume that the antenna area is calculated using surface area in single-layer mode
+     (antenna mode 1), the diode ratio vector for the M1 layer is {0.7 0.0 200 2000}, the
+     layerMaxRatio value for the M1 layer is 400, and the following diodes are connected to a
+     single M1 net: diode A with a diode-protection value of 0.5, diode B with a diode-protection
+     value of 1.0, and diode C with a diode-protection value of 1.5. In this example, the v4
+     value is not specified so a value of 0 is used.
+     Use the following commands to define the antenna rules for this example:
+     icc2_shell> define_antenna_rule -mode 1 -diode_mode diode_mode \
+        -metal_ratio 400 -cut_ratio 20
+     icc2_shell> define_antenna_layer_rule -mode 1 -layer "M1" \
+        -ratio 400 -diode_ratio {0.7 0.0 200 2000}
+
+     The maximum antenna ratio for each diode is computed by using the formula for the diode
+     mode from Table 30. In this case,
+      • If dp>v0 and v4<>0,
+           allowable max-antenna-ratio = min (((dp + v1) * v2 + v3), v4)
+      • If dp>v0 and v4=0,
+           allowable max-antenna-ratio = (dp + v1) * v2 + v3
+      • If dp<=v0,
+           allowable max-antenna-ratio = layerMaxRatio
+     Table 31 shows the maximum antenna ratio for each diode calculated using this formula.
+Table 31        Calculation of Maximum Antenna Ratio for Each Diode
+
+      Diode      Protection value    Maximum Antenna Ratio
+
+      A          0.5                 400
+                                     Protection value is less than the v0 value of 0.7, so use maximum
+                                     antenna ratio of 400.
+
+      B          1.0                 2200
+                                     Protection value is greater than the v0 value of 0.7, so maximum
+                                     antenna ratio is (1.0+0.0) * 200 + 2000 = 2200.
+
+      C          1.5                 2300
+                                     Protection value is greater than the v0 value of 0.7, so maximum
+                                     antenna ratio is (1.5+0.0) * 200 + 2000 = 2300.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                          493
+V-2023.12
+                                                                                      Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Finding and Fixing Antenna Violations
+
+
+     The maximum antenna ratio for the net is computed by using the formula for the diode
+     mode from Table 29:
+      • For diode mode 2, the maximum antenna ratio for the net is the largest of the maximum
+        antenna ratio values for the diodes, 2300.
+      • For diode mode 3, the maximum antenna ratio for the net is the sum of the maximum
+        antenna ratios for the diodes, 400 + 2200 + 2300 = 4900.
+      • For diode mode 4, the maximum antenna ratio for the net is computed by using the
+        formula from Table 30 using the sum of the diode-protection values of the diodes,
+        (0.5+1.0+1.5) * 200 + 2000 = 2600.
+     Example for Diode Modes 5 and 6
+     Assume that the antenna area is calculated using surface area in single-layer mode
+     (antenna mode 1), the diode ratio vector for the M1 layer is {0 0 1 0} (the default diode
+     ratio vector), the layerMaxRatio value for the M1 layer is 400, and the following diodes are
+     connected to a single M1 net: diode A with a diode-protection value of 0.5, diode B with
+     a diode-protection value of 1.0, and diode C with a diode-protection value of 1.5. In this
+     example, the v4 value is not specified so a value of 0 is used.
+     Use the following command to define the antenna rules for this example:
+     icc2_shell> define_antenna_rule -mode 1 -diode_mode diode_mode \
+        -metal_ratio 400 -cut_ratio 20
+
+     Because this example uses the global layerMaxRatio value and the default diode ratio
+     vector, you do not need to define a layer-specific antenna rule.
+     As shown in Table 30, for diode modes 5 and 6, the maximum antenna ratio is computed
+     as
+     metal_area / (gate_area + equi_gate_area)
+     where the equivalent gate area, equi_gate_area, is computed by using the diode ratio
+     vector: (diode_protection + v1) * (v2 + v3).
+      • For diode mode 5, the equivalent gate area is computed using the maximum diode
+        protection, which is 1.5, so the maximum antenna ratio for the net is
+         metal_area / (gate_area + ((1.5 + 0) * (1 + 0))) = metal_area/(gate_area + 1.5)
+      • For diode mode 6, the equivalent gate area is computed using the total diode
+        protection, which is 0.5+1.0+1.5=3.0, so the maximum antenna ratio for the net is
+         metal_area / (gate_area + ((3.0 + 0) * (1 + 0))) = metal_area/(gate_area + 3.0)
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                     494
+V-2023.12
+                                                                                       Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Finding and Fixing Antenna Violations
+
+
+     Example for Diode Modes 7 and 8
+     Assume that the antenna area is calculated using surface area in single-layer mode
+     (antenna mode 1), the diode ratio vector for the M1 layer is {0.7 0.0 150 800}, the
+     layerMaxRatio value for the M1 layer is 400, and the following diodes are connected to a
+     single M1 net: diode A with a diode-protection value of 0.5, diode B with a diode-protection
+     value of 1.0, and diode C with a diode-protection value of 1.5. In this example, the v4
+     value is not specified so a value of 0 is used.
+     Use the following commands to define the antenna rules for this example:
+     icc2_shell> define_antenna_rule -mode 1 -diode_mode diode_mode \
+        -metal_ratio 400 -cut_ratio 20
+     icc2_shell> define_antenna_layer_rule -mode 1 -layer "M1" \
+        -ratio 400 -diode_ratio {0.7 0.0 150 800}
+
+     As shown in Table 30, for diode modes 7 and 8, the maximum antenna ratio is computed
+     as
+     (metal_area - equi_gate_area) / gate_area
+     where the equivalent gate area, equi_gate_area, is computed by using the diode ratio
+     vector: (diode_protection + v1) * (v2 + v3).
+      • For diode mode 7, the equivalent metal area is computed using the maximum diode
+        protection, which is 1.5, so the maximum antenna ratio for the net is
+         (metal_area - ((1.5 + 0) * (150 + 800))) / gate_area = (metal_area - 1025) / gate_area
+      • For diode mode 8, the equivalent metal area is computed using the total diode
+        protection, which is 0.5+1.0+1.5=3.0, so the maximum antenna ratio for the net is
+         (metal_area - ((3.0 + 0) * 150 + 800)) / gate_area = (metal_area - 1250) / gate_area
+     Example for Diode Mode 14 With Multiple Gate Oxide Thicknesses
+     Assume that the antenna area is calculated using surface area in single-layer mode
+     (antenna mode 1), the design contains cells with two different gate oxide thicknesses, the
+     diode ratio vector for the first oxide thickness (gate class 0) for the M1 layer is {1 0 1e9
+     1e9 0 1 2 285 1 285}, the diode ratio vector for the second oxide thickness (gate class 1)
+     for the M1 layer is {1 0 1e9 1e9 1 0 2 165 1 28}, and the layerMaxRatio value for the M1
+     layer is 285.
+     For diode mode 14, the diode ratio vector contains 10 values for each gate class. Because
+     the design uses only two gate oxide thicknesses, only the vectors for gate class 0 and
+     gate class 1 are used. However, you must specify all 40 values when defining the antenna
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                       495
+V-2023.12
+                                                                                        Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Finding and Fixing Antenna Violations
+
+
+     rule. For unused gate classes (gate class 2 and gate class 3 in this example), specify very
+     large ratios to disable the checks.
+     Use the following commands to define the antenna rules for this example:
+     icc2_shell> define_antenna_rule -mode 1 -diode_mode 14 \
+        -metal_ratio 285 -cut_ratio 10
+     icc2_shell> define_antenna_layer_rule -mode 1 -layer "M1" \
+        -ratio 285 -diode_ratio {1 0 1e9 1e9 0 1 2 285 1 285 \
+                                 1 0 1e9 1e9 1 0 2 165 1 28 \
+                                 1 0 1e9 1e9 0 1 2 1e9 1 1e9 \
+                                 1 0 1e9 1e9 0 1 2 1e9 1 1e9 }
+
+     The following table shows the vector usage:
+
+               Formula 1                          Formula 2
+
+               Gate     With Diode       No               With Diode              No Diode
+               sum                       Diode
+               switch
+                        Diode Offset     Ratio            Gate      Diode Ratio   Gate       Ratio
+                        protect                           area      protect       area
+                        ion                               multipl   ion           multipl
+                        multipl                           ier       multipl       ier
+                        ier                                         ier
+
+      Gate    v01       v11     v21      v31      v41     v51       v61   v71     v81        v91
+      Class 0
+
+      Gate    v02       v12     v22      v32      v42     v52       v62   v72     v82        v92
+      Class 1
+
+      Gate    v03       v13     v23      v33      v43     v53       v63   v73     v83        v93
+      Class 2
+
+      Gate    v04       v14     v24      v34      v44     v54       v64   v74     v84        v94
+      Class 3
+
+
+     Here:
+      • V0: Defines which gate areas are used for the check for the first formula:
+          ◦ 0: Gate area of all gates that belong to the current gate class
+          ◦ 1: Total gate area regardless of gate class
+      • V1: Defines the diode protection multiplier for the connected to diode case for the first
+        formula
+      • V2: Defines the offset value for the connected to diode case for the first formula
+
+
+
+IC Compiler™ II Implementation User Guide                                                          496
+V-2023.12
+                                                                                      Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Finding and Fixing Antenna Violations
+
+
+      • V3: Defines the ratio requirement for the not connected to diode case for the first
+        formula
+      • V4: Defines which gate areas are used for the check for the second formula:
+          ◦ 0: Gate area of all gates that belong to the current gate class
+          ◦ 1: Total gate area regardless of gate class
+      • V5: Defines the gate area multiplier for the connected to diode case for the second
+        formula
+      • V6: Defines the diode protection multiplier for the connected to diode case for the
+        second formula
+      • V7: Defines the ratio requirement for the connected to diode case for the second
+        formula
+      • V8: Defines the gate area multiplier for the not connected to diode case for the second
+        formula
+      • V9: Defines the antenna ratio requirement for the not connected to diode case for the
+        second formula
+
+     Calculating the Antenna Ratio for a Pin
+     The tool supports several ways to calculate the antenna ratio (antenna-area/gate-area).
+     You control this calculation by specifying the following information:
+      • How the antenna area is calculated (the antenna area mode)
+      • Which metal segments are considered for the calculation (the antenna recognition
+        mode)
+     To specify these modes, use the -mode option with the define_antenna_rule and
+     define_antenna_layer_rule commands, as described in Setting the Antenna Mode.
+     This is a required option for both of these commands.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                     497
+V-2023.12
+                                                                                      Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Finding and Fixing Antenna Violations
+
+
+     Setting the Antenna Mode
+     The antenna mode controls the antenna ratio calculation by determining
+      • How the antenna area is calculated (the antenna area mode)
+         The tool supports the following area calculation modes:
+          ◦ Surface area, which is calculated as W x L
+          ◦ Sidewall area, which is calculated as (W + L) x 2 x thickness
+             Note:
+                If you use sidewall area calculation, you must define the metal thickness
+                by specifying the unitMinThickness, unitNomThickness, and
+                unitMaxThickness attributes in each Layer section of the technology
+                file.
+      • Which metal segments are considered for the calculation (the antenna recognition
+        mode)
+         To tool supports the following antenna recognition modes:
+          ◦ Single-layer mode
+             In single-layer mode, the tool considers only the metal segments on the current
+             layer; the metal segments on all lower layers are ignored. This mode allows the
+             best routability. In this mode, the antenna ratio is calculated as
+             antenna_ratio = connected metal area of the layer / total gate area
+          ◦ Accumulated-ratio mode
+             In accumulated-ratio mode, the tool considers the metal segments on the current
+             layer and the lower-layer segments connected to the input pins. In this mode, the
+             antenna ratio is calculated as
+             antenna_ratio = accumulation of the single-layer mode ratios of the current layer
+             and layers below
+          ◦ Accumulated-area mode
+             In accumulated-area mode, the tool considers the metal segments on the current
+             and lower layers. In this mode, the antenna ratio is calculated as
+             antenna_ratio = connected metal area of the current and lower layers/ total gate
+             area
+         For a detailed example of the antenna recognition modes, see Antenna Recognition
+         Mode Example.
+
+
+
+IC Compiler™ II Implementation User Guide                                                        498
+V-2023.12
+                                                                                    Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Finding and Fixing Antenna Violations
+
+
+     The IC Compiler II tool supports six antenna modes, which are described in Table 32.
+     To specify the antenna mode, use the -mode option with the define_antenna_rule and
+     define_antenna_layer_rule commands. This is a required option for both commands.
+
+Table 32      Antenna Mode Settings
+
+      Antenna mode value       Area calculation mode     Antenna recognition mode
+
+      1                        Surface                   Single-layer
+
+      2                        Surface                   Accumulated-ratio
+
+      3                        Surface                   Accumulated-area
+
+      4                        Sidewall                  Single-layer
+
+      5                        Sidewall                  Accumulated-ratio
+
+      6                        Sidewall                  Accumulated-area
+
+
+     Antenna Recognition Mode Example
+     Figure 89 shows a layout example with a lateral view, which is used to explain the antenna
+     recognition modes. Table 33 shows the antenna ratios for each antenna recognition mode
+     for this layout example.
+
+Figure 89     Layout Example for Antenna Recognition Modes
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                  499
+V-2023.12
+                                                                                         Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Finding and Fixing Antenna Violations
+
+
+Table 33      Antenna Recognition Modes and Ratios
+
+      Considered segments         Antenna ratio
+
+      Single-layer mode           M1 ratios
+                                  • Gate1: M1b / Gate1
+                                  • Gate2: M1c / Gate2
+                                  • Gate3: M1d / Gate3
+                                  M2 ratios
+                                  • Gate1: M2b / Gate1
+                                  • Gate2: M2d / Gate2
+                                  • Gate3: M2e / Gate3
+                                  M3 ratios
+                                  • Gate1, 2: (M3b + M3c) / (Gate1 + Gate2)
+                                  • Gate3: M3d / Gate3
+                                  M4 ratios
+                                  • Gate1, 2, 3: (M4a + M4b) / (Gate1 + Gate2 + Gate3)
+
+      Accumulated-ratio mode      M1 ratios
+                                  • Gate1: M1b / Gate1
+                                  • Gate2: M1c / Gate2
+                                  • Gate3: M1d / Gate3
+                                  M2 ratios
+                                  • Gate1: M1b / Gate1 + M2b / Gate1
+                                  • Gate2: M1c / Gate2 + M2d / Gate2
+                                  • Gate3: M1d / Gate3 + M2e / Gate3
+                                  M3 ratios
+                                  • Gate1: M1b / Gate1 + M2b / Gate1 + (M3b + M3c) / (Gate1 +
+                                    Gate2)
+                                  • Gate2: M1c / Gate2 + M2d / Gate2 + (M3b + M3c) / (Gate1 +
+                                    Gate2)
+                                  • Gate3: M1d / Gate3 + M2e / Gate3 + M3d / Gate3
+                                  M4 ratios
+                                  • Gate1: M1b / Gate1 + M2b / Gate1 + (M3b + M3c) / (Gate1 +
+                                    Gate2) + (M4a + M4b) / (Gate1 + Gate2 + Gate3)
+                                  • Gate2: M1c / Gate2 + M2d / Gate2 + (M3b + M3c) / (Gate1 +
+                                    Gate2) + (M4a + M4b) / (Gate1 + Gate2 + Gate3)
+                                  • Gate3: M1d / Gate3 + M2e / Gate3 + M3d / Gate3 + (M4a + M4b) /
+                                    (Gate1 + Gate2 + Gate3)
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                      500
+V-2023.12
+                                                                                          Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Finding and Fixing Antenna Violations
+
+
+Table 33        Antenna Recognition Modes and Ratios (Continued)
+
+      Considered segments          Antenna ratio
+
+      Accumulated-area mode        M1 ratios
+                                   • Gate1: M1b / Gate1
+                                   • Gate2: M1c / Gate2
+                                   • Gate3: M1d / Gate3
+                                   M2 ratios
+                                   • Gate1: (M1b + M2b) / Gate1
+                                   • Gate2: (M1c + M2d) / Gate2
+                                   • Gate3: (M1d + M2e) / Gate3
+                                   M3 ratios
+                                   • Gate1, 2: (M1b + M1c + M2b + M2c + M2d + M3b + M3c) / (Gate1
+                                     + Gate2)
+                                   • Gate3: (M1d + M2e + M3d) / Gate3
+                                   M4 ratios
+                                   • Gate1, 2, 3: all metal areas / (Gate1 + Gate2 + Gate3)
+
+
+
+     Specifying Antenna Properties
+     In general, the antenna properties for standard cells and hard macros are defined in
+     their frame views in the reference libraries. You can set default values for the antenna
+     properties, which apply to cells that do not have antenna properties defined in the
+     reference libraries.
+      • route.detail.default_diode_protection
+           Specifies the diode protection value used for standard cell output pins during antenna
+           analysis if the diode protection value is not specified in the e view of the cell.
+      • route.detail.default_gate_size
+           Specifies the gate size used for standard cell input pins during antenna analysis if the
+           gate size is not specified in the e view of the cell.
+      • route.detail.default_port_external_antenna_area
+           Specifies the antenna area used for ports (top-level pins) during antenna analysis if the
+           antenna area is not specified in the e view of the cell.
+      • route.detail.default_port_external_gate_size
+           Specifies the gate size used for ports (top-level pins) during antenna analysis if the
+           gate size is not specified in the e view of the cell.
+      • route.detail.macro_pin_antenna_mode
+           Specifies how macro cell pins are treated for antenna considerations.
+
+
+IC Compiler™ II Implementation User Guide                                                           501
+V-2023.12
+                                                                                                                                                              Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Finding and Fixing Antenna Violations
+
+
+                                     • route.detail.port_antenna_mode
+                                       Specifies how the ports (top-level pins) are treated for antenna considerations.
+     If you are using a hierarchical flow and create a block abstraction for a block, you must
+     use the derive_hier_antenna_property command to extract the antenna information
+     from the block to use at the next level of hierarchy.
+                                     Note:
+                                       If the hierarchical antenna properties are not defined for all layers for a macro,
+                                       Zroute treats the data as incomplete, skips antenna analysis, and issues a
+                                       ZRT-311 warning message. If you get this error message, see SolvNet article
+                                       027178, “Debugging the ZRT-311 Message.”
+
+     See Also
+                                     • Annotating Antenna Properties on Hard Macro Cells
+
+
+     Analyzing and Fixing Antenna Violations
+     If the design library contains antenna rules, Zroute automatically analyzes and fixes
+     antenna rulescheckingenabling                                                                                         antenna violationsenablingfixing
+
+
+
+
+     antenna violations. To disable the analysis and correction of antenna rules during detail
+                                                         antenna violationsfixingdisablingantenna rulescheckingdisabling
+
+
+
+
+     routing, set the route.detail.antenna application option to false.
+     Just like other design rules, antenna rules are checked and corrected during detail routing.
+     This concurrent antenna rule correction architecture reduces total runtime by minimizing
+     the iterations.
+     By default, Zroute
+                                     • Checks antenna rules and corrects violations for all clock and signal nets
+                                       To disable fixing of antenna violations on specific nets, set the
+                                       route.detail.skip_antenna_fixing_for_nets application option. Note that Zroute
+                                       analyzes the antenna rules and reports the antenna violations on these nets, but does
+                                       not fix the violations.
+                                     • Does not check or correct antenna rules for power and ground nets
+                                       To check and correct antenna rules for power and ground nets, set the
+                                       route.detail.check_antenna_on_pg application option to true.
+
+                                     • Starts fixing antenna violations in the second iteration, after initial routing is complete
+                                       and the basic DRC violations have been fixed
+                                       To change the iteration in which Zroute starts fixing antenna violations, set the
+                                       route.detail.antenna_on_iteration application option.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                                                                                           502
+V-2023.12
+                                                                                                             Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Finding and Fixing Antenna Violations
+
+
+                             • Performs layer hopping to fix antenna violations
+                               Layer hopping decreases the antenna ratio by splitting a large metal polygon into
+                               several upper-level polygons. Zroute performs the following types of layer hopping:
+                                ◦ Breaking the antenna with a higher-level metal segment
+                                  Zroute uses this technique to fix most antenna violations. For antenna violations
+                                  that happen at metal-N, inserting a small segment of metal-(N+1) close to the gate
+                                  reduces the ratio between the remaining metal-N, making the ratio much lower.
+                                  This approach is not suitable for fixing top-metal layer antenna violations when the
+                                  output pin can provide only limited protection because there is no way for the router
+                                  to break antenna violations at the topmost metal layer.
+                                ◦ Moving down to a lower-level metal
+                                  Zroute uses this technique to fix only topmost layer antenna violations when output
+                                  pins provide only limited protection. For antenna violations that happen at metal-N,
+                                  replace part of the metal-N with metal-(N-1 or lower) to reduce the ratio. However,
+                                  splitting the metal layer into many pieces might have a negative impact on RC and
+                                  timing delay.
+                               Zroute can also insert diodes to fix antenna violations. To enable the insertion of diodes
+                               to fix antenna violations, set the route.detail.insert_diodes_during_routing
+                               application option to true. To force Zroute to fix antenna violations by inserting diodes,
+                               disable layer hopping by setting the route.detail.hop_layers_to_fix_antenna
+                               application option to false. For information about inserting diodes to fix antenna
+                               violations, see Inserting Diodes During Detail Routing.
+                               If both layer hopping and diode insertion are enabled, by default, Zroute first tries
+                               to use layer hopping to fix the antenna violation. To change the preference to diode
+                               insertion, set the route.detail.antenna_fixing_preference application option to
+                               use_diodes.
+
+     To delete the redundant diodes that are not needed to fix antenna violations, set the
+     route.detail.delete_redundant_diodes_during_routing application option to true.
+     Spare diodes are not deleted as they do not connect to any nets. Port protection diodes
+     that are inserted by detail route are not deleted.
+     As with other design rule violations, antenna violations are reported at the end of each
+     detail routing iteration. For example,
+     DRC-SUMMARY:
+        @@@@@@@ TOTAL VIOLATIONS =      506
+         @@@@ Total number of instance ports with antenna violations =                                            1107
+
+     To check for antenna violations, use the check_routes -antenna true command.
+     antenna ruleschecking
+IC Compiler™ II Implementation User Guide                                                                            503
+V-2023.12
+                                                                                       Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Finding and Fixing Antenna Violations
+
+
+     Inserting Diodes During Detail Routing
+     One way to protect gates from antenna effects is to provide a discharge path for the
+     accumulated charge to leave the net. However, the discharge path should not allow
+     current to flow during normal chip operation. Discharging can be accomplished by
+     inserting a reverse-biased diode on the net close to the gate that is being protected.
+     To enable diode insertion during detail routing, set the
+     route.detail.insert_diodes_during_routing application option to true.
+
+     To control diode insertion, set the following application options:
+      • To specify a preference for fixing antenna violations by using diode insertion rather than
+        layer hopping, set the route.detail.antenna_fixing_preference application option
+        to use_diodes.
+      • To require fixing of antenna violations by using diode insertion, disable layer hopping by
+        setting the route.detail.hop_layers_to_fix_antenna application option to false.
+      • By default, when you enable diode insertion, Zroute can fix an antenna violation either
+        by adding a new diode or by using an existing spare diode. Zroute determines which
+        method to use, based on which is closest to the required location: an empty location for
+        a new diode or an existing spare diode.
+          ◦ To specify a preference for using a new diode or using an existing spare diode,
+            set the route.detail.diode_preference application option to new or spare,
+            respectively. To reset the diode preference to the default behavior, set the
+            route.detail.diode_preference application option to none.
+
+          ◦ If you want Zroute to use only one of these methods, set the
+            route.detail.diode_insertion_mode application option to new to force the
+            insertion of new diodes or to spare to force the use of existing spare diodes.
+             To reset the diode insertion method to the default behavior, set the
+             route.detail.diode_insertion_mode application option to new_and_spare.
+
+         Note:
+             To take advantage of spare diodes for antenna violation fixing, you need
+             to add the spare diodes either before or after standard-cell placement and
+             before routing the areas where antenna violations might occur.
+      • When inserting new diodes, Zroute selects the diodes from the reference libraries
+        and inserts them into existing open spaces. To control which diodes are used, set the
+        route.detail.diode_libcell_names application option.
+
+         When you specify the diode library cells, use only the cell names. If you include the
+         library name, the tool does not recognize the diode cells.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                        504
+V-2023.12
+                                                                                        Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Finding and Fixing Antenna Violations
+
+
+      • By default, Zroute reuses existing filler cell locations for diode insertion.
+         To prevent Zroute from reusing these locations, set the
+         route.detail.reuse_filler_locations_for_diodes application option to false.
+
+     Zroute considers voltage areas when inserting diode cells and also observes the logic
+     hierarchy assignments for diode cells.
+      • If a pin has an antenna violation, the diode cells are inserted at the same level of logic
+        hierarchy as the violating pin.
+      • If a top-level port has an antenna violation, by default, the diode cells are inserted
+        at the top level. However, if the port belongs to a voltage area, you can insert the
+        diode cells in the logic hierarchy associated with the voltage area by setting the
+        route.detail.use_lower_hierarchy_for_port_diodes application option to true.
+
+     To remove the redundant diodes during routing, set the
+     route.detail.delete_redundant_diodes_during_routing application option to true.
+
+     Inserting Diodes After Detail Routing
+     You can fix antenna violations after detail routing by explicitly specifying which violations
+     to fix and providing constraints for fixing them. Based on the specified constraints and the
+     setting of the route.detail.diode_insertion_mode application option, Zroute either
+     inserts new diodes or reuses existing spare diodes to fix the specified violations.
+     To insert diodes after detail routing, use the create_diodes command. When you use
+     this command, you must use the -options option to specify the location of each antenna
+     violation to fix by specifying the port and cell instance, the reference cell for the diode,
+     the number of diodes to insert, the highest allowed routing layer used for connecting the
+     diode, and the maximum distance from the specified pin that the diode can be inserted. If
+     a diode cannot be inserted or reused within the specified distance, the tool does not insert
+     a diode for that violation.
+     Use the following format to specify these values:
+     {port_name instance_name diode_reference number_of_diodes
+        max_routing_layer max_routing_distance}
+
+     Note:
+         You can use this command to insert diodes for top-level ports by specifying the
+         name of the top-level block for the cell instance.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                       505
+V-2023.12
+

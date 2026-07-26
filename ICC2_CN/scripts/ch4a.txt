@@ -1,0 +1,2311 @@
+                                                                                       Feedback
+
+
+
+
+4
+Clock Tree Synthesis
+     To learn how to perform clock tree synthesis in the IC Compiler II tool, see the following
+     topics:
+      • Prerequisites for Clock Tree Synthesis
+      • Defining the Clock Trees
+      • Verifying the Clock Trees
+      • Setting Clock Tree Design Rule Constraints
+      • Specifying the Clock Tree Synthesis Settings
+      • Implementing Clock Trees and Performing Post-CTS Optimization
+      • Implementing Multisource Clock Trees
+      • Analyzing the Clock Tree Results
+
+
+Prerequisites for Clock Tree Synthesis
+     This topic details the prerequisites required before running the clock tree synthesis.
+     Before you run clock tree synthesis on a block, it should meet the following requirements:
+      • The clock sources are identified with the create_clock or create_generated_clock
+        commands.
+      • The block is placed and optimized.
+         Use the check_legality -verbose command to verify that the placement is legal.
+         Running clock tree synthesis on a block that does not have a legal placement might
+         result in long runtimes and reduced QoR.
+         The estimated QoR for the block should meet your requirements before you start clock
+         tree synthesis. This includes acceptable results for
+         ◦ Congestion
+            If congestion issues are not resolved before clock tree synthesis, the addition of
+            clock trees can increase congestion. If the block is congested, you can rerun the
+
+
+IC Compiler™ II Implementation User Guide                                                         225
+V-2023.12
+                                                                                                                                    Feedback
+Chapter 4: Clock Tree Synthesis
+Defining the Clock Trees
+
+
+            create_placement command with the -congestion and -congestion_effort
+            high options, but the runtime can be long.
+
+          ◦ Timing
+          ◦ Maximum capacitance
+          ◦ Maximum transition time
+      • The power and ground nets are prerouted.
+      • High-fanout nets, such as scan enables, are synthesized with buffers.
+      • The active scenarios are defined.
+         By default, the IC Compiler II tool synthesizes and optimizes all clocks in all active
+         scenarios that are enabled for setup or hold analysis.
+
+
+Defining the Clock Trees
+     This section details the information required to analyze and define each clock tree before
+     running clock tree synthesis.
+     Before you run clock tree synthesis, analyze each clock tree in the block and determine
+      • What the clock root is
+      • What the required clock sinks and clock tree exceptions are
+      • Whether the clock tree contains preexisting cells, such as clock-gating cells
+      • Whether the clock tree converges, either with itself (a convergent clock path) or with
+                                                                                    convergent clock path, definedclockconvergent
+
+
+
+
+        another clock tree (an overlapping clock path)
+                                  overlapping clock path, definedclockoverlapping
+      • Whether the clock tree has timing relationships with other clock trees in the block, such
+        as interclock skew requirements
+     Use this information to define the clock trees and validate that the tool has the correct
+     clock tree definitions.
+     The IC Compiler II tool derives the clock trees based on the clocks defined in the block.
+     If the derived clock trees do not meet your requirements, you can define clock trees as
+     described in the following topics:
+      • Deriving the Clock Trees
+      • Defining Clock Tree Exceptions
+      • Restricting Optimization on the Clock Network
+      • Copying Clock Tree Exceptions Across Modes
+
+
+IC Compiler™ II Implementation User Guide                                                                                                 226
+V-2023.12
+                                                                                       Feedback
+Chapter 4: Clock Tree Synthesis
+Defining the Clock Trees
+
+
+      • Deriving Clock Tree Exceptions From Ideal Clock Latencies
+      • Handling Endpoints With Balancing Conflicts
+
+
+     Deriving the Clock Trees
+     The IC Compiler II tool derives the clock trees by tracing through the transitive fanout from
+     the clock roots to the clock endpoints. In general, the tracing terminates when it finds a
+     clock pin of a sequential cell or macro; however, the tool traces through sequential cells if
+     they are integrated clock-gating (ICG) cells or their fanout drives a generated clock.
+     If the clock-gating logic uses a non-unate cell, such as an XOR or XNOR gate, the tool
+     uses both the positive-unate timing arc and the negative-unate timing arc when tracing
+     the clock path. If this does not correspond to the functional mode of the block, use the
+     set_case_analysis command to hold all nonclock inputs of the cell at a constant value,
+     which forces the cell into the required functional mode for clock tree synthesis.
+     For example, suppose a block has the gating logic shown in Figure 36.
+
+Figure 36     Non-Unate Gated Clock
+
+
+
+
+     To force the XOR gate (U0) into functional mode for timing analysis, use the following
+     command:
+     icc2_shell> set_case_analysis 0 U0/B
+
+     Identifying the Clock Roots
+     The IC Compiler II tool uses the clock sources defined by the create_clock command,
+     which can be either input ports or internal hierarchical pins, as the clock roots.
+     For nested clock trees with generated clocks, which are defined by the
+     create_generated_clock command, the tool considers the master-clock source to be
+     the clock root, and the clock endpoints of the nested clock tree are considered endpoints
+     of the master-clock source.
+     For example, for the netlist shown in Figure 37, the tool considers the CLK port to be the
+     clock root for the genclk1 generated clock.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                      227
+V-2023.12
+                                                                                          Feedback
+Chapter 4: Clock Tree Synthesis
+Defining the Clock Trees
+
+
+Figure 37     Nested Clock Tree With a Generated Clock
+
+
+
+                                                                     genclk1
+                       clk1                       D      Q
+
+                 CLK                                   QN
+
+
+
+
+     If the block contains generated clocks, ensure that the master-clock sources are correctly
+     defined, as incorrect definitions can result in poor skew and timing QoR. In particular,
+      • If the tool cannot trace back to the master-clock source, it cannot balance the sink pins
+        of the generated clock with the sink pins of its source.
+      • If the master-clock source is not a clock source defined by the create_clock or
+        create_generated_clock command, the tool cannot synthesize a clock tree for the
+        generated clock or its source.
+     Use the check_clock_trees command to verify that your master-clock sources are
+     correctly defined, as described in Verifying the Clock Trees.
+     Specifying the Clock Root Timing Characteristics
+     To get realistic clock tree synthesis results, you must ensure that the timing characteristics
+     of the clock roots are correctly modeled.
+      • If the clock root is an input port without an I/O pad cell, you must accurately specify the
+        driving cell of the input port.
+         If you specify a weak driving cell, the tool might insert extra buffers to try to meet the
+         clock tree design rule constraints, such as maximum transition time and maximum
+         capacitance.
+         If you do not specify a driving cell (or drive strength), the tool assumes that the port has
+         infinite drive strength.
+         For example, if the CLK1 port is the root of the CLK1 clock tree, use the following
+         command to set its driving cell as the CLKBUF cell in the mylib cell library:
+         icc2_shell> set_driving_cell -lib_cell mylib/CLKBUF [get_ports CLK1]
+
+      • If the clock root is an input port with an I/O pad cell, you must accurately specify the
+        input transition time of the input port.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                          228
+V-2023.12
+                                                                                                                                                Feedback
+Chapter 4: Clock Tree Synthesis
+Defining the Clock Trees
+
+
+         For example, if the CLK1 port is the root of the CLK1 clock tree and the I/O pad cell
+         has already been inserted, use the following commands to set its input transition time
+         to 0.3 for rising delays and 0.2 for falling delays:
+         icc2_shell> set_input_transition -rise 0.3 [get_ports CLK1]
+         icc2_shell> set_input_transition -fall 0.2 [get_ports CLK1]
+
+     Identifying the Clock Endpoints
+     When deriving the clock trees, the tool identifies two types of clock endpoints:
+      • Sink pins
+         Sink pins are the clock endpoints that are used for delay balancing. The tool assigns an
+         clock tree synthesisstop pindefinedexceptions for clock tree synthesisstop pinsclock tree exceptionsstop pinclock tree sinksdefining
+
+
+
+
+         insertion delay of zero to all sink pins and uses this delay during delay balancing.
+         During clock tree synthesis, the tool uses sink pins in calculations and optimizations for
+         both design rule constraints and clock tree timing (skew and insertion delay).
+         Sink pins are also referred to as balancing pins.
+      • Ignore pins
+         Ignore pins are clock endpoints that are excluded from clock tree timing calculations
+         clock tree synthesisexclude pindefinedexceptions for clock tree synthesisexclude pinsclock tree exceptionsexclude pin
+
+
+
+
+         and optimizations. The tool uses ignore pins only in calculations and optimizations for
+         design rule constraints.
+         During clock tree synthesis, the tool isolates ignore pins from the clock tree by inserting
+         a guide buffer before the pin. Beyond the ignore pin, the tool never performs skew or
+         insertion delay optimization, but does perform design rule fixing.
+     The tool identifies the following clock endpoints as sink pins:
+      • A clock pin on a sequential cell (a latch or flip-flip), unless that cell drives a generated
+        clock
+      • A clock pin on a macro cell
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                                                                             229
+V-2023.12
+                                                                                                    Feedback
+Chapter 4: Clock Tree Synthesis
+Defining the Clock Trees
+
+
+     The tool identifies the following clock endpoints as ignore pins:
+                                                          clock tree synthesisimplicitexclude pin
+      • Source pins of clock trees in the fanout of another clock
+         For example, in Figure 38, the source pin of the driven clock (clk2) is an ignore pin of
+         the driving clock (clk1). Sinks of the driven clock are not considered sinks of the driving
+         clock.
+
+   Figure 38      Cascaded Clock With Two Source Clocks
+
+                              clk1                     clk2
+                     CLK
+
+
+
+
+      • Nonclock input pins of sequential cells
+      • Three-state enable pins
+      • Output ports
+      • Incorrectly defined clock pins (for example, the clock pin does not have trigger edge
+        information or does not have a timing arc to the output pin)
+      • Buffer or inverter input pins that are held constant by using the set_case_analysis
+        command
+         Note:
+            The tool does not synthesize a clock tree if its source is held constant by
+            using the set_case_analysis command.
+      • Input pins of combinational cells or integrated clock-gating cells that do not have any
+        fanout or that do not have any enabled timing arcs
+     To verify that the tool has correctly identified the sink pins and ignore pins, examine the
+     clock trees in the GUI, as described in Analyzing Clock Trees in the GUI.
+     If the default sink and ignore pins are correct, you are done with the clock tree definition.
+     Otherwise, first identify any timing settings, such as disabled timing arcs and case analysis
+     settings, that affect the clock tree traversal. To identify disabled timing arcs in the block,
+     use the report_disable_timing command. To identify case analysis settings in the
+     block, use the report_case_analysis command. Remove any timing settings that cause
+     an incorrect clock tree definition.
+
+
+
+IC Compiler™ II Implementation User Guide                                                                 230
+V-2023.12
+                                                                                         Feedback
+Chapter 4: Clock Tree Synthesis
+Defining the Clock Trees
+
+
+     If necessary, you can override the default balancing and ignore pin settings by using the
+     set_clock_balance_points command, as described in Defining Clock Tree Exceptions.
+
+
+     Defining Clock Tree Exceptions
+     Clock tree exceptions are user-defined changes to the default endpoints (balancing and
+     ignore pins) derived by the tool for a specific clock.
+     The IC Compiler II tool supports the following types of clock tree exceptions:
+      • User-defined sink pins
+         These exceptions define sink pins in addition to those derived by the tool for a clock
+         tree. For example, you might define a tool-derived ignore pin as a clock sink.
+         For information about defining sink pins, see Defining Sink Pins.
+      • User-defined insertion delay requirements
+         These exceptions specify special insertion delay requirements for a sink pin (either
+         derived or user-specified).
+         For information about defining insertion delay requirements, see Defining Insertion
+         Delay Requirements.
+      • User-defined ignore pins
+         These exceptions exclude clock endpoints that were derived as sink pins by the tool.
+         For example, you might define an ignore pin to exclude all branches of the clock tree
+         that fan out from some combinational logic or to exclude a tool-derived sink pin.
+         For information about defining ignore pins, see Defining Ignore Pins.
+
+     Defining Sink Pins
+     To define one or more pins as sink pins, use the following syntax:
+     set_clock_balance_points
+        -clock clock
+        -consider_for_balancing true
+        -balance_points pins
+        [-corners corners]
+
+     The -clock option is not required. If you do not use it, the sink pin applies to all clocks.
+     By default, the insertion delay for the user-specified sink pins is 0. For information about
+     overriding the default insertion delay, see Defining Insertion Delay Requirements.
+     When you define sink pins, by default, they apply to all corners. To apply the definition to
+     specific corners, use the -corners option.
+
+
+
+IC Compiler™ II Implementation User Guide                                                           231
+V-2023.12
+                                                                                                                                                                                                                                                 Feedback
+Chapter 4: Clock Tree Synthesis
+Defining the Clock Trees
+
+
+     For example, to specify pin U2/A as a sink pin for the CLK clock in the current corner, use
+     the following command:
+     icc2_shell> set_clock_balance_points -clock [get_clocks CLK] \
+        -consider_for_balancing true -balance_points [get_pins U2/A]
+
+     To report the user-defined sink pins, use the report_clock_balance_points command.
+                                                   remove_clock_tree_exceptions command-stop_pinscommandsremove_clock_tree_exceptions-stop_pins
+
+
+
+
+     This command reports both the user-defined sink pins and the user-defined ignore pins.
+     To remove the sink pin definition from a pin, use the remove_clock_balance_points
+                                                                                                                                                  remove_clock_tree_exceptions command-stop_pinscommandsremove_clock_tree_exceptions-stop_pins
+
+
+
+
+     command.
+     For example, to remove the sink pin definition from the U2/A pin for the CLK clock, use the
+     following command:
+     icc2_shell> remove_clock_balance_points -clock [get_clocks CLK] \
+        -balance_points [get_pins U2/A]
+
+     Defining Insertion Delay Requirements
+     To override the default phase delay of zero for sink pins (derived or user-specified),
+     use the -delay option with the set_clock_balance_points command to specify the
+     insertion delay requirements. The tool adds the specified delay (positive or negative) to the
+     calculated insertion delay up to the specified sink pin.
+     The syntax to define the insertion delay requirement for one or more sink pins is
+     set_clock_balance_points
+        [-clock clock]
+        -delay delay
+        [-rise] [-fall] [-early] [-late]
+        -balance_points pins
+        [-corners corners]
+
+     The -clock option is not required. If you do not use it, the insertion delay requirement
+     applies to all clocks.
+     Clock tree synthesis uses the specified delay value for the path delay calculations used to
+     build the clock tree. By default, the specified delay value is used for both longest-path and
+     shortest-path calculations for both rising-edge and falling-edge paths. To control when the
+     specified delay value is used, use the -rise, -fall, -early, and -late options.
+     When you define insertion delay requirements, by default, they apply to all corners. To
+     apply the definition to specific corners, use the -corners option.
+     For example, to specify that clock tree synthesis should use an insertion delay of 2.0 ns for
+     rising-edge shortest-path calculations for the U2/CLK pin for the CLK clock in the current
+     corner, use the following command:
+     icc2_shell> set_clock_balance_points -clock [get_clocks CLK] \
+        -rise -early -delay 2.0 -balance_points [get_pins U2/CLK]
+
+
+IC Compiler™ II Implementation User Guide                                                                                                                                                                                                              232
+V-2023.12
+                                                                                                                                                                                                                                                                                                                                    Feedback
+Chapter 4: Clock Tree Synthesis
+Defining the Clock Trees
+
+
+     To report the user-defined insertion delay for sink pins, use the
+                                                                                                                                                                                                                                                                                                     remove_clock_tree_exceptions
+
+
+
+
+     report_clock_balance_points command. This command reports the user-defined sink
+     command-stop_pinscommandsremove_clock_tree_exceptions-stop_pins
+
+
+
+
+     pins, the derived sink pins with user-specified insertion delay, and the user-defined ignore
+     pins.
+
+     Defining Ignore Pins
+     To define one or more pins as ignore pins, use the following syntax:
+     set_clock_balance_points
+        [-clock clock]
+        -consider_for_balancing false
+        -balance_points pins
+
+     The -clock option is not required. If you do not use it, all user-defined ignore pins apply to
+     all clocks.
+     For the CLK clock tree shown in Figure 39, assume that you want to ignore all branches of
+     the clock tree beyond the U2 cell. To do so, you would use the following command:
+     icc2_shell> set_clock_balance_points -clock [get_clocks CLK] \
+        -consider_for_balancing false -balance_points [get_pins U2/A]
+
+Figure 39                                                              User-Defined Ignore Pin
+
+
+
+                                                                                   CLK
+
+
+
+
+                                                                                                                                                                                                A
+                                                                                                                                                                                                B
+                                                                                                                                                                                                 U2
+
+
+
+
+     To report the user-defined ignore pins, use the report_clock_balance_points
+                                                                                                 remove_clock_tree_exceptions command-stop_pinscommandsremove_clock_tree_exceptions-stop_pins
+
+
+
+
+     command. This command reports both the user-defined sink pins and the user-defined
+     ignore pins.
+     During clock tree synthesis, the tool adds guide buffers and isolates ignore pins from the
+     rest of the clock network. During subsequent data path optimization, the tool fixes any
+     existing DRC violations beyond the guide buffers.
+     To remove the ignore pin definition from a pin, use the remove_clock_balance_points
+                                                                                                                                                                                                      remove_clock_tree_exceptions command-stop_pinscommandsremove_clock_tree_exceptions-stop_pins
+
+
+
+
+     command.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                                                                                                                                                                                                                                                                 233
+V-2023.12
+                                                                                      Feedback
+Chapter 4: Clock Tree Synthesis
+Defining the Clock Trees
+
+
+     For example, to remove the ignore pin definition from pin U2/CLK for the CLK clock, use
+     the following command:
+     icc2_shell> remove_clock_balance_points -clock [get_clocks CLK] \
+        -balance_points [get_pins U2/CLK]
+
+     Ensuring Clock Tree Exceptions are Valid
+     To identify pins on the clock network, the tool checks if the is_clock_is_used_as_clock
+     pin attribute is true during clock tree synthesis. If you use the
+     set_clock_balance_points command to specify a clock tree exception on a pin for
+     which the is_clock_is_used_as_clock attribute is false, the tool accepts the exception,
+     but ignores it during clock tree synthesis.
+     Consider the clock network in the following figure.
+
+Figure 40     Specifying Exceptions on Pins Beyond the Clock Network
+
+
+
+                                  CLK
+
+
+
+
+                                                                       FF3
+                                                           A      n5
+                                                              Y        D
+                                                           B
+                                                            U2
+
+
+
+
+     By default, the tool sets
+      • The is_clock_is_used_as_clock attribute of the U2/A, U2/Y, and FF3/D pins to
+        false and considers the network beyond the U2/A pin as part of the data network
+
+      • The U2/A pin as an ignore pin and excludes the network beyond this from clock tree
+        synthesis
+     During clock tree synthesis, the tool adds a guide buffer and isolates the U2/A pin from the
+     rest of the clock network. During subsequent data path optimization, the tool can fix any
+     existing DRC violations beyond the guide buffer.
+     Assume you want clock tree synthesis to fix DRC violations up to the FF3/D pin using
+     clock tree constraints. To do so, you must
+      1. Specify the FF3/D pin as an explicit ignore pin as follows:
+         icc2_shell> set_clock_balance_points -clock [get_clocks CLK] \
+             -consider_for_balancing false -balance_points [get_pins FF3/D]
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                    234
+V-2023.12
+                                                                                         Feedback
+Chapter 4: Clock Tree Synthesis
+Defining the Clock Trees
+
+
+      2. Force clock tree synthesis to consider the FF3/D pin as a pin on the clock network by
+         using the set_sense -clock_leaf command as follows:
+         icc2_shell> set_sense -clock_leaf [get_pins FF3/D]
+
+         The set_sense -clock_leaf command sets
+          ◦ The is_clock_used_as_clock attribute to true for all the pins of the clock
+            branches that fanin to the pin specified as the clock leaf
+          ◦ The is_clock_used_as_clock attribute to false for all the pins in the fanout from
+            the pin specified as the clock leaf, and the tool does not propagate the clock beyond
+            this pin
+         To check the value of the is_clock_used_as_clock pin attribute, use the
+         get_attribute command, as shown in the following example:
+         icc2_shell> get_attribute [get_pins FF3/D] is_clock_used_as_clock
+
+
+     Restricting Optimization on the Clock Network
+     You can restrict the optimization on portions of the clock network by specifying
+      • Don’t touch settings
+         These settings identify parts of the clock tree on which clock tree synthesis and
+         optimization is not performed. You can use don’t touch settings to prevent the
+         modification of a clock network beyond a specific pin, the buffering of specific nets, or
+         the sizing of specific cells.
+         For information about defining don’t touch settings, see Setting Don’t Touch Settings.
+      • Size-only settings
+         These settings identify clock tree cells for which the tool can perform only cell sizing.
+         Note that these cells can be moved, unless they have a placement status of fixed.
+         For information about defining size-only settings, see Setting Size-Only Settings.
+
+     Setting Don’t Touch Settings
+     To set a don't touch setting on a clock tree, use the set_dont_touch_network command.
+     icc2_shell> set_dont_touch_network -clock_only [get_pins pin_name]
+
+     The -clock_only option sets the don't touch setting only on the clock network. If you do
+     not specify the -clock_only option, the don't touch setting is set on both the data path
+     and the clock path.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                        235
+V-2023.12
+                                                                                            Feedback
+Chapter 4: Clock Tree Synthesis
+Defining the Clock Trees
+
+
+     To remove the don't touch setting from a clock tree, use the -clear option with the
+     set_dont_touch_network command.
+     icc2_shell> set_dont_touch_network -clock_only [get_pins pin_name] -clear
+
+     You can also set don't touch settings on specific objects in the clock network by using the
+     set_dont_touch command.
+
+     The following commands set a don't touch setting on a cell and a net:
+     icc2_shell> set_dont_touch [get_cells cell_name] true
+     icc2_shell> set_dont_touch [get_nets -segments net_name] true
+
+     To report all the don't touch settings set on the current block, use the report_dont_touch
+     command.
+     icc2_shell> report_dont_touch -all
+
+     Note:
+         If a cell has a placement status of fixed, it is treated like a don’t touch cell during
+         clock tree synthesis.
+
+     Setting Size-Only Settings
+     To set a size-only setting on a cell, use the set_size_only command.
+     The following command sets a size-only setting on a cell:
+     icc2_shell> set_size_only [get_cells cell_name] true
+
+     To report all the size-only settings set on the current block, use the report_size_only
+     command.
+     icc2_shell> report_size_only -all
+
+
+     Copying Clock Tree Exceptions Across Modes
+     You can specify that the tool copies clock tree exceptions from one mode to one or
+     more equivalent modes by using the set_clock_tree_options command with the
+     -copy_exceptions_across_modes, -from_mode, and -to_mode options.
+
+     The following example specifies that during clock tree synthesis the clock tree exceptions
+     in the mode name M1 should be copied to the modes name M2 and M3:
+     icc2_shell> set_clock_tree_options -copy_exceptions_across_modes \
+        -from_mode M1 -to_mode {M2 M3}
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                          236
+V-2023.12
+                                                                                       Feedback
+Chapter 4: Clock Tree Synthesis
+Defining the Clock Trees
+
+
+
+     Deriving Clock Tree Exceptions From Ideal Clock Latencies
+     If you have set ideal clock latencies for specific sinks in your design, you can use the
+     derive_clock_balance_points command to convert these ideal latency settings to clock
+     tree exceptions.
+     The derive_clock_balance_points command converts ideal latencies specified with
+     the set_clock_latency command on clock sink pins to set_clock_balance_points
+     commands. Use the derive_clock_balance_points command before clock tree
+     synthesis, when the design has ideal clocks.
+     By default, the derive_clock_balance_points command
+      • Generates balance point constraints for all ideal primary clocks of all active scenarios
+        that are enabled for setup analysis, hold analysis, or both. It does not generate balance
+        points for generated clocks.
+         To generate the balance points for
+          ◦ Specific primary clocks, use the -clocks option.
+          ◦ All active scenarios of specific corners, use the -corners option.
+      • Calculates a reference latency for each primary ideal clock, which is the sum of the
+        ideal source and network latency specified on the clock with the set_clock_latency
+        command.
+         To specify a different reference latency value, use the -reference_latency option.
+      • Applies the derived clock balance point constraints to the design.
+         To generate an output file containing set_clock_balance_points commands, instead
+         applying it to the design, use the -output option.
+     Balance points that the tool derives are clock and corner specific. Ensure that appropriate
+     set_clock_latency constraints are set for all clocks for all modes used for clock tree
+     synthesis in at least the worst corner.
+     The tool uses the following formula to derive the delay values for the corresponding
+     set_clock_balance_points commands:
+
+     (Clock balance point delay value at the sink) =
+     (Reference latency of the clock) - (Total ideal clock latency at the sink)
+     The total ideal clock latency at the sink is the sum of the source latency of the clock and
+     the ideal network latency for the sink.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                      237
+V-2023.12
+                                                                                      Feedback
+Chapter 4: Clock Tree Synthesis
+Defining the Clock Trees
+
+
+     For example, assume you have the following timing constraint settings:
+     icc2_shell> set_clock_latency -source 0.5 [get_clocks clk]
+     icc2_shell> set_clock_latency 1.0 [get_clocks clk]
+     icc2_shell> set_clock_latency 1.5 [get_pins reg1/CK]
+     icc2_shell> set_clock_latency 0.5 [get_pins reg2/CK]
+
+     If you run the derive_clock_balance_points command, the tool derives the following
+     clock balance point constraints:
+     icc2_shell> set_clock_balance_points -delay -0.5 \
+        -balance_points [get_pins reg1/CK] -clock clk -corners worst
+     icc2_shell> set_clock_balance_points -delay 0.5 \
+        -balance_points [get_pins reg2/CK] -clock clk -corners worst
+
+     To avoid conflicts, do not manually apply any clock balance points for a clock that you
+     derive balance points with the derive_clock_balance_points command.
+
+
+     Handling Endpoints With Balancing Conflicts
+     In some blocks, the clocks have endpoints that are structurally impossible to balance.
+     The IC Compiler II tool can automatically detect endpoints with balancing conflicts and
+     derive an ignore pin to resolve the conflict. This capability is enabled by default for the
+     synthesize_clock_trees and clock_opt commands. To disable this capability, set the
+     cts.common.enable_auto_exceptions application option to false.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                      238
+V-2023.12
+                                                                                          Feedback
+Chapter 4: Clock Tree Synthesis
+Defining the Clock Trees
+
+
+     With this capability, the tool detects and fixes the following types of balancing conflicts:
+      • Internal sink pins of modules that have a combinational clock path
+         If a module contains both internal sink pins and combinational clock paths, it is
+         impossible to balance the internal sink pins. To resolve the balancing conflict, the tool
+         defines the internal sink pins as ignore pins.
+         For example, assume that you have a module that contains a combinational path in
+         the clock network, as shown in figure (a) in Figure 41, which is represented by the
+         extracted timing model (ETM) shown in figure (b).
+
+   Figure 41      Module With Combinational Clock Path
+
+
+
+
+             D                              Q            D                                          Q
+
+
+
+
+                                                                        Clk_check_pin_1
+                                                                    Combinational delay
+            Clk                             Clk_out    Clk                                          Clk_out
+
+                        (a) Netlist                                 (b) ETM with check pin
+
+
+
+         In this case, the internal check pin inside the ETM has delays coming from the ETM
+         timing library; these delays are considered by clock tree synthesis as sinks and are
+         balanced with other sinks at the top level. If the path to the check pin is the shortest
+         path, top-level clock tree synthesis cannot insert buffers on the shortest path and
+         therefore leaves a large skew at the top level. Setting the internal check pin as an
+         ignore pin resolves the skew issue coming from the ETM.
+      • Sink pins that cannot be balanced simultaneously
+         If a block contains two clocks that drive common sinks, one of which is a clock
+         pin that is the parent of another sink, due to a generated clock, it is impossible to
+         simultaneously balance the parent and child clock pins with another common sink. To
+         resolve the balancing conflict, the tool defines the parent clock pin as an ignore pin.
+         For example, in Figure 42, FF_gen/CLK and FF0_1-10/CLK are sinks of clkb,
+         FF1_1-10/CLK and FF0_1-10/CLK are sinks of clka, and FF_gen/CLK is the parent of
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                           239
+V-2023.12
+                                                                                                        Feedback
+Chapter 4: Clock Tree Synthesis
+Verifying the Clock Trees
+
+
+         FF1_1-10/CLK. In this case, the tool defines FF_gen/CLK as an ignore pin for clkb to
+         resolve the balancing conflict.
+
+   Figure 42      Clock Pins That Cannot Be Balanced Simultaneously
+
+
+
+
+Verifying the Clock Trees
+     Before you synthesize the clock trees, use the check_clock_trees command to verify
+                                                     check_clock_tree commandcommandscheck_clock_tree
+
+
+
+
+     that the clock trees are properly defined. For example, to verify that the CLK clock tree is
+     properly defined, use the following command:
+     icc2_shell> check_clock_trees -clocks [get_clocks CLK]
+
+     If you do not specify the -clock option, the tool checks all clocks in the current block.
+     The check_clock_trees command checks for the following issues:
+      • Clock (master or generated) with no sinks
+      • Loops in the clock network
+      • Multiple clocks reach the same register because of overlapping clocks, but multiple-
+        clocks-per-register propagation is not enabled
+      • Ignored clock tree exceptions
+      • Stop pin or float pin defined on an output pin
+      • Buffers with multiple timing arcs used in clock tree references
+      • Situations that cause an empty buffer list
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                                     240
+V-2023.12
+                                                                                      Feedback
+Chapter 4: Clock Tree Synthesis
+Verifying the Clock Trees
+
+
+      • Generated clock without a valid master clock source
+         A generated clock does not have a valid master-clock source in the following situations:
+          ◦ The master clock specified in create_generated_clock does not exist
+          ◦ The master clock specified in create_generated_clock does not drive the source
+            pin of the generated clock
+          ◦ The source pin of the generated clock is driven by multiple clocks, and some of the
+            master clocks are not specified with create_generated_clock.
+            For example, in Figure 43, the GEN_REG/Q pin is driven by both CLKA and
+            CLKB. If only CLKA is specified as a master clock in a create_generated_clock
+            command, GEN_CLK does not have a valid master clock source.
+
+       Figure 43     Generated Clock With Invalid Master Clock Source
+
+
+                                                             GEN_CLK           REG1
+
+
+                                                                               D    Q
+
+                                                   D     Q
+                     CLKA          0
+
+                     CLKB          1
+                                                   GEN_REG
+                                                                                      D   Q
+
+
+
+
+                                                                                      REG2
+
+
+
+     For multicorner-multimode designs, the check_clock_trees command checks all active
+     scenarios for the following issues:
+      • Conflicting per-clock exception settings
+      • Conflicting balancing settings
+     Before you implement the clock trees, you should manually fix the reported issues. Each
+     message generated by the check_clock_trees command has a detailed man page that
+     describes how to fix the identified issue. You can improve the clock tree and timing QoR by
+     fixing all the issues identified by the check_clock_trees command.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                     241
+V-2023.12
+                                                                                                                                                                                                Feedback
+Chapter 4: Clock Tree Synthesis
+Setting Clock Tree Design Rule Constraints
+
+
+
+Setting Clock Tree Design Rule Constraints
+     The IC Compiler II tool supports the following design rule constraints for clock tree
+     synthesis:
+      • Maximum capacitance
+         clock tree synthesismaximum capacitanceclock tree design rule constraintmaximum capacitance
+         To specify maximum capacitance constraints for clock tree synthesis, use the
+         -clock_path option with the set_max_capacitance command.
+
+                                                                                                               If you do not specify this constraint, the clock tree synthesis default is 0.6 pF.
+      • Maximum transition time
+         clock tree synthesismaximum transition timeclock tree design rule constraintmaximum transition time
+         To specify maximum transition time constraints for clock tree synthesis, use the
+         -clock_path option with the set_max_transition command.
+
+                                                                                                               If you do not specify this constraint, the clock tree synthesis default is 0.5 ns.
+     By default, these constraints apply to all corners associated with the current mode. To set
+     the constraint for a specific mode, use the -mode option with the get_clocks command to
+     identify the clocks. To set the constraint for specific corners associated with the specified
+     mode, use the -corners option with the constraint command. Be careful to apply the
+     correct constraints across all the modes and their associated corners.
+     For example, to set a maximum transition time of 0.20 ns on all pins in the CLK clock path
+     for all corners of the current mode, use the following command:
+     icc2_shell> set_max_transition 0.20 -clock_path [get_clocks CLK]
+
+     To set different maximum transition time constraints for different corners associated with a
+     specific mode, use the -mode option with the get_clocks command to specify the mode
+     and use the -corners option to specify the corner.
+     For example, to set the maximum transition time to 0.15 ns for corner1 in mode1 and 0.10
+     ns for corner2 in mode1, use the following commands:
+     icc2_shell> set_max_transition 0.15 -corners corner1 \
+        -clock_path [get_clocks -mode mode1]
+     icc2_shell> set_max_transition 0.10 -corners corner2 \
+        -clock_path [get_clocks -mode mode1]
+
+     To set the same maximum capacitance constraint for different corners associated with a
+     specific mode, use the following command:
+     icc2_shell> set_max_capacitance 0.6 \
+         -clock_path [get_clocks -mode mode2] \
+        -corners [get_corner \
+           [get_attribute [get_modes mode2] associated_corners]]
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                                                                                                                             242
+V-2023.12
+                                                                                         Feedback
+Chapter 4: Clock Tree Synthesis
+Specifying the Clock Tree Synthesis Settings
+
+
+
+Specifying the Clock Tree Synthesis Settings
+     The clock tree synthesis options guide the implementation of the clock trees. The following
+     topics describe how to set these options:
+      • Specifying the Clock Tree References
+      • Setting Skew and Latency Targets
+      • Enabling Local Skew Optimization
+      • Specifying the Primary Corner for Clock Tree Synthesis
+      • Preventing Specific Clocks From Being Synthesized
+      • Preserving Preexisting Clock Trees
+      • Enabling Clock Tree Power Reduction Techniques
+      • Enabling Wire Length Aware Power-Driven Relocation
+      • Reducing Electromigration
+      • Handling Inaccurate Constraints During Clock Tree Synthesis
+      • Defining Clock Cell Spacing Rules
+      • Creating Skew Groups
+      • Defining a Name Prefix for Clock Cells
+      • Using the Global Router During Initial Clock Tree Synthesis
+      • Specifying Constraints for Clock Nets
+      • Constructing Faster Clock Tree to Specific Endpoints
+      • Improving Latency-Driven Clock-Gate Splitting
+      • Reducing Signal Integrity Effects on Clock Nets
+      • Specifying Settings for Clock Latency Adjustments
+      • Reporting the Clock Tree Settings
+
+
+     Specifying the Clock Tree References
+     The buffer and inverter cells that can be used to build a clock tree and the reference
+     cells of the preexisting gates of the clock tree are referred to as clock tree references.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                         243
+V-2023.12
+                                                                                         Feedback
+Chapter 4: Clock Tree Synthesis
+Specifying the Clock Tree Synthesis Settings
+
+
+     To specify the clock tree references, use the set_lib_cell_purpose -include cts
+     command.
+     Ensure that the list of cells you specify as clock tree references meets the following
+     criteria:
+      • The list contains at least one buffer or one inverter
+      • The list contains the library cells of the preexisting gates
+         If they are not included in the list, the tool is unable to resize these preexisting gates
+         during clock tree synthesis and optimization. You can automatically derive equivalent
+         cells for all the preexisting clock tree cells that are not buffers or inverters and specify
+         them as clock references by using the derive_clock_cell_references command, as
+         described in Deriving Clock Tree References for Preexisting Gates.
+      • For multivoltage designs with always-on buffering requirements, the list contains
+        always-on cells
+      • The library cells in the reference list do not have a dont_touch attribute
+         If library cells have the dont_touch attribute set on them, they are not used by clock
+         tree synthesis even if you specify them as clock tree references.
+     To ensure that clock tree synthesis uses only the specified set of cells and that these cells
+     are not used by any optimization step other than clock tree synthesis, run the following
+     commands:
+     icc2_shell> set cts_cells list_of_cells
+     icc2_shell> set_lib_cell_purpose -exclude cts [get_lib_cells]
+     icc2_shell> set_lib_cell_purpose -include none [get_lib_cells $cts_cells]
+     icc2_shell> set_lib_cell_purpose -include cts [get_lib_cells $cts_cells]
+
+     Deriving Clock Tree References for Preexisting Gates
+     To ensure that the tool resize preexisting gates in the clock network during clock tree
+     synthesis and optimization, you must specify equivalent cells as clock references. Not
+     specifying a complete list of equivalent cells for preexisting gates can affect clock tree
+     QoR.
+     You can automatically derive equivalent cells for all the preexisting clock tree cells
+     and specify them as clock references by using the derive_clock_cell_references
+     command.
+     When you run this command, the tool sets the valid_purpose attribute to true on
+     equivalent library cells of the preexisting clock tree cells that are not buffers or inverters.
+     This command does not derive equivalent library cells for preexisting buffers and inverters,
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                         244
+V-2023.12
+                                                                                         Feedback
+Chapter 4: Clock Tree Synthesis
+Specifying the Clock Tree Synthesis Settings
+
+
+     Therefore, you must manually specify the buffers and inverters to use for clock tree
+     synthesis, as shown in the following example:
+     icc2_shell> set_lib_cell_purpose -include cts \
+        {tech_lib/clk_buf* tech_lib/clk_inv*}
+     icc2_shell> derive_clock_cell_references
+     icc2_shell> synthesize_clock_trees
+
+     Instead of automatically specifying the equivalent library cells of the preexisting clock tree
+     cells as clock tree references, you can generate a Tcl script that specifies the equivalent
+     library cells of the preexisting clock tree cells as clock tree references. To do so, use the
+     -output option.
+     icc2_shell> derive_clock_cell_references -output cts_leq_cells.tcl
+
+     You can edit the output file, source it, and then run clock tree synthesis, as shown in the
+     following example:
+     icc2_shell> set_lib_cell_purpose -include cts \
+        {tech_lib/clk_buf* tech_lib/clk_inv*}
+     icc2_shell> source cts_leq_cells.tcl
+     icc2_shell> synthesize_clock_trees
+
+     Restricting the Target Libraries Used
+     You can restrict the libraries used during clock tree synthesis for the top level or a lower
+     level of the logical hierarchy of a design by using the set_target_library_subset
+     -clock command. To enable the use of the target library subset, you must set the
+     opt.common.enable_target_library_subset_opt application option to 1.
+
+     The following example specifies the buf1 and buf2 cells from the HVT_lib and LVT_lib
+     libraries as clock tree references. However, it restricts the lower-level block named
+     TSK_BLK to use only the cells from the LVT_lib library for its clock nets. Therefore, only
+     buf1 and buf2 cells from the LVT_lib library are used as clock references for that block.
+     icc2_shell> set_lib_cell_purpose -include cts \
+        {HVT_lib/buf1 HVT_lib/buf2 LVT_lib/buf1 LVT_lib/buf2}
+     icc2_shell> set_target_library_subset -clock {LVT_lib} \
+            -objects [TOP/TSK_BLK]
+     icc2_shell> set_app_options \
+       -name opt.common.enable_target_library_subset_opt -value 1
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                           245
+V-2023.12
+                                                                                        Feedback
+Chapter 4: Clock Tree Synthesis
+Specifying the Clock Tree Synthesis Settings
+
+
+
+     Setting Skew and Latency Targets
+     By default, clock tree synthesis tries to achieve the best skew and latency for all clocks.
+     However, this can lead to area, power, and runtime overhead for low frequency clocks,
+     which have relaxed skew and latency targets.
+      • To specify a skew target, use the -target_skew option with the
+        set_clock_tree_options command.
+
+      • To specify a latency target, use the -target_latency option with the
+        set_clock_tree_options command.
+
+     By default, when you define skew and latency targets, they apply to all clocks in all
+     corners. To define targets for specific clocks, use the -clocks option. To define targets for
+     specific corners, use the -corners option.
+     To report the user-defined skew and latency targets, use the
+     report_clock_tree_options command.
+
+     To remove user-defined skew or latency targets, use the remove_clock_tree_options
+     command. To remove all skew and latency targets, use the -all option; otherwise, use
+     the appropriate -target_skew, -target_latency, -clocks, and -corners options to
+     remove the specific targets.
+
+
+     Enabling Local Skew Optimization
+     During clock tree synthesis, by default, the tool tries to minimize the global skew, which
+     is the difference between the longest and shortest clock paths. If there is no timing path
+     between the registers with the longest and shortest clock paths, optimizing global skew
+     does not improve the timing QoR of the design. However, by optimizing the local skew,
+     which is the worst skew between launch and capture registers of timing paths, you can
+     improve the timing QoR of the design. During local skew optimization, the tool works on
+     improving local skew of all violating setup and hold timing paths.
+     To enable local skew optimization during the clock tree synthesis and clock tree
+     optimization stages of the synthesize_clock_trees and clock_opt commands, set the
+     cts.compile.enable_local_skew and cts.optimize.enable_local_skew application
+     options to true.
+     icc2_shell> set_app_options -list {cts.compile.enable_local_skew true}
+     icc2_shell> set_app_options -list {cts.optimize.enable_local_skew true}
+
+     When you enable local skew optimization using the previous settings, by default, the tool
+     derives skew targets that help improve the timing QoR, and ignores the target skew you
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                          246
+V-2023.12
+                                                                                            Feedback
+Chapter 4: Clock Tree Synthesis
+Specifying the Clock Tree Synthesis Settings
+
+
+     specify with the set_clock_tree_options -target_skew command. To prevent the tool
+     from deriving skew targets, use the following application option setting:
+     icc2_shell> set_app_options \
+      -name cts.common.enable_auto_skew_target_for_local_skew -value false
+
+
+     Specifying the Primary Corner for Clock Tree Synthesis
+     During initial clock tree synthesis, by default, the tool identifies the corner with the worst
+     clock delays and inserts buffers to balance the clock delays in all modes of this corner.
+     To identify a specific corner as the primary corner for initial clock tree synthesis, use the
+     cts.compile.primary_corner application option.
+
+
+     Preventing Specific Clocks From Being Synthesized
+     By default, the tool synthesizes all clocks defined with the create_clock and
+     create_generated_clock commands. To prevent the tool from synthesizing a specific
+     clock, specify it by using the cts.common.skip_cts_clocks application option.
+     icc2_shell> set_app_options \
+        -name cts.common.skip_cts_clocks -value CK_B
+
+
+     Preserving Preexisting Clock Trees
+     When you perform clock tree synthesis, by default, the tool removes all
+     preexisting clock buffers and inverters. You can prevent this by setting the
+     cts.compile.remove_existing_clock_trees application option to false.
+
+     To preserve specific preexisting clock buffers or inverters, apply a don’t touch or size-only
+     exception on them.
+
+
+     Enabling Clock Tree Power Reduction Techniques
+     You can enable clock tree power reduction techniques by using the
+     cts.compile.power_opt_mode application option as shown in the following table.
+
+Table 19      Settings for the cts.compile.power_opt_mode Application Option
+
+      To do this                                                              Use this setting
+
+      Relocate clock-gating cells closer to their drivers to reduce the length of gate_relocation
+      input nets of the clock-gating cells, which have high switching activity
+
+      Use clustering techniques to improve power                              low_power_targets
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                           247
+V-2023.12
+                                                                                        Feedback
+Chapter 4: Clock Tree Synthesis
+Specifying the Clock Tree Synthesis Settings
+
+
+Table 19       Settings for the cts.compile.power_opt_mode Application Option (Continued)
+
+      To do this                                                            Use this setting
+
+      Use both clock-gate relocation and clustering techniques to improve   all
+      power
+
+
+
+     Enabling Wire Length Aware Power-Driven Relocation
+     The IC Compiler II tool supports improved activity driven clock gate relocation by
+     controlling the amount of wire length degradation and considering the power impact before
+     performing the clock gate relocation. To enable activity driven clock gate relocation, set the
+     cts.compile.power_opt_mode application option to all or gate_relocation.
+
+     The clock gates are not relocated or moved if:
+      • Relocating an integrated clock gate (ICG) has a minor power benefit or degrades
+        power while degrading wire length.
+      • Moving the clock gate has a significant wire length impact for a less power benefit.
+
+
+     Reducing Electromigration
+     Clock cells consume more power than cells that are not in the clock network. Clock cells
+     that are clustered together in a small area increase the current densities for the power
+     and ground rails, which increases the potential for electromigration problems. One way
+     to avoid the problem is to set spacing requirements between clock cells to prevent local
+     clumping of the clock cells along a standard cell power rail between the perpendicular
+     straps.
+     To use this method to reduce electromigration in the block,
+      1. Define clock cell spacing rules for the inverters, buffers, and integrated clock-gating
+         cells in the clock network by using the set_clock_cell_spacing command, as
+         described in Defining Clock Cell Spacing Rules.
+      2. Perform clock tree synthesis by using the synthesize_clock_trees command,
+         as described in Performing Standalone Clock Trees Synthesis, or the clock_opt
+         command, as described in Synthesizing, Optimizing, and Routing Clock Trees With the
+         clock_opt Command.
+           Note:
+             The clock cell spacing rules are also honored by the
+             balance_clock_groups command. For information about using this
+             command, see Balancing Skew Between Different Clock Trees.
+
+
+
+IC Compiler™ II Implementation User Guide                                                          248
+V-2023.12
+                                                                                       Feedback
+Chapter 4: Clock Tree Synthesis
+Specifying the Clock Tree Synthesis Settings
+
+
+      3. Check clock cell spacing rule violations by using the check_legality -verbose
+         command.
+         You should not see any violations if you set the appropriate clock cell spacing
+         constraints.
+
+
+     Handling Inaccurate Constraints During Clock Tree Synthesis
+     In the early stages of the implementation of a design, the constraints can be inaccurate or
+     too restrictive. Running clock tree synthesis on such a design can lead to long runtime or
+     poor clock tree QoR.
+     You can run clock tree synthesis on such a design, but still get usable results in a
+     reasonable runtime. To do so, set the following application variable before you begin clock
+     tree synthesis:
+     icc2_shell> set_app_options \
+        -name cts.common.enable_dirty_design_mode -value true
+
+     When you use this application option setting, the tool
+      • Ignores dont_touch and dont_touch_network attribute settings on clock nets.
+      • Removes maximum transition and maximum capacitance constraints if they are too
+        tight.
+      • Removes the maximum net length constraint if it is less than 50 microns.
+      • Ignores clock cell spacing rules if the horizontal spacing requirement is more than three
+        times the site height and the vertical spacing requirement is more than twenty times the
+        site height.
+      • Ignores nondefault routing rules if the width plus the spacing requirement of the routing
+        rule is more than ten times the default width plus the default spacing.
+      • Reports balance point delay values that are large enough to cause an increase in clock
+        insertion delay.
+
+
+     Defining Clock Cell Spacing Rules
+     To define clock cell spacing rules, use the set_clock_cell_spacing command. At a
+     minimum, you must specify the minimum spacing in the x-direction or the y-direction;
+     typically you would specify the minimum spacing in both directions.
+     To specify the minimum spacing in microns in the
+      • X-direction, set the -x_spacing option to a nonzero value
+         This value is usually dependent on the library cell’s drive strength and clock frequency.
+
+
+IC Compiler™ II Implementation User Guide                                                      249
+V-2023.12
+                                                                                         Feedback
+Chapter 4: Clock Tree Synthesis
+Specifying the Clock Tree Synthesis Settings
+
+
+      • Y-direction, set the -y_spacing option to a nonzero value
+         This value is usually less than half a row height.
+     Note:
+         Using a large spacing value increases the skew because the cells are spaced
+         further away from the intended clusters of sinks.
+     By default, the specified cell spacing requirements apply to all clock cells. To restrict the
+     clock cell spacing rules to specific
+      • Library cells, use the -lib_cells option
+      • Clocks, use the -clocks option
+     If adjoining clock cells both have cell spacing rules for a given direction, the sum
+     of the spacing values applies. For example, if two adjoining clock cells both have a
+     minimum cell spacing of 5 microns in the x-direction, they are placed at least 10 microns
+     apart in the x-direction. You can relax the adjoining cell spacing rule by setting the
+     cts.placement.cell_spacing_rule_style application option to maximum, in which
+     case the tool uses the larger of the spacing settings between two adjoining cells instead of
+     the sum of the spacing settings. For example, the clock cells in the previous example are
+     placed at least 5 microns apart in the x-direction, instead of 10 microns.
+     The clock cell spacing rules defined by the set_clock_cell_spacing command are
+     honored by the synthesize_clock_trees, balance_clock_groups, and clock_opt
+     commands.
+     To report clock cell spacing rules, use the report_clock_cell_spacings command.
+     To remove clock cell spacing rules, use the remove_clock_cell_spacings command. By
+     default, this command removes all clock cell spacing rules. To remove specific clock cell
+     spacing rules, use the -lib_cells option.
+
+
+     Creating Skew Groups
+     During clock tree synthesis, you might want to balance a group of sinks only among
+     each other, and not the rest of the sinks. To do so, define a skew group by using the
+     create_clock_skew_group command.
+
+     When you use this command, specify the sinks you want to group, by using the -objects
+     option.
+     Optionally, you can specify the following:
+      • A clock or generated clock for which to create the skew group by using the -clock
+        option.
+      • A mode for which to create the skew group by using the -mode option.
+
+
+IC Compiler™ II Implementation User Guide                                                        250
+V-2023.12
+                                                                                           Feedback
+Chapter 4: Clock Tree Synthesis
+Specifying the Clock Tree Synthesis Settings
+
+
+         By default, the tool creates the skew group for the current mode.
+      • A name for the skew group by using the -name option.
+     The following example creates a skew group named sg1 consisting of sinks reg1/CP, reg2/
+     CP, and reg3/CP:
+     icc2_shell> create_clock_skew_group -name sg1 \
+        -objects {reg1/CP reg2/CP reg3/CP}
+
+     To report skew groups, use the report_clock_skew_groups command. To remove skew
+     groups, use the remove_clock_skew_groups command.
+
+
+     Defining a Name Prefix for Clock Cells
+     You can specify a name prefix for the cells added on the clock network during clock tree
+     synthesis by using the cts.common.user_instance_name_prefix application option.
+     The following example specifies CTS_ as the name prefix for the cells added on the clock
+     network during clock tree synthesis:
+     icc2_shell> set_app_options \
+        -name cts.common.user_instance_name_prefix -value "CTS_"
+
+     To specify a name prefix for the cells added on the data nets during optimization, including
+     during the clock_opt command, use the opt.common.user_instance_name_prefix
+     application option, as described in Specifying a Cell Name Prefix for Optimization.
+
+
+     Using the Global Router During Initial Clock Tree Synthesis
+     By default, initial clock tree synthesis uses the virtual router to build the clock trees. For
+     designs with complex floorplans, this can introduce congestion hotspots and degrade
+     clock QoR after clock routing.
+     The tool can use the global router during the initial clock tree synthesis stage of the
+     synthesize_clock_trees and clock_opt commands. To enable this feature, set the
+     cts.compile.global_route_aware_buffering application option to true.
+
+
+     Specifying Constraints for Clock Nets
+     By default, the IC Compiler II tool uses the default routing rule and any available routing
+     layers to route the clock trees.
+     You can specify the minimum and maximum routing layers for clock nets as described in
+     Specifying the Routing Resources. These routing layer constraints are used during RC
+     estimation, congestion analysis, and routing.
+
+
+
+IC Compiler™ II Implementation User Guide                                                             251
+V-2023.12
+                                                                                      Feedback
+Chapter 4: Clock Tree Synthesis
+Specifying the Clock Tree Synthesis Settings
+
+
+     To reduce the wire delays in the clock trees, you can use wide wires and higher metal
+     layers instead. Wide wires are represented by nondefault routing rules. To use nondefault
+                      routing rulenondefault, defined
+
+
+
+
+     routing rules on the clock nets, you must first define the routing rules and assign them to
+     the clock nets as described in Using Nondefault Routing Rules.
+
+
+     Constructing Faster Clock Tree to Specific Endpoints
+     The IC Compiler II tool enables you to construct a faster clock tree to specified endpoints
+     without any additional detouring or delay balancing. This improves clock latency to the
+     specified endpoints. To achieve a faster clock tree to specific endpoints, you must create
+     a user skew group for the required endpoints. To create a skew group for a specific
+     endpoint, use the following command before running the synthesize_clock_tree or the
+     build_clock stage of the clock_opt command:
+     icc2_shell> create_clock_skew_group -objects <endpoints>
+
+     Note:
+          • If there is a balancing requirement between the fast endpoints, you must put
+            them in the same skew group.
+          • If there is no balancing requirement between the endpoints, you must create
+            separate skew groups for each endpoint.
+         The upstream clock logic of the required skew group endpoints is shared with
+         the endpoints of the default group or other user skew groups. This leads to
+         detouring for balancing among the endpoints of the default group or other user
+         skew group.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                    252
+V-2023.12
+                                                                                    Feedback
+Chapter 4: Clock Tree Synthesis
+Specifying the Clock Tree Synthesis Settings
+
+
+   Figure 44      Faster Clock Tree to Specific Endpoints
+
+
+
+
+         If a gate drives both skew group and non-skew group endpoints, the skew
+         group endpoints might be delayed due to the balancing requirements of the
+         non-skew group endpoints. In such cases, in addition to creating skew groups,
+         you must also completely isolate the skew group endpoints from the rest of the
+         clock tree by cloning the gates along the path to these endpoints. To create a
+         separate clock path from the clock source to the required endpoints, use the
+         -to option with the split_clock_cells command before clock tree synthesis,
+         that is, before using the synthesize_clock_trees or the build_clock stage
+         of the clock_opt command.
+         icc2_shell> split_clock_cells -to $endpoints
+
+     The IC Compiler II tool enables you to construct a faster clock tree by identifying the
+     optimal cloning solution to achieve the best latency for the group of specified sinks.
+     To achieve a fast clock tree to certain endpoints, use the split_clock_cells -to <
+     $sinks> -latency_driven command. The endpoints must also be created as part of the
+     user skew group using the create_clock_skew_group command.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                 253
+V-2023.12
+                                                                                     Feedback
+Chapter 4: Clock Tree Synthesis
+Specifying the Clock Tree Synthesis Settings
+
+
+
+     Improving Latency-Driven Clock-Gate Splitting
+     The latency-driven clock-gate (CG) splitting now automatically identifies and evaluates
+     different CG cloning moves. This improves clock insertion delay to meet the maximum
+     level constraint.
+     To enable level driven CG splitting, set the cts.icg.latency_driven_cloning
+     application option to true.
+
+Figure 45     Latency Driven Clock-Gate Splitting
+
+
+
+
+     Reducing Signal Integrity Effects on Clock Nets
+     The timing of a design can be improved by reducing signal integrity issues on clock nets.
+     To do so, the tool can derive nondefault routing rules with larger spacing requirements and
+     assign them to the clock nets in regions without routing congestion.
+     To enable this feature, use the following application option setting:
+     icc2_shell> set_app_options \
+        -name cts.optimize.enable_congestion_aware_ndr_promotion -value true
+
+     When the tool derives a new nondefault routing rule for a clock net, the new spacing
+     requirement is dependent on the spacing requirement of the existing routing rule of that
+     net. If the existing routing rule is
+      • A nondefault routing rule with a spacing requirement of less than or equal to two times
+        the default spacing, the spacing requirement is doubled
+         The name of this new nondefault rule is the original name with an _ext_spacing postfix.
+      • A nondefault routing rule with a spacing requirement of more than two times the default
+        spacing, the spacing requirement is increased by one default spacing
+         The name of this new nondefault rule is the original name with an _ext_spacing postfix.
+      • The default routing rule, the spacing requirement is doubled
+         The name of this new nondefault rule is default_rule_equivalent_ndr_double_spacing.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                       254
+V-2023.12
+                                                                                         Feedback
+Chapter 4: Clock Tree Synthesis
+Specifying the Clock Tree Synthesis Settings
+
+
+
+     Specifying Settings for Clock Latency Adjustments
+     I/O ports are usually constrained using real or virtual clocks. After clock tree synthesis,
+     the latencies of the clocks constraining the I/O ports need to be updated to ensure
+     that the boundary constraints are accurate. When you run clock tree synthesis with
+     the clock_opt command, the tool automatically updates the latencies of the clocks
+     constraining the I/O ports. You can control these latency adjustments by using the
+     set_latency_adjustment_options command.
+
+     The following example specifies that the clock latencies of the VCLK1 and VCLK2 clocks
+     should be updated based on the latency of the PC_CLK clock, and that the latency of the
+     VCLK3 clock should not be updated:
+     icc2_shell> set_latency_adjustment_options \
+        -reference_clock PC_CLK -clocks_to_update {VCLK1 VCLK2} \
+        -exclude_clocks VCLK3
+
+     If you perform clock tree synthesis with the synthesize_clock_trees command,
+     the tool does not automatically update the clock latencies. To do so, use the
+     compute_clock_latency command after clock tree synthesis. This command honors the
+     settings you specify with the set_latency_adjustment_options command.
+
+
+     Reporting the Clock Tree Settings
+     To report the settings that are used by clock tree synthesis, use the
+     report_clock_settings command. By default, the commands reports the clock tree
+     configuration, including the design rule constraints, target skew, and target latency; the
+     clock tree references; the clock cell spacing rules; and the nondefault routing rules for all
+     clocks in the current block.
+     To report the settings for specific clocks, use the -clock option to specify the clocks of
+     interest. To report specific information, use the -type option with the appropriate keyword.
+      • To report the clock tree design rule constraints, target skew, and target latency, use
+        -type configurations.
+
+      • To report the clock tree references, use -type references.
+      • To report the clock cell spacing rules, use -type spacing_rules.
+      • To report the nondefault routing rule used for the clock nets, use -type
+        routing_rules.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                          255
+V-2023.12
+                                                                                      Feedback
+Chapter 4: Clock Tree Synthesis
+Implementing Clock Trees and Performing Post-CTS Optimization
+
+
+
+Implementing Clock Trees and Performing Post-CTS Optimization
+     Before you perform clock tree synthesis, you should save the block. This allows you to
+     refine the clock tree synthesis goals and rerun clock tree synthesis with the same starting
+     point, if necessary.
+     The following topics describe the different methods available for implementing clock trees:
+      • Performing Standalone Clock Trees Synthesis
+      • Synthesizing, Optimizing, and Routing Clock Trees With the clock_opt Command
+      • Controlling Concurrent Clock and Data Optimization
+      • Splitting Clock Cells
+      • Balancing Skew Between Different Clock Trees
+      • Performing Global-Route-Based Optimization Using Machine Learning Data
+      • Routing Clock Trees
+      • Inserting Via Ladders During Clock Tree Synthesis, Optimization, and Clock Routing
+      • Marking Clocks as Propagated After Clock Tree Synthesis
+      • Performing Postroute Clock Tree Optimization
+      • Performing Voltage Optimization
+      • Marking Clock Trees as Synthesized
+      • Removing Clock Trees
+
+
+     Performing Standalone Clock Trees Synthesis
+     To perform standalone clock tree synthesis, use the synthesize_clock_trees command,
+     as shown in the following example:
+     icc2_shell> synthesize_clock_trees
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                     256
+V-2023.12
+                                                                                          Feedback
+Chapter 4: Clock Tree Synthesis
+Implementing Clock Trees and Performing Post-CTS Optimization
+
+
+     When you use this command, the tool performs the following tasks:
+      1. Clock tree synthesis
+         Before clock tree synthesis, the tool performs virtual routing of the clock nets and uses
+         RC estimation to determine the clock net timing.
+      2. Clock tree optimization
+         Before clock tree optimization, the tool performs global routing on the clock nets and
+         uses RC extraction to determine the clock net timing. During clock tree optimization,
+         the tool performs incremental global routing on clock nets modified during optimization.
+     Note:
+         This command does not detail route the clock trees.
+     By default, this command works on all clocks in all active scenarios that are enabled for
+     setup or hold analysis. You can specify the clocks to be built by using the -clock option.
+     For example, to build only the CLK clock tree, use the following command:
+     icc2_shell> synthesize_clock_trees -clocks [get_clocks CLK]
+
+     After clock tree synthesis, the tool sets the clocks in all modes of all active scenarios as
+     propagated.
+
+
+     Synthesizing, Optimizing, and Routing Clock Trees With the
+     clock_opt Command
+     To synthesize the clock trees, route the clock nets, and further optimize the design by
+     using a single command, use the clock_opt command.
+     The clock_opt command consist of the following stages:
+      1. The build_clock stage, during which the tool synthesizes and optimizes the clock
+         trees for all clocks in all modes of all active scenarios. After clock tree synthesis, the
+         tool sets the synthesized clocks as propagated.
+      2. The route_clock stage, during which the tool detail routes the synthesized clock nets.
+      3. The final_opto stage, during which the tool performs further optimization, timing-
+         driven placement, and legalization. It then global routes the block and performs
+         extensive global-route-based optimization, which includes incremental legalization and
+         route patching.
+     You can limit the clock_opt command to one or more contiguous stages by using the
+     -from option to specify the stage from which you want to begin and the -to option to
+     specify the stage after which you want to end. If you do not specify the -from option, the
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                             257
+V-2023.12
+                                                                                       Feedback
+Chapter 4: Clock Tree Synthesis
+Implementing Clock Trees and Performing Post-CTS Optimization
+
+
+     tool begins from the build_clock stage. Similarly, if you do not specify the -to option, the
+     tool continues until the final_opto stage is completed.
+     For example, to synthesize and optimize the clock trees and detail route the clock nets
+     only, limit the execution to the build_clock and route_clock stages by use the following
+     command:
+     icc2_shell> clock_opt -to route_clock
+
+     Because the tool performs global routing during the final_opto stage, you should specify
+     all router related settings, such as routing rules, route guides, application option settings
+     required for the technology node, and so on, before you run the clock_opt command.
+     You should run the final_opto only one time for each block. After this stage is
+     completed, all the signal routes in the block are global routed. Therefore, when
+     subsequently run any routing command, such as the route_auto,route_global, or
+     route_group command, the tool skips global routing. To avoid errors during subsequent
+     track assignment and detail routing, do not change any global route shapes after you run
+     the clock_opt command.
+
+     Considering Voltage Drop Information During Clock Tree
+     Synthesis
+     By default, the clock_opt command does not consider voltage drop information when
+     inserting clock buffers. Therefore, the tool might place clock buffers in locations with
+     high PG resistance, which increases the voltage drop. To prevent this, you can use the
+     RedHawk Fusion feature to analyze the PG network and use this information with the
+     clock_opt command, as shown in the following flow:
+
+      1. Use the RedHawk Fusion feature to analyze the PG network by using the
+         analyze_rail -min_path_resistance command.
+
+      2. Load the RedHawk Fusion results by using the open_rail_result command.
+      3. Enable voltage-drop-aware clock tree synthesis by setting the
+         clock_opt.flow.enable_voltage_drop_aware application option to true.
+
+      4. Run the clock_opt command.
+
+     Using Nondefault Routing Rules for Critical Nets During
+     Optimization
+     To improve timing QoR, the tool can use nondefault routing rules on timing critical nets
+     during preroute optimization. In addition, the tool can guide the router to honor these
+     nondefault rule assignments as soft constraints.
+     To enable this capability for the clock_opt command, set the
+     clock_opt.flow.optimize_ndr application option to true.
+
+
+
+IC Compiler™ II Implementation User Guide                                                       258
+V-2023.12
+                                                                                        Feedback
+Chapter 4: Clock Tree Synthesis
+Implementing Clock Trees and Performing Post-CTS Optimization
+
+
+     icc2_shell> set_app_options -name clock_opt.flow.optimize_ndr \
+         -value true
+
+     Performing Concurrent Clock and Data Optimization During the
+     clock_opt Command
+     Applying useful skew techniques during datapath optimization to improve the timing QoR
+     by taking advantage of the positive slack and adjusting the clock arrival times of registers
+     is referred to as concurrent clock and data (CCD) optimization.
+     By default, the tool performs concurrent clock and data optimization during the clock_opt
+     command.
+     To disable concurrent clock and data optimization for the clock_opt command, set the
+     clock_opt.flow.enable_ccd application option to false.
+
+     You can change the default behavior of concurrent clock and data optimization during the
+     clock_opt command by performing any of the following optional steps:
+
+      1. (Optional) Limit the latency adjustment values for concurrent clock and data
+         optimization as described in Limiting the Latency Adjustment Values.
+      2. (Optional) Control the latency adjustment of boundary registers for concurrent clock
+         and data optimization as described in Excluding Boundary Paths.
+      3. (Optional) Ignore specific path groups during concurrent clock and data optimization as
+         described in Excluding Specific Path Groups.
+      4. (Optional) Ignore specific scenarios during concurrent clock and data optimization as
+         described in Excluding Specific Scenarios.
+      5. (Optional) Ignore specific sinks during concurrent clock and data optimization as
+         described in Excluding Specific Sinks.
+      6. (Optional) Control the effort of timing optimization performed during concurrent clock
+         and data optimization as described in Controlling Timing Optimization Effort.
+      7. (Optional) Control the effort of hold timing optimization performed during concurrent
+         clock and data optimization as described in Controlling Hold Time Optimization Effort.
+      8. (Optional) Control the adjustment of I/O clock latencies performed during concurrent
+         clock and data optimization as described in Controlling the Adjustment of I/O Clock
+         Latencies.
+      9. (Optional) Analyze the effects of concurrent clock and data optimization as described in
+         Reporting Concurrent Clock and Data Timing.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                       259
+V-2023.12
+                                                                                           Feedback
+Chapter 4: Clock Tree Synthesis
+Implementing Clock Trees and Performing Post-CTS Optimization
+
+
+     Controlling Multibit Optimization Performed During the clock_opt
+     Command
+     The following topics describe how you can control the multibit optimization performed
+     during the clock_opt command:
+      • Enabling the Rewiring of Mixed-Drive-Strength Multibit Cells
+      • Enabling Post-Clock-Tree-Synthesis Multibit Debanking
+     Enabling the Rewiring of Mixed-Drive-Strength Multibit Cells
+     Some logic libraries have mixed-drive-strength multibit cells where some bits have a
+     higher drive strength than others. For designs that use such cells, if a violating path goes
+     through a lower-drive-strength bit, the tool can rewire the mixed-drive-strength multibit cell
+     such that the violating path goes through a higher-drive-strength bit. To enable this feature
+     for the clock_opt command, set the clock_opt.flow.enable_multibit_rewiring
+     application option to true.
+     Enabling Post-Clock-Tree-Synthesis Multibit Debanking
+     To improve the timing QoR, the clock_opt command can debank multibit registers during
+     the final_opt stage, if doing so does not introduce hold timing violations. To enable this
+     feature, set the clock_opt.flow.enable_multibit_debanking application option to
+     true before you run the final_opt stage of the clock_opt command.
+
+     Performing Power or Area Recovery on the Clock Network
+     If you enable concurrent clock and data optimization for the clock_opt command, the tool
+     performs clock power recovery on clock cells and registers during the final_opt stage.
+     If you do not enable concurrent clock and data optimization, you can enable clock power
+     recovery by using the following application option setting:
+     icc2_shell> set_app_options \
+        -name clock_opt.flow.enable_clock_power_recovery \
+        -value power
+
+     Before you perform power recovery using this technique, you must
+      1. Enable scenarios for dynamic, leakage, or total power optimization by using the
+         -dynamic_power and -leakage_power options of the set_scenario_status
+         command
+      2. (Optional) Provide a switching activity by using the read_saif command
+         If you do not provide switching activity, the tool uses default switching activity for
+         dynamic power recovery.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                         260
+V-2023.12
+                                                                                       Feedback
+Chapter 4: Clock Tree Synthesis
+Implementing Clock Trees and Performing Post-CTS Optimization
+
+
+     Instead of power recovery, you can enable area recovery on the clock cells and registers
+     during the final_opt stage clock_opt command by using the following application
+     option setting:
+     icc2_shell> set_app_options \
+        -name clock_opt.flow.enable_clock_power_recovery \
+        -value area
+
+     Performing IR-Drop-Aware Placement During the clock_opt
+     Command
+     During placement, the tool can use the voltage (IR) drop values of cells to identify areas of
+     high power density and spread the cells with high voltage drop values, which reduces the
+     power density of such areas.
+     To perform IR-drop-aware placement during the clock_opt command, use the following
+     steps:
+      1. Run the clock_opt command through the route-clock stage by using the clock_opt
+         -to route_clock command.
+
+      2. Set up for RedHawk Fusion and perform static or dynamic voltage drop analysis
+         by using the analyze_rail -voltage_drop command as shown in the following
+         example:
+         icc2_shell> source redhawk_setup.tcl
+         icc2_shell> analyze_rail -voltage_drop static -nets {VDD VSS}
+
+         For more information, see Performing Voltage Drop Analysis.
+      3. Enable IR-drop-aware placement by setting the place.coarse.ir_drop_aware
+         application option to true.
+      4. (Optional) Specify additional settings for IR-drop-aware placement, as described in
+         Controlling IR-Drop-Aware Placement.
+      5. Run the final optimization stage of the clock_opt command by using the clock_opt
+         -from final_opto command.
+
+
+     Controlling Concurrent Clock and Data Optimization
+     Applying useful skew techniques during datapath optimization to improve the timing QoR
+     by taking advantage of the positive slack and adjusting the clock arrival times of registers
+     is referred to as concurrent clock and data (CCD) optimization.
+     Concurrent clock and data optimization is enabled by default for the place_opt
+     and clock_opt commands. To enabled it for the route_opt command, set the
+     route_opt.flow.enable_ccd application option to true.
+
+
+
+IC Compiler™ II Implementation User Guide                                                      261
+V-2023.12
+                                                                                        Feedback
+Chapter 4: Clock Tree Synthesis
+Implementing Clock Trees and Performing Post-CTS Optimization
+
+
+     You can change the default behavior of concurrent clock and data optimization by
+      • Limiting the Latency Adjustment Values
+      • Excluding Boundary Paths
+      • Excluding Specific Path Groups
+      • Excluding Specific Scenarios
+      • Excluding Specific Sinks
+      • Controlling Timing Optimization Effort
+      • Controlling Hold Time Optimization Effort
+      • Controlling the Adjustment of I/O Clock Latencies
+      • Performing Dynamic-Voltage-Drop-Driven Concurrent Clock and Data Optimization
+        During the route_opt Command
+      • Specifying Optimization Targets at the Preroute Stage
+      • Specifying Optimization Targets at the Postroute Stage
+      • Enabling Buffer Removal at the Postroute Stage
+      • Reporting Concurrent Clock and Data Timing
+      • Scaling CCD Offsets to New Scenarios for Reporting Timing
+      • Skewing Latch and Discrete Clock Gates
+
+     Limiting the Latency Adjustment Values
+     You can limit the latency adjustment values for concurrent clock and data optimization
+     performed during the place_opt, clock_opt, and route_opt commands as follows:
+      • Limit the amount that the clock latencies are advanced by using the ccd.max_prepone
+        application option.
+      • Limit the amount that the clock latencies are delayed by using the ccd.max_postpone
+        application option.
+     There is no default for these application options. Specify these values in the library timing
+     units. The following example sets a limit of 0.2 for advancing and 0.1 for delaying clock
+     latencies:
+     icc2_shell> set_app_options -list {ccd.max_prepone 0.2}
+     icc2_shell> set_app_options -list {ccd.max_postpone 0.1}
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                       262
+V-2023.12
+                                                                                        Feedback
+Chapter 4: Clock Tree Synthesis
+Implementing Clock Trees and Performing Post-CTS Optimization
+
+
+     Excluding Boundary Paths
+     By default, the tool performs concurrent clock and data optimization on all paths in a block.
+     However, you might want to exclude paths that are connected to boundary registers,
+     which are registers in the transitive fanout of input ports and transitive fanin of output
+     ports. To exclude boundary paths from concurrent clock and data optimization, set the
+     ccd.optimize_boundary_timing application option to false.
+
+     When you do so, you can selectively ignore the boundary paths
+     of some ports during boundary path exclusion by using the
+     ccd.ignore_ports_for_boundary_identification application option. The following
+     example disables concurrent clock and data optimization for all boundary paths except for
+     those connected to the ports named IN_A and OUT_A:
+     icc2_shell> set_app_options -name ccd.optimize_boundary_timing \
+        -value false
+     icc2_shell> set_app_options \
+        -name ccd.ignore_ports_for_boundary_identification \
+        -value {IN_A OUT_A}
+
+     Even when you disable concurrent clock and data optimization on boundary registers,
+     the tool can still optimize the clock tree fanin cone of these boundary registers, when
+     doing so improves the timing QoR of other internal registers that share the same clock
+     paths. To prevent the clock tree fanin of boundary registers from changing, set the
+     ccd.optimize_boundary_timing_upstream application option to false. However, doing
+     so heavily restricts the scope of concurrent clock and data optimization.
+     These application option settings affect concurrent clock and data optimization performed
+     during the place_opt, clock_opt, and route_opt commands.
+
+     Excluding Specific Path Groups
+     To exclude a specific path group from concurrent clock and data optimization, use the
+     ccd.skip_path_groups application option and specify the name of the path group you
+     want ignored.
+     You can ignore a path group for all scenarios or a specific scenario. For example, to ignore
+     the path group named CLK1 for all scenarios and CLK2 for the scenario named scnA, use
+     the following command:
+     icc2_shell> set_app_options -name ccd.skip_path_groups \
+        -value {CLK1 {CLK2 scnA}}
+
+     This setting affects concurrent clock and data optimization performed during the
+     place_opt, clock_opt, and route_opt commands.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                     263
+V-2023.12
+                                                                                        Feedback
+Chapter 4: Clock Tree Synthesis
+Implementing Clock Trees and Performing Post-CTS Optimization
+
+
+     Excluding Specific Scenarios
+     To exclude a specific scenarios from concurrent clock and data optimization, use the
+     ccd.ignore_scenarios application option and specify the name of the scenarios you
+     want to ignore.
+     For example, to ignore the scenario named scnB, use the following command:
+     icc2_shell> set_app_options -name ccd.ignore_scenarios \
+        -value {scnB}}
+
+     This setting affects concurrent clock and data optimization performed during the
+     place_opt, clock_opt, and route_opt commands.
+
+     Excluding Specific Sinks
+     To exclude a specific sink from concurrent clock and data optimization,
+      1. Apply a cts_fixed_balance_pin attribute on the sink pin by using the
+         set_attribute command as shown in the following example:
+         icc2_shell> set_attribute -objects reg21/CK \
+            -name cts_fixed_balance_pin -value true
+
+      2. Set the ccd.respect_cts_fixed_balance_pins application option to true.
+         These setting prevents the tool from adjusting the latencies of the sinks that have a
+         cts_fixed_balance_pin attribute set to true. However, changes in the clock tree
+         due to concurrent clock and data optimization performed on other sinks can change
+         the latencies of the sinks that have a cts_fixed_balance_pin attribute set to true.
+         To prevent the tool from making any changes to the clock paths between the sinks
+         that have a cts_fixed_balance_pin attribute set to true and the clock root, set the
+         ccd.respect_cts_fixed_balance_pins application option to upstream instead of
+         true.
+
+         This application option setting affects concurrent clock and data optimization performed
+         during the place_opt, clock_opt, and route_opt commands.
+
+     Controlling Timing Optimization Effort
+     By default, the tool focuses on improving the timing and power QoR during concurrent
+     clock and data optimization. You can change the effort level for timing optimization by
+     setting the ccd.timing_effort application option to low or high. The default is medium.
+     This setting affects concurrent clock and data optimization performed during the
+     final_opt stage of the clock_opt command and the route_opt command.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                     264
+V-2023.12
+                                                                                          Feedback
+Chapter 4: Clock Tree Synthesis
+Implementing Clock Trees and Performing Post-CTS Optimization
+
+
+     Controlling Hold Time Optimization Effort
+     By default, the tool focuses on fixing setup violations during concurrent clock and data
+     optimization. However, if your design has hold violations that are difficult to fix, you can
+     increase the effort for hold fixing by setting the ccd.hold_control_effort application
+     option to medium, high, or ultra. The default is low.
+     Increasing the priority of hold violations reduces the number of setup violations that are
+     fixed. Therefore, the hold priority should be increased only if the hold timing is critical. This
+     setting affects concurrent clock and data optimization performed during the final_opt
+     stage of the clock_opt command and the route_opt command.
+
+     Controlling the Adjustment of I/O Clock Latencies
+     By default, the tool adjusts the latencies of the I/O clocks, which are the clocks that
+     constrain the boundary ports, when it performs concurrent clock and data optimization
+     during the clock_opt command. The tool also uses concurrent clock and data
+     optimization techniques to adjust the I/O clock latencies when you subsequently run the
+     compute_clock_latency command.
+
+     The tool does not update the I/O clock latencies
+      • For the entire block when you disable this feature by setting the
+        ccd.adjust_io_clock_latency to false or when you disable concurrent clock and
+        data optimization for boundary paths by setting the ccd.optimize_boundary_timing
+        application option to false
+      • For specific I/O paths when you exclude the corresponding path groups from
+        concurrent clock and data optimization by using the ccd.skip_path_groups
+        application option
+      • For specific I/O clocks when you disable latency adjustment those I/O clocks by using
+        the set_latency_adjustment_options -exclude_clocks command
+
+     Performing Dynamic-Voltage-Drop-Driven Concurrent Clock and
+     Data Optimization During the route_opt Command
+     The concurrent clock and data optimization performed during the route_opt command
+     can reduce the peak dynamic voltage drop without affecting the timing QoR. To enable this
+     feature, set the route_opt.flow.enable_voltage_drop_opt_ccd application option to
+     true.
+
+     When you enable this feature, during the route_opt command, the tool uses the
+     RedHawk Fusion feature to identify dynamic-voltage-drop hotspots and cells rows where
+     the cells from the hotspots can be relocated. Then, during optimization, the tool relocates
+     or downsizes the cells in the hotspots to reduce the peak dynamic voltage drop without
+     hurting the timing QoR.
+
+
+
+IC Compiler™ II Implementation User Guide                                                           265
+V-2023.12
+                                                                                        Feedback
+Chapter 4: Clock Tree Synthesis
+Implementing Clock Trees and Performing Post-CTS Optimization
+
+
+     You can specify one of the following thresholds for selecting cells for optimization:
+      • A threshold for the cell voltage drop, as a percentage of the supply voltage, by using
+        the ccd.voltage_drop_voltage_threshold application option.
+         Any cell with a voltage drop that exceeds this threshold is selected for optimization.
+      • A threshold for the number of cells, as a percentage of the total number of cells, by
+        using the ccd.voltage_drop_population_threshold application option.
+         Cells are selected starting with the worst violator.
+     During postroute optimization, the tool can perform RedHawk dynamic voltage drop
+     analysis to identify cells involved in voltage drop violations, and then use optimization
+     techniques on those cells to improve the dynamic voltage drop.
+     You can further improve the dynamic voltage drop by enabling IR-driven
+     sizing, which uses the RedHawk dynamic voltage drop analysis results to
+     identify cells involved in voltage drop violations, and then tries to replace those
+     cells with cells having smaller leakage current. To enable this feature, set the
+     route_opt.flow.enable_irdrivenopt application option to true, in addition to setting
+     the route_opt.flow.enable_voltage_drop_opt_ccd application option to true.
+
+     Specifying Optimization Targets at the Preroute Stage
+     When performing concurrent clock and data optimization using the place_opt or
+     clock_opt command, you can give a higher priority to the WNS optimization of
+
+      • Certain path groups by specifying them by using the ccd.targeted_ccd_path_groups
+        application option, as shown in the following example:
+         icc2_shell> set_app_options -name ccd.targeted_ccd_path_groups \
+            -value {PG1 PG2}
+
+         If a path group you specify with this application option is also specified as a path group
+         to skip with the ccd.skip_path_groups application option, the path group is skipped
+         during concurrent clock and data optimization.
+      • Certain endpoints by specifying a file containing the endpoints by using the
+        ccd.targeted_ccd_end_points_file application option, as shown in the following
+        example:
+         icc2_shell> set_app_options -name ccd.targeted_ccd_end_points_file \
+            -value endpoint_targets.tcl
+
+         If you specify both path groups and endpoints, the tool optimizes only the specified
+         endpoints that are in the specified paths groups.
+      • The worst 300 timing paths by setting the ccd.enable_top_wns_optimization
+        application option to true
+
+
+IC Compiler™ II Implementation User Guide                                                         266
+V-2023.12
+                                                                                           Feedback
+Chapter 4: Clock Tree Synthesis
+Implementing Clock Trees and Performing Post-CTS Optimization
+
+
+     Specifying Optimization Targets at the Postroute Stage
+     At the final stages of your design flow, you can use the route_opt command to perform
+     concurrent clock and data optimization on specific critical path groups or endpoints by
+     using the following steps:
+      1. Enable targeted concurrent clock and data optimization for the route_opt command
+         by setting the route_opt.flow.enable_targeted_ccd_wns_optimization
+         application option to true.
+      2. Specify the optimization target by using one or both of the following settings:
+         ◦ Specify the path groups to optimize by using the ccd.targeted_ccd_path_groups
+           application option
+            Note:
+               If a path group you specify with this application option is also specified
+               as a path group to skip by using the ccd.skip_path_groups application
+               option, the path group is skipped during targeted concurrent clock and
+               data optimization.
+         ◦ Specify the endpoints to optimize by using the
+           ccd.targeted_ccd_end_points_file application option
+
+         You must specify at least one of these settings. If you specify both, the tool optimizes
+         the specified endpoints of the specified paths groups.
+      3. (Optional) Specify the type of optimization to perform by using the
+         ccd.targeted_ccd_select_optimization_moves application option.
+
+         The valid values are
+         ◦ auto, the default, which enables all optimization types, including buffering
+         ◦ size_only, which enables sizing only
+         ◦ equal_or_smaller_sizing, which enables sizing only to cells that are the same
+           size or smaller
+         ◦ footprint_sizing, which enables sizing only to cells with the same footprint
+      4. (Optional) Specify an optimization effort by using the
+         ccd.targeted_ccd_wns_optimization_effort application option.
+
+         The valid values are high (default), medium, and low. The higher the effort, the more
+         timing QoR improvement you will see in the targeted paths, but at the expense of the
+         timing QoR of other paths.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                        267
+V-2023.12
+                                                                                        Feedback
+Chapter 4: Clock Tree Synthesis
+Implementing Clock Trees and Performing Post-CTS Optimization
+
+
+      5. (Optional) Specify a threshold beyond which the slack for the
+         path groups that are not targeted can be degraded by using the
+         ccd.targeted_ccd_threshold_for_nontargeted_path_groups application option.
+
+         By default, if the path groups that are not targeted have positive slack, the tool can
+         degrade this slack until it reaches zero.
+     For the route_opt command, you can enable both regular concurrent clock
+     and data optimization by using the route_opt.flow.enable_ccd application
+     option and targeted concurrent clock and data optimization by using the
+     route_opt.flow.enable_targeted_ccd_wns_optimization application option. If
+     you enable both, the tool performs regular concurrent clock and data optimization first,
+     followed by targeted concurrent clock and data optimization.
+     The following script performs targeted concurrent clock and data optimization on a block
+     that has already undergone routing and postroute optimization:
+     open_lib design1
+     open_block blk.post_route
+
+     #Disable regular CCD optimization, which was previously performed
+     set_app_options \
+       -name route_opt.flow.enable_ccd -value false
+
+     #Enable targeted CCD optimization
+     set_app_options \
+       -name route_opt.flow.enable_targeted_ccd_wns_optimization \
+       -value true
+
+     #Specify the path group and endpoints to target
+     set_app_options -name ccd.targeted_ccd_path_groups -value clkA
+     set_app_options -name ccd.targeted_ccd_end_points_file \
+        -value clkA_ep.txt
+
+     #Specify the optimization type and effort
+     set_app_options \
+        -name ccd.targeted_ccd_select_optimization_moves -value size_only
+     set_app_options -name ccd.targeted_ccd_wns_optimization_effort \
+        -value medium
+
+     # Perform the targeted CCD optimization
+     route_opt
+
+     Enabling Buffer Removal at the Postroute Stage
+     To improve QoR by removing buffers or pairs of inverters when concurrent
+     clock and data optimization is performed during route_opt command, set the
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                         268
+V-2023.12
+                                                                                        Feedback
+Chapter 4: Clock Tree Synthesis
+Implementing Clock Trees and Performing Post-CTS Optimization
+
+
+     ccd.post_route_buffer_removal application option to true, as shown in the following
+     example:
+     icc2_shell> set_app_options -name route_opt.flow.enable_ccd \
+        -value true
+     icc2_shell> set_app_options -name ccd.post_route_buffer_removal \
+        -value true
+     icc2_shell> route_opt
+
+     Reporting Concurrent Clock and Data Timing
+     You analyze the timing effects of concurrent clock and data optimization by using the
+     report_ccd_timing command. By default, it reports the setup and hold slack of the worst
+     capture (D-slack) and launch (Q-slack) paths of the five most critical endpoint registers in
+     the block, as shown in the following example report:
+     icc2_shell> report_ccd_timing
+     ...
+     ...
+     ----------------------------------------------------------------
+         Setup                     Hold
+     ----------------------------------------------------------------
+      D-slack    Q-slack       D-slack    Q-slack     Pin
+     ----------------------------------------------------------------
+     -0.567710 -0.173974       0.524202   0.167434    sink2/CP
+     -0.175268   0.125309      0.168582   0.077625    sink3e/CP
+     -0.173974   0.126836      0.167434   0.076277    sink3a/CP
+     -0.033271 -0.175268       0.068856   0.168582    sink3d/CP
+      0.017364 -0.033271      -0.022138   0.068856    sink3c/CP
+
+     To control the type of report generated, use the -type option as follows:
+      • To report information for the paths in the fanin or fanout of the most critical endpoints,
+        use the -type fanin or -type fanout option.
+      • To report information for the previous, current, and next path stages of the most critical
+        endpoints, use the -type stage option.
+      • To report information for all the previous, current, and next path stages of the most
+        critical endpoints, use the -type chain option. Figure 46 shows the previous, current,
+        and next stages for an endpoint register.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                       269
+V-2023.12
+                                                                                      Feedback
+Chapter 4: Clock Tree Synthesis
+Implementing Clock Trees and Performing Post-CTS Optimization
+
+
+Figure 46     Previous, Current, and Next Path Stages
+
+
+
+
+     By default, the command reports setup slacks at D and Q pins of registers. To report the
+     hold slacks at these pins, use the -hold option.
+     By default, the command analyzes timing paths across all active scenarios and reports
+     the worst D and Q slacks across scenarios. To analyze and report the slack for specific
+     scenarios use the -scenarios option.
+     To report the information for specific path endpoints, specify the corresponding clock pins
+     by using the -pins option.
+     You can analyze the effects latency adjustments performed during concurrent clock and
+     data optimization by increasing or decreasing the clock arrival of a specific endpoint
+     using the -prepone or -postpone option with the -pins option as shown in the following
+     example:
+     icc2_shell> report_ccd_timing -pins Reg11/clk -postpone 0.02
+
+     You can also see the effects of changing specific cell and net delay values by using the
+     -annotate_cell_delay and -annotate_net_delay options, as shown in the following
+     example:
+     icc2_shell> report_ccd_timing -annotate_cell_delay {{U1/a U1/y 0.2}} \
+        -pin I2/d -type stage
+
+     The delay values you specify with these options are used only for analyzing and reporting
+     the concurrent clock and data timing. They are not saved and used during subsequent
+     concurrent clock and data optimization.
+
+     Scaling CCD Offsets to New Scenarios for Reporting Timing
+     To copy concurrent clock and data (CCD) offsets to the new scenarios for consistent
+     timing or QoR reports, use the copy_useful_skew command. During CCD, when a pin's
+     CTS balance point offsets are derived in only a subset of the active scenarios, use this
+     command to copy the offsets to the in-active scenarios and active scenarios that do not
+     have the CCD offsets.
+     The copy_useful_skew command also ensures that the corresponding constraints of
+     the set_clock_latency command are set on all the pins and scenarios, where a new
+     offset value is computed. The average value of the offset is computed across all scenarios,
+
+
+IC Compiler™ II Implementation User Guide                                                      270
+V-2023.12
+                                                                                        Feedback
+Chapter 4: Clock Tree Synthesis
+Implementing Clock Trees and Performing Post-CTS Optimization
+
+
+     where a balance point offset is defined. The average value is then scaled back in each
+     active scenario using the scaling factor of the scenario corner.
+
+     Skewing Latch and Discrete Clock Gates
+     To skew latches and discrete clock gates together, set the
+     ccd.skew_opt_merge_dcg_cells_by_driver application option to true before
+     compile_fusion or place_opt final_opto. By default, the application option is set to
+     false. Setting the ccd.skew_opt_merge_dcg_cells_by_driver application option to
+     true enhances the concurrent clock and data optimization to skew latches and gating
+     element by the same offset. This ensures the latch and gate are at the same level and
+     improves hold timing of discrete clock gates.
+     icc2_shell> set_attribute
+        -name ccd.skew_opt_merge_dcg_cells_by_driver -value true
+
+
+     Splitting Clock Cells
+     You can manually split clock cells that have DRC violations by using the
+     split_clock_cells -cells command, as shown in the following example:
+     icc2_shell> split_clock_cells -cells [get_cells U1/ICG*]
+
+     The tool does not split the specified cells if
+      • They do not have DRC violations
+      • They have don’t-touch, size-only, or fixed-placement attribute settings
+      • It is necessary to punch ports on the boundaries of power domains or blocks that have
+        been identified with the set_freeze_ports command
+     After splitting a cell, the tool
+      • Names the new cells using the <original_cell_name>_split_<integer> naming
+        convention
+      • Copies all the settings and constraints from the original cell to the newly created cells
+     Instead of specifying the cells to split, you can specify one or more collection of loads
+     that are driven by the same driver by using the -loads option, as shown in the following
+     example:
+     icc2_shell> set loads1 [get_pins I1/reg*/CK]
+     icc2_shell> set loads2 [get_pins I2/reg*/CK]
+     icc2_shell> split_clock_cells -loads [list $load1 $load2]
+
+     After splitting, each set of loads is driven by a newly created driver.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                      271
+V-2023.12
+                                                                                     Feedback
+Chapter 4: Clock Tree Synthesis
+Implementing Clock Trees and Performing Post-CTS Optimization
+
+
+
+     Balancing Skew Between Different Clock Trees
+     The IC Compiler II tool can automatically balance the skew between a group of clocks.
+     The set of clocks considered during delay balancing is referred to as a clock balance
+     group. You can define multiple clock balance groups. For each clock balance group, you
+     can define a delay offset between the clocks. Together, the clock balance groups and their
+     delay offset settings are referred to as interclock delay balancing constraints.
+     Note:
+         The tool cannot balance skew between a generated clock and other clocks.
+     To balance multiple clocks, perform the following steps:
+      1. Generate the interclock delay balancing constraints either by
+         Manually defining the clock balance groups and their delay offsets, as described in
+         Defining the Interclock Delay Balancing Constraints
+         Having the tool generate them as described in Generating Interclock Delay Balancing
+         Constraints Automatically
+      2. Balance the interclock delays as described in Running Interclock Delay Balancing.
+
+     Defining the Interclock Delay Balancing Constraints
+     To define interclock delay balancing constraints, use the create_clock_balance_group
+     command. At a minimum, you must specify a name for the clock balance group and the
+     clocks in the group.
+      • To specify a name for the clock balance group, use the -name option.
+      • To specify the clock trees in the group, use the -objects option with the get_clocks
+        command. By default, the clock balance group is defined for the clocks in the current
+        mode. To define a clock balance group for the clocks of a specific mode, use the
+        -objects option with the get_clocks -mode command.
+
+     For example, to define a clock balance group named group1 that contains the clocks
+     named clk1 and clk2 in the current mode, use the following command:
+     icc2_shell> create_clock_balance_group -name group1 \
+        -objects [get_clocks {clk1 clk2}]
+
+     To define a clock balance group named group2 that contains all the clocks in the mode
+     named m2, use the following command:
+     icc2_shell> create_clock_balance_group -name group2 \
+        -objects [get_clocks -mode m2]
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                      272
+V-2023.12
+                                                                                      Feedback
+Chapter 4: Clock Tree Synthesis
+Implementing Clock Trees and Performing Post-CTS Optimization
+
+
+     By default, the tool has a goal of zero delay offset between clocks. All clocks are balanced
+     with the same insertion delay which usually is the longest insertion delay among the
+     clocks. To specify a delay offset between clocks in the group, use the -offset_latencies
+     option. By default, the delay offset applies to the current corner. To apply the delay offset
+     to a specific corner, use the -corner option.
+     For example, assume the design has three clocks named clk1, clk2, and clk3. If you want
+     the insertion delay of clk1 and clk2 to be the same and the insertion delay of clk3 to be
+     100 less than that of clk1 and clk2, use the following command:
+     icc2_shell> create_clock_balance_group -name group3 \
+        -objects [get_clocks {clk1 clk2 clk3}] \
+        -offset_latencies {0 0 -100}
+
+     Reporting Clock Balance Groups
+     To report clock balance groups, use the report_clock_balance_groups command. The
+     report lists the clock balance groups for all modes in all active scenarios.
+     Removing Clock Balance Groups
+     To remove clock balance groups, use the remove_clock_balance_groups command. You
+     can either remove specific clock balance groups by specifying the clock balance groups
+     or all clock balance groups by using the -all option. If you specify the clock balance
+     groups to remove, they are removed from the current mode. However, if a specified group
+     does not exist in the current mode, but does exist in another mode, it is removed from that
+     mode. If you use the -all option, the clock balance groups are removed from all modes.
+     For example, to remove a previously defined clock balance group named group1 from the
+     current mode, use the following command:
+     icc2_shell> remove_clock_balance_groups group1
+
+     To remove all clock balance groups from all modes, use the following command:
+     icc2_shell> remove_clock_balance_groups -all
+
+     Generating Interclock Delay Balancing Constraints Automatically
+     The IC Compiler II tool can automatically generate the interclock delay balancing
+     constraints based on the timing relationships between the clocks. To automatically
+     generate the interclock delay balancing constraints, use the following command:
+     icc2_shell> derive_clock_balance_constraints
+
+     This command identifies clocks that have interclock timing paths and places
+     them in the same balance group. After running this command, use the
+     report_clock_balance_groups command to report the generated interclock delay
+     balancing constraints, as described in Reporting Clock Balance Groups. If necessary,
+
+
+
+IC Compiler™ II Implementation User Guide                                                     273
+V-2023.12
+

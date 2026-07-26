@@ -1,0 +1,595 @@
+% 第 6 章
+\bichapter{芯片收尾与可制造性设计}{Chip Finishing and Design for Manufacturing}
+\label{chap:dfm}
+
+IC Compiler II 工具提供芯片收尾（chip finishing）以及可制造性设计（DFM）与良率（yield）相关能力，可在设计流程各阶段应用，以应对芯片制造中的工艺设计问题。
+
+有关芯片收尾与可制造性设计功能，请参阅以下主题：
+\begin{itemize}
+  \item 插入 Tap Cell（Inserting Tap Cells）
+  \item 执行 Boundary Cell 插入（Performing Boundary Cell Insertion）
+  \item 查找并修复天线违例（Finding and Fixing Antenna Violations）
+  \item 插入冗余 Via（Inserting Redundant Vias）
+  \item 优化线长与 Via 数量（Optimizing Wire Length and Via Count）
+  \item 减小临界面积（Reducing Critical Areas）
+  \item 插入金属--绝缘体--金属电容（Inserting Metal-Insulator-Metal Capacitors）
+  \item 插入 Filler Cell（Inserting Filler Cells）
+  \item 插入 Metal Fill（Inserting Metal Fill）
+\end{itemize}
+
+% ============================================================
+\section{插入 Tap Cell}
+\subsection*{Inserting Tap Cells}
+
+Tap cell 是带有 well tie、substrate tie 或二者兼有的特殊非逻辑单元。当库中多数或全部标准单元不含 substrate/well tap 时，通常需要使用此类单元。一般设计规则会规定标准单元内每个晶体管到 well 或 substrate tap 的最大允许距离。
+
+在全局布局之前（floorplanning 阶段），可在 block 中插入 tap cell，形成二维阵列结构，以确保后续放置的标准单元均满足最大 diffusion-to-tap 距离限制。插入后应目视检查，确认所有标准单元可布局区域均已被 tap cell 妥善保护。
+
+IC Compiler II 提供两种插入 tap cell 阵列的方法：
+\begin{itemize}
+  \item 基于 site row 以及 tap cell 之间的最大距离插入 tap cell 阵列\\
+        使用 \cmd{create\_tap\_cells} 命令，见「使用 \cmd{create\_tap\_cells} 命令」。
+  \item 使用指定的 offset 与 pitch 插入 tap cell 阵列，并可选择在边界附近额外插入 tap cell\\
+        使用 \cmd{create\_cell\_array} 命令，见「使用 \cmd{create\_cell\_array} 命令」。
+\end{itemize}
+
+先进工艺节点常需额外插入 tap cell，以管理 substrate 与 well 噪声。在标准 tap cell 插入之后，还可使用以下能力：
+\begin{itemize}
+  \item 插入 tap wall\\
+        Tap wall 是一行或一列无间隙线性排列的 tap cell。可在 block、macro 或 hard placement blockage 边界之外或之内插入。边界外的称为 exterior tap wall；边界内的称为 interior tap wall。
+        \begin{itemize}
+          \item 插入 exterior tap wall：使用 \cmd{create\_exterior\_tap\_walls}，见「插入 Exterior Tap Wall」。
+          \item 插入 interior tap wall：使用 \cmd{create\_interior\_tap\_walls}，见「插入 Interior Tap Wall」。
+        \end{itemize}
+  \item 插入 tap mesh\\
+        Tap mesh 是二维 tap cell 阵列，每个 mesh window 中有一个 tap cell。使用 \cmd{create\_tap\_meshes}，见「插入 Tap Mesh」。
+  \item 插入 dense tap array\\
+        Dense tap array 的 tap 间距小于 \cmd{create\_tap\_cells} 所用间距。使用 \cmd{create\_dense\_tap\_cells}，见「插入 Dense Tap Array」。
+\end{itemize}
+
+\subsection{使用 \cmd{create\_tap\_cells} 命令}
+\subsubsection*{Using the create\_tap\_cells Command}
+
+要基于 site row 添加 tap cell 阵列，使用 \cmd{create\_tap\_cells}。必须指定用于插入的库单元名（\opt{-lib\_cell}）以及 tap cell 之间的最大距离（微米，\opt{-distance}）。
+
+例如：
+\begin{lstlisting}
+icc2_shell> create_tap_cells -lib_cell myreflib/mytapcell -distance 30
+\end{lstlisting}
+
+\begin{noteBox}
+若应用选项 \appopt{place.legalize.enable\_pin\_color\_alignment\_check} 为 \cmd{true}（默认 \cmd{false}），命令在插入时会确保 tap cell 内部 pin 与金属对齐到相应颜色的 routing track，并移动 tap cell 以避免颜色对齐违例。为避免因移动导致 signoff DRC 错误，在该应用选项为 \cmd{true} 时应略微减小 tap 距离。
+\end{noteBox}
+
+默认情况下，\cmd{create\_tap\_cells} 在整个 block 的每一行插入 tap cell。工具从行左边缘开始，按指定 tap 距离确定后续位置。此外，若在相邻于 block 边界、hard macro 或 hard placement blockage 的每个行边缘的最小 tap 距离（指定距离的一半）内不存在 tap cell，工具会额外插入一个 tap cell。图~\ref{fig:default-tap-placement} 给出采用 every-row 插入模式时的默认布局；注意 hard macro 右侧会额外加入 tap cell，以确保距 hard macro 边缘在最小 tap 距离内存在 tap cell。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 85：Default Tap Cell Placement）}\\[0.3em]
+\small 请参阅原版 PDF 插图；可将截图放入 \texttt{figures/} 目录后用 \texttt{\textbackslash includegraphics} 替换。
+\vspace{1.5cm}}}
+\caption{默认 Tap Cell 布局}
+\label{fig:default-tap-placement}
+\end{figure}
+
+可修改以下默认行为方面：
+\begin{itemize}
+  \item \textbf{镜像（MX）行所用库单元}\\
+        使用 \opt{-mirrored\_row\_lib\_cell} 指定镜像行所用库单元。
+  \item \textbf{插入图案}\\
+        使用 \opt{-pattern} 指定以下之一：
+        \begin{itemize}
+          \item \texttt{every\_row}（默认）：每行都插入。此时 \opt{-distance} 应约为工艺设计规则中最大 diffusion-to-tap 值的两倍。
+          \item \texttt{every\_other\_row}：仅在奇数行插入。\opt{-distance} 应约为最大 diffusion-to-tap 值的两倍。
+          \item \texttt{stagger}：每行都插入，偶数行相对奇数行偏移半个 \opt{-offset}，形成类似棋盘的图案。\opt{-distance} 应约为最大 diffusion-to-tap 值的四倍。
+        \end{itemize}
+  \item \textbf{相对行左边缘的偏移}\\
+        使用 \opt{-offset} 将图案起点向右平移指定微米距离。
+  \item \textbf{固定单元的处理}\\
+        默认在计算出的 tap 位置插入，不论该处是否被固定单元占用。使用 \opt{-skip\_fixed\_cells} 可避免在固定单元位置插入。默认将该固定单元视为 blockage 并在该处打断行，从而可能在固定单元两侧各插入一个 tap cell。若要不打断行又避免重叠，可同时使用 \opt{-preserve\_distance\_continuity} 与 \opt{-skip\_fixed\_cells}：命令会平移 tap cell 以避免重叠；\opt{-preserve\_distance\_continuity} 仅平移那些计算位置被所列库单元实例占用的 tap cell。
+\end{itemize}
+
+例如，下列命令会平移计算位置被 \texttt{mylib/cell1} 固定实例占用的 tap cell：
+\begin{lstlisting}
+icc2_shell> create_tap_cells -lib_cell mylib/tap -distance 30 \
+   -skip_fixed_cells -preserve_distance_continuity mylib/cell1
+\end{lstlisting}
+
+使用 \opt{-skip\_fixed\_cells} 时，还可用 \opt{-min\_horizontal\_periphery\_spacing} 指定边界与位于 blockage 上方或下方的角部 tap cell 之间的最小水平间距（以 unit tile 数为单位）。图~\ref{fig:tap-boundary-spacing} 示出有无 boundary cell 时该选项对布局的影响。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 86：Tap Cell Boundary Row Spacing）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{Tap Cell 边界行间距}
+\label{fig:tap-boundary-spacing}
+\end{figure}
+
+\begin{itemize}
+  \item \textbf{额外 tap cell 的添加}\\
+        可用下列一种或两种方法阻止额外插入：
+        \begin{itemize}
+          \item \opt{-row\_end\_tap\_bypass}：声明 boundary cell 已含 tap，故边界不再额外插入。注意命令不会验证 block 是否确有 boundary cell，或其是否真含 tap。
+          \item \opt{-at\_distance\_only}：仅允许在指定 tap 距离、半距离或四分之一距离（仅 stagger）处插入。注意使用该选项可能导致 DRC 违例。
+        \end{itemize}
+  \item \textbf{插入区域}\\
+        使用 \opt{-voltage\_area} 将插入限制在指定 voltage area。
+  \item \textbf{命名约定}\\
+        默认命名：\texttt{tapfiller!library\_cell\_name!number}。\\
+        用 \opt{-separator} 可更改默认分隔符 ``!''。\\
+        用 \opt{-prefix} 可为特定运行加前缀，命名变为：\texttt{tapfiller!prefix!library\_cell\_name!number}。
+\end{itemize}
+
+\subsection{使用 \cmd{create\_cell\_array} 命令}
+\subsubsection*{Using the create\_cell\_array Command}
+
+要按特定布局添加 tap cell 阵列，使用 \cmd{create\_cell\_array}。必须指定库单元名（\opt{-lib\_cell}）以及 $x$、$y$ 方向的 pitch。
+
+例如：
+\begin{lstlisting}
+icc2_shell> create_cell_array -lib_cell myreflib/mytapcell \
+   -x_pitch 10 -y_pitch 10
+\end{lstlisting}
+
+默认在整个 block 的指定网格每个位置插入 tap cell。工具从 core 区域左下角开始，按 $x$/$y$ pitch 确定后续位置。插入的 tap cell 会 snap 到 site row，并以该行默认方向放置。若位置被固定单元、hard macro、soft macro 或 power-switch cell 占用，则不在该处插入。
+
+可修改以下默认行为：
+\begin{itemize}
+  \item \textbf{插入区域}\\
+        \opt{-voltage\_area}：限制到指定 voltage area。\\
+        \opt{-boundary}：限制到指定区域。\\
+        若两者同时使用，仅在重叠区域插入。
+  \item \textbf{相对插入区域边界的偏移}\\
+        \opt{-x\_offset}：起点向右平移（微米）。\\
+        \opt{-y\_offset}：起点向上平移（微米）。
+  \item \textbf{插入图案}\\
+        \opt{-checkerboard}：在网格每隔一个位置插入。
+        \begin{itemize}
+          \item \opt{-checkerboard even}：左下角放置 tap cell。
+          \item \opt{-checkerboard odd}：左下角留空。
+        \end{itemize}
+        某些设计方法要求在棋盘图案中位于特定单元（如 critical area breaker 或 boundary cell）上方或下方的空位也插入 tap cell。可用 \opt{-preserve\_boundary\_row\_lib\_cells} 指定相关库单元以启用这些额外插入。
+  \item \textbf{Snap 行为}\\
+        设置 \opt{-snap\_to\_site\_row false} 可禁用 snap 到 site row；此时默认方向为 R0。
+  \item \textbf{方向}\\
+        用 \opt{-orient} 指定：R0、R90、R180、R270、MX、MY、MXR90 或 MYR90。
+  \item \textbf{命名约定}\\
+        默认：\texttt{headerfooter\_\_library\_cell\_name\_R\#\_C\#\_number}。\\
+        使用 \opt{-prefix} 时：\texttt{prefix\_\_library\_cell\_name\_R\#\_C\#\_number}。
+\end{itemize}
+
+\subsection{插入 Exterior Tap Wall}
+\subsubsection*{Inserting Exterior Tap Walls}
+
+Exterior tap wall 是放置在 block、macro 或 hard placement blockage 边界之外的一行或一列无间隙 tap cell。
+
+使用 \cmd{create\_exterior\_tap\_walls}，必须指定：
+\begin{itemize}
+  \item \textbf{Tap wall 所用 tap cell}（\opt{-lib\_cell}）\\
+        默认以 R0 方向插入；可用 \opt{-orientation} 指定其他方向。\\
+        若设计有 FinFET grid，选择 tap cell 时请遵循：
+        \begin{itemize}
+          \item 水平 tap wall：指定方向下的单元宽度须为 FinFET grid $x$-pitch 的整数倍；
+          \item 垂直 tap wall：指定方向下的单元高度须为 FinFET grid $y$-pitch 的整数倍。
+        \end{itemize}
+        默认命名：\texttt{extTapWall\_\_library\_cell\_name\_R\#\_C\#\_number}。\\
+        使用 \opt{-prefix} 时：\texttt{prefix\_\_library\_cell\_name\_R\#\_C\#\_number}。
+  \item \textbf{插入侧}（\opt{-side}）\\
+        每次只能指定一侧：\texttt{top}、\texttt{bottom}、\texttt{right} 或 \texttt{left}。多侧需多次运行。
+  \item \textbf{插入区域}（\opt{-bbox}）\\
+        指定包围盒左下与右上角：
+\begin{lstlisting}
+-bbox {{llx lly} {urx ury}}
+\end{lstlisting}
+        包围盒必须覆盖指定侧上对象边缘的一部分。若覆盖该侧多条边，则沿最长边插入；若未覆盖任何边，则报错。
+\end{itemize}
+
+默认情况下，水平 tap wall 从包围盒左边缘开始并贴齐顶/底边界；垂直 tap wall 从包围盒底边缘开始并贴齐左/右边界。可用 \opt{-x\_margin} 与 \opt{-y\_margin} 指定边距。若含边距后的区域过小，则不插入。应确保插入区域不含 placement blockage、固定单元或 macro，否则可能导致 tap wall 不完整或缺失。
+
+插入时命令不遵循标准单元 row/site，也不跨越对象边界。插入后会固定所插 tap cell 的布局。
+
+\subsection{插入 Interior Tap Wall}
+\subsubsection*{Inserting Interior Tap Walls}
+
+Interior tap wall 是放置在 block、macro、hard placement blockage 或非默认 voltage area 的标准单元布局区域边界之内的一行或一列 tap cell。
+
+\begin{noteBox}
+仅可对具有单一 site 定义的设计插入 interior tap wall。
+\end{noteBox}
+
+使用 \cmd{create\_interior\_tap\_walls}，必须指定：
+\begin{itemize}
+  \item \textbf{Tap cell}（\opt{-lib\_cell}）\\
+        须为与行高、site 宽匹配的单高（single-height）单元。\\
+        默认按行方向插入；可用 \opt{-orientation} 更改。\\
+        默认命名：\texttt{tapfiller\_\_library\_cell\_name\_R\#\_C\#\_number}。\\
+        使用 \opt{-prefix} 时：\texttt{prefix\_\_library\_cell\_name\_R\#\_C\#\_number}。
+  \item \textbf{插入侧}（\opt{-side}）\\
+        每次仅一侧；多侧需多次运行。
+\end{itemize}
+
+默认沿标准单元可布局区域指定侧的所有边无间隙放置。
+\begin{itemize}
+  \item 用 \opt{-bbox} 指定插入区域包围盒。命令沿包围盒所涵盖可布局区域在指定侧的最长边插入。对齐取决于该边段所含角点数量：
+        \begin{itemize}
+          \item 无角点：水平 wall 从左边、垂直 wall 从底边开始；
+          \item 一个角点：从该角点开始；
+          \item 指定侧上两个角点：水平从左边、垂直从底边开始。对含两角的水平 wall，末两单元间距可能缩短以对齐右角；空间不足时末单元可能不贴齐右角。
+        \end{itemize}
+  \item 对水平 tap wall，可用 \opt{-x\_spacing} 指定单元间隙。若小于单元宽度则间距为 0；若非 site 宽整数倍则向下取整到 site 宽倍数。
+\end{itemize}
+
+插入时遵循标准单元 row 与 site；未定义则不插入。Placement blockage、固定单元与 macro 等障碍可能导致不完整或缺失的 tap wall。插入后固定布局。
+
+\subsection{插入 Tap Mesh}
+\subsubsection*{Inserting Tap Meshes}
+
+Tap mesh 是每个 mesh window 含一个 tap cell 的二维阵列。通常插在 P\&R block 之外，也可插在完全位于 core 区域内或完全位于 core 区域外的任意区域。
+
+使用 \cmd{create\_tap\_meshes}，必须指定：
+\begin{itemize}
+  \item \textbf{Tap cell}（\opt{-lib\_cell}）\\
+        默认 R0；可用 \opt{-orientation}。\\
+        默认命名：\texttt{headerfooter\_\_library\_cell\_name\_R\#\_C\#\_number}。\\
+        使用 \opt{-prefix} 时：\texttt{prefix\_\_library\_cell\_name\_R\#\_C\#\_number}。
+  \item \textbf{插入区域}（\opt{-bbox}）：\texttt{\{\{llx lly\} \{urx ury\}\}}
+  \item \textbf{Mesh window}（\opt{-mesh\_window}）\\
+        以 $x$、$y$ 方向 pitch 的整数值指定窗口大小：\texttt{-mesh\_window \{x\_pitch y\_pitch\}}。\\
+        Mesh window 与插入区域左下角对齐。
+\end{itemize}
+
+插入时不遵循标准单元 row/site。在每个 mesh window 左下角放置 tap cell；若被阻挡，则取到该左下角曼哈顿距离最近的可用位置；若无可用位置则警告并跳过该窗口。插入后固定布局。
+
+\subsection{插入 Dense Tap Array}
+\subsubsection*{Inserting Dense Tap Arrays}
+
+Dense tap array 的 tap 间距小于 \cmd{create\_tap\_cells} 所用间距。
+
+使用 \cmd{create\_dense\_tap\_cells}，必须指定：
+\begin{itemize}
+  \item \textbf{Tap cell}（\opt{-lib\_cell}）\\
+        须与运行 \cmd{create\_tap\_cells} 时相同。\\
+        默认命名：\texttt{tapfiller!library\_cell\_name!number}；可用 \opt{-separator}、\opt{-prefix}。
+  \item \textbf{Tap 距离}（\opt{-distance}）\\
+        必须小于 \cmd{create\_tap\_cells} 所用距离。
+  \item \textbf{插入区域}（\opt{-bbox}）
+\end{itemize}
+
+命令首先移除完全位于插入区域内的既有 tap cell，再按指定距离重新插入以形成更密阵列。为避免 tap 规则违例，应使用与 \cmd{create\_tap\_cells} 相同的插入图案。支持 \opt{-offset}、\opt{-pattern}、\opt{-skip\_fixed\_cells}、\opt{-at\_distance\_only}（详见 man 页）。插入后固定布局。
+
+% ============================================================
+\section{执行 Boundary Cell 插入}
+\subsection*{Performing Boundary Cell Insertion}
+
+在放置标准单元之前，可为 block 添加 boundary cell。Boundary cell 包括：加在单元行两端以及 core 区域、hard macro、blockage、voltage area 等对象边界周围的 end-cap cell；以及填充水平与垂直 end-cap 之间空隙的 corner cell。End-cap cell 通常为非逻辑单元（如电源轨去耦电容）。因工具接受任意标准单元作为 end-cap，须确保指定合适的单元。
+
+插入 boundary cell 的步骤：
+\begin{enumerate}
+  \item 用 \cmd{set\_boundary\_cell\_rules} 指定插入要求（见「指定 Boundary Cell 插入要求」）。
+  \item 用 \cmd{compile\_boundary\_cells} 或 \cmd{compile\_targeted\_boundary\_cells} 按规则插入（见「插入 Boundary Cell」）。
+  \item 用 \cmd{check\_boundary\_cells} 或 \cmd{check\_targeted\_boundary\_cells} 验证布局（见「验证 Boundary Cell 布局」）。
+\end{enumerate}
+
+每次运行仅支持单一 site 定义。\cmd{compile\_boundary\_cells} 与 \cmd{compile\_targeted\_boundary\_cells} 根据 \cmd{set\_boundary\_cell\_rules} 所指定库单元确定 site，并仅在使用该 site 定义的区域插入。若设计有多种 site 定义，须对每种各运行一次该流程。
+
+\subsection{指定 Boundary Cell 插入要求}
+\subsubsection*{Specifying the Boundary Cell Insertion Requirements}
+
+使用 \cmd{set\_boundary\_cell\_rules} 指定：
+\begin{itemize}
+  \item 用于 boundary cell 的库单元（见「指定 Boundary Cell 插入所用库单元」）；
+  \item 放置规则（见「指定 Boundary Cell 放置规则」）；
+  \item 插入单元的命名约定（见「指定 Boundary Cell 命名约定」）；
+  \item 创建 routing guide 以遵守 metal cut allowed/forbidden preferred grid extension 规则（见「Boundary Cell 插入期间创建 Routing Guide」）；
+\begin{noteBox}
+该功能仅由 \cmd{compile\_boundary\_cells} 支持，\cmd{compile\_targeted\_boundary\_cells} 不支持。
+\end{noteBox}
+  \item 创建 placement blockage 以遵守 minimum jog / minimum separation 规则（见「Boundary Cell 插入期间创建 Placement Blockage」）。
+\begin{noteBox}
+该功能仅由 \cmd{compile\_boundary\_cells} 支持，\cmd{compile\_targeted\_boundary\_cells} 不支持。
+\end{noteBox}
+\end{itemize}
+
+\begin{noteBox}
+\cmd{set\_boundary\_cell\_rules} 指定的设置保存在设计库中。
+\end{noteBox}
+
+\begin{seeAlsoBox}
+报告 Boundary Cell 插入要求：见「报告 Boundary Cell 插入要求」。
+\end{seeAlsoBox}
+
+\subsubsection{指定 Boundary Cell 插入所用库单元}
+\subsubsection*{Specifying the Library Cells for Boundary Cell Insertion}
+
+Boundary cell 包括左右上下边界的 end-cap，以及内/外角单元。可用 \cmd{set\_boundary\_cell\_rules} 的下列选项为各类型指定不同库单元：
+\begin{itemize}
+  \item \opt{-left\_boundary\_cell}、\opt{-right\_boundary\_cell}：分别指定左、右边界 end-cap 所用的单个库单元。
+  \item \opt{-top\_boundary\_cells}、\opt{-bottom\_boundary\_cells}：分别指定顶、底边界 end-cap 的库单元列表。按指定顺序插入；若剩余空间小于当前单元，则插入列表中下一个能放入剩余空间的单元。\\
+        对垂直行 block，行自底向顶，故顶边界沿 block 左侧、底边界沿右侧。\\
+        对 double-back block 中的翻转行，顶边界单元用于底边界，底边界单元用于顶边界。
+  \item \opt{-top\_tap\_cell}、\opt{-bottom\_tap\_cell}：分别指定顶、底边界行上的 tap cell，以确保端 cap 满足最大 diffusion-to-tap 限制。
+  \item \opt{-top\_left\_outside\_corner\_cell}、\opt{-top\_right\_outside\_corner\_cell}、\opt{-bottom\_left\_outside\_corner\_cell}、\opt{-bottom\_right\_outside\_corner\_cell}：各外角位置的单个库单元。
+  \item \opt{-top\_left\_inside\_corner\_cells}、\opt{-top\_right\_inside\_corner\_cells}、\opt{-bottom\_left\_inside\_corner\_cells}、\opt{-bottom\_right\_inside\_corner\_cells}：各内角位置的库单元列表。工具插入第一个与内角尺寸匹配的角单元；若无一精确匹配，则插入第一个可不违规则放置的单元。
+\end{itemize}
+
+图~\ref{fig:boundary-cell-locations} 示出含两个 hard macro/blockage 的水平行 block 上 boundary 与 corner 单元位置；行翻转时位置也会翻转。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 87：Boundary Cell Locations）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{Boundary Cell 位置}
+\label{fig:boundary-cell-locations}
+\end{figure}
+
+\subsubsection{指定 Boundary Cell 放置规则}
+\subsubsection*{Specifying Boundary Cell Placement Rules}
+
+默认：
+\begin{itemize}
+  \item 运行 \cmd{compile\_boundary\_cells} 时，工具以默认方向在 core 区域、hard macro 与 hard placement blockage 周围放置 boundary cell；
+  \item 运行 \cmd{compile\_targeted\_boundary\_cells} 时，工具以默认方向在指定对象周围放置。
+\end{itemize}
+
+要翻转边界单元方向，可在 \cmd{set\_boundary\_cell\_rules} 中使用一个或多个选项：\opt{-mirror\_left\_boundary\_cell}、\opt{-mirror\_right\_boundary\_cell}、\opt{-mirror\_left\_outside\_corner\_cell}、\opt{-mirror\_right\_outside\_corner\_cell}、\opt{-mirror\_left\_inside\_corner\_cell}、\opt{-mirror\_right\_inside\_corner\_cell}、\opt{-mirror\_left\_inside\_horizontal\_abutment\_cell}、\opt{-mirror\_right\_inside\_horizontal\_abutment\_cell}。不能翻转顶/底边界单元方向。
+
+使用 \cmd{compile\_boundary\_cells} 时，还可修改：
+\begin{itemize}
+  \item \textbf{翻转行上顶/底内角单元互换}\\
+        \opt{-do\_not\_swap\_top\_and\_bottom\_inside\_corner\_cell}：阻止在翻转行顶内角使用底内角单元、在底内角使用顶内角单元。
+  \item \textbf{考虑 voltage area}\\
+        \opt{-at\_va\_boundary}：在 voltage area 边界两侧插入水平 boundary cell。
+  \item \textbf{一单位 tile 间隙}\\
+        \opt{-no\_1x}：防止插入产生一单位 tile 间隙。当行长等于两倍角单元宽加一单位 tile 宽时不插入；若等于两倍角单元宽则仍插入。
+  \item \textbf{Tap cell 间距}\\
+        \opt{-tap\_distance}：顶/底边界行上 tap cell 间距（微米）。
+  \item \textbf{短行上的插入}\\
+        \opt{-min\_row\_width}：行宽小于该阈值时不插入。
+  \item \textbf{子 block 中的插入}\\
+        \opt{-insert\_into\_blocks}：递归在子 block 中插入（默认不插入）。
+\end{itemize}
+
+\subsubsection{指定 Boundary Cell 命名约定}
+\subsubsection*{Specifying the Naming Convention for Boundary Cells}
+
+默认命名：\texttt{boundarycell!library\_cell\_name!number}。\\
+用 \opt{-separator} 更改分隔符；用 \opt{-prefix} 加前缀后为：\texttt{boundarycell!prefix!library\_cell\_name!number}。
+
+\subsection{Boundary Cell 插入期间创建 Routing Guide}
+\subsubsection*{Creating Routing Guides During Boundary Cell Insertion}
+
+若 technology file 定义了 metal cut allowed 与 forbidden preferred grid extension 规则，可用 \opt{-add\_metal\_cut\_allowed} 在插入期间创建相应 routing guide。此时 \cmd{compile\_boundary\_cells} 会创建：
+\begin{itemize}
+  \item Metal cut allowed routing guide：覆盖全部可布局 site row 所占区域，再按垂直收缩因子缩小（为最小 site row 高度的 50\%）；
+  \item Forbidden preferred grid extension routing guide：覆盖直至 block 边界的剩余区域。
+\end{itemize}
+
+\begin{noteBox}
+仅 \cmd{compile\_boundary\_cells} 支持；\cmd{compile\_targeted\_boundary\_cells} 不支持。
+\end{noteBox}
+
+\subsection{Boundary Cell 插入期间创建 Placement Blockage}
+\subsubsection*{Creating Placement Blockages During Boundary Cell Insertion}
+
+若工艺有 minimum jog 或 minimum separation 要求，可在 \cmd{set\_boundary\_cell\_rules} 中配合下列选项，由 \cmd{compile\_boundary\_cells} 创建 placement blockage：
+\begin{itemize}
+  \item \opt{-min\_horizontal\_jog}：若 macro（含 hard keepout）、hard placement blockage 或 voltage area（含 guard band）的水平边小于指定值，则用 \cmd{compile\_boundary\_cells -add\_placement\_blockage} 创建 blockage 以防违例。
+  \item \opt{-min\_vertical\_jog}：对垂直边同理。
+  \item \opt{-min\_horizontal\_separation}：若连续水平布局区域小于指定值，则创建 blockage。
+  \item \opt{-min\_vertical\_separation}：对垂直方向同理。
+\end{itemize}
+
+\begin{noteBox}
+默认 \cmd{compile\_boundary\_cells} 会检查指定规则但不创建 blockage；须使用 \opt{-add\_placement\_blockage} 才会创建。该功能仅 \cmd{compile\_boundary\_cells} 支持。
+\end{noteBox}
+
+\subsection{报告 Boundary Cell 插入要求}
+\subsubsection*{Reporting the Boundary Cell Insertion Requirements}
+
+使用 \cmd{report\_boundary\_cell\_rules} 报告由 \cmd{set\_boundary\_cell\_rules} 指定的要求。仅报告用户指定设置，不报告默认值。
+
+\subsection{移除 Boundary Cell 插入要求}
+\subsubsection*{Removing Boundary Cell Insertion Requirements}
+
+使用 \cmd{remove\_boundary\_cell\_rules} 移除一项或多项由 \cmd{set\_boundary\_cell\_rules} 指定的要求。
+
+\subsection{插入 Boundary Cell}
+\subsubsection*{Inserting Boundary Cells}
+
+按插入目标选择命令：
+\begin{itemize}
+  \item 在 core 区域、hard macro 与 placement blockage 周围插入：\cmd{compile\_boundary\_cells}；
+  \item 仅在一个或多个 voltage area 周围：\cmd{compile\_boundary\_cells -voltage\_area}；
+  \item 仅在特定对象周围：\cmd{compile\_targeted\_boundary\_cells -target\_objects}（可针对特定 macro、voltage area、voltage area shape、placement/routing blockage 与 core 区域）。
+\end{itemize}
+
+\cmd{set\_boundary\_cell\_rules} 同时配置两种 compile 命令；部分规则仅被 \cmd{compile\_boundary\_cells} 遵守，详见「指定 Boundary Cell 插入要求」。
+
+\subsection{验证 Boundary Cell 布局}
+\subsubsection*{Verifying the Boundary Cell Placement}
+
+用 \cmd{compile\_boundary\_cells} 插入后，用 \cmd{check\_boundary\_cells} 验证。用 \opt{-error\_view} 可生成供 error browser 查看的错误数据文件。该命令检查：
+\begin{itemize}
+  \item \textbf{缺失的 boundary 或 corner cell}\\
+        验证整个边界周围有 boundary/corner cell 且无间隙。图~\ref{fig:check-missing-boundary} 示出有效布局及因缺失单元导致的错误。
+\begin{noteBox}
+对成熟节点，boundary cell 可能仅插在左、右侧；此时命令只验证这两侧无间隙。
+\end{noteBox}
+  \item \textbf{不正确的 boundary/corner cell}\\
+        验证所用库单元与 \cmd{set\_boundary\_cell\_rules} 指定一致。
+  \item \textbf{不正确的方向}\\
+        验证各 boundary cell 方向符合允许方向。
+  \item \textbf{短行与短边}\\
+        验证每行 boundary cell 宽于 \opt{-min\_row\_width}，且各 blockage 水平边大于 \opt{-min\_horizontal\_jog}。
+\end{itemize}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 88：Check for Missing Boundary or Corner Cells）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{检查缺失的 Boundary/Corner Cell}
+\label{fig:check-missing-boundary}
+\end{figure}
+
+% ============================================================
+\section{查找并修复天线违例}
+\subsection*{Finding and Fixing Antenna Violations}
+
+芯片制造中，栅氧易被静电放电损伤。多层金属化过程中导线累积的静电荷可能损坏器件或导致芯片完全失效。静电电荷泄放入器件的现象称为天线（antenna）或电荷收集天线问题。
+
+为防止天线问题，工具验证每个输入 pin 的金属天线面积除以栅极面积小于晶圆厂给出的最大天线比：
+\[
+\frac{\text{antenna-area}}{\text{gate-area}} < \text{max-antenna-ratio}
+\]
+该检查基于 block 的全局与层相关天线规则，以及单元的天线属性。
+
+天线流程步骤：
+\begin{enumerate}
+  \item 定义天线规则；
+  \item 指定 pin 与 port 的天线属性；
+  \item 分析并修复天线违例。
+\end{enumerate}
+
+\subsection{定义天线规则}
+\subsubsection*{Defining Antenna Rules}
+
+天线规则定义如何计算 block 中网络的最大天线比，以及 pin 的天线比。必须用 \cmd{define\_antenna\_rule} 定义全局天线规则；也可用 \cmd{define\_antenna\_layer\_rule} 指定层相关规则。无层规则时使用全局规则。
+
+相关主题：
+\begin{itemize}
+  \item 计算最大天线比
+  \item 计算 Pin 的天线比
+\end{itemize}
+
+\subsubsection{计算最大天线比}
+\subsubsection*{Calculating the Maximum Antenna Ratio}
+
+须指定：
+\begin{itemize}
+  \item 二极管提供多少保护（diode protection mode）——\cmd{define\_antenna\_rule} 的 \opt{-diode\_mode}（必选），见「设置 Diode Protection Mode」；
+  \item 在二极管保护下如何计算天线比（diode ratio vector）——\cmd{define\_antenna\_layer\_rule} 的 \opt{-diode\_ratio}（必选），见「指定 Diode Ratio Vector」。
+\end{itemize}
+
+\subsubsection{设置 Diode Protection Mode}
+\subsubsection*{Setting the Diode Protection Mode}
+
+Diode protection mode 规定二极管提供的保护程度。先进工艺设计常使用不同 gate oxide class 表示多种栅氧厚度。工具最多支持四种：gate class 0、1、2、3。无 gate class 数据的 pin 视为 class 0。对使用多种栅氧厚度的设计，须使用支持多厚度的模式：14、16、18。
+
+用 \cmd{define\_antenna\_rule -diode\_mode} 指定（必选）。表~\ref{tab:diode-protection-mode} 定义各模式如何影响网络最大天线比；各二极管最大天线比的计算公式见表~\ref{tab:antenna-ratio-calc}，其中使用 \opt{-diode\_ratio} 向量值。
+
+\begin{table}[htbp]
+\centering
+\caption{Diode Protection Mode 设置（原书 Table 28）}
+\label{tab:diode-protection-mode}
+\begin{tabular}{@{}cp{0.72\textwidth}@{}}
+\toprule
+模式 & 定义 \\
+\midrule
+0 & 二极管不提供任何保护。 \\
+1 & 二极管提供无限保护。此模式下最高金属层不检查天线违例，因为最高层形成时输入--输出连接已完成。 \\
+2 & 保护有限；多二极管时取各二极管最大天线比的最大值。 \\
+3 & 保护有限；多二极管时取各二极管最大天线比之和。 \\
+4 & 保护有限；多二极管时用各二极管 diode-protection 值之和计算最大天线比。 \\
+5 & 保护有限；用所有二极管的最大 diode-protection 值计算等效栅极面积。 \\
+6 & 保护有限；用所有二极管 diode-protection 值之和计算等效栅极面积。 \\
+7 & 保护有限；用最大 diode-protection 值计算等效金属面积。 \\
+8 & 保护有限；用 diode-protection 值之和计算等效金属面积。 \\
+9 & 保护有限；按最大二极管保护做缩放。 \\
+10 & 保护有限；按总二极管保护做缩放。 \\
+11 & 保护有限；按最大二极管保护做缩放。 \\
+12 & 保护有限；按总二极管保护做缩放。 \\
+13 & 已废弃。 \\
+14 & 保护有限；两套独立计算公式。支持 gate class。 \\
+15 & 仅内部使用。 \\
+16 & 保护有限；多二极管时用 diode-protection 值之和计算最大天线比。支持 gate class。 \\
+17 & 保护有限；用 diode-protection 值之和计算等效栅极面积；输入与输出 pin 分别计算。 \\
+18 & 保护有限；多二极管时用 diode-protection 值之和计算最大天线比。支持 gate class，且计算取决于 pin 是否连二极管。 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{指定 Diode Ratio Vector}
+\subsubsection*{Specifying the Diode Ratio Vector}
+
+用 \cmd{define\_antenna\_layer\_rule -diode\_ratio} 指定用于计算最大天线比的值。未指定时工具使用 \texttt{\{0 0 1 0 0\}}。实际用法取决于 \cmd{define\_antenna\_rule -diode\_mode}。
+
+表~\ref{tab:diode-ratio-format} 给出各模式的向量格式；表~\ref{tab:antenna-ratio-calc} 说明如何用向量值计算。其中：
+\begin{itemize}
+  \item \texttt{dp}：输出 pin 的 diode protection 值（见「指定天线属性」）；
+  \item \texttt{layerMaxRatio}：该层最大天线比，由 \cmd{define\_antenna\_layer\_rule -ratio} 或全局规则的 \opt{-metal\_ratio}/\opt{-cut\_ratio} 指定。
+\end{itemize}
+
+示例见后文「模式 2/3/4」「模式 5/6」「模式 7/8」「模式 14 多栅氧厚度」各小节。
+
+\begin{table}[htbp]
+\centering
+\caption{Diode Ratio Vector 格式（原书 Table 29）}
+\label{tab:diode-ratio-format}
+\begin{tabular}{@{}cp{0.72\textwidth}@{}}
+\toprule
+模式 & 格式 \\
+\midrule
+2--10, 17 & \texttt{\{v0 v1 v2 v3 [v4]\}}；\texttt{v4} 为可选保护上限，省略视为 0（无上限）。 \\
+11, 12 & \texttt{\{\{v0 v1 v2 v3 [v4]\}\{s0 s1 s2 s3 s4 s5\}\}}；第二向量为缩放值。 \\
+14 & 每个 gate class 一个 10 值向量（共 4 个）。 \\
+16 & 每个 gate class 一个 8 值向量（共 4 个）。 \\
+18 & 每个 gate class 一个 12 值向量（共 4 个）。 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\caption{基于 Diode Mode 的天线比计算（原书 Table 30，摘要）}
+\label{tab:antenna-ratio-calc}
+\begin{tabular}{@{}cp{0.72\textwidth}@{}}
+\toprule
+模式 & 计算 \\
+\midrule
+0, 1 & 不使用 \\
+2, 3, 4 & 若 \texttt{dp>v0} 且 \texttt{v4$\neq$0}：\texttt{min(((dp+v1)*v2+v3), v4)}；若 \texttt{v4=0}：\texttt{(dp+v1)*v2+v3}；若 \texttt{dp$\leq$v0}：\texttt{layerMaxRatio} \\
+5 & \texttt{metal\_area/(gate\_area+equi\_gate\_area)}；\texttt{equi\_gate\_area} 由 \texttt{max\_diode\_protection} 与 v0--v4 按类似规则计算 \\
+6 & 同 5，但用 \texttt{total\_diode\_protection} \\
+7 & \texttt{(metal\_area-equi\_metal\_area)/gate\_area}；\texttt{equi\_metal\_area} 由最大保护值计算，且不超过 \texttt{metal\_area} \\
+8 & 同 7，但用总保护值 \\
+9 & \texttt{scale*metal\_area/gate\_area}；\texttt{scale} 由最大保护推导 \\
+10 & 同 9，但用总保护 \\
+11 & 按 \texttt{max\_diode\_protection} 落在 v0--v4 区间选取 s0--s5 作为 \texttt{scale} \\
+12 & 同 11，但用 \texttt{total\_diode\_protection} \\
+13 & N/A \\
+14 & 按 gate class 选用对应向量；两套公式分别用于不同情况（详见原书） \\
+16, 18 & 支持 gate class；用保护值之和等规则（详见原书公式） \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{noteBox}
+完整代数公式与数值示例请对照原书 Table 30 及随后 Example 小节；译本表~\ref{tab:antenna-ratio-calc} 为便于查阅的浓缩形式，计算语义与原文一致。
+\end{noteBox}
+
+\paragraph{模式 2、3、4 示例}
+\subsubsection*{Example for Diode Modes 2, 3, and 4}
+
+设二极管保护值为 dp，向量为 \texttt{\{v0 v1 v2 v3 v4\}}。对每个二极管先按表~\ref{tab:antenna-ratio-calc} 算其最大天线比；模式 2 取最大值，模式 3 取各二极管最大天线比之和，模式 4 先对保护值求和再代入公式。表~\ref{tab:max-ratio-per-diode} 概括各二极管最大天线比计算。
+
+\begin{table}[htbp]
+\centering
+\caption{各二极管最大天线比计算（原书 Table 31）}
+\label{tab:max-ratio-per-diode}
+\begin{tabular}{@{}lp{0.7\textwidth}@{}}
+\toprule
+条件 & 结果 \\
+\midrule
+\texttt{dp > v0} 且 \texttt{v4 $\neq$ 0} & \texttt{min(((dp+v1)*v2+v3), v4)} \\
+\texttt{dp > v0} 且 \texttt{v4 = 0} & \texttt{(dp+v1)*v2+v3} \\
+\texttt{dp $\leq$ v0} & \texttt{layerMaxRatio} \\
+\bottomrule
+\end{tabular}
+\end{table}

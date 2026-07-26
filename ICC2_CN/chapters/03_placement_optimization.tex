@@ -1,0 +1,1248 @@
+% 第 3 章
+\bichapter{布局与优化}{Placement and Optimization}
+\label{chap:place}
+
+要了解如何在 IC Compiler II 中执行布局与优化，请参阅：
+\begin{itemize}
+  \item 执行布局与优化
+  \item 识别优化期间无法修复的问题
+  \item 分析布局
+  \item 分析时序
+  \item 分析功耗
+  \item 对比 QoR 数据
+\end{itemize}
+
+% ============================================================
+\section{执行布局与优化}
+\subsection*{Performing Placement and Optimization}
+
+完成设计规划与电源规划后，即可对设计执行布局（placement）、优化（optimization）与合法化（legalization）。以下主题说明如何进行：
+\begin{itemize}
+  \item 执行独立布局与合法化
+  \item 使用 \cmd{place\_opt} 命令执行布局与优化
+  \item 使用 Design Compiler 工具的物理引导（physical guidance）
+  \item 执行多比特寄存器优化
+  \item 执行 Magnet Placement
+  \item 细化布局（Refining Placement）
+  \item 对多电压 block 执行布局与优化
+  \item 重建缓冲树（Buffer Trees）
+  \item 添加与移除 tie cell
+\end{itemize}
+
+% ------------------------------------------------------------
+\subsection{执行独立布局与合法化}
+\subsubsection*{Performing Standalone Placement and Legalization}
+
+要执行粗布局（coarse placement），使用 \cmd{create\_placement} 命令。若 block 含有通过读取 SCANDEF 文件标注的 scan chain，粗布局器还会执行 scan chain 优化。
+
+可通过 \opt{-effort} 选项控制运行时间与 QoR 之间的权衡。
+
+要启用：
+\begin{itemize}
+  \item 时序驱动布局：使用 \opt{-timing\_driven} 选项
+  \item 考虑高扇出 net 与长 net，并计入优化阶段随后在这些 net 上添加的 buffer 的时序驱动布局：使用 \opt{-buffering\_aware\_timing\_driven} 选项
+  \item 拥塞驱动布局：使用 \opt{-congestion} 选项\\
+        要控制用于拥塞消除的 CPU 努力程度，使用 \opt{-congestion\_effort} 选项
+  \item 拥塞驱动重构：使用 \opt{-congestion\_driven\_restructuring} 选项\\
+        使用该选项时，工具会进行多轮布局与逻辑重构，以帮助降低拥塞
+\end{itemize}
+
+\begin{noteBox}
+在使用 \cmd{create\_placement} 运行布局之前，应先运行 \cmd{merge\_clock\_gates} 合并 clock-gating 逻辑。
+\end{noteBox}
+
+要执行合法化，使用 \cmd{legalize\_placement} 命令。有关可指定的合法化约束与设置的更多信息，见「指定合法化设置」。
+
+\begin{noteBox}
+按「启用高级合法化算法」所述启用 advanced legalizer 时，不支持 \cmd{legalize\_placement} 的 \opt{-cells} 选项。
+\end{noteBox}
+
+% ------------------------------------------------------------
+\subsection{使用 place\_opt 命令执行布局与优化}
+\subsubsection*{Performing Placement and Optimization With the place\_opt Command}
+
+要用单一命令执行粗布局、物理优化与合法化，使用 \cmd{place\_opt} 命令。
+
+该命令支持多线程，并使用由 \cmd{set\_host\_options -max\_cores} 指定的线程数。
+
+\cmd{place\_opt} 命令包含以下阶段：
+\begin{enumerate}
+  \item \textbf{初始布局（\cmd{initial\_place}）}\\
+        此阶段工具合并 clock-gating 逻辑并执行粗布局。若 block 含有通过读取 SCANDEF 标注的 scan chain，工具还会执行 scan chain 优化。
+  \item \textbf{初始 DRC 违例修复（\cmd{initial\_drc}）}\\
+        此阶段工具移除已有缓冲树，并执行高扇出 net 综合（high-fanout-net synthesis）与电气 DRC 违例修复。
+  \item \textbf{初始优化（\cmd{initial\_opto}）}\\
+        此阶段工具执行时序、面积、拥塞与漏电功耗优化。
+  \item \textbf{最终布局（\cmd{final\_place}）}\\
+        此阶段工具执行增量布局以改善时序与拥塞，并对设计合法化。
+  \item \textbf{最终优化（\cmd{final\_opto}）}\\
+        此阶段工具进一步优化并合法化，以改善时序与拥塞。
+\end{enumerate}
+
+运行 \cmd{place\_opt} 时，默认执行全部布局与优化阶段。
+
+要将 \cmd{place\_opt} 限制为仅运行其中一个或多个阶段，使用 \opt{-from} 指定起始阶段，使用 \opt{-to} 指定结束阶段（之后停止）。
+
+若不指定 \opt{-from}，工具从 \cmd{initial\_place} 阶段开始；若不指定 \opt{-to}，工具一直运行到 \cmd{final\_opto} 阶段完成。
+
+例如，要跳过初始布局，但对其余优化与布局阶段在已完成初始布局的设计上运行，可使用：
+\begin{lstlisting}
+icc2_shell> place_opt -from initial_drc
+\end{lstlisting}
+
+\subsubsection{为布局与优化创建临时时钟树}
+\subsubsection*{Creating a Temporary Clock Tree for Placement and Optimization}
+
+默认情况下，\cmd{place\_opt} 在布局与优化期间使用理想时钟（ideal clock）信息。但可通过将应用选项 \appopt{place\_opt.flow.trial\_clock\_tree} 设为 \cmd{true}，让工具构建临时时钟树，并在 \cmd{place\_opt} 期间使用传播时钟（propagated clocks）。
+
+布局与优化之后，使用 \cmd{clock\_opt} 或 \cmd{synthesize\_clock\_trees} 执行时钟树综合时，工具会移除临时时钟树并构建实际时钟树。为使临时时钟树与实际时钟树相关，应在运行 \cmd{place\_opt} 之前指定时钟树综合设置。
+
+\subsubsection{优化 Clock-Gating 单元}
+\subsubsection*{Optimizing Clock-Gating Cells}
+
+默认情况下，工具在以下时机合并 clock-gating 单元：
+\begin{itemize}
+  \item 未启用 Synopsys physical guidance 流程时，在 \cmd{place\_opt} 的 \cmd{initial\_place} 阶段开始处；
+  \item 通过将 \appopt{place\_opt.flow.do\_spg} 设为 \cmd{true} 启用 Synopsys physical guidance（SPG）流程时，在 \cmd{place\_opt} 的 \cmd{initial\_opt} 阶段开始处。
+\end{itemize}
+
+但若在运行 \cmd{place\_opt} 之前已运行 \cmd{merge\_clock\_gates}，则 \cmd{place\_opt} 期间不再合并 clock gate。
+
+可按如下方式控制 clock-gating 单元的合并：
+\begin{itemize}
+  \item 仅合并处于时钟树同一层级的 clock-gating 单元：将 \appopt{cts.icg.merge\_cross\_level} 设为 \cmd{false}。\\
+        默认情况下，工具可合并处于时钟树不同层级的 clock-gating 单元。
+  \item 禁用 clock-gating 单元合并：将 \appopt{place\_opt.flow.merge\_clock\_gates} 设为 \cmd{false}。
+\end{itemize}
+
+若 clock gate 的 enable 引脚处于关键时序路径上，\cmd{place\_opt} 还可进一步优化 clock-gating 单元。要启用该功能，将 \appopt{place\_opt.flow.optimize\_icgs} 设为 \cmd{true}。
+
+在 clock-gating 单元优化期间，工具会：
+\begin{itemize}
+  \item 执行 clock-aware 布局（无论 \appopt{place\_opt.flow.clock\_aware\_placement} 如何设置），并将关键 clock-gating 单元及其扇出放置在更优位置；
+  \item 构建临时时钟树（无论 \appopt{place\_opt.flow.trial\_clock\_tree} 如何设置），并用该时钟树识别时序关键的 clock-gating 单元；
+  \item 若 clock gate 的 enable 引脚处于关键时序路径上，则拆分（split）clock-gating 单元。\\
+        可通过 \appopt{place\_opt.flow.optimize\_icgs\_critical\_range} 指定临界范围，以控制拆分程度。
+\end{itemize}
+
+\subsubsection{对 Clock Gate 使用更准确的 Latency}
+\subsubsection*{Using Accurate Latencies for Clock Gates}
+
+默认情况下，工具在整个 \cmd{place\_opt} 流程中估计并更新 clock-gate latency。这确保在时钟树综合之前、时钟仍为理想时钟时，数据通路优化与 useful-skew 优化能使用更准确的 clock-gate latency。
+
+要提高估计 clock-gate latency 的准确性，应在运行 \cmd{place\_opt} 之前指定时钟树综合设置，例如时钟树 buffer/inverter、时钟非默认布线规则（nondefault routing rules）等。
+
+\begin{noteBox}
+若已按「为布局与优化创建临时时钟树」启用 trial clock tree synthesis，或按「优化 Clock-Gating 单元」启用 clock-gate 优化（二者在 CTS 之前用更准确的方法建模时钟树效应），则工具不再执行 clock-gate latency 估计与 clock-gate-latency-aware 布局。
+\end{noteBox}
+
+工具不会修改你对 clock-gating 单元指定的任何 \cmd{set\_clock\_latency} 约束。工具估计的 clock-gate latency 值通过 \cmd{set\_clock\_latency -offset} 存储。可用 \cmd{write\_script -format icc2} 查看这些估计值，并在生成输出中查找 \cmd{set\_clock\_latency -offset} 命令。\cmd{write\_sdc} 生成的 SDC 文件不会捕获这些估计的 latency offset。
+
+要阻止工具估计特定 clock-gate 的 latency，对其时钟引脚设置 \cmd{dont\_estimate\_clock\_latency} 属性，例如：
+\begin{lstlisting}
+icc2_shell> set_attribute \
+   [get_pins {ICG21/CK}] dont_estimate_clock_latency true
+\end{lstlisting}
+
+\subsubsection{启用基于全局布线的高扇出综合}
+\subsubsection*{Enabling Global Route Based High-Fanout Synthesis}
+
+工具执行高扇出综合与电气 DRC 违例修复时，默认使用虚拟布线（virtual routes）。
+
+要在高扇出综合与电气 DRC 违例修复期间使用全局布线（global routes），在运行 \cmd{place\_opt} 之前设置 \appopt{place\_opt.initial\_drc.global\_route\_based}：
+\begin{lstlisting}
+icc2_shell> set_app_options \
+   -name place_opt.initial_drc.global_route_based -value 1
+\end{lstlisting}
+
+要启用包含 trial 高扇出综合的集成两遍初始布局流程，在运行 \cmd{place\_opt} 之前设置：
+\begin{lstlisting}
+icc2_shell> set_app_options \
+   -name place_opt.initial_drc.global_route_based -value 1
+icc2_shell> set_app_options \
+   -name place_opt.initial_place.two_pass -value true
+\end{lstlisting}
+
+该集成两遍初始布局流程包括：线长驱动布局、trial 高扇出综合，以及时序驱动布局。工具丢弃 trial 高扇出综合结果，但保留时序驱动布局，并继续进行基于全局布线的高扇出综合。
+
+对 floorplan 碎片化严重的设计，启用集成两遍初始布局与基于全局布线的高扇出综合，有助于改善时序并降低拥塞。
+
+\subsubsection{启用缓冲树重建}
+\subsubsection*{Enabling the Rebuilding of Buffer Trees}
+
+在 \cmd{place\_opt} 的 \cmd{initial\_drc} 阶段，工具默认执行高扇出 net 综合，为高扇出 net 构建缓冲树。\cmd{initial\_drc} 之后，若能改善 setup 时序、逻辑 DRC 违例、线长或面积，工具可移除并重建整棵缓冲树或部分缓冲树。
+
+要在以下阶段启用缓冲树重建：
+\begin{itemize}
+  \item 在 \cmd{initial\_opto} 阶段针对多电压 net：将 \appopt{opt.buffering.enable\_mv\_rebuffering} 设为 \cmd{true}
+  \item 在 \cmd{final\_opto} 阶段针对任意 net：将 \appopt{opt.buffering.enable\_rebuffering} 设为 \cmd{true}
+\end{itemize}
+
+\subsubsection{更改拥塞努力程度}
+\subsubsection*{Changing the Congestion Effort}
+
+默认情况下，\cmd{place\_opt} 执行拥塞优化以改善设计的可布线性。可通过 \appopt{place\_opt.place.congestion\_effort} 禁用或控制该优化的努力程度；默认值为 \cmd{medium}。
+
+\subsubsection{对关键 Net 使用非默认布线规则}
+\subsubsection*{Using of Nondefault Routing Rules for Critical Nets}
+
+为改善时序 QoR，工具可在布线前优化期间对时序关键 net 使用非默认布线规则（nondefault routing rules）。此外，工具可引导路由器将这些非默认规则分配作为软约束加以遵守。
+
+要为 \cmd{place\_opt} 启用该能力，将 \appopt{place\_opt.flow.optimize\_ndr} 设为 \cmd{true}：
+\begin{lstlisting}
+icc2_shell> set_app_options -name place_opt.flow.optimize_ndr \
+    -value true
+\end{lstlisting}
+
+\subsubsection{启用路径优化}
+\subsubsection*{Enabling Path Optimization}
+
+路径优化（path optimization）是一种增量优化能力，专注于改善时序路径的 QoR。也可在 \cmd{place\_opt} 期间通过将 \appopt{place\_opt.flow.do\_path\_opt} 设为 \cmd{true} 来启用：
+\begin{lstlisting}
+icc2_shell> set_app_options -name place_opt.flow.do_path_opt -value true
+\end{lstlisting}
+
+\subsubsection{在 place\_opt 期间执行 IR-Drop-Aware 布局}
+\subsubsection*{Performing IR-Drop-Aware Placement During the place\_opt Command}
+
+布局期间，工具可利用单元的电压（IR）drop 值识别高功耗密度区域，并分散高压降单元，从而降低此类区域的功耗密度。
+
+要在 \cmd{place\_opt} 期间执行 IR-drop-aware 布局，按下列步骤：
+\begin{enumerate}
+  \item 用 \cmd{place\_opt -to final\_place} 运行到最终布局阶段。
+  \item 为 RedHawk Fusion 做好设置，并用 \cmd{analyze\_rail -voltage\_drop} 执行静态或动态压降分析，例如：
+\begin{lstlisting}
+icc2_shell> source redhawk_setup.tcl
+icc2_shell> analyze_rail -voltage_drop static -nets {VDD VSS}
+\end{lstlisting}
+        更多信息见「执行压降分析」。
+  \item 将 \appopt{place.coarse.ir\_drop\_aware} 设为 \cmd{true}，以启用 IR-drop-aware 布局。
+  \item （可选）按「控制 IR-Drop-Aware 布局」指定额外设置。
+  \item 用 \cmd{place\_opt -from final\_place} 重新运行最终布局阶段。
+\end{enumerate}
+
+\subsubsection{在 place\_opt 期间执行并发时钟与数据优化}
+\subsubsection*{Performing Concurrent Clock and Data Optimization During the place\_opt Command}
+
+在数据通路优化中应用 useful skew 技术，利用正松弛并调整寄存器的时钟到达时间以改善时序 QoR，称为并发时钟与数据（concurrent clock and data，CCD）优化。
+
+默认情况下，工具在 \cmd{place\_opt} 的最终优化阶段执行 CCD。可通过将 \appopt{place\_opt.flow.enable\_ccd} 设为 \cmd{false} 来禁用。
+
+\cmd{place\_opt} 期间导出的时钟 latency 调整以 clock-latency offset 形式通过 \cmd{set\_clock\_latency -offset} 存储，并以 clock-balance-point-delay offset 形式通过 \cmd{set\_clock\_balance\_point -offset} 存储。可用 \cmd{write\_script -format icc2} 查看这些 clock-latency offset（在输出中查找 \cmd{set\_clock\_latency -offset}）。\cmd{write\_sdc} 生成的 SDC 不会捕获这些 offset。可用 \cmd{report\_clock\_balance\_point} 报告 clock-balance-point-delay offset。
+
+要为 \cmd{place\_opt} 期间的 CCD 设置 block，执行下列步骤：
+\begin{enumerate}
+  \item 确保为 \cmd{clock\_opt} 设为 active 的 scenario，对 \cmd{place\_opt} 也保持 active。
+  \item 通过下列两种设置之一，指定工具在 \cmd{place\_opt} 期间构建临时时钟树并使用传播时钟：
+\begin{lstlisting}
+icc2_shell> set_app_options -name place_opt.flow.trial_clock_tree \
+     -value true
+\end{lstlisting}
+\begin{lstlisting}
+icc2_shell> set_app_options -name place_opt.flow.optimize_icgs \
+     -value true
+\end{lstlisting}
+        或者，工具可用理想时钟做 useful skew 计算；但必须为所有 clock-gating 单元与时序单元（含 macro）的时钟引脚指定准确的理想时钟 latency。
+\end{enumerate}
+
+可通过下列可选步骤改变 \cmd{place\_opt} 期间 CCD 的默认行为：
+\begin{enumerate}
+  \item （可选）限制 CCD 的 latency 调整值，见「限制 Latency 调整值」。
+  \item （可选）控制边界寄存器的 latency 调整，见「排除边界路径」。
+  \item （可选）在 CCD 中忽略特定 path group，见「排除特定 Path Group」。
+  \item （可选）在 CCD 中忽略特定 scenario，见「排除特定 Scenario」。
+  \item （可选）在 CCD 中忽略特定 sink，见「排除特定 Sink」。
+  \item （可选）分析 CCD 效果，见「报告并发时钟与数据时序」。
+  \item （可选）对带内部延时的 macro 导出自动零平衡点（automatic zero balance point）。
+  \item （可选）将 latch 与 discrete clock gate 按相同 offset 一起 skew，见「Skewing Latch and Discrete Clock Gates」。
+\end{enumerate}
+
+% ------------------------------------------------------------
+\subsection{使用 Design Compiler 工具的物理引导}
+\subsubsection*{Using Physical Guidance From the Design Compiler Tool}
+
+使用 \cmd{place\_opt} 执行布局与优化时，可将 Design Compiler Graphical 工具的 Synopsys physical guidance 信息作为起点。
+
+使用 Design Compiler Graphical 布局的好处包括：
+\begin{itemize}
+  \item 缩短布局步骤的运行时间；
+  \item 改善 Design Compiler Graphical 与 IC Compiler II 之间的相关性。
+\end{itemize}
+
+要从 Design Compiler Graphical 传递设计，使用 Verilog 格式的门级网表以及约束信息。
+
+为保持一致性并改善相关性，必须：
+\begin{itemize}
+  \item 在两个工具中使用相同的逻辑约束（含时序与 UPF 信息）。\\
+        但须将 Design Compiler 的 scenario 约束转换为 IC Compiler II 支持的 mode、corner 与 scenario 格式。
+  \item 在 IC Compiler II 中使用 Design Compiler Graphical 布局，并在两个工具中使用相同的 floorplan 与物理约束。\\
+        不过，可提供 Design Compiler Graphical 当前不支持、但 IC Compiler II 物理实现所需的额外 floorplan 信息。
+\end{itemize}
+
+要从 Design Compiler Graphical 传递物理信息（布局、floorplan 与物理约束），执行下列任务：
+\begin{itemize}
+  \item 在 Design Compiler Graphical 中用 \cmd{write\_def} 生成 DEF 文件，并在 IC Compiler II 中用
+\begin{lstlisting}
+read_def -add_def_only_objects {cells} -convert_sites
+\end{lstlisting}
+        读入。\\
+        该 DEF 包含：
+        \begin{itemize}
+          \item Die area、site rows 与 tracks
+          \item Port 的位置与形状
+          \item Macro、标准单元与 physical-only 单元的位置
+          \item Route guide 与预布线 net
+          \item Placement blockage
+        \end{itemize}
+  \item 创建 Tcl 文件，包含 DEF 未捕获的物理约束，并在 IC Compiler II 中应用到设计。\\
+        DEF 未捕获的物理约束包括：
+        \begin{itemize}
+          \item Voltage area 定义
+          \item Layer 约束
+          \item 带利用率的特殊 route guide
+          \item 带 blocked layers 的特殊 blockage
+        \end{itemize}
+\end{itemize}
+
+要在 IC Compiler II 中使用 Synopsys physical guidance，在运行 \cmd{place\_opt} 之前设置：
+\begin{lstlisting}
+icc2_shell> set_app_options -name place_opt.flow.do_spg -value true
+\end{lstlisting}
+
+下列示例脚本展示如何将 Synopsys physical guidance 与 \cmd{place\_opt} 配合使用：
+\begin{lstlisting}
+# Read in the netlist
+read_verilog design_spg.v
+
+# Apply the timing constraints
+source timing_const.tcl
+
+# Apply the UPF constraints
+load_upf design.upf
+
+# Apply the DEF file generated from the Design Compiler Graphical tool
+read_def -add_def_only_objects {cells} -convert_sites design_dcg.def
+
+# Apply the placement constraints not supported by DEF
+source placement_const.tcl
+
+# Enable the Synopsys placement guidance flow
+set_app_options -name place_opt.flow.do_spg -value true
+
+# Perform placement and optimization
+place_opt
+\end{lstlisting}
+
+更多信息见 \textit{Design Compiler User Guide} 中的 Synopsys physical guidance。
+
+% ------------------------------------------------------------
+\subsection{执行多比特寄存器优化}
+\subsubsection*{Performing Multibit Register Optimization}
+
+IC Compiler II 可将单比特寄存器或较小的多比特寄存器组合（bank），并替换为等效的更大多比特寄存器。例如，可将八个 1-bit 寄存器或四个 2-bit 寄存器 bank 组合，替换为一个 8-bit 寄存器 bank 或两个 4-bit 寄存器 bank。工具仅在单比特寄存器具有相同时序约束时才合并它们，并将时序约束复制到结果多比特寄存器。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 25：Replacing Multiple Single-Bit Register Cells With a Multibit Register Cell）}\\[0.3em]
+\small 请参阅原版 PDF 插图；可将截图放入 \texttt{figures/} 目录后用 \texttt{\textbackslash includegraphics} 替换。
+\vspace{1.5cm}}}
+\caption{用多比特寄存器单元替换多个单比特寄存器单元}
+\label{fig:multibit-replace}
+\end{figure}
+
+用多比特寄存器替换单比特寄存器可减少：
+\begin{itemize}
+  \item 面积（因共享晶体管与优化的晶体管级版图）；
+  \item 时钟树总网线长度；
+  \item 时钟树 buffer 数量与时钟树功耗。
+\end{itemize}
+
+若能改善总负松弛（total negative slack），工具也可将大多比特寄存器拆分（debank）为较小的多比特寄存器或单比特寄存器。
+
+某些逻辑库具有混合驱动强度（mixed-drive-strength）的多比特寄存器，部分 bit 驱动强度高于其他 bit。对此类单元，若违例路径经过较低驱动强度的 bit，工具可对混合驱动强度多比特单元重新布线（rewire），使违例路径经过较高驱动强度的 bit。
+
+以下主题说明如何执行多比特寄存器优化：
+\begin{itemize}
+  \item 执行集成多比特寄存器优化
+  \item 使用离散命令执行多比特寄存器优化
+  \item 对多比特保持寄存器（retention registers）做 banking
+\end{itemize}
+
+\subsubsection{执行集成多比特寄存器优化}
+\subsubsection*{Performing Integrated Multibit Register Optimization}
+
+要在 \cmd{place\_opt} 期间执行多比特寄存器优化：
+\begin{enumerate}
+  \item 将 \appopt{place\_opt.flow.enable\_multibit\_banking} 设为 \cmd{true}，启用多比特寄存器 banking。
+  \item （可选）将 \appopt{place\_opt.flow.enable\_multibit\_debanking} 设为 \cmd{true}，启用 debanking。
+  \item （可选）将 \appopt{multibit.banking.across\_equivalent\_icg} 设为 \cmd{true}，允许对由等效 integrated-clock-gating（ICG）单元驱动的寄存器做 banking。\\
+        默认情况下，工具仅对由同一时钟 net 驱动的寄存器做 banking。启用后，工具会对等效 clock-gating 单元驱动的寄存器做 banking，并合并这些 clock-gating 单元。但这样做可能丢失施加在连接至 clock-gating 单元的 net 上的非默认布线规则。因此优化后请检查并重新应用这些规则。
+  \item （可选）将 \appopt{place\_opt.flow.enable\_multibit\_rewiring} 设为 \cmd{true}，启用多比特寄存器 rewiring。
+  \item （可选）用 \cmd{set\_multibit\_options} 指定 banking 设置。例如，将 \cmd{reg[1]} 排除在多比特优化之外：
+\begin{lstlisting}
+icc2_shell> set_multibit_options -exclude [get_cells "reg[1]"]
+\end{lstlisting}
+  \item （可选）按表~\ref{tab:multibit-appopt} 控制 banking 与 debanking。
+  \item 用 \cmd{place\_opt} 执行布局与优化。
+  \item 用 \cmd{report\_multibit} 报告多比特组件。
+\end{enumerate}
+
+\begin{table}[htbp]
+\centering
+\caption{控制多比特寄存器 Banking 与 Debanking 的应用选项}
+\label{tab:multibit-appopt}
+\begin{tabularx}{\textwidth}{@{}X X@{}}
+\toprule
+\textbf{目的} & \textbf{将下列应用选项设为 true} \\
+\midrule
+Banking 时忽略未包含在 SCANDEF 信息中的 scan flip-flop
+  & \appopt{multibit.banking.enable\_strict\_scan\_check} \\
+Banking 时考虑带多个 scan-in 引脚与内部 scan-in 引脚的多比特寄存器库单元
+  & \appopt{multibit.banking.lcs\_consider\_multi\_si\_cells} \\
+Banking 与 debanking 时忽略用户指定的 size-only 单元
+  & \appopt{multibit.common.ignore\_sizeonly\_cells} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsubsection{使用离散命令执行多比特寄存器优化}
+\subsubsection*{Performing Multibit Register Optimization Using Discrete Commands}
+
+可用下列离散步骤执行多比特 banking：
+\begin{enumerate}
+  \item 用 \cmd{create\_placement} 执行初始布局。
+  \item （可选）用 \cmd{set\_multibit\_options} 指定 banking 设置。
+  \item 用 \cmd{identify\_multibit} 识别可替换为多比特单元的单元组，见「识别多比特 Bank」。
+  \item 用 \cmd{place\_opt -from initial\_drc} 优化设计。
+  \item （可选）用 \cmd{report\_multibit} 报告 banking 信息。
+  \item （可选）若 banking 未改善 QoR，用 \cmd{split\_multibit} 将特定多比特 bank 拆分为单独寄存器或更小的多比特 bank，见「拆分多比特 Bank」。
+\end{enumerate}
+
+\paragraph{识别多比特 Bank}
+\paragraph*{Identifying Multibit Banks}
+
+要用 \cmd{identify\_multibit} 识别可替换为多比特单元的寄存器、isolation cell 或 level-shifter 组，必须指定：
+\begin{itemize}
+  \item 如何应用 banking 信息，任选其一：
+        \begin{itemize}
+          \item 用 \opt{-apply} 让工具将 banking 信息应用到设计；
+          \item 用 \opt{-output\_file} 生成包含 \cmd{create\_multibit} 命令的输出文件，以便手动应用。\\
+                可查看、必要时编辑该输出，再用 \cmd{source} 应用到设计。
+        \end{itemize}
+  \item 要 bank 的单元类型，任选其一：
+        \begin{itemize}
+          \item 用 \opt{-register} 识别可 bank 的寄存器组；
+          \item 用 \opt{-mv\_cell} 识别可 bank 的 isolation 或 level-shifter 组。
+        \end{itemize}
+\end{itemize}
+
+使用 \opt{-register} banking 寄存器时，可选地：
+\begin{itemize}
+  \item 用 \opt{-input\_map\_file} 指定输入映射文件，控制单比特到多比特 bank 的映射。该文件包含哪些多比特寄存器 bank 替换哪些单比特寄存器，例如：
+\begin{lstlisting}
+reg_group_1 {REGX1 REGX2 REGX4}
+2 {1 MREG2}
+4 {1 MREG4}
+6 {1 MREG2}{1 MREG4}
+\end{lstlisting}
+        该映射文件包含名为 \cmd{reg\_group\_1} 的功能组，说明如何将参考单元类型为 REGX1、REGX2、REGX4 的单比特寄存器组合为多比特寄存器：
+        \begin{itemize}
+          \item 第一行：两个单比特寄存器可组合成一个由一个 MREG2 参考单元构成的寄存器 bank；
+          \item 第二行：四个单比特寄存器可组合成一个由一个 MREG4 参考单元构成的寄存器 bank；
+          \item 第三行：六个单比特寄存器可组合成由一个 MREG2 与一个 MREG4 构成的寄存器 bank。
+        \end{itemize}
+  \item 用 \opt{-slack\_threshold} 按松弛排除寄存器。松弛小于指定阈值的寄存器被忽略。默认考虑所有寄存器。
+\end{itemize}
+
+此外，可选地通过下列方式控制被 bank 的单元：
+\begin{itemize}
+  \item 用 \opt{-cells} 指定要考虑的实例列表（使用后不考虑其他单元）；
+  \item 用 \opt{-exclude\_instance} 指定要排除的实例列表；
+  \item 用 \opt{-exclude\_library\_cells} 指定要排除其全部实例的库单元列表。
+\end{itemize}
+
+默认情况下，\cmd{identify\_multibit} 执行 DFT 优化，重新划分 scan chain，使由同一时钟驱动器或 gating 单元驱动的寄存器进入同一 scan chain，从而增加可组合成多比特寄存器 bank 的单比特寄存器数量。若不希望重新划分 scan chain，对 \cmd{identify\_multibit} 使用 \opt{-no\_dft\_opt}。
+
+\paragraph{拆分多比特 Bank}
+\paragraph*{Splitting Multibit Banks}
+
+为改善局部拥塞或路径松弛，可用 \cmd{split\_multibit} 将多比特 bank 拆分为更小的多比特 bank 或单比特单元。默认情况下，该命令拆分负松弛时序路径上的所有多比特单元。
+
+要拆分：
+\begin{itemize}
+  \item 特定单元：指定单元实例名。可用 \opt{-lib\_cells} 指定拆分后使用的较小单元的参考名。\\
+        下例将名为 \cmd{reg\_gr0} 的四比特寄存器 bank 拆分为两个两比特多比特 bank：
+\begin{lstlisting}
+icc2_shell> split_multibit reg_gr0 -lib_cells {lib1/MREG2 lib1/MREG2}
+\end{lstlisting}
+  \item 松弛小于特定值的路径上的多比特单元：使用 \opt{-slack\_threshold}。\\
+        下例拆分松弛差于 $-1$ 的路径上的多比特单元：
+\begin{lstlisting}
+icc2_shell> split_multibit -slack_threshold -1
+\end{lstlisting}
+  \item 特定时序 path group 中的多比特单元：使用 \opt{-path\_groups}。\\
+        使用该选项时，工具拆分指定 path group 中负松弛路径上的多比特单元。可与 \opt{-slack\_threshold} 联用为该 path group 指定松弛阈值。\\
+        下例拆分 path group CLKA 中松弛差于 $-0.5$ 的路径上的多比特单元：
+\begin{lstlisting}
+icc2_shell> split_multibit -path_groups CLKA \
+   -slack_threshold -0.5
+\end{lstlisting}
+\end{itemize}
+
+还可进一步控制拆分：
+\begin{itemize}
+  \item 用 \opt{-exclude\_instance} 排除特定单元；
+  \item 用 \opt{-cells} 仅考虑特定单元。
+\end{itemize}
+
+\cmd{split\_multibit} 仅拆分由 \cmd{create\_multibit} 或 \cmd{identify\_multibit} 创建的多比特单元。
+
+\subsubsection{对多比特保持寄存器做 Banking}
+\subsubsection*{Banking Multibit Retention Registers}
+
+工具可将单比特保持寄存器组合为多比特保持寄存器，若满足：
+\begin{itemize}
+  \item 单比特保持寄存器关联同一 retention strategy；
+  \item 其 retention 引脚具有相同驱动器；
+  \item 单元库中有匹配的多比特保持寄存器；
+  \item 该多比特保持寄存器的库单元已通过 \cmd{map\_retention\_cell -lib\_cells} 指定为该 retention strategy 的库单元。
+\end{itemize}
+
+工具可拆分多比特保持寄存器，若：
+\begin{itemize}
+  \item 单元库中有匹配的单比特保持寄存器；
+  \item 这些单比特保持寄存器的库单元已通过 \cmd{map\_retention\_cell -lib\_cells} 指定为该 retention strategy 要使用的库单元。
+\end{itemize}
+
+\begin{noteBox}
+若使用 \cmd{identify\_multibit} 识别多比特保持寄存器，请使用 \opt{-register}，而非 \opt{-mv\_cell}。
+\end{noteBox}
+
+% ------------------------------------------------------------
+\subsection{执行 Magnet Placement}
+\subsubsection*{Performing Magnet Placement}
+
+为改善复杂 floorplan 的拥塞或改善设计时序，可使用 magnet placement：将固定对象指定为磁体（magnet），并让工具将连接到该磁体对象的所有标准单元靠近其放置。磁体对象可为固定 macro 单元、固定 macro 的引脚，或 I/O port。
+
+为获得最佳结果，应在标准单元布局之前执行 magnet placement。
+
+执行 magnet placement 时，使用 \cmd{magnet\_placement} 命令，并指定磁体及所需特殊功能的选项。表~\ref{tab:magnet-opts} 列出 \cmd{magnet\_placement} 选项。
+
+\begin{table}[htbp]
+\centering
+\caption{\cmd{magnet\_placement} 命令选项}
+\label{tab:magnet-opts}
+\begin{tabularx}{\textwidth}{@{}X l@{}}
+\toprule
+\textbf{目的} & \textbf{使用该选项} \\
+\midrule
+指定要拉向磁体对象的单元 & \opt{-cells cell\_list} \\
+允许用 \opt{-cells} 指定层次单元，并说明如何处理这些层次单元
+  & \opt{-hierarchy\_mode default\textbar block\textbar all} \\
+允许移动标记为 fixed 的单元 & \opt{-move\_fixed} \\
+允许移动标记为 legalize-only 的单元 & \opt{-move\_legalize\_only} \\
+Magnet placement 后将移动过的单元标记为 fixed 或 legalize-only
+  & \opt{-mark\_fixed} / \opt{-mark\_legalize\_only} \\
+指定距磁体的逻辑级数，在该范围内考虑 magnet placement
+  & \opt{-logical\_levels number} \\
+确定逻辑级数时排除 buffer 与 inverter & \opt{-exclude\_buffers} \\
+查找要拉取的单元时，在时序单元输入处停止路径追踪
+  & \opt{-stop\_by\_sequential\_cells} \\
+查找要拉取的单元时，在时序单元输出处停止路径追踪
+  & \opt{-stop\_on\_sequential\_cells} \\
+查找要拉取的单元时，在指定 pin、port 或单元之外停止路径追踪
+  & \opt{-stop\_points} \\
+防止将单元放在 soft blockage 上（默认仅避开 hard blockage）
+  & \opt{-avoid\_soft\_blockage} \\
+磁体为多个 port 或长 port 时，指定如何放置单元
+  & \opt{-multiple\_long\_port\_mode auto\textbar nearby} \\
+仅报告将被拉向磁体的单元，但不实际拉取
+  & \opt{-only\_report\_magnet\_cells} \\
+创建正在被拉向磁体的单元集合 & \opt{-get\_collection} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+下列示例使用图~\ref{fig:magnet-datapath} 所示数据通路。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.2cm}
+\textit{（原书 Figure 26：Example of Pulling Cells in a Contiguous Data Path）}
+\vspace{1.2cm}}}
+\caption{在连续数据通路中拉取单元的示例}
+\label{fig:magnet-datapath}
+\end{figure}
+
+下列命令将所有单元 C1 至 C8 拉向磁体对象 C0：
+\begin{lstlisting}
+icc2_shell> magnet_placement C0
+\end{lstlisting}
+
+下列命令将 C6、C7、C8 拉向磁体对象 C2：
+\begin{lstlisting}
+icc2_shell> magnet_placement C2 -cells {C6 C7 C8}
+\end{lstlisting}
+
+尽管 C3、C4、C5 形成连续数据通路，但它们与 C0 隔离，因此下列命令不会将任何单元拉向 C0：
+\begin{lstlisting}
+icc2_shell> magnet_placement C0 -cells {C3 C4 C5}
+\end{lstlisting}
+
+下列命令也不会将任何单元拉向 C0，因为 C3、C6、C8 不形成连续数据通路：
+\begin{lstlisting}
+icc2_shell> magnet_placement C0 -cells {C3 C6 C8}
+\end{lstlisting}
+
+% ------------------------------------------------------------
+\subsection{细化布局}
+\subsubsection*{Refining Placement}
+
+要细化布局并最小化拥塞，使用 \cmd{refine\_placement} 命令。默认对该命令对整个设计执行增量布局。
+\begin{itemize}
+  \item 要细化特定区域的布局，使用 \opt{-coordinates} 并指定区域坐标。
+  \item 要更改布局努力程度，使用 \opt{-effort}，取值为 \cmd{low}、\cmd{medium} 或 \cmd{high}；默认为 \cmd{medium}。
+  \item 要更改最小化拥塞的努力程度，使用 \opt{-congestion\_effort}，取值为 \cmd{low}、\cmd{medium} 或 \cmd{high}；默认为 \cmd{medium}。
+  \item 要控制对现有布局的扰动程度，使用 \opt{-perturbation\_level}，取值为 \cmd{min}、\cmd{medium}、\cmd{high} 或 \cmd{max}；默认为 \cmd{medium}。
+\end{itemize}
+
+% ------------------------------------------------------------
+\subsection{对多电压 Block 执行布局与优化}
+\subsubsection*{Performing Placement and Optimization on Multivoltage Blocks}
+
+布局与优化会自动考虑多电压约束，例如 voltage area。
+
+布局期间，工具会：
+\begin{itemize}
+  \item 将单元放置在其关联的 voltage area 或 voltage area shape 内；
+  \item 将 level shifter 与 isolation cell 靠近 voltage area 边界放置。
+\end{itemize}
+
+优化期间插入 buffer 时，工具会：
+\begin{enumerate}
+  \item 考虑 net 的驱动器与负载的相关供电，并用下列之一对电源状态做动态分析：
+        \begin{itemize}
+          \item 用 \cmd{create\_pst} 创建的 UPF power state table；
+          \item 用 \cmd{add\_power\_state} 创建的 UPF power state groups。
+        \end{itemize}
+  \item 根据电源状态与被缓冲 voltage area 中的可用供电，选择不会引入新的多电压违例的缓冲供电。优先选用单轨（single-rail）buffer 而非双轨（dual-rail）buffer，以节省功耗与面积并改善可布线性。
+\end{enumerate}
+
+要了解特定 net 如何或是否被缓冲，使用 \cmd{check\_bufferability} 命令，见「分析 Net 的可缓冲性」。
+
+% ------------------------------------------------------------
+\subsection{重建缓冲树}
+\subsubsection*{Rebuilding Buffer Trees}
+
+在 \cmd{place\_opt} 的 \cmd{initial\_drc} 阶段，工具移除已有缓冲树并执行高扇出综合。运行 \cmd{place\_opt} 之后，要用 \cmd{create\_buffer\_trees} 按特定需求重建特定缓冲树。
+
+默认情况下，\cmd{create\_buffer\_trees} 会：
+\begin{itemize}
+  \item 为所有高扇出 net 重建缓冲树。\\
+        要重建特定高扇出 net，使用 \opt{-from}。
+  \item 在重建前移除已有缓冲树。\\
+        要保留已有 buffer 并增量构建缓冲树，使用 \opt{-incremental}。
+  \item 使用虚拟布线拓扑与提取构建缓冲树。\\
+        要基于全局布线构建缓冲树，使用 \opt{-global\_route\_based}。
+  \item 不合法化新添加的单元。\\
+        要合法化添加的单元，在 \cmd{create\_buffer\_trees} 之后运行 \cmd{legalize\_placement}。
+\end{itemize}
+
+下例仅为 \cmd{n33} net 重建缓冲树，且仅使用 \cmd{buf4x} 与 \cmd{buf8x} 类型 buffer：
+\begin{lstlisting}
+icc2_shell> set_lib_cell_purpose -include none {tech_lib/*}
+icc2_shell> set_lib_cell_purpose \
+   -include optimization {tech_lib/buf4x tech_lib/buf8x}
+icc2_shell> create_buffer_trees -from n33 -global_route_based
+\end{lstlisting}
+
+\begin{noteBox}
+\cmd{create\_buffer\_trees} 仅应在设计流程的布线前（preroute）阶段使用。
+\end{noteBox}
+
+% ------------------------------------------------------------
+\subsection{添加与移除 Tie Cell}
+\subsubsection*{Adding and Removing Tie Cells}
+
+运行 \cmd{place\_opt} 或 \cmd{clock\_opt} 时，工具可在优化期间添加 tie cell。此外，可用 \cmd{add\_tie\_cells} 为特定 pin 或 port 添加 tie cell。\cmd{place\_opt}、\cmd{clock\_opt} 或 \cmd{add\_tie\_cells} 首次向 block 添加 tie cell 时，工具会优化 tie cell 连接：移除所有已有 tie cell，并添加经最优聚类的 tie cell。
+
+要移除特定 tie cell，使用 \cmd{remove\_tie\_cells}。默认移除当前 block 中的所有 tie cell。要移除特定实例或某库单元的全部实例，使用 \opt{-objects}。
+
+% ============================================================
+\section{识别优化期间无法修复的问题}
+\subsection*{Identifying Issues That Cannot Be Fixed During Optimization}
+
+IC Compiler II 提供下列能力，用于识别优化期间无法修复的问题：
+\begin{itemize}
+  \item 分析 Net 的可缓冲性
+  \item 分析无法修复的违例
+\end{itemize}
+
+\subsection{分析 Net 的可缓冲性}
+\subsubsection*{Analyzing the Bufferability of Nets}
+
+要分析当前 block 中的 net 是否可被缓冲，或报告为何无法缓冲，使用 \cmd{check\_bufferability}。该命令检查是否存在：
+\begin{itemize}
+  \item 在指定 voltage area 中可用于缓冲该 net 的 supply net；
+  \item 可用于缓冲该 net 的合适库单元；
+  \item 阻止缓冲的 net 设置，例如 ideal-network 或 don’t-touch 约束。
+\end{itemize}
+
+使用该命令时必须指定：
+\begin{itemize}
+  \item 要分析的 net，任选其一：
+        \begin{itemize}
+          \item 用 \opt{-nets} 指定 net 名；
+          \item 用 \opt{-driver} 与 \opt{-loads} 指定驱动器与负载，并用 \opt{-hierarchy} 指定进行分析的逻辑层次。
+        \end{itemize}
+  \item 用 \opt{-voltage\_area} 指定分析可缓冲性的 voltage area。
+\end{itemize}
+
+例如，要分析名为 \cmd{n34} 的 net 在 PD1 电源域中是否可添加 buffer：
+\begin{lstlisting}
+icc2_shell> check_bufferability -nets n34 -voltage_area PD1
+Information: Can insert dual rail buffers (8 lib_cells) and inverters (6
+ lib_cells) with supply nets (power: VDDSW, ground: VSS). (MV-454)
+\end{lstlisting}
+
+要分析在 PD\_TOP voltage area 的 top 层次中，是否可在驱动引脚 \cmd{top\_reg\_1\_/Q} 与负载引脚 \cmd{top\_U1\_9/B} 之间添加 buffer：
+\begin{lstlisting}
+icc2_shell> check_bufferability -driver top_reg_1_/Q \
+   -loads top_U1_9/B -hierarchy / -voltage_area PD_TOP
+Information: Cannot insert buffers or inverters, because required supply
+ nets are not available. (MV-459)
+\end{lstlisting}
+
+要获取关于 net 可缓冲性的更多信息，使用 \opt{-verbose}。
+
+\subsection{分析无法修复的违例}
+\subsubsection*{Analyzing Violations That Cannot Be Fixed}
+
+要分析 block 并生成包含无法修复违例信息的报告，使用 \cmd{analyze\_design\_violations}。报告先给出分析摘要，再按降序列出违例明细。违例按无法修复的原因分类。
+
+使用该命令时，必须用 \opt{-type} 指定要分析的违例类型：
+\begin{itemize}
+  \item \cmd{max\_trans}：分析最大 transition 违例
+  \item \cmd{setup}：分析 setup 违例
+  \item \cmd{hold}：分析 hold 违例
+  \item \cmd{static\_noise}：分析静态噪声违例
+  \item \cmd{only\_lib}：分析影响优化的库设置
+\end{itemize}
+
+此外，可指定：
+\begin{itemize}
+  \item 用 \opt{-fanout} 指定识别高扇出 net 的阈值。默认将扇出大于 30 的 net 视为高扇出 net。
+  \item 用 \opt{-slack} 指定识别小的时序违例的松弛阈值。默认将小于 5~ps 的松弛违例视为小违例。
+  \item 用 \opt{-drc\_nets} 指定用于最大 transition 分析的 net。默认分析所有 net。
+  \item 用 \opt{-endpoints} 指定 setup/hold 分析的端点。默认分析所有端点。
+  \item 用 \opt{-output} 指定输出文件名。工具会在你指定的文件名后添加 \texttt{.txt} 扩展名。默认生成名为 \texttt{analyze\_design\_violations.txt} 的文件。
+\end{itemize}
+
+% ============================================================
+\section{分析布局}
+\subsection*{Analyzing the Placement}
+
+IC Compiler II 提供下列基于 GUI 与报告的能力，用于分析布局：
+\begin{itemize}
+  \item 报告利用率（Utilization）
+  \item 报告布局 QoR
+  \item 查询与更改布局状态
+  \item 在 GUI 中分析布局
+\end{itemize}
+
+\subsection{报告利用率}
+\subsubsection*{Reporting Utilization}
+
+Block 的利用率按下列公式计算，其中 demand 为对象占用的总面积，capacity 为总可用面积：
+\[
+\text{Utilization} = \text{Demand} / \text{Capacity}
+\]
+
+报告利用率的步骤：
+\begin{enumerate}
+  \item （可选）用 \cmd{create\_utilization\_configuration} 创建利用率报告配置。\\
+        下例为当前 block 创建名为 \cmd{config1} 的配置，用 core area 计算 capacity，并排除 hard 与 soft placement blockage：
+\begin{lstlisting}
+icc2_shell> create_utilization_configuration -scope block config1 \
+   -capacity core_area -exclude {hard_blockages soft_blockages}
+\end{lstlisting}
+        要用 \cmd{remove\_utilization\_configurations} 移除利用率配置。
+  \item 用 \cmd{report\_utilization} 报告利用率。\\
+        用 \opt{-config} 与 \opt{-scope} 指定配置及其存储位置。\opt{-scope} 的有效值为 \cmd{tech}、\cmd{lib} 与 \cmd{block}。若与 \opt{-config} 联用时未指定 \opt{-scope}，工具依次在当前 block、设计库、逻辑库中搜索该配置。\\
+        要用 \opt{-of\_objects} 报告特定对象的利用率，并指定一个或多个 block、voltage area、site array 或 bound。所有对象必须为同一类型。
+\end{enumerate}
+
+\subsection{报告布局 QoR}
+\subsubsection*{Reporting the Placement QoR}
+
+\cmd{report\_placement} 显示当前 block 的布局 QoR 信息。默认报告 block 中所有 net 的总半周长包围盒（half-perimeter boundary box）线长，以及任何布局违例，例如：
+\begin{lstlisting}
+icc2_shell> report_placement
+...
+...
+
+  Wire length report (all)
+  ==================
+  wire length in design leon3mp: 12386597.894 microns.
+
+  Physical hierarchy violations report
+  ====================================
+  Violations in design leon3mp:
+     0 cells have placement violation.
+\end{lstlisting}
+
+要用 \opt{-hierarchical} 同时报告子 block 与当前 block。
+
+要用 \opt{-wirelength} 及相应关键字，将线长计算限制为特定类型的 net：
+\begin{itemize}
+  \item \opt{-wirelength interface}：仅包含跨越物理边界的 net；
+  \item \opt{-wirelength hard\_macro}：仅包含连接到 hard macro 的 net；
+  \item \opt{-wirelength IO}：仅包含连接到 I/O pin 或 pad 的 net；
+  \item \opt{-wirelength none}：抑制线长报告。
+\end{itemize}
+
+要用 \opt{-physical\_hierarchy\_violations} 及相应关键字，限制报告的布局违例类型：
+\begin{itemize}
+  \item \opt{-physical\_hierarchy\_violations internal}：仅报告放置在当前 block 布局区域之外的单元；
+  \item \opt{-physical\_hierarchy\_violations external}：仅报告与子 block 重叠的单元；
+  \item \opt{-physical\_hierarchy\_violations none}：抑制布局违例报告。
+\end{itemize}
+
+还可报告下列布局度量：
+\begin{itemize}
+  \item \textbf{Swimming pool area}\\
+        Swimming pool 是由子 block、hard macro 与 placement blockage 围成的区域。此类区域可能使布局或布线难以成功，应覆盖 placement blockage 或予以消除。
+        \begin{itemize}
+          \item 用 \opt{-swimming\_pool\_area} 报告当前 block 中的总 swimming pool 面积；
+          \item 用 \opt{-maximum\_swimming\_pool\_area} 报告面积小于特定阈值的 swimming pool 区域。
+        \end{itemize}
+  \item \textbf{Thin channel area}\\
+        Thin channel 是当前 block 的子 block（无论是 hard macro 还是物理层次）之间的狭窄区域。此类通道可能使布局或布线难以成功，应覆盖 placement blockage 或加宽。
+        \begin{itemize}
+          \item 用 \opt{-thin\_channel\_area} 报告当前 block 中的总 thin channel 面积；
+          \item 用 \opt{-maximum\_thin\_channel\_width} 或 \opt{-maximum\_thin\_channel\_height} 报告宽度或高度小于特定阈值的 thin channel。
+        \end{itemize}
+  \item \textbf{Hard macro 上方布线的线长}\\
+        用 \opt{-hard\_macro\_route\_over} 报告当前 block 中在 hard macro 上方布线的 net 线长。该选项报告每个存在 over-macro 布线的 hard macro 的水平与垂直线长，以及 over-macro 布线的总线长。
+  \item \textbf{Hard macro 重叠数量}\\
+        用 \opt{-hard\_macro\_overlap} 报告当前 block 中重叠 hard macro 的总数。
+\end{itemize}
+
+\subsection{查询与更改布局状态}
+\subsubsection*{Querying and Changing the Placement Status}
+
+单元实例的 \cmd{status} 属性指示其当前布局状态。表~\ref{tab:place-status} 列出可能取值。
+
+\begin{table}[htbp]
+\centering
+\caption{布局状态关键字}
+\label{tab:place-status}
+\begin{tabularx}{\textwidth}{@{}l X l@{}}
+\toprule
+\textbf{布局状态} & \textbf{说明} & \textbf{DEF 语法} \\
+\midrule
+\cmd{unplaced} & 单元实例尚未布局。
+  注：要用 \cmd{reset\_placement} 将所有已布局单元恢复为 unplaced。该命令仅修改状态为 \cmd{placed} 的单元；不修改 \cmd{fixed} 或 \cmd{locked} 的单元。
+  & \texttt{+UNPLACED} \\
+\cmd{placed} & 单元实例已布局，但后续操作仍可移动。 & \texttt{+PLACED} \\
+\cmd{fixed} & 单元实例已布局，后续操作可调整尺寸但不可移动。
+  注：要防止这些单元被 sizing，须设置 \cmd{dont\_touch} 属性，见「优化期间保留单元与 Net」。
+  & \texttt{+FIXED} \\
+\cmd{legalize\_only} & 单元实例已布局，仅可由合法化器移动。 & N/A \\
+\cmd{locked} & 单元实例已布局，不可手动或由工具移动。 & \texttt{+COVER} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+要获取单元实例的布局状态，用 \cmd{get\_attribute} 查询其 \cmd{status} 属性。例如，获取名为 INST1 的单元实例：
+\begin{lstlisting}
+icc2_shell> get_attribute -objects [get_cells INST1] -name status
+\end{lstlisting}
+
+要更改单元实例的布局状态，使用 \cmd{set\_placement\_status}。例如，将 INST1 设为 \cmd{fixed}，使其在后续优化与布局中不被移动：
+\begin{lstlisting}
+icc2_shell> set_placement_status fixed [get_cells INST1]
+\end{lstlisting}
+
+\subsection{在 GUI 中分析布局}
+\subsubsection*{Analyzing the Placement in the GUI}
+
+IC Compiler II 图形用户界面（GUI）提供下列工具，用于分析与可视化布局后的结果质量：
+\begin{itemize}
+  \item \textbf{Global Route Congestion Map}：可视化布局在避免布线拥塞方面的质量。
+  \item \textbf{Cell Density Map}：识别 block 中或矩形区域内的高单元密度区。
+  \item \textbf{Pin Density Map}：识别 block 中或矩形区域内的高引脚密度区。
+\end{itemize}
+
+有关在 GUI 中使用这些分析工具的更多信息，见 \textit{IC Compiler II Graphical User Interface User Guide} 中的「Using Map and Visual Modes」。
+
+% ============================================================
+\section{分析时序}
+\subsection*{Analyzing Timing}
+
+IC Compiler II 会在需要时自动更新时序与延时估计结果。但可用 \cmd{update\_timing} 显式更新时序。
+
+可用下列命令为 block 生成时序报告：
+\begin{itemize}
+  \item \cmd{report\_timing}：报告当前 block 的最差时序路径。
+  \item \cmd{report\_qor}：显示当前 block 的 QoR 信息与统计。
+  \item \cmd{report\_constraints}：报告当前 block 的逻辑 DRC 违例。
+\end{itemize}
+
+有关生成这些报告的更多信息，见 \textit{IC Compiler II Timing Analysis User Guide} 中的「Generating Reports」。
+
+% ============================================================
+\section{分析功耗}
+\subsection*{Analyzing Power}
+
+要计算并报告 block 的功耗，使用 \cmd{report\_power}。
+
+\cmd{report\_power} 支持下列漏电功耗计算方法：
+\begin{itemize}
+  \item \textbf{Average}：基于所有状态的等权重概率。
+  \item \textbf{Unconditional}：基于 \cmd{default\_cell\_leakage\_power} 库属性或 \cmd{cell\_leakage\_power} 库单元属性。
+  \item \textbf{State-dependent}：基于单元各状态条件的加权和。计算取决于状态相关漏电库模型表征与静态概率。若状态相关漏电信息不可用，则功耗计算使用 unconditional 方法。
+\end{itemize}
+
+要为 \cmd{report\_power} 选择漏电功耗计算方法，将 \appopt{power.leakage\_mode} 设为 \cmd{average}、\cmd{unconditional} 或 \cmd{state}。要不报告漏电功耗，设为 \cmd{off}。默认为 \cmd{state}：
+\begin{lstlisting}
+icc2_shell> set_app_options -name power.leakage_mode -value average
+\end{lstlisting}
+
+要在功耗分析与报告期间使用复合电流源（CCS）接收端模型电容，将 \appopt{power.use\_ccs\_rcv\_cap} 设为 \cmd{true}。
+
+下列示例给出默认功耗报告。
+
+\begin{lstlisting}[caption={默认功耗报告}]
+...
+...
+Mode: my_mode
+Corner: bc_corner
+Scenario: bc_scenario
+Voltage: 1.160000
+Temperature: 125.000000
+Voltage unit: 1.00V
+Temperature unit: 1.00C
+Power unit: 1.00pW
+Cell Leakage Power          = 5125495.58 uW
+Power Group        Leakage Power          Total Power           (    % )
+-----------------------------------------------------------------------------
+---
+io_pad                  0.00e+00             0.00e+00           ( 0.00%)
+memory                  0.00e+00             0.00e+00           ( 0.00%)
+black_box               0.00e+00             0.00e+00           ( 0.00%)
+clock_network           3.32e+10             3.32e+01           ( 0.65%)
+register                1.62e+12             1.62e+03           ( 31.67%)
+sequential              1.16e+09             1.16e+00           ( 0.02%)
+combinational           3.47e+12             3.47e+03           ( 67.66%)
+-----------------------------------------------------------------------------
+---
+Total                   5.13e+12 pW          5.13e+03 mW
+1
+\end{lstlisting}
+
+\subsection{为报告创建功耗组}
+\subsubsection*{Creating Power Groups for Reporting}
+
+运行 \cmd{report\_power} 且未指定单元列表时，工具报告默认功耗组的功耗信息。可用 \cmd{set\_power\_group} 创建由单元实例或库单元组成的功耗组。\cmd{report\_power} 会同时报告默认与用户指定功耗组的信息。
+
+若单元属于多个功耗组，用于报告目的的归属按下列优先级确定：
+\begin{enumerate}
+  \item 用 \cmd{set\_power\_group} 为单元实例指定的功耗组；
+  \item 用 \cmd{set\_power\_group} 为其库单元指定的功耗组；
+  \item 该单元的默认功耗组。
+\end{enumerate}
+
+要用 \cmd{get\_power\_group} 获取特定单元的功耗组：
+\begin{itemize}
+  \item 用 \opt{-default} 获取其默认功耗组；
+  \item 用 \opt{-user} 获取其可能所属的用户定义功耗组；
+  \item 不带选项则获取用于报告目的的功耗组。
+\end{itemize}
+
+要用 \cmd{report\_power\_groups} 报告 block 中的所有功耗组。要用 \cmd{get\_power\_group\_objects} 获取特定功耗组中的单元集合。
+
+要用 \cmd{reset\_power\_group} 移除功耗组，或从特定功耗组中移除单元。
+
+\subsection{报告基于引脚的时钟网络功耗}
+\subsubsection*{Reporting Pin-Based Clock Network Power}
+
+\cmd{report\_power} 将时钟网络功耗作为名为 \cmd{clock\_network} 的默认功耗组的一部分进行报告。
+
+默认情况下，报告的时钟网络功耗基于单元：若单元的某一输出在时钟网络上，则该单元的功耗（含其所有输入与输出的功耗）计入时钟网络。但可通过下列应用选项，将 \cmd{report\_power} 报告的时钟网络功耗限制为仅包含时钟网络上的引脚：
+\begin{lstlisting}
+icc2_shell> set_app_options -list {power.clock_network pin_based}
+\end{lstlisting}
+
+默认为 \cmd{cell\_based}。
+
+\cmd{report\_clock\_qor -type power} 报告的功耗信息是基于引脚（pin-based）的。
+
+% ============================================================
+\section{对比 QoR 数据}
+\subsection*{Comparing QoR Data}
+
+可按下列步骤生成基于 Web 的报告，以用 QORsum 报告查看并对比 QoR 数据：
+\begin{enumerate}
+  \item （可选）用 \cmd{set\_qor\_data\_options} 配置后续步骤捕获与显示的 QoR 数据。
+        \begin{itemize}
+          \item 用 \opt{-leakage\_scenario} 与 \opt{-dynamic\_scenario} 指定设计中最关键的功耗 scenario。\\
+                工具用你指定的功耗 scenario 生成 QORsum 报告中功耗 QoR 的高层摘要。若未指定，则对漏电与动态 scenario 均使用总功耗最高的 active 功耗 scenario。\\
+                这些设置仅用于功耗 QoR 摘要；工具使用所有 active 功耗 scenario 的功耗信息来捕获并报告 QORsum 中的详细功耗信息。
+          \item 用 \opt{-clock\_name} 与 \opt{-clock\_scenario} 指定最关键的时钟名与时钟 scenario。\\
+                工具用你指定的时钟名与 scenario 生成时钟 QoR 的高层摘要。若未指定，工具识别最关键时钟并用于摘要。\\
+                这些设置仅用于时钟 QoR 摘要；工具使用所有时钟生成详细时钟 QoR 信息。
+          \item 用 \opt{-run\_name} 为 QORsum 报告中的该次运行指定标识名。\\
+                默认工具用编号命名各次运行（如 Run1、Run2）。也可用更有意义的名称。在步骤 3 用 \cmd{compare\_qor\_data} 的 \opt{-run\_names} 也可指定运行名；若这样做，工具忽略 \cmd{set\_qor\_data\_options -run\_name} 指定的名称。
+        \end{itemize}
+        下例指定漏电功耗 scenario、动态功耗 scenario、时钟 scenario 以及用于对应摘要的时钟：
+\begin{lstlisting}
+icc2_shell> set_qor_data_options \
+   -leakage_scenario S1 -dynamic_scenario S2 \
+   -clock_scenario S3 -clock_name sys_clk
+\end{lstlisting}
+
+  \item 用 \cmd{write\_qor\_data} 收集报告用的 QoR 数据。该命令捕获与时序、功耗、运行时间及其他度量相关的 QoR 数据。\\
+        可在希望捕获 QoR 数据的每个设计流程阶段多次运行 \cmd{write\_qor\_data}。用 \opt{-label} 指定值以标明捕获所处的流程阶段。\\
+        默认 \cmd{write\_qor\_data} 捕获与已布局并优化设计相关的数据。可用 \opt{-report\_group} 及五个支持值之一（\cmd{unmapped}、\cmd{mapped}、\cmd{placed}、\cmd{cts}、\cmd{routed}）按流程状态调整捕获的报告集。更细粒度控制可用 \opt{-report\_list} 显式指定要生成的每个报告。\\
+        \cmd{write\_qor\_data} 从多数常用工具报告（如 \cmd{report\_qor}、\cmd{report\_power}）向磁盘捕获标准 QoR 数据集。若有不属于命令集合的额外自定义数据要捕获，用 \cmd{capture\_qor\_data} 捕获完全自定义的 QoR 数据或 GUI 版图图像，以纳入基于 Web 的 QORsum 报告。这可用于补充 \cmd{write\_qor\_data} 捕获的标准 QoR 数据，或创建完全自定义的 QORsum 报告。相关命令包括：\cmd{define\_qor\_data\_panel}（在 QORsum 中创建新面板以查看 QoR 数据），以及 \cmd{set\_qor\_data\_metric\_properties}（自定义任意 QORsum 面板中任意度量列的属性，例如着色样式或对比数据时的着色阈值）。
+
+  \item 用 \cmd{compare\_qor\_data} 生成 QORsum 报告。\\
+        该命令取一次或多次 \cmd{write\_qor\_data} 运行捕获的数据，并创建基于 Web 的报告以查看与对比这些结果。\\
+        必须用 \opt{-run\_locations} 指定上一步各次 \cmd{write\_qor\_data} 输出的位置；每个路径对应要对比的运行结果。\\
+        可用 \opt{-run\_names} 为 QORsum 中的运行指定标识名；若这样做，工具忽略 \cmd{set\_qor\_data\_options -run\_name}。默认用编号命名（如 run1、run2）。\\
+        可用 \opt{-output} 指定输出目录；默认写入名为 \texttt{compare\_qor\_data} 的目录。要用 \opt{-force} 覆盖已有输出数据；默认不覆盖。
+
+  \item 用 \cmd{view\_qor\_data} 查看生成的 QORsum 报告。
+\end{enumerate}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.2cm}
+\textit{（原书 Figure 27：QORsum Report）}
+\vspace{1.2cm}}}
+\caption{QORsum 报告}
+\label{fig:qorsum}
+\end{figure}
+
+有关探索对比数据的更多信息，见下列主题：
+\begin{itemize}
+  \item 设置基线运行（Baseline Run）
+  \item 更改 QoR 显示样式
+  \item 排序与过滤数据
+  \item 探索详细对比数据
+\end{itemize}
+
+\subsection{设置基线运行}
+\subsubsection*{Setting Your Baseline Run}
+
+默认情况下，数据的第一行是基线运行，其他所有运行与之对比。基线运行的名称以金色高亮，标记为「golden」或基线结果。
+
+非基线单元格的着色指示相对基线的差异方向与程度：
+\begin{itemize}
+  \item 红色表示相对基线变差；绿色表示相对基线改善；
+  \item 较浅着色表示差异较小；较深着色表示差异较大。
+\end{itemize}
+
+要将光标悬停在列标题上，可查看各色阶对应的 delta 阈值。
+
+要更改基线运行，单击 \textbf{Runs} 按钮，并从 \textbf{Baseline Run} 列选择新的基线运行。
+
+\begin{seeAlsoBox}
+更改 QoR 显示样式；排序与过滤数据；探索详细对比数据。
+\end{seeAlsoBox}
+
+\subsection{更改 QoR 显示样式}
+\subsubsection*{Changing the QoR Display Style}
+
+默认情况下，对比表显示所有运行的 QoR 值。例如，某次运行的 NVE 数为 2374。
+
+在表中任意位置右键单击，可循环切换不同显示样式：
+\begin{itemize}
+  \item 相对基线的百分比 delta；
+  \item 相对基线的绝对 delta（以斜体显示）。
+\end{itemize}
+
+例如，按百分比 delta，NVE 显示为比基线少 2.7\% 的失败端点；按绝对 delta，NVE 显示为比基线少 65 个失败端点。
+
+\begin{seeAlsoBox}
+排序与过滤数据；探索详细对比数据。
+\end{seeAlsoBox}
+
+\subsection{排序与过滤数据}
+\subsubsection*{Sorting and Filtering the Data}
+
+可对运行数据排序与过滤，以揭示结果中的模式，并确定要进一步探索的参数。
+
+相关主题：
+\begin{itemize}
+  \item 排序数据
+  \item 过滤度量（Metrics）
+  \item 过滤运行（Runs）
+  \item 分析示例
+\end{itemize}
+
+\begin{seeAlsoBox}
+探索详细对比数据。
+\end{seeAlsoBox}
+
+\subsubsection{排序数据}
+\subsubsection*{Sorting the Data}
+
+单击任意列标题，按该度量排序。第一次单击升序，第二次单击降序。
+
+例如，要使最差 TNS 位于表顶、最佳 TNS 位于表底，单击 TNS 列标题；再次单击则相反。
+
+\subsubsection{过滤度量}
+\subsubsection*{Filtering Metrics}
+
+要控制表中显示哪些度量，单击 \textbf{Metrics} 按钮，并在 Metrics 对话框中相应勾选或取消勾选。
+
+例如，要仅显示 setup 时序、网表面积与单元计数，按图~\ref{fig:metrics-dialog} 选择度量。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}
+\textit{（原书 Figure 28：Metrics Dialog Box）}
+\vspace{1.0cm}}}
+\caption{Metrics 对话框}
+\label{fig:metrics-dialog}
+\end{figure}
+
+\subsubsection{过滤运行}
+\subsubsection*{Filtering Runs}
+
+要控制表中显示哪些运行，单击 \textbf{Runs} 按钮，并从 \textbf{Visible Runs (Summary)} 列相应勾选或取消勾选探索运行。
+
+例如，要仅显示前四次运行，按图~\ref{fig:choose-runs} 选择。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}
+\textit{（原书 Figure 29：Choose Baseline and Visible Runs Dialog Box）}
+\vspace{1.0cm}}}
+\caption{选择基线与可见运行对话框}
+\label{fig:choose-runs}
+\end{figure}
+
+\subsubsection{分析示例}
+\subsubsection*{Example Analysis}
+
+下例演示如何排序与过滤数据，以缩小要进一步探索的运行范围。
+
+假设打开图~\ref{fig:cmp-report} 所示对比报告，并将 \cmd{util60\_aspect1\%1\_layerM9} 运行设为基线。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}
+\textit{（原书 Figure 30：Comparison Report）}
+\vspace{1.0cm}}}
+\caption{对比报告}
+\label{fig:cmp-report}
+\end{figure}
+
+可先查看 TNS，并将数据从最佳 TNS 排到最差 TNS。注意到最佳 TNS 运行使用 M9 顶层金属，最差使用 M7，说明限制金属层对时序影响显著。
+
+随后可通过关闭 M7 运行的可见性，将分析限制为 M9 运行。在得到最佳 TNS 运行后，可按 GRCOverflow 列排序以将最差 overflow 置于顶部，从而对比拥塞。
+
+注意到较高利用率运行的拥塞高于较低利用率运行。可按图~\ref{fig:lower-util} 关闭较高利用率运行的可见性，留下数量可控、更能满足时序与拥塞目标的探索运行子集。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}
+\textit{（原书 Figure 31：Displaying Lower-Utilization Runs）}
+\vspace{1.0cm}}}
+\caption{显示较低利用率运行}
+\label{fig:lower-util}
+\end{figure}
+
+\subsection{探索详细对比数据}
+\subsubsection*{Exploring the Detailed Comparison Data}
+
+启动 QORsum 报告时，应用打开 QOR Summary 表，汇总各次运行的高层时序、功耗与拥塞度量。该视图及其他摘要视图有助于排序与过滤数据，以定位要进一步探索的运行。
+
+用摘要表识别最佳候选运行后，可用详细表获得更深洞察。摘要表给出所有运行的高层设计 QoR（如每次运行的整体设计时序 WNS、TNS、NVE），而详细表可显示设计中所有 path group 基于 path-group 的时序。详细表允许查看某一 path group 在所有运行上的时序，或一次查看最多六个运行的所有 path group 时序。所有详细表命名约定以「Details」结尾。例如，Path Type Details 表显示基于 path-type 的时序信息。
+
+默认情况下，详细表从 Focused View 开始，如图~\ref{fig:focused-view}。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}
+\textit{（原书 Figure 32：Focused View）}
+\vspace{1.0cm}}}
+\caption{Focused View}
+\label{fig:focused-view}
+\end{figure}
+
+Focused View 一次显示一个 path group。要用顶部下拉菜单更改焦点。例如，可如图~\ref{fig:focused-dd} 指定 scenario 与 path group。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}
+\textit{（原书 Figure 33：Focused View Drop-down Menu）}
+\vspace{1.0cm}}}
+\caption{Focused View 下拉菜单}
+\label{fig:focused-dd}
+\end{figure}
+
+Focused View 聚焦于所有运行的某一特定属性。也可查看较少运行的全部属性。
+
+例如，可同时查看所有 path group 以识别最差 path group。要切换到传统详细视图，单击顶部菜单的 Focused View 切换按钮，如图~\ref{fig:focused-toggle}。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}
+\textit{（原书 Figure 34：Focused View Toggle Button）}
+\vspace{1.0cm}}}
+\caption{Focused View 切换按钮}
+\label{fig:focused-toggle}
+\end{figure}
+
+要查看特定度量的详细对比数据，单击左侧面板中的某个详细视图。例如，要查看基于 path-group 的时序详情，选择 Path Group Details，如图~\ref{fig:path-group-details}。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}
+\textit{（原书 Figure 35：Path Group Details）}
+\vspace{1.0cm}}}
+\caption{Path Group Details}
+\label{fig:path-group-details}
+\end{figure}
+
+摘要表的每一行显示一次流程的结果，而详细表的每一行显示诸如 path group 名称等详细信息。各流程在每个度量下并排显示为列。例如，WNS 列组（以及每个度量的列组）显示标为 1、2、5、6、9、10 的相同六列。这些列代表各流程结果，用流程 ID 而非完整流程名，以避免列过宽。每个度量下的第一列是基线，其余五列为与之对比的测试流程。表上方有图例：金色框中的流程 ID 表示基线，蓝色框表示测试流程，后跟流程名。可单击 \textbf{Legend} 按钮展开或折叠图例。也可在单击 \textbf{Runs} 按钮打开的「Choose Baseline and Visible Runs」对话框中查看流程 ID。
+
+详细表视图一次最多可显示六个运行（基线运行，加上在 Choose Baseline and Visible Runs 对话框中选择的前五个其他运行）。要更改显示的运行：
+\begin{enumerate}
+  \item 单击 \textbf{Runs} 按钮，打开 Choose Baseline and Visible Runs 对话框。
+  \item 在 \textbf{Visible Runs (Summary)} 列中相应勾选或取消勾选运行。这会同步选中或取消选中 \textbf{Visible flows (Detailed)} 列中的那些运行。
+\end{enumerate}
+
+\subsubsection{过滤详细数据}
+\subsubsection*{Filtering the Detailed Data}
+
+详细视图提供过滤器以聚焦特定数据。某些视图有默认自动显示的过滤器。例如，下列详细视图具有默认的 scenario 与 path group 过滤器：Path Type Details、Path Group Details 与 Logic Level Details。
+
+可通过下列方式修改默认过滤器：
+\begin{itemize}
+  \item 单击过滤器名称前的 X 符号以移除过滤器；
+  \item 更改过滤器值；
+  \item 单击过滤器上除 X 符号或值字段以外的任意位置，以启用或禁用过滤器。
+\end{itemize}
+
+也可对详细数据应用自定义过滤器。创建自定义过滤器：
+\begin{enumerate}
+  \item 单击 \textbf{Filter} 按钮，显示 Add Filter 字段。
+  \item 通过定义过滤条件并选择要纳入结果的数据集来定义过滤器。\\
+        选择列与比较类型，再指定比较值。
+        \begin{itemize}
+          \item 数值比较：选择 \texttt{=}、\texttt{!=}、\texttt{<}、\texttt{<=}、\texttt{>} 或 \texttt{>=}，并在 Value 字段中指定数值。
+          \item 字符串比较：选择 \cmd{contains}，并指定字符串值。
+          \item 正则表达式比较：选择 \cmd{regexp}，并指定正则表达式。
+          \item 基于所选列可用值的过滤：选择 \cmd{enum}，Value 字段变为包含可用值的下拉菜单，再启用一个或多个显示的值。启用时，值前显示勾选标记。\\
+                要启用或禁用某值：单击或用上下箭头导航到该值使其高亮，再按 Enter 切换状态。也可在 Value 字段中输入字符串以过滤下拉菜单中的可用值。单击 X 符号可取消已选值。
+        \end{itemize}
+  \item 单击绿色勾选标记应用过滤器。
+\end{enumerate}
+
+例如，要过滤 Path Group Details 视图以仅显示 \cmd{func@cworst} scenario 中的 path group，按相应界面定义过滤器。

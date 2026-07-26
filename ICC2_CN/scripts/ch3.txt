@@ -1,0 +1,1883 @@
+                                                                                     Feedback
+
+
+
+
+3
+Placement and Optimization
+     To learn how to perform placement and optimization in the IC Compiler II tool, see
+      • Performing Placement and Optimization
+      • Identifying Issues That Cannot Be Fixed During Optimization
+      • Analyzing the Placement
+      • Analyzing Timing
+      • Analyzing Power
+      • Comparing QoR Data
+
+
+Performing Placement and Optimization
+     After you have finished design planning and power planning, you can perform placement,
+                     placement and optimizationcustomizing
+
+
+
+
+     optimization, and legalization on your design. The following topics describe how to perform
+     placement, optimization, and legalization:
+      • Performing Standalone Placement and Legalization
+      • Performing Placement and Optimization With the place_opt Command
+      • Using Physical Guidance From the Design Compiler Tool
+      • Performing Multibit Register Optimization
+      • Performing Magnet Placement
+      • Refining Placement
+      • Performing Placement and Optimization on Multivoltage Blocks
+      • Rebuilding Buffer Trees
+      • Adding and Removing Tie Cells
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                   181
+V-2023.12
+                                                                                     Feedback
+Chapter 3: Placement and Optimization
+Performing Placement and Optimization
+
+
+
+     Performing Standalone Placement and Legalization
+     To perform coarse placement, use the create_placement command. If a block contains
+     scan chains that were annotated on the block by reading a SCANDEF file, the coarse
+     placer also performs scan chain optimization.
+     You can control the tradeoff between runtime and QoR by setting the -effort option.
+     To enable
+      • Timing-driven placement, use the -timing_driven option
+      • Timing-driven placement that considers high-fanout nets and long nets and accounts
+        for the buffers that are subsequently added on these nets during optimization, use the
+        -buffering_aware_timing_driven option
+
+      • Congestion-driven placement, use the -congestion option
+         To control the CPU effort used for congestion removal, use the -congestion_effort
+         option
+      • Congestion driven restructuring, use the -congestion_driven_restructuring option
+         When you use this option, the tool performs several iterations of placement and
+         restructuring of the logic to help reduce congestion.
+     Note:
+         Before you run placement using the create_placement command, you should
+         merge the clock-gating logic by running the merge_clock_gates command.
+     To perform legalization, use the legalize_placement command. For more information
+     about legalization constraints and settings that you can specify, see Specifying
+     Legalization Settings.
+     Note:
+         The -cells option of the legalize_placement command is not supported
+         when you enable the advanced legalizer as described in Enabling Advanced
+         Legalization Algorithms.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                   182
+V-2023.12
+                                                                                       Feedback
+Chapter 3: Placement and Optimization
+Performing Placement and Optimization
+
+
+
+     Performing Placement and Optimization With the place_opt
+     Command
+     To perform coarse placement, physical optimization, and legalization with a single
+     command, use the place_opt command.
+     This command supports multithreading and uses the number of threads specified by the
+     set_host_options -max_cores command.
+
+     The place_opt command consists of the following stages:
+      1. Initial placement (initial_place)
+         During this stage, the tool merges the clock-gating logic and performs coarse
+         placement. If a block contains scan chains that are annotated by reading a SCANDEF
+         file, the tool also performs scan chain optimization.
+      2. Initial DRC violation fixing (initial_drc)
+         During this stage, the tool removes existing buffer trees and performs high-fanout-net
+         synthesis and electrical DRC violation fixing.
+      3. Initial optimization (initial_opto)
+         During this stage, the tool performs timing, area, congestion, and leakage-power
+         optimization.
+      4. Final placement (final_place)
+         During this stage, the tool performs incremental placement to improve timing and
+         congestion, and legalizes the design.
+      5. Final optimization (final_opto)
+         During this stage, the tool performs further optimization and legalization to improve
+         timing and congestion.
+     When you run the place_opt command, by default, the tool runs all stages of placement
+     and optimization.
+     To limit the place_opt command to run only one or more of these stages, use the -from
+     option to specify the stage from which you want to begin and the -to option to specify the
+     stage after which you want to end.
+     If you do not specify the -from option, the tool begins from the initial_place stage.
+     Similarly, if you do not specify the -to option, the tool continues until the final_opto
+     stage is completed.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                        183
+V-2023.12
+                                                                                           Feedback
+Chapter 3: Placement and Optimization
+Performing Placement and Optimization
+
+
+     For example, to skip initial placement, but run all the other stages of optimization and
+     placement on a design that has already completed initial placement, use the following
+     command:
+     icc2_shell> place_opt -from initial_drc
+
+     Creating a Temporary Clock Tree for Placement and Optimization
+     By default, the place_opt command uses ideal clock information during placement
+     and optimization. However, you can specify that the tool builds a temporary clock
+     tree and use propagated clocks during the place_opt command by setting the
+     place_opt.flow.trial_clock_tree application option to true.
+
+     After placement and optimization, when you perform clock tree synthesis by using the
+     clock_opt or synthesize_clock_trees command, the tool removes the temporary clock
+     tree and builds the actual clock tree. To ensure that the temporary clock tree correlates
+     to the actual clock tree, specify your clock tree synthesis settings before you run the
+     place_opt command.
+
+     Optimizing Clock-Gating Cells
+     By default, the tool merges clock-gating cells at the beginning of the
+      • initial_place stage of the place_opt command when the Synopsys physical
+        guidance flow is not enabled.
+      • initial_opt stage of the place_opt command when the Synopsys physical guidance
+        (SPG) flow is enabled by setting the place_opt.flow.do_spg application option to
+        true.
+
+     However, if you run the merge_clock_gates command before you run the place_opt
+     command, the tool does not merge clock gates during the place_opt command.
+     You can control the merging of clock-gating cells as follows:
+      • To merge only the clock-gating cells that are at the same level of the clock tree, set the
+        cts.icg.merge_cross_level application option to false.
+
+         By default, the tool can merge clock-gating cells that are at different levels of the clock
+         tree.
+      • To disable the merging of clock-gating cells, set the
+        place_opt.flow.merge_clock_gates application option to false.
+
+     The place_opt command can further optimize clock-gating cells if the enable
+     pin of the clock gate is in a critical timing path. To enable this feature, set the
+     place_opt.flow.optimize_icgs application option to true.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                        184
+V-2023.12
+                                                                                            Feedback
+Chapter 3: Placement and Optimization
+Performing Placement and Optimization
+
+
+     During the clock-gating cell optimization, the tool
+      • Performs clock-aware placement, irrespective of the setting of the
+        place_opt.flow.clock_aware_placement application option, and places critical
+        clock-gating cells and their fanouts at more optimal locations
+      • Builds a temporary clock tree, irrespective of the setting of the
+        place_opt.flow.trial_clock_tree application option, and uses the clock tree to
+        identify timing-critical clock-gating cells
+      • Splits clock-gating cells if the enable pin of the clock gate is in a critical timing path
+         You can control the extent of splitting by specifying a critical range using the
+         place_opt.flow.optimize_icgs_critical_range application option.
+
+     Using Accurate Latencies for Clock Gates
+     By default, the tool estimates and updates the clock-gate latencies throughout the
+     place_opt command flow. This ensures that the tool uses more accurate clock-gate
+     latencies during datapath optimization and useful-skew optimization performed before
+     clock tree synthesis, when clocks are ideal.
+     To improve the accuracy of the estimated clock-gate latencies, specify clock tree synthesis
+     settings such as the clock tree buffers and inverters, clock nondefault routing rules, and so
+     on before you run the place_opt command.
+     Note:
+         If you enabled trial clock tree synthesis as described in Creating a Temporary
+         Clock Tree for Placement and Optimization or clock-gate optimization as
+         described in Optimizing Clock-Gating Cells, which use more accurate methods
+         of modeling the clock tree effects prior to clock tree synthesis, the tool does not
+         perform clock-gate latency estimation and clock-gate-latency-aware placement.
+     The tool does not modify any set_clock_latency constraints specified by you on
+     clock-gating cells. The tool-estimated clock-gate latency values are stored by using the
+     set_clock_latency -offset command. You can see these estimated values by using
+     the write_script -format icc2 command and checking for the set_clock_latency
+     -offset commands in the generated output. The estimated latency offset values are not
+     captured in an SDC file generated by the write_sdc command.
+     To prevent the tool from estimating the latency for a specific clock-gate, set a
+     dont_estimate_clock_latency attribute on its clock pin by using the set_attribute
+     command, as shown in the following example:
+     icc2_shell> set_attribute \
+        [get_pins {ICG21/CK}] dont_estimate_clock_latency true
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                            185
+V-2023.12
+                                                                                         Feedback
+Chapter 3: Placement and Optimization
+Performing Placement and Optimization
+
+
+     Enabling Global Route Based High-Fanout Synthesis
+     When the tool performs high-fanout synthesis and electrical DRC violation fixing, by
+     default, it uses virtual routes.
+     To use global routes during high-fanout synthesis and electrical DRC violation fixing, set
+     the place_opt.initial_drc.global_route_based application option before you run the
+     place_opt command:
+     icc2_shell> set_app_options \
+        -name place_opt.initial_drc.global_route_based -value 1
+
+     To enable an integrated two-pass initial placement flow, which includes a trial high-fanout
+     synthesis, set the following application options before you run the place_opt command:
+     icc2_shell> set_app_options \
+        -name place_opt.initial_drc.global_route_based -value 1
+     icc2_shell> set_app_options \
+        -name place_opt.initial_place.two_pass -value true
+
+     The integrated two-pass initial placement flow consist of wire-length-driven placement, trial
+     high-fanout synthesis, and timing-driven placement. The tool discards the trial high-fanout
+     synthesis results, but retains the timing-driven placement and proceeds to global route
+     based high-fanout synthesis.
+     For designs with fragmented floorplans, enabling the integrated two-pass initial placement
+     flow and global route based high-fanout synthesis can help improve timing and reduce
+     congestion.
+
+     Enabling the Rebuilding of Buffer Trees
+     During the initial_drc stage of the place_opt command, by default, the tool performs
+     high-fanout net synthesis, which builds buffers trees for high-fanout nets. After the
+     initial_drc stage, the tool can remove and rebuild entire buffers trees or portions of buffer
+     trees if doing so improves the setup timing, logical DRC violations, wire length, or area.
+     To enable rebuilding of buffer trees during
+      • The initial_opto stage for multivoltage nets, set the
+        opt.buffering.enable_mv_rebuffering application option to true
+
+      • The final_opto stage for any net, set the opt.buffering.enable_rebuffering
+        application option to true
+
+     Changing the Congestion Effort
+     By default, the place_opt command performs congestion optimization to improve the
+     routability of the design. You can disable or control the effort used for this optimization
+     by using the place_opt.place.congestion_effort application option setting, which
+     defaults to medium.
+
+
+IC Compiler™ II Implementation User Guide                                                          186
+V-2023.12
+                                                                                       Feedback
+Chapter 3: Placement and Optimization
+Performing Placement and Optimization
+
+
+     Using of Nondefault Routing Rules for Critical Nets
+     To improve timing QoR, the tool can use nondefault routing rules on timing critical nets
+     during preroute optimization. In addition, the tool can guide the router to honor these
+     nondefault rule assignments as soft constraints.
+     To enable this capability for the place_opt command, set the
+     place_opt.flow.optimize_ndr application option to true.
+     icc2_shell> set_app_options -name place_opt.flow.optimize_ndr \
+         -value true
+
+     Enabling Path Optimization
+     Path optimization is an incremental optimization capability that focus on improving the
+     QoR of timing paths. You can also enable it during the place_opt command by setting the
+     place_opt.flow.do_path_opt application option to true.
+     icc2_shell> set_app_options -name place_opt.flow.do_path_opt -value true
+
+     Performing IR-Drop-Aware Placement During the place_opt
+     Command
+     During placement, the tool can use the voltage (IR) drop values of cells to identify areas of
+     high power density and spread the cells with high voltage drop values, which reduces the
+     power density of such areas.
+     To perform IR-drop-aware placement during the place_opt command, use the following
+     steps:
+      1. Run the place_opt command through the final-placement stage by using the
+         place_opt -to final_place command.
+
+      2. Set up for RedHawk Fusion and perform static or dynamic voltage drop analysis
+         by using the analyze_rail -voltage_drop command as shown in the following
+         example:
+         icc2_shell> source redhawk_setup.tcl
+         icc2_shell> analyze_rail -voltage_drop static -nets {VDD VSS}
+
+         For more information, see Performing Voltage Drop Analysis.
+      3. Enable IR-drop-aware placement by setting the place.coarse.ir_drop_aware
+         application option to true.
+      4. (Optional) Specify additional settings for IR-drop-aware placement, as described in
+         Controlling IR-Drop-Aware Placement.
+      5. Rerun the final-placement stage by using the place_opt -from final_place
+         command.
+
+
+IC Compiler™ II Implementation User Guide                                                       187
+V-2023.12
+                                                                                        Feedback
+Chapter 3: Placement and Optimization
+Performing Placement and Optimization
+
+
+     Performing Concurrent Clock and Data Optimization During the
+     place_opt Command
+     Applying useful skew techniques during datapath optimization to improve the timing QoR
+     by taking advantage of the positive slack and adjusting the clock arrival times of registers
+     is referred to as concurrent clock and data (CCD) optimization.
+     By default, the tool performs concurrent clock and data optimization during the final
+     optimization stage of the place_opt command. You can disable concurrent clock and data
+     optimization for the place_opt command by setting the place_opt.flow.enable_ccd
+     application option to false.
+     The clock latency adjustments derived during the place_opt command are stored as
+     clock-latency offsets by using the set_clock_latency -offset command and clock-
+     balance-point-delay offsets by using the set_clock_balance_point -offset command.
+     You can see these clock-latency offset values by using the write_script -format
+     icc2 command and checking for the set_clock_latency -offset commands in
+     the generated output. The clock-latency offset values are not captured in an SDC file
+     generated by the write_sdc command. You can report the clock-balance-point-delay
+     offsets by using the report_clock_balance_point command.
+     To set up the block for concurrent clock and data optimization during the place_opt
+     command, perform the following steps:
+      1. Ensure that the same scenarios that you set as active for the clock_opt command are
+         also active for the place_opt command.
+      2. Specify that the tool builds temporary clock trees and uses propagated clocks during
+         the place_opt command by using one of the following two settings:
+         ◦ icc2_shell> set_app_options -name place_opt.flow.trial_clock_tree \
+              -value true
+
+         ◦ icc2_shell> set_app_options -name place_opt.flow.optimize_icgs \
+              -value true
+
+         Alternatively, the tool can use ideal clocks for useful skew computation. However, you
+         must specify accurate ideal clock latencies for the clock pins of all clock gating cells
+         and sequential cells, including macro cells.
+     You can change the default behavior of concurrent clock and data optimization during the
+     place_opt command by performing any of the following optional steps:
+
+      1. (Optional) Limit the latency adjustment values for concurrent clock and data
+         optimization as described in Limiting the Latency Adjustment Values.
+      2. (Optional) Control the latency adjustment of boundary registers for concurrent clock
+         and data optimization as described in Excluding Boundary Paths.
+
+
+
+IC Compiler™ II Implementation User Guide                                                       188
+V-2023.12
+                                                                                      Feedback
+Chapter 3: Placement and Optimization
+Performing Placement and Optimization
+
+
+      3. (Optional) Ignore specific path groups during concurrent clock and data optimization as
+         described in Excluding Specific Path Groups.
+      4. (Optional) Ignore specific scenarios during concurrent clock and data optimization as
+         described in Excluding Specific Scenarios.
+      5. (Optional) Ignore specific sinks during concurrent clock and data optimization as
+         described in Excluding Specific Sinks.
+      6. (Optional) Analyze the effects of concurrent clock and data optimization as described in
+         Reporting Concurrent Clock and Data Timing.
+      7. (Optional) Derive automatic zero balance point on macros with internal delays as
+         described in .
+      8. (Optional) Skew latch and discrete clock together by the same offset as described in
+         Skewing Latch and Discrete Clock Gates.
+
+
+     Using Physical Guidance From the Design Compiler Tool
+     When you use the place_opt command to perform placement and optimization, you can
+     use the Synopsys physical guidance information from the Design Compiler Graphical tool
+     as a starting point.
+     Using Design Compiler Graphical placement provides the following benefits:
+      • Reduces the runtime of the placement step
+      • Achieves better correlation between the Design Compiler Graphical and IC Compiler II
+        tools
+     To transfer the design from the Design Compiler Graphical tool, use a gate-level netlist in
+     the Verilog format, along with the constraint information.
+     To preserve consistency and improve correlation, you must
+      • Use the same logical constraints, including timing and UPF information, in both tools.
+         However, you must convert the Design Compiler scenario constraints into the mode,
+         corner, and scenario format supported by the IC Compiler II tool.
+      • Use the Design Compiler Graphical placement in the IC Compiler II tool and the same
+        floorplan and physical constraints in both tools.
+         However, you can provide additional floorplan information that is not currently
+         supported by the Design Compiler Graphical tool, but is needed in the IC Compiler II
+         tool for physical implementation.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                     189
+V-2023.12
+                                                                                      Feedback
+Chapter 3: Placement and Optimization
+Performing Placement and Optimization
+
+
+     To transfer the physical information (placement, floorplan, and physical constraints) from
+     the Design Compiler Graphical tool, perform the following tasks:
+      • Use the write_def command in the Design Compiler Graphical tool to generate
+        a DEF file and read it into the IC Compiler II tool by using the read_def
+        -add_def_only_objects {cells} -convert_sites command.
+
+         The DEF file generated from the Design Compiler Graphical tool contains the following
+         physical information:
+         ◦ Die area, site rows, and tracks
+         ◦ Locations and shapes of ports
+         ◦ Locations of macros, standard cells and physical only cells
+         ◦ Route guides and prerouted nets
+         ◦ Placement blockages
+      • Create a Tcl file containing physical constraints not captured in the DEF file and apply
+        those constraints to the design in the IC Compiler II tool.
+         Physical constraints not captured in DEF include
+         ◦ Voltage area definitions
+         ◦ Layer constraints
+         ◦ Special route guides with utilization
+         ◦ Special blockages with blocked layers
+     To use of Synopsys physical guidance information in the IC Compiler II tool, set the
+     place_opt.flow.do_spg application option before you run the place_opt command:
+     icc2_shell> set_app_options -name place_opt.flow.do_spg -value true
+
+     The following example script shows how to use the Synopsys physical guidance with the
+     place_opt command:
+     # Read in the netlist
+     read_verilog design_spg.v
+
+     # Apply the timing constraints
+     source timing_const.tcl
+
+     # Apply the UPF constraints
+     load_upf design.upf
+
+     # Apply the DEF file generated from the Design Compiler Graphical tool
+     read_def -add_def_only_objects {cells} -convert_sites design_dcg.def
+
+
+
+IC Compiler™ II Implementation User Guide                                                     190
+V-2023.12
+                                                                                          Feedback
+Chapter 3: Placement and Optimization
+Performing Placement and Optimization
+
+
+     # Apply the placement constraints not supported by DEF
+     source placement_const.tcl
+
+     # Enable the Synopsys placement guidance flow
+     set_app_options -name place_opt.flow.do_spg -value true
+
+     # Perform placement and optimization
+     place_opt
+
+     For more information, see the Synopsys physical guidance information in the Design
+     Compiler User Guide.
+
+
+     Performing Multibit Register Optimization
+     The IC Compiler II tool can combine (bank) single-bit registers or smaller multibit registers
+     and replace them with equivalent larger multibit registers. For example, the tool can
+     combine eight 1-bit registers or four 2-bit register banks and replace them with one 8-
+     bit register bank or two 4-bit register banks. The tool merges single-bit registers only if
+     they have the same timing constraints, and it copies the timing constraints to the resulting
+     multibit register.
+
+Figure 25     Replacing Multiple Single-Bit Register Cells With a Multibit Register Cell
+
+
+                  D     Q
+                  SI
+                  SE
+                                                                           2               2
+                                                                                D     Q
+                                                                                SI
+                                                                                SE
+                  D     Q
+                  SI
+                  SE
+                                            Replace with                One 2-bit register cell
+
+
+        Two 1-bit register cells
+
+
+
+
+     Replacing single-bit registers with multibit registers reduces
+      • Area due to shared transistors and optimized transistor-level layout
+      • The total clock tree net length
+      • The number of clock tree buffers and clock tree power
+
+
+IC Compiler™ II Implementation User Guide                                                         191
+V-2023.12
+                                                                                          Feedback
+Chapter 3: Placement and Optimization
+Performing Placement and Optimization
+
+
+     The tool can also split (debank) large multibit registers into smaller multibit registers or
+     single-bit registers, if it improves the total negative slack.
+     Some logic libraries have mixed-drive-strength multibit registers where some bits have a
+     higher drive strength than others. For designs that use such cells, if a violating path goes
+     through a lower-drive-strength bit, the tool can rewire the mixed-drive-strength multibit cell
+     such that the violating path goes through a higher-drive-strength bit.
+     The following topics provide information about how to perform multibit register
+     optimization:
+      • Performing Integrated Multibit Register Optimization
+      • Performing Multibit Register Optimization Using Discrete Commands
+      • Banking Multibit Retention Registers
+
+     Performing Integrated Multibit Register Optimization
+     To perform multibit register optimization during the place_opt command,
+      1. Enable multibit register banking by setting the
+         place_opt.flow.enable_multibit_banking application option to true.
+
+      2. (Optional) Enable multibit register debanking by setting the
+         place_opt.flow.enable_multibit_debanking application option to true.
+
+      3. (Optional) Enable banking of registers driven by equivalent integrated-clock-gating
+         (ICG) cells by setting the multibit.banking.across_equivalent_icg application
+         option to true.
+         By default, the tool only banks registers that are driven by the same clock net. When
+         you enable this feature, the tool banks registers driven by equivalent clock-gating cells
+         and merges the clock-gating cells. However, when doing so, it might lose nondefault
+         routing rules applied to the nets connected to the clock-gating cells. Therefore, check
+         and reapply these nondefault routing rules after optimization.
+      4. (Optional) Enable multibit register rewiring by setting the
+         place_opt.flow.enable_multibit_rewiring application option to true.
+
+      5. (Optional) Specify settings for multibit register banking by using the
+         set_multibit_options command.
+
+         For example, the following command excludes the reg[1] cell from multibit optimization:
+         icc2_shell> set_multibit_options -exclude [get_cells "reg[1]"]
+
+      6. (Optional) Control multibit register banking and debanking as shown in the following
+         table.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                           192
+V-2023.12
+                                                                                             Feedback
+Chapter 3: Placement and Optimization
+Performing Placement and Optimization
+
+
+   Table 16       Application Options for Controlling Multibit Register Banking and Debanking
+
+         To do this                                        Set this application option to true
+
+         Ignore scan flip-flops that are not included in   multibit.banking.enable_strict_scan_check-
+         the SCANDEF information during banking
+
+         Consider multibit register library cells with     multibit.banking.lcs_consider_multi_si_cells
+         multiple scan-in pins and internal scan-in pins
+         during banking
+
+         Ignore user-specified size-only cells during      multibit.common.ignore_sizeonly_cells
+         banking and debanking
+
+
+      7. Perform placement and optimization by using the place_opt command.
+      8. Report multibit components by using the report_multibit command.
+
+     Performing Multibit Register Optimization Using Discrete
+     Commands
+     You can perform multibit banking using the following discrete steps:
+      1. Perform initial placement by using the create_placement command.
+      2. (Optional) Specify settings for multibit register banking by using the
+         set_multibit_options command.
+
+      3. Identify the groups of cells that can be replaced by multibit cells by using the
+         identify_multibit command, as described in Identifying Multibit Banks.
+
+      4. Optimize the design by using the place_opt -from initial_drc command.
+      5. (Optional) Report multibit banking information by using the report_multibit
+         command.
+      6. (Optional) If multibit banking does not improve QoR, split specific multibit banks into
+         individual registers or smaller multibit banks by using the split_multibit command,
+         as described in Splitting Multibit Banks.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                          193
+V-2023.12
+                                                                                          Feedback
+Chapter 3: Placement and Optimization
+Performing Placement and Optimization
+
+
+     Identifying Multibit Banks
+     To identify groups of registers, isolation cells, or level-shifter cells that can be replaced by
+     multibit cells, use the identify_multibit command.
+     When you use the identify_multibit command, you must specify:
+      • How to apply the multibit banking information by using one of the following methods:
+         ◦ To have the tool apply the banking information to the design, use the -apply option.
+         ◦ To manually apply the banking information, generate an output file containing
+           create_multibit commands by using the -output_file option.
+
+            You can view the output, edit it if necessary, and apply it to the design by using the
+            source command.
+
+      • The type of cells you want to bank by using one of the following methods:
+         ◦ To identify groups of registers that can be banked, use the -register option.
+         ◦ To identify groups of isolation or level-shifter cells that can be banked, use the
+           -mv_cell option.
+
+     When banking registers with the -register option, optionally, you can
+      • Control the mapping of single bits to multibit banks by specifying an input map file
+        using the -input_map_file option. This file contains mapping information about which
+        multibit register bank replaces which single-bit registers, as shown in the following
+        example:
+         reg_group_1 {REGX1 REGX2 REGX4}
+         2 {1 MREG2}
+         4 {1 MREG4}
+         6 {1 MREG2}{1 MREG4}
+
+         This map file contains a functional group named reg_group_1, which specifies how
+         single-bit registers of reference cell types REGX1, REGX2, and REGX4 can be
+         grouped to form multibit registers as follows:
+         ◦ The first line specifies that two single-bit registers can be combined to form a
+           register bank consisting of one MREG2 reference cell.
+         ◦ The second line specifies that four single-bit registers can be combined to form a
+           register bank consisting of one MREG4 reference cell.
+         ◦ The third line specifies that six single-bit registers can be combined to form a
+           register bank consisting of one MREG2 and one MREG4 reference cells.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                          194
+V-2023.12
+                                                                                        Feedback
+Chapter 3: Placement and Optimization
+Performing Placement and Optimization
+
+
+      • Exclude registers based on their slack by specifying a slack threshold with the
+        -slack_threshold option
+
+         Registers with a slack less than the specified threshold are ignored. By default, the tool
+         considers all registers for banking.
+     In addition, you can optionally control the cells that are banked by specifying:
+      • A list of instance to consider for banking by using the -cells option.
+         When you use this option, the tool does not consider any other cells for banking.
+      • A list of instances to exclude by using the -exclude_instance option.
+      • A list of library cells to exclude all instances by using the -exclude_library_cells
+        option.
+     By default, the identify_multibit command performs DFT optimization, which
+     repartitions scan chains such that registers driven by the same clock driver or gating cell
+     are put in the same scan chain. This increases the number of single-bit registers that can
+     be combined to form multibit register banks. If you do not want the tool to repartition the
+     scan chains, use the -no_dft_opt option with the identify_multibit command.
+     Splitting Multibit Banks
+     To improve local congestion or path slack, you can split a multibit bank into smaller
+     multibit banks or single-bit cells by using the split_multibit command. By default, the
+     command splits all multibit cells on timing paths with negative slack.
+     To split
+      • A specific cell, specify the cell instance name.
+         You can specify the reference names of the smaller cells to use after splitting by using
+         the -lib_cells option.
+         The following example splits the multibit cell instance named reg_gr0, which is a four-
+         bit register bank, into two two-bit multibit banks:
+         icc2_shell> split_multibit reg_gr0 -lib_cells {lib1/MREG2 lib1/MREG2}
+
+      • Multibit cells on paths with slack less than a specific value, use the -slack_threshold
+        option.
+         The following example splits the multibit cells on paths with a slack worse than -1:
+         icc2_shell> split_multibit -slack_threshold -1
+
+      • Multibit cells in a specific timing path group, use the -path_groups option.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                       195
+V-2023.12
+                                                                                             Feedback
+Chapter 3: Placement and Optimization
+Performing Placement and Optimization
+
+
+         When you use this option, the tool splits the multibit cells on the pats with negative
+         slack in the specified path group. You can specify a slack threshold limit for the path
+         group by using the -slack_threshold option with the -path_groups option.
+         The following example splits the multibit cells on paths with a slack worse than -0.5 in
+         the timing path group CLKA:
+         icc2_shell> split_multibit -path_groups CLKA \
+            -slack_threshold -0.5
+
+     You can further control splitting as follows:
+      • Exclude specific cells by using the -exclude_instance option
+      • Consider only specific cells by using the -cells option
+     The split_multibit command only splits multibit cells that were created by the
+     create_multibit or identify_multibit command.
+
+     Banking Multibit Retention Registers
+     The tool can combine single-bit retention registers and create a multibit retention register if
+      • The single-bit retention registers are associated with the same retention strategy
+      • The retention pins of the single-bit retention registers have the same driver
+      • The cell library has a matching multibit retention register
+      • The library cell for the multibit retention register is specified as a library cell for the
+        retention strategy by using the map_retention_cell -lib_cells command
+     The tool can split a multibit retention register if
+      • The cell library has matching single-bit retention registers
+      • The library cells for the single-bit retention registers are specified as library cells to use
+        for the retention strategy by using the map_retention_cell -lib_cells command
+     Note:
+         If you are using the identify_multibit command, to identify multibit retention
+         registers, use the -register option, and not the -mv_cell option.
+
+
+     Performing Magnet Placement
+     To improve congestion for a complex floorplan or to improve timing for the design, you can
+     use magnet placement to specify a fixed object as a magnet and have the tool place all
+     the standard cells connected to the magnet object close to it. You can specify fixed macro
+     cells, pins of a fixed macro cells, or I/O ports as the magnet object.
+
+
+
+IC Compiler™ II Implementation User Guide                                                             196
+V-2023.12
+                                                                                          Feedback
+Chapter 3: Placement and Optimization
+Performing Placement and Optimization
+
+
+     For best results, perform magnet placement before standard cell placement.
+     To perform magnet placement, use the magnet_placement command with a specification
+     of the magnets and options for any special functions you need to perform.
+     Table 17 shows the magnet_placement options.
+Table 17       The magnet_placement Command Options
+
+      To do this                                              Use this option
+
+      Specify the cells to pull toward the magnet object.     -cells cell_list
+
+      Enable hierarchical cells to be specified with the      -hierarchy_mode default | block |
+      -cells option and specify how these hierarchical        all
+      cells should be handled
+
+      Enable the movement of cells marked as fixed or         -move_fixed
+                                 fixed cellsmovement
+
+
+
+
+      legalize-only.                                          -move_legalize_only
+
+      Mark the moved cells as fixed or legalize-only after    -mark_fixed
+      magnet placement.                                       -mark_legalize_only
+
+      Specify the number of logic levels from the magnet      -logical_levels number
+      that are considered for magnet placement.
+
+      Exclude buffers and inverters when determining the      -exclude_buffers
+      level of logic.
+
+      Prevent the tracing of paths at inputs of sequential    -stop_by_sequential_cells
+      cells when finding the cells to pull.
+
+      Prevent the tracing of paths at the outputs of          -stop_on_sequential_cells
+      sequential cells when finding the cells to pull.
+
+      Prevent the tracing of paths beyond the specified       -stop_points
+      pins, ports, or cells when finding the cells to pull.
+
+      Prevent placing cells on soft blockages. By default,    -avoid_soft_blockage
+      the command only avoids hard blockages.
+
+      Specify how to place cells when the magnet objects      -multiple_long_port_mode auto|nearby
+      are multiple ports or long ports
+
+      Report the cells that will be moved toward the magnet -only_report_magnet_cells
+      object, but not pull them
+
+      Create a collection of cells that are being pulled      -get_collection
+      toward the magnet object.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                         197
+V-2023.12
+                                                                                   Feedback
+Chapter 3: Placement and Optimization
+Performing Placement and Optimization
+
+
+     The following examples use the data paths shown in Figure 26.
+
+Figure 26     Example of Pulling Cells in a Contiguous Data Path
+
+
+                                                  C3         C4          C5
+
+
+
+                            C0          C1        C2         C6          C7
+
+
+
+                                                             C8
+
+
+
+
+     The following command pulls all cells, C1 through C8, toward the C0 magnet object:
+     icc2_shell> magnet_placement C0
+
+     The following command pulls the C6, C7, and C8 cells toward the C2 magnet object:
+     icc2_shell> magnet_placement C2 -cells {C6 C7 C8}
+
+     Although the C3, C4, and C5 cells form a contiguous datapath, they are isolated from the
+     C0 cell, so the following command pulls no cells toward the C0 cell.
+     icc2_shell> magnet_placement C0 -cells {C3 C4 C5}
+
+     The following command pulls no cells toward the C0 magnet object because the C3, C6,
+     and C8 cells do not form a contiguous data path.
+     icc2_shell> magnet_placement C0 -cells {C3 C6 C8}
+
+
+     Refining Placement
+     To refine the placement and minimize congestion, use the refine_placement command.
+     By default, this command performs incremental placement on the entire design.
+      • To refine the placement of a specific region, use the -coordinates option and specify
+        the coordinates of the region.
+      • To change the effort used for placement, use the -effort option and specify either
+        low, medium, or high. The default is medium.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                    198
+V-2023.12
+                                                                                         Feedback
+Chapter 3: Placement and Optimization
+Performing Placement and Optimization
+
+
+      • To change the effort used for minimizing congestion, use the -congestion_effort
+        option and specify either low, medium, or high. The default is medium.
+      • To control the perturbation of the existing placement, use the -perturbation_level
+        option and specify either min, medium, high, or max. The default is medium.
+
+
+     Performing Placement and Optimization on Multivoltage Blocks
+     Placement and optimization automatically consider multivoltage constraints, such as
+     voltage areas.
+     During placement, the tool
+      • Places cells within their associated voltage area or voltage area shape
+      • Places level shifters and isolation cells close to the voltage area boundaries
+     During optimization, when the tool inserts buffers, it
+      1. Considers the related supplies of the driver and loads of the net and does a dynamic
+         analysis of the power states using one of the following:
+         ◦ The UPF power state table you created using the create_pst command
+         ◦ The UPF power state groups you created using add_power_state command
+      2. Chooses a buffering supply that does not introduce new multivoltage violations, based
+         on the power states and the available supplies in the voltage area being buffered.
+         Single-rail buffers are preferred to dual-rail buffers to save power and area, and
+         improve routability.
+     To understand how or whether specific nets are buffered, use the check_bufferability
+     command, as described in Analyzing the Bufferability of Nets.
+
+
+     Rebuilding Buffer Trees
+     During the initial_drc stage of the place_opt command, the tool removes
+     existing buffer trees and performs high-fanout synthesis. After you run the place_opt
+     command, to rebuild specific buffers trees to meet specific requirements, use the
+     create_buffer_trees command.
+
+     By default, the create_buffer_trees command
+      • Rebuilds the buffer trees for all high-fanout nets
+         To rebuild a specific high-fanout net, use the -from option.
+      • Removes the existing buffer trees before rebuilding
+
+
+IC Compiler™ II Implementation User Guide                                                      199
+V-2023.12
+                                                                                          Feedback
+Chapter 3: Placement and Optimization
+Identifying Issues That Cannot Be Fixed During Optimization
+
+
+         To keep the existing buffers and incrementally build the buffer trees, use the
+         -incremental option.
+
+      • Builds the buffer trees using virtual route topologies and extraction
+         To build the buffer trees based on global routes, use the -global_route_based option.
+      • Does not legalize the newly added cells
+         To legalize the added cells, run the legalize_placement command after you run the
+         create_buffer_trees command.
+
+     The following example rebuilds the buffer tree for the n33 net using only buf4x and buf8x
+     type buffers:
+     icc2_shell> set_lib_cell_purpose -include none {tech_lib/*}
+     icc2_shell> set_lib_cell_purpose \
+        -include optimization {tech_lib/buf4x tech_lib/buf8x}
+     icc2_shell> create_buffer_trees -from n33 -global_route_based
+
+     Note:
+         The create_buffer_trees command should only be used at the preroute
+         stage of the design flow.
+
+
+     Adding and Removing Tie Cells
+     When you run the place_opt or clock_opt command, the tool can add tie cells during
+     optimization. In addition, you can add tie cells for specific pins or ports by using the
+     add_tie_cells command. The first time tie cells are added to a block by the place_opt,
+     clock_opt, or add_tie_cells command, the tool optimizes the tie cell connections by
+     removing all existing tie cells and adding tie cells which are optimally clustered.
+     To remove specific tie cells, use the remove_tie_cells command. By default, the tool
+     removes all tie cells in the current block. To remove specific instances or all instances of a
+     specific library cell, use the -objects option.
+
+
+Identifying Issues That Cannot Be Fixed During Optimization
+     The IC Compiler II tool provides the following capabilities for identifying issues that cannot
+     be fixed during optimization:
+      • Analyzing the Bufferability of Nets
+      • Analyzing Violations That Cannot Be Fixed
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                       200
+V-2023.12
+                                                                                     Feedback
+Chapter 3: Placement and Optimization
+Identifying Issues That Cannot Be Fixed During Optimization
+
+
+
+     Analyzing the Bufferability of Nets
+     To analyze whether a net in the current block can be buffered or to report why the net
+     cannot be buffered, use the check_bufferability command. This command checks if
+     there are
+      • Supply nets available for buffering the net in the specified voltage area
+      • Suitable library cells available for buffering the net
+      • Settings on the net that prevent buffering, such as ideal-network or don’t-touch
+        constraint settings
+     With this command, you must specify the following:
+      • The net to analyze by using one of the following methods:
+          ◦ Specify the net name using the -nets option.
+          ◦ Specify the driver and loads by using the -driver and -loads options, and the
+            logical hierarchy in which to perform the analysis by using the -hierarchy option.
+      • The voltage area in which to analyze the bufferability by using the -voltage_area
+        option.
+     For example, to analyze if buffers can be added on the net named n34 in the PD1 power
+     domain, use the following command:
+     icc2_shell> check_bufferability -nets n34 -voltage_area PD1
+     Information: Can insert dual rail buffers (8 lib_cells) and inverters (6
+      lib_cells) with supply nets (power: VDDSW, ground: VSS). (MV-454)
+
+     To analyze whether buffers can be added between the top_reg_1_/Q driver pin and its
+     top_U1_9/B load pin in the top hierarchy in the PD_TOP voltage area, use the following
+     command:
+     icc2_shell> check_bufferability -driver top_reg_1_/Q \
+        -loads top_U1_9/B -hierarchy / -voltage_area PD_TOP
+     Information: Cannot insert buffers or inverters, because required supply
+      nets are not available. (MV-459)
+
+     For a more information about the bufferability of a net, use the -verbose option.
+
+
+     Analyzing Violations That Cannot Be Fixed
+     To analyze a block and generate a report that contains information about the violations
+     that cannot be fixed, use the analyze_design_violations command. The report
+     contains a summary of the analysis, followed by a detailed list of the violations, in
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                      201
+V-2023.12
+                                                                                        Feedback
+Chapter 3: Placement and Optimization
+Analyzing the Placement
+
+
+     descending order. The violations are categorized based on the reason why they cannot be
+     fixed.
+     When you use this command, you must specify the type of violation you want to analyze
+     by specifying one of the following setting with the -type option:
+      • max_trans to analyze maximum-transition violations
+      • setup to analyze setup violations
+      • hold to analyze hold violations
+      • static_noise to analyze static noise violations
+      • only_lib to analyze library settings that affect optimization
+     In addition, you can specify the following:
+      • A threshold for identifying high-fanout nets by using the -fanout option.
+         By default, the tool considers nets with a fanout larger than 30 to be high-fanout nets.
+      • A slack threshold for identifying small timing violations by using the -slack option.
+         By default, the tool considers any slack violation less than 5 picoseconds as a small
+         violation.
+      • Nets for maximum-transition analysis by using the -drc_nets.
+         By default, analyzes all nets for maximum-transition violations.
+      • Endpoints for setup and hold analysis by using the -endpoints option.
+         By default, analyzes all endpoints for setup and hold violations.
+      • An output file name by using the -output option.
+         The tool adds a .txt extension to the output file name you specify. By default, the tool
+         generates a file named analyze_design_violations.txt.
+
+
+Analyzing the Placement
+     The IC Compiler II tool provides the following GUI- and report-based capabilities for
+     analyzing the placement:
+      • Reporting Utilization
+      • Reporting the Placement QoR
+      • Querying and Changing the Placement Status
+      • Analyzing the Placement in the GUI
+
+
+IC Compiler™ II Implementation User Guide                                                        202
+V-2023.12
+                                                                                                                          Feedback
+Chapter 3: Placement and Optimization
+Analyzing the Placement
+
+
+
+     Reporting Utilization
+     The utilization of a block is calculated by using the following formula, where demand is the
+     total area occupied by objects and capacity is the total available area:
+     Utilization = Demand / Capacity
+     To report the utilization, use the following steps:
+                                      1. (Optional) Create a configuration for reporting the utilization by using the
+                                         create_utilization_configuration command.
+
+                                        The following example creates a utilization configuration for the current block named
+                                        config1 that uses the core area for calculating the capacity and excludes hard and soft
+                                        placement blockages:
+                                        icc2_shell> create_utilization_configuration -scope block config1 \
+                                           -capacity core_area -exclude {hard_blockages soft_blockages}
+
+                                        To remove a utilization configuration, use the remove_utilization_configurations
+                                        command.
+                                      2. Report the utilization by using the report_utilization command.
+                                        To specify a utilization configuration and where it is stored, use the -config and
+                                        -scope options. The valid values for the -scope option are tech, lib, and block. If
+                                        you do not specify the -scope option with the -config option, the tool first searches
+                                        the current block, then the design library, and finally the logic library for the specified
+                                        configuration.
+                                        To report the utilization for specific objects, use the -of_objects option and specify
+                                        one or more blocks, voltage areas, site arrays, or bounds. All objects must be of the
+                                        same type.
+
+
+     Reporting the Placement QoR
+     The report_placement command displays information about the placement QoR for
+     commandsreport_qorQoRreporting
+
+
+
+
+     the current block. By default, the command reports the total half-perimeter boundary box
+     wire length for all nets in the block, as well as any placement violations, as shown in the
+     following example:
+                                      icc2_shell> report_placement
+                                      ...
+                                      ...
+
+                                        Wire length report (all)
+                                        ==================
+                                        wire length in design leon3mp: 12386597.894 microns.
+
+
+
+IC Compiler™ II Implementation User Guide                                                                                         203
+V-2023.12
+                                                                                       Feedback
+Chapter 3: Placement and Optimization
+Analyzing the Placement
+
+
+         Physical hierarchy violations report
+         ====================================
+         Violations in design leon3mp:
+            0 cells have placement violation.
+
+     1
+
+     To report on the subblocks, as well as the current block, use the -hierarchical option.
+     To restrict the wire length calculation to specific types of nets, use the -wirelength option
+     with the appropriate keyword.
+      • To include only nets that cross a physical boundary, use -wirelength interface.
+      • To include only nets connected to hard macros, use -wirelength hard_macro.
+      • To include only nets connected to I/O pins or pads, use -wirelength IO.
+      • To suppress the wire length report, use -wirelength none.
+     To restrict the types of placement violations reported, use the
+     -physical_hierarchy_violations option with the appropriate keyword.
+
+      • To report only the cells placed outside of the placement area of the current block, use
+        -physical_hierarchy_violations internal.
+
+      • To report only the cells that overlap a subblock, use
+        -physical_hierarchy_violations external.
+
+      • To suppress the placement violation report, use -physical_hierarchy_violations
+        none.
+
+     You can also report the following placement metrics:
+      • Swimming pool area
+         A swimming pool is a region that is enclosed by subblocks, hard macros, and
+         placement blockages. Swimming pools can make it difficult to successfully place or
+         route the block and should either be covered with a placement blockage or removed.
+          ◦ To report the total swimming pool area in the current block, use the
+            -swimming_pool_area option.
+
+          ◦ To report swimming pool regions with an area smaller than a specific threshold, use
+            the -maximum_swimming_pool_area option.
+      • Thin channel area
+         A thin channel is a narrow region between subblocks of the current block, whether
+         they are hard macros or physical hierarchies. Thin channels can make it difficult to
+         successfully place or route the block and should either be covered with a placement
+         blockage or widened.
+
+
+IC Compiler™ II Implementation User Guide                                                       204
+V-2023.12
+                                                                                           Feedback
+Chapter 3: Placement and Optimization
+Analyzing the Placement
+
+
+           ◦ To report the total thin channel area in the current block, use the
+             -thin_channel_area option.
+
+           ◦ To report thin channels with a width or height smaller than a specific threshold, use
+             the -maximum_thin_channel_width or -maximum_thin_channel_height option.
+      • Wire length of nets routed over hard macros
+           To report the wire length of nets routed over hard macros in the current block, use the
+           -hard_macro_route_over option. This option reports the horizontal and vertical wire
+           length for each hard macro that has over-macro routing, as well as the total wire length
+           for over-macro routing.
+      • The number of hard macro overlaps
+           To report the total number of overlapping hard macros in the current block, use the
+           -hard_macro_overlap option.
+
+
+     Querying and Changing the Placement Status
+     The status attribute of a cell instance indicates the current status of its placement.
+     Table 18 shows the possible values of the status attribute.
+Table 18        Placement Status Keywords
+
+      Placement status         Description                                            DEF syntax
+
+      unplaced                 The cell instance has not yet been placed.             +UNPLACED
+                               Note:
+                                  To revert all placed cells to the unplaced state,
+                                  use the reset_placement command. This
+                                  command modifies the placement status only for
+                                  cells with a placement status of placed; it does
+                                  not modify the placement status for cells with a
+                                  placement status of fixed or locked.
+
+      placed                   The cell instance has been placed, but can be moved +PLACED
+                               by subsequent operations.
+
+      fixed                    The cell instance has been placed and can be sized     +FIXED
+                               but not moved by subsequent operations.
+                               Note:
+                                  To prevent these cells from being sized, you must
+                                  set a dont_touch attribute on these cells, as
+                                  described in Preserving Cells and Nets During
+                                  Optimization.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                          205
+V-2023.12
+                                                                                           Feedback
+Chapter 3: Placement and Optimization
+Analyzing the Placement
+
+
+Table 18        Placement Status Keywords (Continued)
+
+      Placement status         Description                                          DEF syntax
+
+      legalize_only            The cell instance has been placed and can be moved N/A
+                               only by the legalizer.
+
+      locked                   The cell instance has been placed and cannot be      +COVER
+                               moved either manually or by the tool.
+
+
+     To get the placement status of a cell instance, query its status attribute by using the
+     get_attribute command. For example, to get the placement status of the cell instance
+     named INST1, use the following command:
+     icc2_shell> get_attribute -objects [get_cells INST1] -name status
+
+     To change the placement status of a cell instance, use the set_placement_status
+     command. For example, to set the placement status of the cell instance named INST1
+     to fixed, so that it is not moved during subsequent optimization and placement, use the
+     following command:
+     icc2_shell> set_placement_status fixed [get_cells INST1]
+
+
+     Analyzing the Placement in the GUI
+     The IC Compiler II graphical user interface (GUI) provides the following tools for analyzing
+     and visualizing the quality of results after placement:
+      • Global Route Congestion Map
+           You can use the global route congestion map to visualize the quality of placement with
+           respect to the avoidance of routing congestion.
+      • Cell Density Map
+           You can use the cell density map to identify areas of high cell density in the block or in
+           a rectangular area of the block.
+      • Pin Density Map
+           You can use the pin density map to identify areas of high pin density in the block or in a
+           rectangular area of the block.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                         206
+V-2023.12
+                                                                                                Feedback
+Chapter 3: Placement and Optimization
+Analyzing Timing
+
+
+     For more information about using these analysis tools in the GUI, see the Using Map and
+     Visual Modes topic in the IC Compiler II Graphical User Interface User Guide.
+
+
+Analyzing Timing
+     The IC Compiler II tool automatically updates timing and delay estimation results when
+     needed. However, you can explicitly update the timing by using the update_timing
+     command.
+     You can use the following commands to generate timing reports for a block:
+      • report_timing
+         The report_timing command reports the worst-case timing paths for the current
+         block.
+      • report_qor
+         The report_qor command displays QoR information and statistics for the current
+         block.
+      • report_constraints
+         The report_constraints command reports the logical DRC violations for the current
+         report_constraint commandcommandsreport_constraintconstraint reportreportsconstraint
+
+
+
+
+         block.
+     For more information about generating these reports, see the Generating Reports topic in
+     the IC Compiler II Timing Analysis User Guide.
+
+
+Analyzing Power
+     To calculate and report the power for a block, use the report_power command.
+     The report_power command supports the following methods for calculating the leakage
+     power:
+      • Average
+         When using this method, the calculation is based on equal weighted probabilities for all
+         states.
+      • Unconditional
+         When using this method, the calculation is based on the
+         default_cell_leakage_power library attribute or cell_leakage_power library cell
+         attribute.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                             207
+V-2023.12
+                                                                                      Feedback
+Chapter 3: Placement and Optimization
+Analyzing Power
+
+
+      • State-dependent
+         When using this method, the calculation is based on the weighted sum of each state
+         condition of the cell. The calculation depends on the state-dependent leakage library
+         model characterization and static probability. If the state-depended leakage information
+         is not available, the power calculation uses the unconditional method.
+      To select the leakage-power calculation method for the report_power command, set the
+      power.leakage_mode application option to average, unconditional, or state. To not
+      report leakage power, set this application option to off. The default is state.
+      icc2_shell> set_app_options -name power.leakage_mode -value average
+
+      To use composite current source (CCS) receiver model capacitance during power analysis
+      and reporting, set the power.use_ccs_rcv_cap application option to true.
+      Example 14 shows a default power report.
+
+Example 14 Default Power Report
+...
+...
+Mode: my_mode
+Corner: bc_corner
+Scenario: bc_scenario
+Voltage: 1.160000
+Temperature: 125.000000
+Voltage unit: 1.00V
+Temperature unit: 1.00C
+Power unit: 1.00pW
+Cell Leakage Power          = 5125495.58 uW
+Power Group        Leakage Power          Total Power           (    % )
+-----------------------------------------------------------------------------
+---
+io_pad                  0.00e+00             0.00e+00           ( 0.00%)
+memory                  0.00e+00             0.00e+00           ( 0.00%)
+black_box               0.00e+00             0.00e+00           ( 0.00%)
+clock_network           3.32e+10             3.32e+01           ( 0.65%)
+register                1.62e+12             1.62e+03           ( 31.67%)
+sequential              1.16e+09             1.16e+00           ( 0.02%)
+combinational           3.47e+12             3.47e+03           ( 67.66%)
+-----------------------------------------------------------------------------
+---
+Total                   5.13e+12 pW          5.13e+03 mW
+1
+
+
+      Creating Power Groups for Reporting
+      When you run the report_power command without specifying a list of cells, the tool
+      reports the power information for the default power groups. You can create power groups
+      consisting of cell instances or library cells by using the set_power_group command. The
+
+
+IC Compiler™ II Implementation User Guide                                                     208
+V-2023.12
+                                                                                       Feedback
+Chapter 3: Placement and Optimization
+Analyzing Power
+
+
+     report_power command reports the power information for both the default and user-
+     specified power groups.
+     If a cell belongs to multiple power groups, the power group it belongs to for reporting
+     purposes is determined by the following precedence:
+      1. The power group specified for the cell instance with the set_power_group command.
+      2. The power group specified for its library cell with the set_power_group command.
+      3. The default power group of the cell.
+     To get the power group of a specific cell, use the get_power_group command.
+      • Use the -default option to get the default power group it belongs to.
+      • Use the -user option to get the user-defined power groups it might belong to.
+      • Use no option to get the power group it belongs to for reporting purposes.
+     To report all the power groups in the block, use the report_power_groups command. To
+     get a collection of cells in a specific power group, use the get_power_group_objects
+     command.
+     To remove a power group or remove a cell from a specific power group, use the
+     reset_power_group command.
+
+
+     Reporting Pin-Based Clock Network Power
+     The report_power command reports the power information for the clock network as part
+     of the default power group named clock_network.
+     By default, the clock network power that was reported is cell-based. If an output of a
+     cell is on the clock network, the power of that cell, including the power of all its inputs
+     and outputs, is considered as part of the clock network. However, you can limit the clock
+     network power reported by the report_power command to include only the pins that are
+     on the clock network by using the following application option setting:
+     icc2_shell> set_app_options -list {power.clock_network pin_based}
+
+     The default is cell_based.
+     The power information that is reported by the report_clock_qor -type power
+     command is pin-based.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                      209
+V-2023.12
+                                                                                     Feedback
+Chapter 3: Placement and Optimization
+Comparing QoR Data
+
+
+
+Comparing QoR Data
+     You can generate a web-based report to view and compare your QoR data with a
+     QORsum report by performing the following steps:
+      1. (Optional) Configure the QoR data, which is captured and displayed in the subsequent
+         steps, by using the set_qor_data_options command.
+         ◦ To specify the most critical power scenarios in your design, use the
+           -leakage_scenario and -dynamic_scenario options.
+
+            The tool uses the power scenarios you specify to generate the high-level summary
+            of the power QoR in the QORsum report. If you do not specify these options, it uses
+            the active power scenario with the highest total power for both the leakage and
+            dynamic scenario for the power QoR summary.
+            These settings are only used for the power QoR summary. The tool uses the power
+            information of all active power scenarios to capture and report the detailed power
+            information in the QORsum report.
+         ◦ To specify the most critical clock name and clock scenario, use the -clock_name
+           and -clock_scenario options.
+            The tool uses the clock name and scenario you specify to generate the high-level
+            summary of the clock QoR in the QORsum report. If you do not specify these
+            options, the tool identifies the most critical clock and uses it for the clock QoR
+            summary.
+            These settings are only used for the clock QoR summary. The tool uses all clocks to
+            generate the detailed clock QoR information in the QORsum report.
+         ◦ To specify a name to identify the run in the QORsum report, use the -run_name
+           option.
+            By default, the tool names each run with a number, such as Run1, Run2, and so
+            on. You can use this option to give a more meaningful name to each run. You can
+            also specify the run name by using the -run_names option when you generate the
+            QORsum report by using the compare_qor_data command in step 3. If you do so,
+            the tool ignores the run name specify by the set_qor_data_options -run_name
+            command.
+         The following example specifies the leakage-power scenario, dynamic-power scenario,
+         clock scenario, and the clock to use for the corresponding summary in the QORsum
+         report:
+         icc2_shell> set_qor_data_options \
+            -leakage_scenario S1 -dynamic_scenario S2 \
+            -clock_scenario S3 -clock_name sys_clk
+
+
+
+IC Compiler™ II Implementation User Guide                                                    210
+V-2023.12
+                                                                                      Feedback
+Chapter 3: Placement and Optimization
+Comparing QoR Data
+
+
+      2. Collect the QoR data for your report by using the write_qor_data command. The
+         write_qor_data command captures QoR data related to timing, power, runtime, and
+         other metrics.
+         You can run the write_qor_data command multiple times, at each stage of the design
+         flow at which you want to capture QoR data. Use the -label and specify a value to
+         indicate at which stage of the flow you are capturing the data.
+         By default, the write_qor_data command captures data relevant to a placed and
+         optimized design. You can specify the -report_group option with any of the five
+         supported value (unmapped, mapped, placed, cts, routed) to tune the set of reports
+         being captured, based on the state of the flow where you are capturing the data. For
+         finer-grain control, use the -report_list option to explicitly specify each report you
+         want to generate.
+         The write_qor_data command captures a standard set of QoR data to disk from
+         most of the common tool reports like the report_qor and report_power. If there
+         is additional custom data to capture that is not part of the command collection, use
+         the capture_qor_data command to capture fully custom QoR data or GUI layout
+         images to include in the web-based QORsum report. This can be used to supplement
+         the standard QoR data captured by the write_qor_data command, or to create fully
+         custom QORsum reports. Related commands include define_qor_data_panel,
+         that lets you create a new panel in the QORsum report for viewing QoR data, and
+         set_qor_data_metric_properties, that lets you customize the properties of any
+         metric column in any QORsum report panel, so you can control things like the style of
+         coloring, or the thresholds for coloring when comparing data.
+      3. Generate the QORsum report by using the compare_qor_data command.
+         This command takes the data captured by one or more runs of the write_qor_data
+         command and creates a web-based report for viewing and comparing those results.
+         You must specify the location of the output of each of the write_qor_data runs from
+         the previous step by using -run_locations option. Each path location corresponds to
+         the run result that you want to compare.
+         You can assign a specific name to identify the run in the QORsum report by using the
+         -run_names option. If you do so, the tool ignores the run name specify by using the
+         set_qor_data_options -run_name command. By default, the tool names each run
+         by a number, such as run1, run2, and so on.
+         You can specify the output directory by using the -output option. By default, the tool
+         writes the report to a directory named compare_qor_data. To overwrite exiting output
+         data, use the -force option. By default, the tool does not overwrite existing output
+         data.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                     211
+V-2023.12
+                                                                                     Feedback
+Chapter 3: Placement and Optimization
+Comparing QoR Data
+
+
+      4. View the generated QORsum report by using the view_qor_data command.
+
+   Figure 27     QORsum Report
+
+
+
+
+     For more information about exploring the comparison data, see the following topics:
+      • Setting Your Baseline Run
+      • Changing the QoR Display Style
+      • Sorting and Filtering the Data
+      • Exploring the Detailed Comparison Data
+
+
+     Setting Your Baseline Run
+     By default, the first row of data is your baseline run against which all other runs are
+     compared. The name of the baseline run is highlighted in gold to mark it as the “golden,”
+     or baseline, result.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                    212
+V-2023.12
+                                                                                    Feedback
+Chapter 3: Placement and Optimization
+Comparing QoR Data
+
+
+
+
+     The shading of non-baseline cells indicates the direction and degree by which the data
+     differs from the baseline:
+      • Red indicates a degradation compared to the baseline; green indicates an
+        improvement compared to the baseline
+      • Lighter shading represents a smaller difference compared to the baseline; darker
+        shading represents a larger difference compared to the baseline
+     To view the delta thresholds corresponding to each shade, hover the cursor over the
+     column headers:
+
+
+
+
+     To change your baseline run, click the Runs button and select a new run as the baseline
+     from the Baseline Run column, as shown in the following figure:
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                     213
+V-2023.12
+                                                                                        Feedback
+Chapter 3: Placement and Optimization
+Comparing QoR Data
+
+
+     See Also
+      • Changing the QoR Display Style
+      • Sorting and Filtering the Data
+      • Exploring the Detailed Comparison Data
+
+
+     Changing the QoR Display Style
+     By default, the comparison tables show the QoR values for all runs. For example, the NVE
+     number for the following run is 2374:
+
+
+
+
+     To cycle through different display styles of the data, right-click anywhere in the table. You
+     can view the data
+      • as a percentage delta against the baseline
+      • as an absolute delta against the baseline (shown in italic)
+     For example, as a percentage delta, the NVE number shows 2.7% fewer failing endpoints
+     than the baseline:
+
+
+
+
+     As an absolute delta, the NVE number shows 65 fewer failing endpoints than the baseline:
+
+
+
+
+     See Also
+      • Sorting and Filtering the Data
+      • Exploring the Detailed Comparison Data
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                       214
+V-2023.12
+                                                                                       Feedback
+Chapter 3: Placement and Optimization
+Comparing QoR Data
+
+
+
+     Sorting and Filtering the Data
+     You can sort and filter the run data to reveal patterns in the results and determine the
+     parameters you want to explore further.
+     To sort and filter the data, see the following topics:
+      • Sorting the Data
+      • Filtering Metrics
+      • Filtering Runs
+      • Example Analysis
+
+     See Also
+      • Exploring the Detailed Comparison Data
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                       215
+V-2023.12
+                                                                                      Feedback
+Chapter 3: Placement and Optimization
+Comparing QoR Data
+
+
+     Sorting the Data
+     Click any column header to sort the data using that metric. The first click performs an
+     ascending sort, while the second click performs a descending sort.
+     For example, to show the worst TNS numbers at the top of the table and the best TNS
+     numbers at the bottom, click the TNS column header:
+
+
+
+
+     Click the TNS column header again to show the best TNS numbers at the top and the
+     worst at the bottom:
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                      216
+V-2023.12
+                                                                                        Feedback
+Chapter 3: Placement and Optimization
+Comparing QoR Data
+
+
+     Filtering Metrics
+     To control which metrics are displayed in the table, click the Metrics button and select or
+     deselect the metrics from the Metrics dialog box accordingly.
+     For example, to show only the setup timing, netlist area, and cell counts, select the metrics
+     as shown in Figure 28.
+
+Figure 28     Metrics Dialog Box
+
+
+
+
+     Filtering Runs
+     To control which runs are displayed in the table, click the Runs button and select or
+     deselect the exploration runs accordingly from the Visible Runs (Summary) column.
+     For example, to display only the first four runs in a table, select the runs as shown in
+     Figure 29.
+
+Figure 29     Choose Baseline and Visible Runs Dialog Box
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                       217
+V-2023.12
+                                                                                    Feedback
+Chapter 3: Placement and Optimization
+Comparing QoR Data
+
+
+     Example Analysis
+     The following example demonstrates how you might sort and filter your data to narrow
+     down the runs you would like to explore further.
+     Suppose you open the comparison report shown in Figure 30 and set the
+     util60_aspect1%1_layerM9 run as the base run.
+
+Figure 30     Comparison Report
+
+
+
+
+     You could look at your TNS numbers first and sort the data from best TNS to worst TNS,
+     as shown in the following figure:
+
+
+
+
+     Notice that the best TNS runs have the M9 top layer, and the worst have the M7 top layer.
+     This suggests that restricting the metal layers significantly impacts timing.
+
+
+
+IC Compiler™ II Implementation User Guide                                                   218
+V-2023.12
+                                                                                        Feedback
+Chapter 3: Placement and Optimization
+Comparing QoR Data
+
+
+     You could then restrict your analysis to your M9 runs by turning off the visibility of your M7
+     runs, as shown in the following figure:
+
+
+
+
+     Now that you have your best TNS runs, you could compare their congestion by sorting
+     the GRCOverflow column to show the worst overflow at the top, as shown in the following
+     figure:
+
+
+
+
+     Notice that your higher-utilization runs have more congestion than your lower-utilization
+     runs. You could restrict your analysis to your lower-utilization runs by turning off the
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                        219
+V-2023.12
+                                                                                      Feedback
+Chapter 3: Placement and Optimization
+Comparing QoR Data
+
+
+     visibility of your higher-utilization runs as shown in Figure 31, leaving you with a
+     manageable subset of exploration runs that better meet your timing and congestion goals.
+
+Figure 31     Displaying Lower-Utilization Runs
+
+
+
+
+     Exploring the Detailed Comparison Data
+     When you launch the QORsum report, the application opens the QOR Summary table,
+     which summarizes high-level timing, power, and congestion metrics for each of your runs.
+     This and other summary views help you sort and filter the data to pinpoint the runs you
+     want to explore further.
+     After you have identified your best candidate runs using the summary tables, you can use
+     the detailed tables to provide deeper insights into your data. While summary tables give
+     a high-level overview of design QoR across all of your runs, such as the overall design
+     timing (WNS, TNS, and NVE) for every run, the detailed table can show the path-group-
+     based timing for all path groups in the design. Detailed tables allows you to view the timing
+     of a specific path group for all your runs or view the timing of all path groups for up to
+     six of your runs at once. All detailed tables follow the naming convention of ending with
+     “Details.” For example, Path Type Details table shows information about your path-type-
+     based timing.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                     220
+V-2023.12
+                                                                                         Feedback
+Chapter 3: Placement and Optimization
+Comparing QoR Data
+
+
+     By default, the detailed tables start in the Focused View, as shown in Figure 32.
+
+Figure 32     Focused View
+
+
+
+
+     The Focused View shows you one path group at a time. To change your focus, use the
+     drop-down menus at the top. For example, you can specify a scenario and path group as
+     shown in Figure 33.
+
+Figure 33     Focused View Drop-down Menu
+
+
+
+
+     The Focused View focuses on a specific property for all runs. However, you can also look
+     at all of the properties for a smaller number of runs.
+     For example, you can identify the worst path group by viewing all path groups
+     simultaneously. To view the data from the traditional detailed view, click the Focused View
+     toggle button at the top menu, as shown in Figure 34.
+
+Figure 34     Focused View Toggle Button
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                      221
+V-2023.12
+                                                                                       Feedback
+Chapter 3: Placement and Optimization
+Comparing QoR Data
+
+
+     To view detailed comparison data for a particular metric, click one of the detailed views in
+     the panel on the left.
+     For example, to view the details of your path-group-based timing, select Path Group
+     Details, as shown in Figure 35.
+
+Figure 35     Path Group Details
+
+
+
+
+     Whereas each row in a summary table shows the results for a flow, each row in a detailed
+     table shows detailed information such as path group names. The flows are shown side
+     by side as columns under each metric. For example, the WNS column group (and the
+     column group of each metric) shows the same six columns labeled 1, 2, 5, 6, 9, 10. These
+     columns represent the results of each flow, and are given a flow ID number, rather than
+     showing the full flow name, to prevent the columns from being too wide. The first column
+     under each metric is the baseline, and the other five are the test flows being compared
+     to that baseline. A legend is shown above the table with the flow ID number in a gold box
+     (for the baseline) or a blue box (for the test flows), followed by the flow name. You can
+     expand or collapse the legend by clicking the Legend button. You can also see the flow
+     ID numbers in the “Choose Baseline and Visible Runs” dialog box, which is opened by
+     clicking the Runs button.
+     The detailed table views can display up to six runs at one time (your baseline run, plus
+     the first five other runs selected in the Choose Baseline and Visible Runs dialog box). To
+     change the runs that are displayed,
+      1. Click the Runs button to open the Choose Baseline and Visible Runs dialog box.
+      2. From the Visible Runs (Summary) column, select or deselect the runs accordingly. This
+         selects and deselects those runs from the Visible flows (Detailed) column.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                      222
+V-2023.12
+                                                                                            Feedback
+Chapter 3: Placement and Optimization
+Comparing QoR Data
+
+
+     Filtering the Detailed Data
+     Detailed views offer filters to focus on specific data. Some views have default filters that
+     are shown automatically. For example, the following detailed views have default scenario
+     and path group filters: Path Type Details, Path Group Details, and Logic Level Details.
+     You can modify the default filters by
+      • Removing the filter by clicking the X symbol before the filter name
+
+
+
+      • Changing the filter value
+
+
+
+      • Enable and disable the filter by clicking anywhere on the filter but the X symbol or value
+        field
+
+
+
+     You can also apply custom filters to the detailed data. To create a custom filter,
+      1. Click the Filter button to display the Add Filter fields, which are shown in the following
+         figure:
+
+
+
+
+      2. Define the filter by defining the filter criteria and selecting the datasets to include in the
+         results.
+         To define the filter, select the column and comparison type, and then specify the
+         comparison value.
+         ◦ To perform a numeric comparison, select one of the following comparison types: =,
+           !=, <, <=, >, or >= and specify a numeric value in the Value field.
+
+         ◦ To perform a string comparison, select the contains comparison type and specify a
+           string value in the Value field.
+         ◦ To perform a regular expression comparison, select the regexp comparison type
+           and specify a regular expression in the Value field.
+         ◦ To filter based on the available values of the selected column, select the enum
+           comparison type, which populates the Value field with a drop-down menu that
+           contains the available values, and then enable one or more of the displayed values.
+           When a value is enabled, a check mark is displayed before the value.
+
+
+IC Compiler™ II Implementation User Guide                                                           223
+V-2023.12
+                                                                                          Feedback
+Chapter 3: Placement and Optimization
+Comparing QoR Data
+
+
+            To enable or disable a value, highlight the value by clicking it or navigating to it
+            by using the Up and Down arrows, and then press Enter, which toggles the value
+            status. You can also type a string in the Value field to filter the available values in
+            the drop-down menu. To dismiss selected values, click the X symbol.
+      3. Apply the filter by clicking the green check mark.
+     For example, to filter the Path Group Details view by displaying the path groups in the
+     func@cworst scenario, define the filter as shown in the following figure:
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                         224
+V-2023.12
+

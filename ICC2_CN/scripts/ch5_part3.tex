@@ -1,0 +1,439 @@
+% ============================================================
+\section{布线约束}
+\subsection*{Routing Constraints}
+
+布线约束在布线过程中提供指导。表~\ref{tab:routing-constraints} 概述各类约束。
+
+\begin{table}[htbp]
+\centering
+\caption{布线约束类型}
+\label{tab:routing-constraints}
+\begin{tabularx}{\textwidth}{@{}l X@{}}
+\toprule
+\textbf{指导内容} & \textbf{说明} \\
+\midrule
+控制布线层 & \cmd{set\_ignored\_layers} 等，见「指定布线资源」 \\
+更严格最小宽/间距 & 定义并应用 NDR（\cmd{create\_routing\_rule}） \\
+控制穿越 voltage area & 电压域布线规则 \\
+控制布线方向 & 层优选方向；区域用 preferred-direction-only / switch-preferred-direction routing guide \\
+限制非优选方向边数 & maximum-number-of-pattern routing guide \\
+控制 off-grid 布线 & 见「控制 Off-Grid 布线」 \\
+禁止特定 net 布线 & \appopt{physical\_status} 设为 \cmd{locked} \\
+禁止特定区域布线 & routing blockage \\
+为顶层布线预留空间 & corridor routing blockage \\
+限制布线到特定区域 & routing corridor \\
+区域优先级 & access preference routing guide \\
+控制布线密度 & utilization routing guide \\
+鼓励 river routing & single-layer river routing guide \\
+改善硬宏 pin 可布线性 & pin access routing guides \\
+控制 block 边界周围布线 & perimeter constraint objects \\
+Metal cut allowed/forbidden 规则 & boundary cell 插入时自动创建，或 \cmd{derive\_metal\_cut\_routing\_guides} \\
+控制 pin 连接 & must-join、pin connection 类型、pin tapering \\
+控制 via ladder 连接 & 见相关小节 \\
+限制重布线范围 & rerouting mode \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{定义 Routing Blockage}
+\subsubsection*{Defining Routing Blockages}
+
+Routing blockage 定义特定层上禁止布线的区域，Zroute 视其为硬约束。用 \cmd{create\_routing\_blockage} 创建，至少指定边界与层。
+
+\begin{itemize}
+  \item 矩形：\opt{-boundary \{ \{llx lly\} \{urx ury\} \}}；
+  \item 直角多边形：\opt{-boundary \{ \{x1 y1\} \{x2 y2\} ... \}}，也可由 geo\_mask 等物理对象并集生成（多连通则生成多个 blockage）；
+  \item 层：\opt{-layers}（金属、via 或 poly）。
+\end{itemize}
+
+默认名称 \texttt{RB\_objId}，阻止边界内所有网络；按 real metal 参与 RC 提取与 DRC，须满足最小间距。常用选项：\opt{-name}、\opt{-cell}、\opt{-zero\_spacing}（零间距且不作 real metal；防止 via 插入时须用此选项）、\opt{-net\_types}（\cmd{signal}/\cmd{clock}/\cmd{power}/\cmd{ground} 等）。
+
+\begin{lstlisting}
+icc2_shell> create_routing_blockage \
+   -boundary { {0.0 0.0} {100.0 100.0} } \
+   -net_types signal -layers M1
+icc2_shell> create_routing_blockage \
+   -boundary { {0.0 0.0} {100.0 100.0} } \
+   -net_types signal -layers V1 -zero_spacing
+icc2_shell> create_routing_blockage \
+   -boundary { {0.0 0.0} {100.0 100.0} } \
+   -net_types {power ground} -layers M2
+\end{lstlisting}
+
+\textbf{为顶层布线预留空间}：创建时加 \opt{-reserve\_for\_top\_level\_routing}。块级实现时作普通 blockage；frame view 提取时移除以允许顶层布线。
+
+查询：\cmd{get\_routing\_blockages}、\cmd{get\_objects\_by\_location -classes routing\_blockage}。移除：\cmd{remove\_routing\_blockages}（\opt{-all} 移除全部 corridor）。
+
+\subsection{定义 Routing Guide}
+\subsubsection*{Defining Routing Guides}
+
+Routing guide 为区域提供布线指令。用户定义的 guide 由 Zroute 遵从，但 Advanced Route 工具不遵从。
+
+\begin{noteBox}
+用户定义的 routing guide 由 Zroute 遵从；Advanced Route 工具不遵从。
+\end{noteBox}
+
+用 \cmd{create\_routing\_guide} 创建，须指定矩形边界 \opt{-boundary \{\{llx lly\} \{urx ury\}\}} 及用途相关选项。表~\ref{tab:user-routing-guides} 列出用户定义类型。
+
+\begin{table}[htbp]
+\centering
+\caption{用户定义 Routing Guide}
+\label{tab:user-routing-guides}
+\begin{tabularx}{\textwidth}{@{}X l@{}}
+\toprule
+\textbf{用途} & \textbf{选项} \\
+\midrule
+仅在优选方向布线 & \opt{-preferred\_direction\_only} \\
+切换优选方向 & \opt{-switch\_preferred\_direction} \\
+限制特定布线模式出现次数 & \opt{-max\_patterns} \\
+控制布线密度 & \opt{-horizontal\_track\_utilization} / \opt{-vertical\_track\_utilization} \\
+区域优先级 & \opt{-access\_preference} \\
+鼓励 river routing & \opt{-river\_routing} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+默认名称 \texttt{RD\#n}；可用 \opt{-name}、\opt{-layers}、\opt{-cell}。
+
+\subsubsection{控制布线方向}
+\subsubsection*{Using Routing Guides to Control the Routing Direction}
+
+\begin{lstlisting}
+icc2_shell> create_routing_guide -boundary {{0.0 0.0} {100.0 100.0}} \
+   -layers {M4} -preferred_direction_only
+icc2_shell> create_routing_guide -boundary {{0.0 0.0} {100.0 100.0}} \
+   -layers {M1 M2} -switch_preferred_direction
+\end{lstlisting}
+
+\begin{noteBox}
+若 switch-preferred-direction 与 preferred-direction-only 重叠，前者优先。
+\end{noteBox}
+
+\subsubsection{限制非优选方向边数}
+\subsubsection*{Using Routing Guides to Limit Edges in the Nonpreferred Direction}
+
+\begin{lstlisting}
+icc2_shell> create_routing_guide -boundary {{50 50} {200 200}} \
+   -max_patterns {{M2 non_pref_dir_edge 2} {M4 non_pref_dir_edge 3}} \
+   -layers {M2 M4}
+\end{lstlisting}
+当前支持的 pattern 为 \cmd{non\_pref\_dir\_edge}。超过阈值时 Zroute 报告违例。
+
+\subsubsection{控制密度与优先级、River Routing}
+\subsubsection*{Density, Access Preference, and River Routing}
+
+\begin{lstlisting}
+icc2_shell> create_routing_guide -boundary {{0.0 0.0} {100.0 100.0}} \
+   -horizontal_track_utilization 50 -vertical_track_utilization 30
+icc2_shell> create_routing_guide -boundary {{0 0} {300 300}} \
+   -access_preference {M1 {wire_access_preference {{0 0} {2 1}} 0.2}
+                          {via_access_preference {{0 0} {5 5}} 1.0}
+                          {via_access_preference {{40 40} {45 45}} 0.5}}
+icc2_shell> create_routing_guide -boundary {{0.0 0.0} {100.0 100.0}} \
+   -river_routing -layers {M2}
+\end{lstlisting}
+
+强度 0--1；强度为 1 时视为硬约束，小于 1 的区域被忽略。用 \cmd{report\_routing\_guides} 报告。查询/移除：\cmd{get\_routing\_guides}、\cmd{remove\_routing\_guides -all}。
+
+\subsection{推导 Routing Guide}
+\subsubsection*{Deriving Routing Guides}
+
+\subsubsection{Pin Access Routing Guide}
+\subsubsection*{Deriving Pin Access Routing Guides}
+
+在更小工艺节点复用硬宏时，可用 \cmd{derive\_pin\_access\_routing\_guides} 改善宏 pin 可达性：
+
+\begin{lstlisting}
+icc2_shell> derive_pin_access_routing_guides -cells myMacro \
+   -layers {M2 M3} -x_width 0.6 -y_width 0.7
+\end{lstlisting}
+
+为指定宏在指定层创建 routing guide，并在宏周围创建带 pin 开孔的 metal blockage 及相邻 via 层 blockage。默认仅在优选方向开孔；\opt{-nonpreferred\_direction} 可在非优选方向也开孔；\opt{-pin\_extension} 可延伸开孔。命令会将宏 pin 的 \appopt{is\_rectangle\_only\_rule\_waived} 设为 \cmd{true}。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.2cm}\textit{（原书 Figure 64：Pin Access Routing Guides and Blockages）}\vspace{1.2cm}}}
+\caption{Pin Access Routing Guide 与 Blockage}
+\label{fig:pin-access-guides}
+\end{figure}
+
+移动宏后须重新生成；不可手动修改。
+
+\subsubsection{Metal Cut Routing Guide}
+\subsubsection*{Deriving Metal Cut Routing Guides}
+
+若 technology file 定义了 metal cut allowed / forbidden preferred grid extension 规则且已有 boundary cell，可用：
+\begin{lstlisting}
+derive_metal_cut_routing_guides -add_metal_cut_allowed
+\end{lstlisting}
+\opt{-check\_only} 可检查；错误数据默认 \texttt{block\_name.err}（\opt{-error\_view} 可改）。
+
+\subsection{控制 Block 边界周围布线}
+\subsubsection*{Controlling Routing Around the Block Boundary}
+
+用 \cmd{derive\_perimeter\_constraint\_objects} 沿边界放置金属形状、routing guide 与 blockage。边界变更后须重新生成。
+
+\begin{itemize}
+  \item \opt{-perimeter\_objects metal\_preferred}：沿优选方向边插入浮空金属（连续形状或用 \opt{-stub} 的 metal stub）；
+  \item \opt{-short\_metal\_length}/\opt{-metal\_spacing}：垂直于非优选边的短金属；
+  \item \opt{-perimeter\_objects mprg\_nonpreferred}：沿非优选边插入最大 pattern guide（阈值为 0）；
+  \item 另可沿边界插入 routing blockage。
+\end{itemize}
+
+常用选项：\opt{-hierarchical}、\opt{-layers}、\opt{-spacing\_from\_boundary}、\opt{-width\_nonpreferred}、\opt{-spacing\_nonpreferred}、\opt{-check\_only}。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}\textit{（原书 Figure 65：Continuous Metal Shape Perimeter Constraint Objects）}\vspace{1.0cm}}}
+\caption{连续金属形状边界约束对象}
+\label{fig:perimeter-metal-cont}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}\textit{（原书 Figure 66：Metal Stub Perimeter Constraint Objects）}\vspace{1.0cm}}}
+\caption{Metal Stub 边界约束对象}
+\label{fig:perimeter-metal-stub}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}\textit{（原书 Figure 67：Metal Shape Perimeter Constraint Objects With Additional Short Shapes）}\vspace{1.0cm}}}
+\caption{带短金属的边界约束对象}
+\label{fig:perimeter-short-metal}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}\textit{（原书 Figure 68：Routing Guide Perimeter Constraint Objects）}\vspace{1.0cm}}}
+\caption{Routing Guide 边界约束对象}
+\label{fig:perimeter-guide}
+\end{figure}
+
+\subsection{在特定区域内布线（Routing Corridor）}
+\subsubsection*{Routing Nets Within a Specific Region}
+
+Routing corridor 将布线限制在指定区域。全局布线视其为硬约束；轨道分配与详细布线视其为软约束（为修 DRC 可能略微越界）。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}\textit{（原书 Figure 69：Using a Routing Corridor）}\vspace{1.0cm}}}
+\caption{使用 Routing Corridor}
+\label{fig:routing-corridor}
+\end{figure}
+
+用 \cmd{create\_routing\_corridor} 创建，\cmd{add\_to\_routing\_corridor} 将 net 加入，\cmd{check\_routing\_corridors} 检查。
+
+\subsection{使用非默认布线规则（NDR）}
+\subsubsection*{Using Nondefault Routing Rules}
+
+用 \cmd{create\_routing\_rule} 定义比 technology file 更严格的宽度、间距、via 间距、via 选择、mask、屏蔽等规则，再用 \cmd{set\_routing\_rule} 或 \cmd{set\_clock\_routing\_rules} 赋给网络。
+
+\subsubsection{最小线宽与间距}
+\subsubsection*{Defining Minimum Wire Width and Spacing Rules}
+
+\begin{lstlisting}
+create_routing_rule rule_name \
+   -widths {layer1 width1 ...} \
+   -spacings {layer1 spacing1 ...}
+\end{lstlisting}
+
+也可定义 soft spacing（带 weight）：
+\begin{lstlisting}
+-soft_spacings { {layer spacing weight} ... }
+\end{lstlisting}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}\textit{（原书 Figure 70：Ignoring Nondefault Spacing Rule Violations）}\vspace{1.0cm}}}
+\caption{忽略非默认间距规则违例}
+\label{fig:ignore-ndr-spacing}
+\end{figure}
+
+为 soft spacing 分配修复努力：
+\begin{lstlisting}
+icc2_shell> set_app_options \
+   -name route.common.soft_rule_weight_to_effort_level_map \
+   -value { {low low} {medium medium} {high high} }
+\end{lstlisting}
+effort 取值：\cmd{off}/\cmd{low}/\cmd{medium}/\cmd{high}（\cmd{low} weight 不可用 medium/high effort）。
+
+\subsubsection{最小 Via 间距与非默认 Via}
+\subsubsection*{Via Spacing and Nondefault Vias}
+
+\begin{lstlisting}
+icc2_shell> create_routing_rule via_spacing_rule \
+   -via_spacings {{V1 V1 2.3} {V1 V2 3.2}}
+\end{lstlisting}
+
+指定非默认 via：\opt{-cuts}（由工具按 technology 选择）或 \opt{-vias}（显式列出 via 类型、cut 数与方向 \cmd{R}/\cmd{NR}）。
+
+\subsubsection{Mask 约束与屏蔽规则}
+\subsubsection*{Mask Constraints and Shielding Rules}
+
+\begin{lstlisting}
+icc2_shell> create_routing_rule clock_mask1 \
+   -mask_constraints {M4 mask_one M5 mask_one}
+icc2_shell> create_routing_rule shield_rule \
+   -shield_widths {M1 0.1 M2 0.1 M3 0.1 M4 0.1 M5 0.1 M6 0.3} \
+   -shield_spacings {M1 0.1 M2 0.1 M3 0.1 M4 0.1 M5 0.1 M6 0.3}
+\end{lstlisting}
+
+\begin{noteBox}
+为确保 DRC 收敛，双图案化 mask 约束应仅用于极少数时序关键网络。
+\end{noteBox}
+
+报告：\cmd{report\_routing\_rules -verbose}（\opt{-output} 可写出 Tcl）。移除：\cmd{remove\_routing\_rules}。修改须先删后重建。
+
+\subsubsection{将 NDR 赋给网络}
+\subsubsection*{Assigning Nondefault Routing Rules to Nets}
+
+\begin{itemize}
+  \item \cmd{set\_clock\_routing\_rules}：CTS 前赋给时钟网，CTS 会传播到新建时钟网；
+  \item \cmd{set\_routing\_rule}：赋给信号网，或 CTS 后的时钟网。
+\end{itemize}
+
+表~\ref{tab:clock-ndr-restrict} 列出限制时钟规则分配的选项。
+
+\begin{table}[htbp]
+\centering
+\caption{限制时钟布线规则分配}
+\label{tab:clock-ndr-restrict}
+\begin{tabularx}{\textwidth}{@{}X l@{}}
+\toprule
+\textbf{赋给} & \textbf{选项} \\
+\midrule
+特定时钟树 & \opt{-clocks} \\
+连到 clock root 的网络 & \opt{-net\_type root} \\
+连到 clock sink 的网络 & \opt{-net\_type sink} \\
+时钟树内部网络 & \opt{-net\_type internal} \\
+特定时钟网络 & \opt{-nets} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}\textit{（原书 Figure 71：Root, Internal, and Sink Clock Net Types）}\vspace{1.0cm}}}
+\caption{Root / Internal / Sink 时钟网络类型}
+\label{fig:clock-net-types}
+\end{figure}
+
+\begin{lstlisting}
+icc2_shell> set_clock_routing_rules -rules NDR1 -net_type root
+icc2_shell> set_clock_routing_rules -rules NDR2 -net_type internal
+icc2_shell> set_clock_routing_rules -rules NDR3 -net_type sink
+icc2_shell> set_clock_tree_options -root_ndr_fanout_limit 300
+\end{lstlisting}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}\textit{（原书 Figure 72：Using a Fanout Limit for Selecting Root Nets）}\vspace{1.0cm}}}
+\caption{用扇出限制选择 Root 网络}
+\label{fig:root-fanout-limit}
+\end{figure}
+
+\begin{noteBox}
+较小的 \opt{-root\_ndr\_fanout\_limit} 会增加使用 root NDR 的时钟网数量，可能加剧拥塞。
+\end{noteBox}
+
+多条 NDR 时优先级：\cmd{set\_routing\_rule} $>$ \cmd{set\_clock\_routing\_rules -nets} $>$ \cmd{set\_clock\_routing\_rules -clocks} $>$ 全局 \cmd{set\_clock\_routing\_rules}。
+
+信号网示例：
+\begin{lstlisting}
+icc2_shell> set_routing_rule -rule WideMetal [get_nets CLK]
+icc2_shell> set_routing_rule -default_rule [get_nets CLK]
+\end{lstlisting}
+另有 \opt{-no\_rule}、\opt{-clear}。报告：\cmd{report\_routing\_rules -of\_objects}、\cmd{report\_clock\_routing\_rules}。
+
+\subsection{控制 Off-Grid 布线}
+\subsubsection*{Controlling Off-Grid Routing}
+
+默认仅当 technology 中 \texttt{onWireTrack}/\texttt{onGrid} 为 1 时才要求对齐 track。可用以下选项覆盖：
+\begin{lstlisting}
+icc2_shell> set_app_options \
+   -name route.common.wire_on_grid_by_layer_name \
+   -value {{M2 true} {M3 true}}
+icc2_shell> set_app_options \
+   -name route.common.via_on_grid_by_layer_name \
+   -value {{V2 true}}
+icc2_shell> set_app_options \
+   -name route.common.extra_via_off_grid_cost_multiplier_by_layer_name \
+   -value {{M2 0.5}}
+\end{lstlisting}
+有效代价 $=$ 基础代价 $\times (1+\mathrm{multiplier})$，multiplier 范围 0.0--20.0。
+
+\subsection{Must-Join Pin 布线}
+\subsubsection*{Routing Must-Join Pins}
+
+Must-join pin 的各 terminal 作为同一网络连接。默认随机结构（图~\ref{fig:must-join-default}）；为改善电磁特性，可用 pattern-based must-join（经 via ladder 能力实现，图~\ref{fig:must-join-single}）。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}\textit{（原书 Figure 73：Default Must-Join Pin Connection）}\vspace{1.0cm}}}
+\caption{默认 Must-Join 连接}
+\label{fig:must-join-default}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}\textit{（原书 Figure 74：Single-Level Pattern-Based Must-Join Pin Connection）}\vspace{1.0cm}}}
+\caption{单层 Pattern-Based Must-Join}
+\label{fig:must-join-single}
+\end{figure}
+
+多层结构（图~\ref{fig:must-join-multi}）：将 \appopt{route.auto\_via\_ladder.pattern\_must\_join\_over\_pin\_layer} 设为 2。当库 pin 有 \appopt{pattern\_must\_join} 且运行 \cmd{route\_auto}/\cmd{route\_group}/\cmd{route\_eco} 时自动使用。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}\textit{（原书 Figure 75：Multi-Level Pattern-Based Must-Join Pin Connection）}\vspace{1.0cm}}}
+\caption{多层 Pattern-Based Must-Join}
+\label{fig:must-join-multi}
+\end{figure}
+
+\begin{lstlisting}
+icc2_shell> set_app_options -name \
+   route.auto_via_ladder.pattern_must_join_max_number_stagger_tracks \
+   -value {3 0}
+\end{lstlisting}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}\textit{（原书 Figure 76：Pattern-Based Must-Join Pin Connection With Staggering）}\vspace{1.0cm}}}
+\caption{带 Stagger 的 Pattern-Based Must-Join}
+\label{fig:must-join-stagger}
+\end{figure}
+
+无法创建时报告 ``Needs pattern must join pin connection'' DRC。可用 \appopt{route.auto\_via\_ladder.update\_pattern\_must\_join\_during\_route} 控制是否在每次布线时更新。
+
+\subsection{控制 Pin 连接与 Tapering}
+\subsubsection*{Controlling Pin Connections and Pin Tapering}
+
+\begin{lstlisting}
+icc2_shell> set_app_options \
+   -name route.common.connect_within_pins_by_layer_name \
+   -value {{M1 via_all_pins}}
+\end{lstlisting}
+
+Mode：\cmd{off}（默认）、\cmd{via\_standard\_cell\_pins}、\cmd{via\_wire\_standard\_cell\_pins}、\cmd{via\_all\_pins}、\cmd{via\_wire\_all\_pins}。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}\textit{（原书 Figure 77--79：Pin Connection Restrictions）}\vspace{1.0cm}}}
+\caption{Pin 连接限制示意（无限制 / via / via+wire）}
+\label{fig:pin-connect-modes}
+\end{figure}
+
+Pin tapering：默认基于距离；也可用层基 tapering（\opt{-taper\_over\_pin\_layers}/\opt{-taper\_under\_pin\_layers} 等）。二者互斥，同时指定时采用层基设置。相关应用选项：\appopt{route.detail.pin\_taper\_mode}、\appopt{route.detail.use\_wide\_wire\_effort\_level}、\appopt{route.detail.use\_wide\_wire\_to\_input\_pin} 等。
+
+Via ladder 连接：默认连到 ladder 最顶层。\appopt{route.detail.via\_ladder\_upper\_layer\_via\_connection\_mode}、\appopt{route.detail.allow\_default\_rule\_nets\_via\_ladder\_lower\_layer\_connection} 可调整。
+
+\subsection{设置重布线模式}
+\subsubsection*{Setting the Rerouting Mode}
+
+将 net 的 \appopt{physical\_status} 设为 \cmd{locked}（禁止重布）、\cmd{minor\_change}（仅小改）或 \cmd{unrestricted}（默认）。
+
+\begin{lstlisting}
+icc2_shell> set_attribute -objects [get_nets net1] \
+   -name physical_status -value locked
+\end{lstlisting}

@@ -1,0 +1,1782 @@
+                                                                                         Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Redundant Vias
+
+
+     The create_diodes command uses the following application options to control diode
+     insertion:
+      • To control whether Zroute inserts new diodes or reuses spare diodes, set the
+        route.detail.diode_insertion_mode application option.
+
+      • To control whether Zroute can reuse filler cell locations, set the
+        route.detail.reuse_filler_locations_for_diodes application option.
+
+      • To specify the logic hierarchy in which to insert the diodes for top-level ports, set the
+        route.detail.use_lower_hierarchy_for_port_diodes application option.
+
+     For example, to insert 2 Adiode diode cells to fix an antenna violation on the A port of the
+     CI cell instance, where the diodes must be inserted using no higher layer than M5 and
+     within 2.5 microns of the port, enter the following command:
+     icc2_shell> create_diodes {{A CI Adiode 2 M5 2.5}}
+
+
+
+Inserting Redundant Vias
+     Redundant via insertion is an important design-for-manufacturing (DFM) feature that is
+     supported by Zroute throughout the routing flow. In each routing stage, Zroute concurrently
+     optimizes via count as well as wire length. The redundant via result is measured by
+     the redundant via conversion rate, which is defined as the percentage of single vias
+     converted into redundant vias. You should also pay attention to the number of unoptimized
+     single vias. If a block has fewer unoptimized single vias, it is usually better for DFM. The
+     following topics describe how to insert redundant vias:
+      • Inserting Redundant Vias on Clock Nets
+      • Inserting Redundant Vias on Signal Nets
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                           506
+V-2023.12
+                                                                                        Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Redundant Vias
+
+
+
+     Inserting Redundant Vias on Clock Nets
+     Zroute can insert redundant vias on clock nets either during or after routing. This topic
+     describes how to insert redundant vias during clock routing. For information about
+     postroute redundant via insertion, see Postroute Redundant Via Insertion.
+     To insert redundant vias on clock nets during clock routing,
+      1. Specify the redundant vias in a nondefault routing rule by using the
+         create_routing_rule command, as described in Specifying Nondefault Vias.
+
+         Be sure to consider both DFM and routing when you select the redundant vias;
+         otherwise, if you select the redundant vias based only on DFM considerations, you
+         could negatively impact the routability.
+         In addition to using nondefault routing rules to define the redundant vias for clock nets,
+         you can also use them to define stricter wire width and spacing rules and to define
+         the tapering distance. For more information about nondefault routing rules, see Using
+         Nondefault Routing Rules.
+      2. Assign the nondefault routing rule to the clock nets by using the
+         set_clock_routing_rules command.
+         icc2_shell> set_clock_routing_rules -rules clock_via_rule
+
+      3. Run clock tree synthesis.
+         icc2_shell> synthesize_clock_trees
+
+      4. Route the clock nets.
+         icc2_shell> route_group -all_clock_nets \
+            -reuse_existing_global_route true
+
+         Zroute reserves space for the redundant vias during global routing and inserts the
+         redundant vias during detail routing.
+
+
+     Inserting Redundant Vias on Signal Nets
+     You can perform redundant via insertion in the following ways:
+      • Postroute redundant via insertion
+      • Concurrent soft-rule-based redundant via insertion
+      • Near 100 percent redundant via insertion
+     In general, you should start with postroute redundant via insertion. If postroute redundant
+     via insertion results in a redundant via rate of at least 80 percent, you can try to improve
+
+
+
+IC Compiler™ II Implementation User Guide                                                        507
+V-2023.12
+                                                                                          Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Redundant Vias
+
+
+     the redundant via rate by using concurrent soft-rule-based redundant via insertion. If
+     postroute redundant via insertion results in a redundant via rate of at least 90 percent,
+     you can try to improve the redundant via rate by using near 100 percent redundant via
+     insertion.
+     Note:
+         As the redundant via rate increases, it becomes more difficult to converge
+         on the routing design rules and you might see a reduction in signal integrity;
+         therefore, you should use near 100 percent redundant via insertion only for
+         those blocks that truly require such a high redundant via rate. In addition,
+         achieving very high redundant via rates might require you to modify the
+         floorplan utilization to allow enough space for the redundant vias.
+     The following topics describe the default via mapping table, how to define a customized
+     via mapping table, how to insert redundant vias by using various methods, and how to
+     report the redundant via rate.
+      • Viewing the Default Via Mapping Table
+      • Defining a Customized Via Mapping Table
+      • Postroute Redundant Via Insertion
+      • Concurrent Soft-Rule-Based Redundant Via Insertion
+      • Near 100 Percent Redundant Via Insertion
+      • Preserving Timing During Redundant Via Insertion
+      • Reporting Redundant Via Rates
+
+     Viewing the Default Via Mapping Table
+     By default, Zroute reads the default contact codes from the technology file and
+     generates an optimized via mapping table. To see the default mapping table, use the
+     add_redundant_vias -list_only true command.
+
+     In most cases you achieve better results if you use a customized mapping table rather
+     than the default mapping table. For information about defining a customized mapping
+     table, see Defining a Customized Via Mapping Table.
+     If you have not previously defined a customized mapping table for the block, you can
+     see the default mapping table by using the add_redundant_vias -list_only true
+     command.
+     Note:
+         After you have created a customized mapping table by using the method
+         described in Defining a Customized Via Mapping Table, this command shows
+         the customized mapping table.
+
+
+IC Compiler™ II Implementation User Guide                                                        508
+V-2023.12
+                                                                     Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Redundant Vias
+
+
+     Example 25 shows an example of a default via mapping table.
+
+Example 25 Default Via Mapping Table
+icc2_shell> add_redundant_vias -list_only
+...
+Redundant via optimization will attempt to replace the following vias:
+    VIA12SQ_C    -> VIA12SQ_C_2x1    VIA12SQ_C_2x1(r) VIA12SQ_C_1x2    VIA12SQ_
+C_1x2(r)
+    VIA12SQ_C(r) -> VIA12SQ_C_2x1    VIA12SQ_C_2x1(r) VIA12SQ_C_1x2    VIA12SQ_
+C_1x2(r)
+...
+    VIA89(r)     -> VIA89_C_1x2(r) VIA89_1x2(r) VIA89_1x2      VIA89_C_1x2
+                    VIA89_C_2x1(r) VIA89_2x1(r) VIA89_2x1      VIA89_C_2x1
+    VIA9RDL      -> VIA9RDL_2x1    VIA9RDL_1x2
+
+
+
+
+IC Compiler™ II Implementation User Guide                                   509
+V-2023.12
+                                                                                         Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Redundant Vias
+
+
+     Defining a Customized Via Mapping Table
+     To define a customized via mapping, use the add_via_mapping command. At a minimum,
+     you must specify the source via and its replacement vias by using the -from and -to
+     options. The vias listed in these options must be either vias defined in the technology
+     file or design-specific vias created by the create_via_def command. The vias listed in
+     the -from option must be simple vias or via arrays. The vias listed in the -to option can
+     be simple vias, simple via arrays, or custom vias. For information about creating design-
+     specific vias, see Defining Vias.
+     Use the following options to refine the via mapping:
+      • -weight
+         By default, all mappings have the same priority, and Zroute selects the redundant vias
+         to use based on routability. To set the priority for a mapping, use the -weight option to
+         assign an integer weight value between 1 and 10 to the mapping. If you do not assign
+         a weight, the tool assigns a weight of 1. During redundant via insertion, Zroute uses the
+         higher weighted redundant vias first.
+      • -transform
+         By default, Zroute can rotate or flip the via arrays during redundant via insertion (the
+         -transform all option).
+
+          ◦ To allow only rotation of the via arrays during redundant via insertion, use the
+            -transform rotate option.
+
+          ◦ To allow only flipping of the via arrays during redundant via insertion, use the
+            -transform flip option.
+
+          ◦ To allow only the specified orientation of the via array during redundant via
+            insertion, use the -transform none option.
+     The tool saves the mappings defined by the add_via_mapping command in a via mapping
+     table in the design library. By default, if you try to add a via mapping that already exists in
+     the table, the command fails. To overwrite an existing mapping definition, use the -force
+     option.
+     Example 26 shows an example of using the add_via_mapping command to define a
+     customized via mapping table.
+
+Example 26 Customized Via Mapping Table
+     icc2_shell> add_via_mapping \
+        -from {VIA12 1x1} -to {VIA12T 2x1} -weight 5
+     icc2_shell> add_via_mapping \
+        -from {VIA12 1x1} -to {VIA12 2x1} -weight 1
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                           510
+V-2023.12
+                                                                                        Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Redundant Vias
+
+
+     To see the customized via mappings associated with a block, use the
+     report_via_mapping command.
+
+      • By default, this command shows all user-defined via mappings.
+      • To show the via mappings for specific source vias, use the -from option.
+      • To show the via mappings for specific replacement vias, use the -to option.
+     To remove mappings from the via mapping table, use the remove_via_mappings
+     command.
+      • To remove all via mappings, use the -all option.
+      • To remove the via mappings for specific source vias, use the -from option.
+      • To remove the via mappings for specific replacement vias, use the -to option.
+     Using a Subset of the Via Mapping Table for Redundant Via Insertion
+     To use a subset of the via mapping table for redundant via insertion, specify which
+     weight groups from the via mapping table to use by setting one or both of the
+     route.common.redundant_via_include_weight_group_by_layer_name and
+     route.common.redundant_via_exclude_weight_group_by_layer_name application
+     options.
+      • If you set only the
+         route.common.redundant_via_include_weight_group_by_layer_name application
+         option, Zroute selects redundant vias only from the specified weight groups. If you do
+         not specify an entry for a layer, redundant via insertion is not performed on that layer.
+      • If you set only the
+         route.common.redundant_via_exclude_weight_group_by_layer_name application
+         option, Zroute selects redundant vias from all weight groups in the original via mapping
+         table, except the specified weight groups. If you do not specify an entry for a layer, all
+         weight groups are used for that layer.
+      • If you set both application options, Zroute selects
+        redundant vias from the weight groups specified in the
+         route.common.redundant_via_include_weight_group_by_layer_name
+         application, excluding the weight groups specified in the
+         route.common.redundant_via_exclude_weight_group_by_layer_name application
+         option.
+
+     Postroute Redundant Via Insertion
+     To perform postroute redundant via insertion, use the add_redundant_vias command.
+     This command can replace single-cut vias with multiple-cut via arrays, single-cut vias
+     with other single-cut vias that have a different contact code, and multiple-cut via arrays
+
+
+IC Compiler™ II Implementation User Guide                                                         511
+V-2023.12
+                                                                                         Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Redundant Vias
+
+
+     with different multiple-cut via arrays. During redundant via insertion, the detail router also
+     checks the design rules within the neighboring partition to minimize DRC violations.
+     By default, the add_redundant_vias command inserts redundant vias on all nets. To
+     insert redundant vias only on specific nets, use the -nets option to specify the nets. Using
+     net-specific redundant via insertion allows you to further improve the optimized via rate
+     without causing large-scale routing and timing changes.
+     After the vias are checked and replaced, the detail router rechecks for DRC violations and
+     corrects any violations.
+     If the percentage of redundant vias is not high enough, you can increase the effort level
+     by using the -effort option to get a better redundant via rate. Increasing the effort level
+     to high can increase the redundant via rate by about 3 to 5 percent by shifting the vias
+     to make room for additional vias. However, because high-effort redundant via insertion
+     moves the vias more, it can result in a less lithography-friendly pattern at the 45-nm
+     technology node and below. In this case, you should use concurrent soft-rule-based
+     redundant via insertion to improve the redundant via rate.
+     You can also try to increase the postroute redundant via rate by setting the
+     route.detail.optimize_wire_via_effort_level application option to high, which
+     reduces the number of single vias and makes more room for redundant vias by reducing
+     wire length.
+     After you perform the initial postroute redundant via insertion, set the
+     route.common.post_detail_route_redundant_via_insertion application option
+     to enable automatic insertion of redundant vias after subsequent detail routing or ECO
+     routing. This helps to maintain the redundant via rate in your block.
+
+     Concurrent Soft-Rule-Based Redundant Via Insertion
+     Soft-rule-based redundant via insertion can improve the redundant via rate by reserving
+     space for the redundant vias during routing. You can use concurrent soft-rule-based
+     redundant via insertion during both initial routing and ECO routing. The actual via insertion
+     is not done during routing; you must still perform postroute redundant via insertion by
+     using the add_redundant_vias command.
+     Note:
+         Reserving space during routing increases the routing runtime. You should use
+         this method only when needed to improve the redundant via rate beyond that
+         provided by postroute redundant via insertion and the postroute approach
+         resulted in a redundant via rate of at least 80 percent.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                        512
+V-2023.12
+                                                                                        Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Redundant Vias
+
+
+     To perform concurrent soft-rule-based redundant via insertion,
+      1. (Optional) Define the via mapping table as described in Defining a Customized Via
+         Mapping Table.
+      2. Enable concurrent soft-rule-based redundant via insertion.
+         By default, concurrent redundant via insertion is disabled.
+          ◦ To enable concurrent soft-rule-based redundant via insertion during initial routing,
+            set the route.common.concurrent_redundant_via_mode application option to
+            reserve_space.
+             icc2_shell> set_app_options \
+                -name route.common.concurrent_redundant_via_mode \
+                -value reserve_space
+
+             To control the effort used to reserve space for the redundant vias during initial
+             routing, set the route.common.concurrent_redundant_via_effort_level
+             application option. By default, Zroute uses low effort. The higher effort levels result
+             in a better redundant via conversion rate at the expense of runtime. The low and
+             medium efforts affect only global routing and track assignment, while high effort also
+             affects detail routing, which can impact design rule convergence.
+             Note:
+                If you enable the route.common.concurrent_redundant_via_mode
+                option before running the place_opt command, the redundant vias are
+                considered during congestion estimation.
+          ◦ To enable concurrent soft-rule-based redundant via insertion during ECO routing,
+            set the route.common.eco_route_concurrent_redundant_via_mode application
+            option to reserve_space.
+             icc2_shell> set_app_options \
+                -name route.common.eco_route_concurrent_redundant_via_mode \
+                -value reserve_space
+
+             To control the effort used to reserve space for
+             the redundant vias during ECO routing, set the
+             route.common.eco_route_concurrent_redundant_via_effort_level
+             application option.
+             Note:
+                Using concurrent soft-rule-based redundant via insertion during ECO
+                routing can impact timing and design rule convergence. In general, you
+                should use this method only when you used near 100 percent redundant
+                via insertion during initial routing.
+
+
+
+IC Compiler™ II Implementation User Guide                                                       513
+V-2023.12
+                                                                                       Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Redundant Vias
+
+
+      3. Route the block.
+         During routing, Zroute reserves space for the redundant vias and fixes hard design rule
+         violations.
+      4. Perform postroute redundant via insertion.
+         During postroute redundant via insertion, Zroute inserts the redundant vias in the
+         reserved locations.
+
+     Near 100 Percent Redundant Via Insertion
+     You can achieve a redundant via rate near 100 percent by using hard-rule-based
+     redundant via insertion. Hard-rule-based redundant via insertion can improve the
+     redundant via rate by treating redundant vias as hard design rules during routing. You can
+     use nearly 100 percent redundant via insertion only during initial routing; this method is not
+     supported during ECO routing. When you use near 100 percent redundant via insertion
+     during initial routing, you should use soft-rule-based redundant via insertion during ECO
+     routing to preserve the redundant via rate achieved during initial routing.
+     Note:
+         This method can result in a very large runtime increase for congested blocks.
+         You should use this method only when needed to improve the redundant via
+         rate beyond that provided by concurrent soft-rule-based redundant via insertion
+         and the soft-rule-based approach resulted in a redundant via rate of at least 90
+         percent.
+     To perform concurrent hard-rule-based redundant via insertion,
+      1. Enable nearly 100 percent via insertion by setting the
+         route.common.concurrent_redundant_via_mode application option to
+         insert_at_high_cost. (By default, concurrent redundant via insertion is disabled.)
+         icc2_shell> set_app_options \
+            -name route.common.concurrent_redundant_via_mode \
+            -value insert_at_high_cost
+
+         To control the effort used to reserve space for the redundant vias, set the
+         route.common.concurrent_redundant_via_effort_level application option.
+
+         Note:
+             If you enable the route.common.concurrent_redundant_via_mode option
+             before running the place_opt command, the redundant vias are considered
+             during congestion estimation.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                      514
+V-2023.12
+                                                                                          Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Redundant Vias
+
+
+      2. Route the block.
+         During routing, Zroute inserts the redundant vias and fixes hard design rule violations.
+         In general, redundant via insertion has the same priority as other hard design rules;
+         however, if design rule checking does not converge during detail routing, Zroute
+         automatically relaxes the redundant via constraints to improve DRC convergence.
+
+     Preserving Timing During Redundant Via Insertion
+     When you insert redundant vias, it changes the timing of your block. Short nets tend to
+     slow down due to increased capacitance, whereas long nets tend to speed up due to
+     decreased resistance. Zroute redundant via insertion has a timing-preservation mode
+     that allows you to perform redundant via insertion without affecting the block timing by
+     preventing insertion of redundant vias on critical nets.
+     To enable timing-preservation mode for redundant via insertion, define the timing
+     preservation constraints by using the following options of the add_redundant_vias
+     command:
+      • -timing_preserve_setup_slack_threshold
+      • -timing_preserve_hold_slack_threshold
+      • -timing_preserve_nets
+     You should timing-preservation mode only at the end of the flow, after using the normal
+     redundant via insertion flows, which converge both the redundant via rate and the timing
+     QoR. Timing-preservation mode can slightly increase the redundant via rate while
+     maintaining timing. However, if you use timing-preservation mode earlier in the flow, before
+     timing is met, it might severely reduce the redundant via rate due to critical nets.
+
+     Reporting Redundant Via Rates
+     After redundant via insertion, whether concurrent or postroute, Zroute generates a
+     redundant via report that provides the following information:
+      • The via conversion rate for nondefault vias
+         The via conversion rate for nondefault vias is listed at the top of the report as the total
+         optimized via conversion rate.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                         515
+V-2023.12
+                                                                                          Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Redundant Vias
+
+
+      • The optimized via conversion rate for each layer
+         The optimized via conversion rate includes both double vias and DFM-friendly bar vias,
+         which have a single cut but a larger metal enclosure. The tool reports two values for
+         the via conversion rate:
+          ◦ The total optimized via conversion rate
+             This value is computed based on the total via count, which includes both fixed vias
+             and routed vias. Fixed vias are vias that cannot be optimized by the router, such as
+             unrouted vias and user-defined vias.
+          ◦ The optimized via conversion rate based on the total routed via count
+             This value is computed based only on the routed via count, which includes only
+             those vias that can be optimized by the router.
+         Note:
+             The optimized via conversion rate is not useful if you are using bar vias.
+      • The distribution of optimized vias by weight for each layer
+         To determine the via conversion rate for conversions above a certain weight, you must
+         add the reported conversion rates for those weights. For example, in Example 27, the
+         via conversion rate for weight 5 and above for layer V03 is 10.75+64.50=75.25%.
+         Note:
+             The conversion rate for unweighted vias is reported as “Un-optimized.”
+      • The total double via conversion rate for the block
+     Note:
+         The redundant via rate reported by the report_design command differs from
+         the redundant via rate reported by Zroute during redundant via insertion or the
+         check_routes command. This difference occurs because the report_design
+         command reports the double via rate for both PG vias and signal vias, while
+         Zroute reports the double via rate only for signal vias. In addition, Zroute bases
+         the conversion rate only on the redundant via mapping.
+     Example 27 shows an example of the redundant via report.
+
+Example 27 Redundant Via Report
+     Total optimized via conversion rate = 96.94% (1401030 / 1445268 vias)
+     Layer V01        = 41.89% (490617 / 1171301 vias)
+         Weight 10    = 9.64% (112869 vias)
+         Weight 5     = 32.25% (377689 vias)
+         Weight 1     = 0.01% (59       vias)
+         Un-optimized = 58.11% (680684 vias)
+
+
+
+IC Compiler™ II Implementation User Guide                                                       516
+V-2023.12
+                                                                                         Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Optimizing Wire Length and Via Count
+
+
+     Layer V02        = 76.20% (1567822/ 2057614 vias)
+         Weight 10    = 43.51% (895270 vias)
+         Weight 5     = 28.62% (588805 vias)
+         Weight 1     = 4.07% (83747    vias)
+         Un-optimized = 23.80% (489792 vias)
+     Layer V03        = 81.87% (687115 / 839297 vias)
+         Weight 10    = 64.50% (541369 vias)
+         Weight 5     = 10.75% (90224   vias)
+         Weight 1     = 6.62% (55522    vias)
+         Un-optimized = 18.13% (152182 vias)
+     Layer V04        = 81.60% (226833 / 277977 vias)
+         Weight 10    = 81.45% (226418 vias)
+         Weight 1     = 0.15% (415      vias)
+         Un-optimized = 18.40% (51144   vias)
+     ...
+     Layer V09        = 85.47% (1329   / 1555    vias)
+         Weight 10    = 85.47% (1329    vias)
+         Un-optimized = 14.53% (226     vias)
+
+     Total double via conversion rate                = 46.69% (2158006 / 4622189 vias)
+
+
+
+Optimizing Wire Length and Via Count
+     During detail routing, Zroute optimizes wire length and via count in the areas where DRC
+     violations occur; however, it does not optimize the layout in areas where no DRC violations
+     occur.
+     To improve the manufacturing yield, use the optimize_routes command to perform
+     standalone optimization of wire length and via count after performing detail routing and
+     redundant via insertion.
+     By default, Zroute selects the nets to reroute based on the overall cost. For each selected
+     net, Zroute determines whether to reroute all the shapes in the net or just a portion of
+     them. To select the nets to reroute, use the -nets option to specify the nets. When you
+     specify the nets to optimize, you can also use the -reroute_all_shapes_in_nets option
+     to control whether Zroute must reroute all the associated net shapes.
+     By default, Zroute performs a maximum of 40 detail routing iterations to fix DRC violations
+     that exist after the optimization. You can use the -max_detail_route_iterations option
+     to control the maximum number of detail routing iterations.
+
+
+Reducing Critical Areas
+     A critical area is a region of the block where, if the center of a random particle defect falls
+     there, the defect causes circuit failure, thereby reducing yield. A conductive defect causes
+     a short fault, and a nonconductive defect causes an open fault.
+
+
+
+IC Compiler™ II Implementation User Guide                                                        517
+V-2023.12
+                                                                                                                                                 Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Reducing Critical Areas
+
+
+                                       The following topics describe how to
+                                       • Reduce critical area short faults by performing wire spreading
+                                       • Reduce critical area open faults by performing wire widening
+
+
+                                       Performing Wire Spreading
+                                       After you have performed detail routing and redundant via insertion, you can perform wire
+                                       spreading to increase the average spacing between wires, which reduces the critical area
+                                       short faults and therefore improves yield.
+                                       To perform wire spreading, use the spread_wires command. By default, the
+                                                                           spread_zrt_wires commandcommandsspread_zrt_wires   spread_zrt_wires
+
+
+
+
+                                       spread_wires command uses the following settings to spread the signal wires on the
+     commandcommandsspread_zrt_wires
+
+
+
+
+                                       same layer:
+                                       To perform wire spreading, use the spread_wires command. By default, the
+                                                                           spread_zrt_wires commandcommandsspread_zrt_wires   spread_zrt_wires
+
+
+
+
+                                       spread_wires command uses the following settings to spread the signal wires on the
+     commandcommandsspread_zrt_wires
+
+
+
+
+                                       same layer:
+                                       • Spreads the wires by half a pitch in the preferred direction
+                                          To modify the spread distance, use the -pitch option. You specify the spread distance
+                                          as a multiplier for the layer pitch. For example, to specify a spread distance of 1.5 times
+                                          the layer pitch, use the following command:
+                                          icc2_shell> spread_wires -pitch 1.5
+
+                                       • Uses twice the layer pitch as the minimum jog length
+                                          To modify the minimum jog length, use the -min_jog_length option. You specify the
+                                          minimum jog length as an integer multiple of the layer pitch.
+                                       • Uses the minimum layer spacing plus one half the layer pitch as the minimum jog
+                                         length
+                                          To modify the minimum jog spacing, use the -min_jog_spacing_by_layer_name
+                                          option. You specify the minimum jog spacing in microns for each layer. The tool uses
+                                          the default jog spacing for any unspecified layers.
+                                       Figure 90 shows how the jog length and jog spacing values are used in wire spreading.
+
+Figure 90                                      Wire Spreading Results
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                                                                              518
+V-2023.12
+                                                                                                        Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Reducing Critical Areas
+
+
+     In the following example, the minimum jog length is set to three times the layer pitch,
+     the minimum jog spacing for the M1 layer is set to 0.07 microns, and the minimum jog
+     spacing for the M2 layer is 0.08 microns. All other metal layers use the default minimum
+     jog spacing.
+     icc2_shell> spread_wires -min_jog_length 3 \
+        -min_jog_spacing_by_layer_name {{M1 0.07} {M2 0.08}}
+
+     After spreading, the spread_wires command performs detail routing iterations to fix any
+     DRC violations caused as a result of spreading.
+     When you change the layout, it can change the timing of your block. Wire spreading has a
+     timing-preservation mode that allows you to perform wire spreading without affecting the
+     block timing.
+     To enable timing-preservation mode for wire spreading, define the timing preservation
+     constraints by using the following options with the spread_wires command:
+      • -timing_preserve_setup_slack_threshold threshold
+      • -timing_preserve_hold_slack_threshold threshold
+      • -timing_preserve_nets nets
+     The threshold values are floating-point numbers in library units. Wire spreading is
+     performed only on nets with slack greater than or equal to the specified values or the nets
+     specified in the -timing_preserve_nets option, as well as adjacent nets on the same
+     layer within two routing pitches.
+
+
+     Performing Wire Widening
+     After you have performed detail routing, redundant via insertion, and wire spreading, you
+     can perform wire widening to increase the average width of the wires, which reduces the
+     critical area open faults and therefore improves yield.
+     To perform wire widening, use the widen_wires command. By default, the widen_wires
+                                          widen_zrt_wires commandcommandswiden_zrt_wireswire widening
+
+
+
+
+     command widens all wires in the block to 1.5 times their original width. For more flexibility,
+     you can use the -widen_widths_by_layer_name option to define up to five possible wire
+     widths to use for each layer. For example, to define possible wire widths of 0.07 and 0.06
+     microns for the M1 layer; wire widths of 0.08 and 0.07 microns for the M2 layer; and 1.5
+     times the existing wire width for all other layers, enter the following command:
+     icc2_shell> widen_wires \
+        -widen_widths_by_layer_name {{M1 0.07 0.06} {M2 0.08 0.07}}
+
+     When you perform wire widening, the spacing between neighboring wires is decreased,
+     which can reduce the improvement in critical area shorts gained from wire spreading.
+     You can control the tradeoff between wire spreading and wire widening by using the
+
+
+
+IC Compiler™ II Implementation User Guide                                                                     519
+V-2023.12
+                                                                                      Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Metal-Insulator-Metal Capacitors
+
+
+     -spreading_widening_relative_weight option. By default, wire spreading and wire
+     widening are given equal priority. To weight the priority toward wire widening and reduced
+     critical area open faults, set this option to a value between 0.0 and 0.5. To weight the
+     priority toward wire spreading and reduced critical area short faults, set this option to a
+     value between 0.5 and 1.0.
+     After widening, the widen_wires command performs detail routing iterations to fix any
+     DRC violations caused as a result of widening. Note that the widened wires do not trigger
+     fat wire spacing rules.
+     When you widen the wires, it changes the timing of your block. Wire widening has a
+     timing-preservation mode that allows you to perform wire widening without affecting the
+     block timing.
+     To enable timing-preservation mode for wire widening, define the timing preservation
+     constraints by using the following options with the widen_wires command:
+      • -timing_preserve_setup_slack_threshold threshold
+      • -timing_preserve_hold_slack_threshold threshold
+      • -timing_preserve_nets nets
+     The threshold values are floating-point numbers in library units. Wire widening is not
+     performed on nets with slack less than the specified values or the nets specified in the
+     -timing_preserve_nets option.
+
+
+
+Inserting Metal-Insulator-Metal Capacitors
+     A metal-insulator-metal (MiM) capacitor is made of two special-purpose conducting layers
+     separated by an insulator. This capacitor is inserted between two regular metal layers, as
+     shown in Figure 91.
+
+Figure 91     Cross-Section View of MiM Capacitor Layers
+
+             M9 layer           M9                       M9             M9            maskName =
+                                                                                      "viaMimtop"
+                                                                         via
+                                                         via
+
+
+
+
+          MTOP layer                   maskName =              maskName = "mimtop"
+                                      "viaMimbottom"
+                                via
+
+
+
+
+                                                                                         MiM capacitor
+          MBOT layer                                      maskName = "mimbottom"
+
+
+             M8 layer           M8
+
+
+
+IC Compiler™ II Implementation User Guide                                                       520
+V-2023.12
+                                                                                          Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Filler Cells
+
+
+     MiM capacitors are typically connected between power and ground to help maintain a
+     constant supply voltage in the presence of electrical noise. The dimensions of a MiM
+     capacitor are usually customized to fit the power strap geometry of a specific power plan.
+     To insert an array of MiM capacitors into a block and connect them to the power rails, use
+     the create_mim_capacitor_array command. At a minimum, you must specify the MiM
+     capacitor library cell, as well as the x- and y-increments of the array.
+     For example,
+     icc2_shell> create_mim_capacitor_array \
+                 -lib_cell my_lib/mim_ref_cell
+                 -x_increment 20 -y_increment 20
+
+     By default, the create_mim_capacitor_array command
+      • Inserts MiM capacitors for the entire block
+         To restrict the insertion to a specific region, use the -boundary option to specify the
+         rectangular or rectilinear region. You can specify only a single region.
+         The command does not consider standard cells, macros, placement blockages, or
+         voltage areas when inserting the MiM capacitors.
+      • Inserts the MiM capacitors in the R0 orientation
+         To change the orientation, use the -orientation option. When you change the
+         orientation, it affects all MiM capacitor cells in the inserted array.
+      • Uses the following naming convention for the inserted MiM capacitor cells:
+         mimcap!library_cell_name!number
+         To identify the MiM capacitor cells inserted in a specific run, use the -prefix option
+         to specify a prefix string. When you use this option, the tool uses the following naming
+         convention:
+         mimcap!prefix!library_cell_name!number
+
+
+Inserting Filler Cells
+     To ensure that all power nets are connected, you can fill empty space in the standard-cell
+     rows with filler cells. The IC Compiler II tool supports filler cells with and without metal and
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                          521
+V-2023.12
+                                                                                              Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Filler Cells
+
+
+     supports both single-height and multiheight filler cells. Filler cell insertion is often used to
+     add decoupling capacitors to improve the stability of the power supply.
+     Note:
+         Before inserting filler cells, ensure that the block is legalized by using the
+         check_legality command.
+
+     The IC Compiler II tool can select the filler cells to use based on
+      • An ordered list of filler cell references
+         In the standard filler cell insertion flow, you specify an ordered list of filler library cells
+         and the tool inserts the first cell that fits in each gap. If your technology requires
+         specific filler cells abutting the standard cells, you can insert these required filler cells
+         first, and then use standard filler cell insertion to fill the remaining space.
+         For details about this method, see Standard Filler Cell Insertion.
+      • Threshold-voltage rules
+         In the threshold-voltage-based flow, the tool selects the filler cells by using user-defined
+         insertion rules, which are based the threshold-voltage types of the cells that border the
+         gap. This flow is typically used only for established foundry nodes.
+         For details about this method, see Threshold-Voltage-Based Filler Cell Insertion.
+
+
+     Standard Filler Cell Insertion
+     The standard filler cell insertion flow uses the create_stdcell_fillers command
+     to insert filler cells in the block and the remove_stdcell_fillers_with_violation
+     command to perform design rule checking on the filler cells and remove filler cells with
+     violations.
+     During filler cell insertion, the create_stdcell_fillers command uses the placement
+     legalizer to ensure that the inserted filler cells honor advanced node placement rules
+     and physical constraints such as placement blockages and keepout margins. When
+     the place.legalize.enable_advanced_legalizer application option is set to true,
+     the command uses the advanced legalization algorithms for 2D rule checking and cell
+     interaction, which can reduce filler cell insertion runtime.
+     To insert filler cells in your block,
+      1. Ensure that the block is legalized by using the check_legality command.
+         When verifying that a block is fillable, the check_legality command assumes that all
+         standard cells that have a design_type attribute of filler can be used as filler cells.
+         However, the create_stdcell_fillers command inserts only the cells specified in
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                              522
+V-2023.12
+                                                                                           Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Filler Cells
+
+
+         the -lib_cells option. This difference might result in unfillable gaps after filler cell
+         insertion even though the check_legality command did not report any issues.
+      2. (Optional) Insert required filler cells to abut specific standard cells by using the
+         create_left_right_filler_cells command, as described in Abutting Standard
+         Cells With Specific Filler Cells.
+      3. (Optional) Enable multithreaded filler cell insertion by using the set_host_options
+         command to specify the multicore configuration.
+         icc2_shell> set_host_options -max_cores n
+
+         The create_stdcell_fillers command uses the multicore configuration only
+         when the technology file contains minimum threshold voltage, oxide-diffusion (OD), or
+         trimpoly (TPO) rules.
+         Note:
+             The multicore configuration specified with the set_host_options command
+             applies to all IC Compiler II commands that support multicore processing.
+      4. Insert metal filler cells by using the create_stdcell_fillers command.
+         Use the -lib_cells option to specify the metal filler library cells to insert. The
+         command tries to insert the filler cells in the order that you specify; for the best results,
+         specify them from the largest to the smallest.
+         To determine the filler cells available in a cell library, use the following command:
+         icc2_shell> get_lib_cells ref_lib/* -filter "design_type==filler"
+
+         To sort the filler cells by decreasing size, use the sort_collection command, as
+         shown in the following example:
+         icc2_shell> set FILLER_CELLS \
+            [get_object_name [sort_collection -descending \
+               [get_lib_cells ref_lib/* -filter "design_type==filler"] area]]
+
+         For more information, see Controlling Standard Filler Cell Insertion.
+      5. Connect the inserted filler cells to the power and ground (PG) network by using the
+         connect_pg_net -automatic command.
+
+      6. Remove the metal filler cells with DRC violations by using the
+         remove_stdcell_fillers_with_violation command.
+
+         Removing the filler cells can expose new violations; therefore, you must sometimes run
+         this command multiple times to remove all violating filler cells.
+         For more information, see Checking for Filler Cell DRC Violations.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                           523
+V-2023.12
+                                                                                           Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Filler Cells
+
+
+      7. Insert nonmetal filler cells by using the create_stdcell_fillers command.
+         Use the -lib_cells option to specify the nonmetal filler library cells to insert. The tool
+         tries to insert the filler cells in the order that you specify; for the best results, specify
+         them from the largest to the smallest.
+         For more information, see Controlling Standard Filler Cell Insertion.
+      8. Connect the inserted filler cells to the PG network by using the connect_pg_net
+         -automatic command.
+
+     See Also
+      • Generic ECO Flow for Timing or Functional Changes
+      • Removing Filler Cells
+
+     Controlling Standard Filler Cell Insertion
+     By default, the create_stdcell_fillers command fills all empty space in the horizontal
+     standard-cell rows of the entire block by inserting instances of the filler library cells
+     specified by the -lib_cells option.
+     You can control the following aspects of the filler cell insertion:
+      • The selection of filler cells based on lowest leakage current
+         By default, the command does not consider leakage current when inserting filler cells.
+         To reduce the leakage current, use the -leakage_vt_order option to specify the
+         threshold voltage layers in order of decreasing leakage current. The command uses
+         this information to select the filler cells with the lowest leakage current that meet the
+         legalization requirements.
+         To check whether the filler cells inserted in the current block result in the
+         lowest possible leakage power, use the -leakage_vt_check option with the
+         create_stdcell_fillers command. When you use this option, the command only
+         checks the existing filler cells; it does not insert filler cells. You must also use the
+         -lib_cells and -leakage_vt_order options to specify the available filler cells. The
+         check reports the filler cells that could be replaced with a specified filler cell with lower
+         leakage current without causing legalization errors. By default, the command reports a
+         maximum of 100 violations. To change the maximum number of reported violations, set
+         the chf.create_stdcell_fillers.max_leakage_vt_order_violations application
+         option.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                          524
+V-2023.12
+                                                                                             Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Filler Cells
+
+
+         Note:
+             This feature has the following requirements:
+             ◦ You must enable the advanced legalizer by setting the
+               place.legalize.enable_advanced_legalizer application option to
+               true. For more information about the advanced legalizer, see Enabling
+               Advanced Legalization Algorithms.
+             ◦ The threshold voltage layers must be defined in the technology file. A
+               threshold voltage layer is identified by a maskType attribute of implant in
+               the Layer section of the technology file.
+      • The percentage of empty space to fill
+         By default, the command fills all the empty space. To leave some empty space, use the
+         -utilization option to specify the percentage of empty space to fill.
+
+         To control the relative amount of various types of filler cells, such as ULVT and
+         LVT decoupling capacitor cells, use the -type_utilization option to specify
+         the insertion percentage for each type of cell. The sum of all the percentages
+         specified in this option must be less than or equal to 100. When you use this option,
+         the create_stdcell_fillers command might leave some empty spaces. To
+         fill these empty spaces, use the -fill_remaining option. When you use this
+         option, the command uses the cells specified in the -lib_cells option but not the
+         -type_utilization option to fill the empty spaces. For example,
+         # insert 70 percent ULVT cells, 30 percent LVT cells
+         icc2_shell> create_stdcell_fillers -lib_cells $FILLER_CELLS \
+            -type_utilization { {*/DCAP16*ULVT */DCAP8*ULVT */DCAP4*ULVT
+               */DCAP2*ULVT */DCAP1*ULVT} 70
+                                {*/DCAP16*LVT */DCAP8*LVT */DCAP4*LVT
+               */DCAP2*LVT */DCAP1*LVT} 30 } \
+            -fill_remaining
+
+         By default, the tool randomly selects the filler cells from the specified library cells. To
+         control the cell selection priority, use the -prefer_type_ordering option with the
+         -type_utilization option. When you use the -prefer_type_ordering option,
+         the tool selects the library cells in each group specified in the -type_utilization
+         option in priority order, from left to right. If some of the cells are difficult to insert due to
+         legalization rules or library cell size, specify them before cells that are easier to insert to
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                             525
+V-2023.12
+                                                                                          Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Filler Cells
+
+
+         ensure that they are selected. For example, when the -prefer_type_ordering option
+         is used with the previous example, the tool
+          ◦ First tries to insert the ULVT decoupling capacitors to a utilization of 70 percent, first
+            trying to insert */DCAP16*ULVT cells, then */DCAP8*ULVT cells, and so on
+          ◦ Then tries to insert the LVT decoupling capacitors to a utilization of 30 percent, first
+            trying to insert */DCAP16*LVT cells, then */DCAP8*LVT cells, and so on
+          ◦ Then filling the remaining gaps using the remaining cells specified in the -lib_cells
+            option
+         # insert 70 percent ULVT cells, 30 percent LVT cells
+         icc2_shell> create_stdcell_fillers -lib_cells $FILLER_CELLS \
+            -type_utilization { {*/DCAP16*ULVT */DCAP8*ULVT */DCAP4*ULVT
+               */DCAP2*ULVT */DCAP1*ULVT} 70
+                                {*/DCAP16*LVT */DCAP8*LVT */DCAP4*LVT
+               */DCAP2*LVT */DCAP1*LVT} 30 } \
+            -prefer_type_ordering \
+            -fill_remaining
+
+      • The region in which to insert the filler cells
+          ◦ Use the -bboxes option to restrict filler cell insertion to the specified bounding
+            boxes.
+          ◦ Use the -voltage_area option to restrict filler cell insertion to the specified voltage
+            areas.
+      • Whether to check for power net violations
+         By default, the command does not check for power net violations, as this check
+         increases runtime and is required only for metal filler cell insertion. However, this might
+         result in the remove_stdcell_fillers_with_violation command removing many
+         decoupling capacitors.
+         To prevent power net violations caused by filler cell insertion, use the -rules
+         check_pnet option.
+
+      • Gap prevention
+         By default, the command assumes that the smallest cell size is one unit site. If
+         the smallest cell in your design is larger than one unit site, this could cause gaps
+         during filler cell insertion. To prevent the command from inserting filler cells that
+         leave a gap, specify the smallest cell size as a multiple of the unit site by using the
+         -smallest_cell_size option. You can specify a value of 1, 2, or 3.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                          526
+V-2023.12
+                                                                                             Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Filler Cells
+
+
+         Note:
+             The advanced legalizer automatically prevents gaps; therefore, this option is
+             ignored when place.legalize.enable_advanced_legalizer application
+             option is set to true.
+      • The handling of hard placement blockages
+         By default, the command honors hard placement blockages and does not insert filler
+         cells in regions affected by these blockages. To ignore the hard placement blockages
+         and insert filler cells in those regions, use the -ignore_hard_blockages option.
+      • The naming convention used to identify the inserted filler cell instances
+         By default, the command uses the following naming convention for inserted filler cells:
+         xofiller!filler_library_cell_name!number
+         To identify the filler cells inserted in a specific run, use the -prefix option to specify
+         a prefix string. When you use this option, the command uses the following naming
+         convention:
+         xofiller!prefix!filler_library_cell_name!number
+      • The behavior when the legalizer detects errors
+         By default, the command fails if the legalizer detects an error. To force the command
+         to complete filler cell insertion even when errors occur, use the -continue_on_error
+         option. When you use this option, the resulting block might have legalization errors that
+         must be fixed manually.
+
+     Checking for Filler Cell DRC Violations
+     By default, the remove_stdcell_fillers_with_violation command checks for DRC
+     violations between all cell instances with xofiller in their name and top-level signal routing
+     objects and removes the violating filler cells.
+     You can control the following aspects of the filler cell checking:
+      • The string used to identify the filler cells
+         To specify a different string to identify the filler cells, use the -name option.
+      • The region in which to check for violations
+         To restrict filler cell check to specific regions, use the -boundary option.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                             527
+V-2023.12
+                                                                                              Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Filler Cells
+
+
+      • The checked objects
+           To check for violations between filler cells and all neighboring objects, such as
+           signal net shapes, other filler cells, standard cells, PG rails, and terminals, use the
+           -check_between_fixed_objects true option.
+
+      • Restrict DRC to shorts-checking only
+           By default, the command removes all filler cells that cause a routing DRC violation. To
+           remove only those filler cells that cause a short by overlapping a routing shape, use the
+           -shorts_only true option.
+
+      • Whether double-patterning rules are checked
+           The command checks for double-patterning violations only when the following criteria
+           are met:
+           ◦ The route.common.color_based_dpt_flow application option is true.
+           ◦ The technology file defines double-patterning rules
+     To check for DRC violations on filler cells before removing them, use the -check_only
+     true option. When you use this option, this command writes a report to a file named
+     block_fillers_with_violation.rpt in the current working directory. The report lists the filler
+     cells with violations and reports the first violation for each filler cell.
+
+     Fixing Remaining Mask Design Rule Violations
+     Some mask design rules are not handled during filler cell insertion because they have
+     a low probability of occurrence and they require extensive computation time if handled
+     during insertion.
+     After filler cell insertion, use the replace_fillers_by_rules command to fix these
+     design rule violations. You must specify the rule to fix by using the -replacement_rule
+     option. Table 34 lists the design rules supported by this command and the keywords used
+     to specify these rules.
+Table 34        Design Rules Supported by the replace_fillers_by_rules Command
+
+      Design rule              Description                                  -replacement_rule keyword
+
+      End orientation          This rule allows the leftmost or rightmost   end_orientation
+                               filler cell to be flipped to a different
+                               orientation. For more information, see
+                               End Orientation Rule.
+
+      Half row adjacency for This rule restricts the placement              half_row_adjacency
+      half-height filler cells of half-height filler cells. For more
+                               information, see Half Row Adjacency
+                               Rule.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                             528
+V-2023.12
+                                                                                               Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Filler Cells
+
+
+Table 34        Design Rules Supported by the replace_fillers_by_rules Command (Continued)
+
+      Design rule             Description                                    -replacement_rule keyword
+
+      Illegal abutment        This rule prevents a filler cell from         illegal_abutment
+                              abutting certain other filler cells. For more
+                              information, see Illegal Abutment Rule.
+
+      Maximum horizontal      This rule restricts the horizontal length of   od_horiztonal_distance
+      length                  a continuous row of filler cells. For more
+                              information, see Maximum Horizontal
+                              Length Rule.
+
+      Maximum horizontal      This rule restricts the horizontal length      horizontal_edges_distance
+      edge length             of a sequence of abutted objects on a
+                              specific layer. For more information, see
+                              Maximum Horizontal Edge Length Rule.
+
+      Maximum stacking for    This rule restricts the horizontal length      small_filler_stacking
+      small filler cells      of a sequence of abutted objects on a
+                              specific layer. For more information, see
+                              Maximum Stacking for Small Filler Cells
+                              Rule.
+
+      Maximum vertical edge This rule restricts the vertical length of a     max_vertical_constraint
+      length                column of stacked filler cells. For more
+                            information, see Maximum Vertical Edge
+                            Length Rule.
+
+      Tap cell spacing        This rule restricts the distance between od_tap_distance
+                              a tap cell’s oxide diffusion (OD) layer
+                              and the neighboring OD layers. For more
+                              information, see Tap Cell Spacing Rule.
+
+      N/A                     Randomly replace filler cells with custom      random
+                              filler cells. For more information, see
+                              Random Filler Cell Replacement.
+
+
+     End Orientation Rule
+     The end orientation rule searches for a continuous horizontal sequence of cells and
+     modifies the orientation of the leftmost or rightmost filler cells if they are in the specified list
+     of target filler cells.
+     To select this rule, use the -replacement_rule end_orientation option with the
+     replace_fillers_by_rules command. When you select this rule, you must specify
+
+      • The target filler cells
+           To specify the target filler cells, use the -target_fillers option.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                              529
+V-2023.12
+                                                                                          Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Filler Cells
+
+
+      • The orientation modification
+          ◦ To change the orientation for the leftmost filler cells, use the -left_end option.
+          ◦ To change the orientation for the rightmost filler cells, use the -right_end option.
+          ◦ To change the orientation for both the leftmost and rightmost filler cells, use both
+            options.
+         The valid values for these options are
+          ◦ inverse, which flips the cell from its existing orientation
+          ◦ R0_or_MX, which changes an MY orientation to R0 or an R180 orientation to MX
+          ◦ MY_or_R180, which changes an R0 orientation to MY or an MX orientation to R180
+     To report the cells whose orientation would be changed, without actually changing the
+     orientations, use the -check_only option. This option is valid only for the end orientation
+     rule.
+     Half Row Adjacency Rule
+     The half row adjacency rule searches for half-height filler cells and replaces them based
+     on the types of their neighboring standard cells. The standard cells are classified as one of
+     the following types:
+      • Inbound
+         The top or bottom boundary of an inbound standard cell is at the half-height location of
+         the cell rows. When a half-height filler cell abuts an inbound cell, the abutting side of
+         the half-height filler cell must have inbound-cell interaction polygons (ICIP).
+      • Regular
+         The top and bottom boundaries of a regular standard cell are at the full-height location
+         of the cell rows. When a half-height filler cell abuts a regular cell, the abutting side of
+         the half-height filler cell must not have inbound-cell interaction polygons (ICIP).
+     The replacement filler cells have the same height, width, and threshold voltage as the
+     original filler cells. The cell libraries include both p-type and n-type replacement filler cells
+     with inbound-cell interaction polygons (ICIP). For p-type half-height filler cells, the inbound-
+     cell interaction polygons (ICIP) are at the bottom corners. For n-type half-height filler cells,
+     the inbound-cell interaction polygons (ICIP) are at the top corners. Figure 92 shows the
+     replacement of the half-height filler cells using the half row adjacency rule.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                          530
+V-2023.12
+                                                                                            Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Filler Cells
+
+
+Figure 92         Half-Height Filler Cell Replacement With Half Row Adjacency Rule
+                                                                                          Inbound-cell
+                                                                                           interaction
+                                                                                            polygons
+                             Inbound                                    Inbound
+                   FILL2_P    height                         FILL2_PR    height
+
+
+             Regular                                      Regular
+              height                                       height
+                         FILL4_N                                    FILL4_NR
+
+                                   Inbound                                     Inbound
+                                    height                                      height
+
+
+
+
+     To select this rule, use the -replacement_rule half_row_adjacency option with the
+     replace_fillers_by_rules command. The following table lists the options used to
+     specify the replacement half-height filler cells. Each list can contain only one cell of each
+     size.
+Table 35          Half-Height Replacement Filler Cells
+
+      Abutting inbound standard cells        Option to specify replacement filler cells
+
+      None                                   -p_none, -n_none
+
+      Left-only                              -p_left, -n_left
+
+      Right-only                             -p_right, -n_right
+
+      Left and right                         -p_left_right, -n_left_right
+
+      Top or bottom (applies only to 2X filler -p_left_center_right, -n_left_center_right
+      cells)
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                                531
+V-2023.12
+                                                                                              Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Filler Cells
+
+
+     Illegal Abutment Rule
+     The illegal abutment rule restricts the filler cells that can abut certain other filler cells.
+     To select this rule, use the -replacement_rule illegal_abutment option with the
+     replace_fillers_by_rules command. When you select this rule, you must specify
+
+      • The filler cells considered for the check and their replacements
+         The filler cells considered for the check are called target cells. To specify the target filler
+         cells and their replacements, use the following syntax with the -replace_abutment
+         option:
+         { {target_cell1 refill_cell1} ... }
+
+         To ignore filler cells that have a physical_status attribute of fixed or locked, use
+         the -skip_fixed_cells option with the replace_fillers_by_rules command.
+      • The filler cells that cannot abut the target filler cells
+         These filler cells are called illegal cells. To specify the illegal cells, use the
+         -illegal_abutment option. Note that the target filler cells specified in the
+         -replace_abutment option are also considered illegal cells.
+
+     For example, the following command fixes illegal abutment violations where the FILL1a
+     and FILL1b filler cells cannot abut the FILLx and FILLy cells:
+     icc2_shell> replace_fillers_by_rules -replacement_rule illegal_abutment \
+        -replace_abutment { {FILL1a CFILL1a} {FILL1b CFILL1b} } \
+        -illegal_abutment {FILLx FILLy}
+
+     Figure 93 shows the original row, which violates this rule, and the resulting row, which
+     uses the replacement filler cells to fix the violations. The target filler cells are shown in red,
+     while the replacement filler cells are shown in green.
+
+Figure 93     Fixing an Illegal Abutment Violation
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                             532
+V-2023.12
+                                                                                          Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Filler Cells
+
+
+     Maximum Horizontal Edge Length Rule
+     The maximum horizontal edge length rule restricts the horizontal length of a sequence of
+     abutted objects on a specific layer.
+     To select this rule, use the -replacement_rule horizontal_edges_distance option
+     with the replace_fillers_by_rules command. When you select this rule, you must
+     specify
+      • The maximum horizontal length
+         To specify the maximum length, use the -max_constraint_length option.
+      • The layer to check
+         To specify the layer, use the -layer option.
+      • The cells considered for the check and the filler cells that can be used to replace the
+        violating filler cells
+         The filler cells considered for the check are called constrained cells. The filler cells
+         considered to replace violating cells are called unconstrained cells.
+          ◦ To specify multiple constrained cell groups and their replacement cells, use the
+            following syntax with the -refill_table option:
+             { {{refill_cell1 {constrained_cells1}} ... }
+
+             You can use this syntax to fix violations for threshold-voltage-based filler cells.
+          ◦ To specify a single constrained cell group, use the -constraint_fillers option.
+            To specify the replacement cells, use the -non_constraint_fillers option.
+             Note:
+                If you use both methods, the command uses only the information
+                specified in the -refill_table option.
+     For example, the following command identifies and fixes maximum horizontal edge length
+     violations where the horizontal length on the M2 layer exceeds 30 um:
+     icc2_shell> replace_fillers_by_rules \
+        -replacement_rule horizontal_edges_distance \
+        -max_constraint_length 30 -layer M2 \
+        -refill_table { {{VT1_FILL1} {VT1_DECAP4 VT1_DECAP2}}
+                        {{VT2_FILL1} {VT2_DECAP4 VT2_DECAP2}} }
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                           533
+V-2023.12
+                                                                                          Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Filler Cells
+
+
+     Maximum Horizontal Length Rule
+     The maximum horizontal length rule restricts the horizontal length of a sequence of
+     abutted filler cells.
+     To select this rule, use the -replacement_rule od_horiztonal_distance option with
+     the replace_fillers_by_rules command. When you select this rule, you must specify
+      • The maximum horizontal length
+         To specify the maximum length, use the -max_constraint_length option.
+      • The cells considered for the check and the filler cells that can be used to replace the
+        violating filler cells
+         The filler cells considered for the check are called constrained cells. The filler cells
+         considered to replace violating cells are called unconstrained cells.
+          ◦ To specify multiple constrained cell groups and their replacement cells, use the
+            following syntax with the -refill_table option:
+             { {{refill_cell1 {constrained_cells1}} ... }
+
+             You can use this syntax to fix violations for threshold-voltage-based filler cells.
+          ◦ To specify a single constrained cell group, use the -constraint_fillers option.
+            To specify the replacement cells, use the -non_constraint_fillers option.
+             Note:
+                If you use both methods, the command uses only the information
+                specified in the -refill_table option.
+     For example, the following command identifies and fixes maximum horizontal length
+     violations where the horizontal length exceeds 70 um:
+     icc2_shell> replace_fillers_by_rules \
+        -replacement_rule od_horiztonal_distance -max_constraint_length 70 \
+        -refill_table { {{VT1_FILL1} {VT1_DECAP4 VT1_DECAP2}}
+                        {{VT2_FILL1} {VT2_DECAP4 VT2_DECAP2}} }
+
+     Figure 94 shows the original row, which violates this rule, and the resulting row, which
+     uses unconstrained filler cells to fix the violation. The constrained cells are shown in red,
+     while the unconstrained cells are shown in green.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                           534
+V-2023.12
+                                                                                            Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Filler Cells
+
+
+Figure 94     Fixing a Maximum Vertical Edge Length Violation
+
+
+
+
+     Maximum Stacking for Small Filler Cells Rule
+     The maximum stacking for small filler cells rule restricts the stacking height of small filler
+     cells.
+     To select this rule, use the -replacement_rule small_filler_stacking option with the
+     replace_fillers_by_rules command. When you select this rule, you must specify
+
+      • The maximum stacking height
+         To specify the maximum stacking height, use the -max_constraint_length option.
+      • The cells considered for the check
+         To specify the small filler cells to consider for the check, use the -small_fillers
+         option.
+      • The filler cells that can be used to replace the violating filler cells
+         To specify the filler cells that can be used to replace the violating filler cells, use the
+         -replacement_fillers option.
+
+     If the vertical stacking of the small filler cells specified in the -small_fillers option
+     exceeds the height specified in the -max_constraint_length option, the command
+     replaces two or three consecutive filler cells adjacent to the violating cell with one of
+     the large filler cells specified in the -replacement_fillers option. If it is not possible
+     to replace the filler cells, the command reorders the filler cells to fix the violation. The
+     command maintains the threshold voltage at the location of the violating filler cell;
+     however, the threshold voltage at the location of non-violating filler cells might change. The
+     command does not check for threshold voltage violations caused by these changes.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                              535
+V-2023.12
+                                                                                       Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Filler Cells
+
+
+     For example, the following command identifies and fixes maximum stacking violations
+     where the stacking height exceeds 10 um:
+     icc2_shell> replace_fillers_by_rules \
+        -replacement_rule small_filler_stacking -max_constraint_length 10 \
+        -small_fillers {FILL1 FILL2} -replacement_fillers {FILL3 FILL4} \
+
+     The following figures illustrate the replacement and reordering techniques used to fix
+     maximum stacking violations. In these figures, the small filler cells are shown in red, while
+     the large filler cells are shown in green.
+     Figure 95 shows the original stack, which violates this rule, and the resulting stack, which
+     uses a replacement filler cell to fix the violation.
+
+Figure 95     Fixing Maximum Stacking Violation by Replacement
+
+
+                    FILL1 FILL1 FILL1                                  FILL3
+                     vt1   vt1   vt1                                    vt1
+
+                        FILL2                                      FILL2
+         10um            vt1                                        vt1
+
+                    FILL1                                      FILL1
+                     vt1                                        vt1
+
+
+     Figure 96 shows the original stack, which violates this rule, and the resulting stack, which
+     uses reordering to fix the violation. Note that the threshold voltage of the FILL3 cell is
+     changed so that the vt2 threshold voltage is maintained in the original location.
+
+Figure 96     Fixing Maximum Stacking Violation by Reordering
+
+
+                FILL2              FILL3                       FILL3              FILL2
+                 vt2                vt1                         vt2                vt2
+
+                        FILL2                                      FILL2
+         10um            vt1                                        vt1
+
+                    FILL1                                      FILL1
+                     vt1                                        vt1
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                      536
+V-2023.12
+                                                                                         Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Filler Cells
+
+
+     Maximum Vertical Edge Length Rule
+     The maximum vertical edge length rule restricts the vertical length of a stack of certain
+     filler cells and standard cells.
+     To select this rule, use the -replacement_rule max_vertical_constraint option with
+     the replace_fillers_by_rules command. When you select this rule, you must specify
+      • The maximum vertical length
+         To specify the maximum vertical length, use the -max_constraint_length option.
+      • The cells considered for the check
+         These cells are called constrained cells. To specify the constrained filler cells, use
+         the -constraint_fillers option. By default, all standard cells are constrained. To
+         exclude specific standard cells from consideration, use the -exception_cells option.
+         To ignore the length violation when a constrained cell abuts an exception cell, use the
+         -no_violation_along_exception_cells option.
+
+      • The filler cells that can be used to replace the violating filler cells
+         These filler cells are called unconstrained cells; they are not considered when
+         measuring the stack height.
+          ◦ To specify the filler cells that can be used to break a continuous edge of constrained
+            cells, use the -non_constraint_fillers option.
+          ◦ To specify the filler cells whose left side can be used to break a continuous edge of
+            constrained cells, use the -non_constraint_left_fillers option.
+          ◦ To specify the filler cells whose right side can be used to break a continuous edge
+            of constrained cells, use the -non_constraint_right_fillers option.
+     Note:
+         Any filler cells that are not identified as constrained, unconstrained, or exception
+         cells are considered constrained cells.
+     For example, the following command identifies and fixes maximum vertical edge length
+     violations where the vertical length exceeds 180 um:
+     icc2_shell> replace_fillers_by_rules \
+        -replacement_rule max_vertical_constraint -max_constraint_length 180 \
+        -constraint_fillers {DECAP8 DECAP4} -non_constraint_fillers {FILL1} \
+        -exception_cells {BUF1 TAP1}
+
+     Figure 97 shows the original stack, which violates this rule, and the resulting stack, which
+     uses unconstrained filler cells to fix the violation. The constrained cells are shown in red,
+     while the unconstrained cells are shown in green.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                        537
+V-2023.12
+                                                                                        Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Filler Cells
+
+
+Figure 97       Fixing a Maximum Vertical Edge Length Violation
+
+
+
+
+     Tap Cell Spacing Rule
+     The tap cell spacing rule restricts the distance between a target tap cell’s oxide diffusion
+     (OD) layer and the OD layers of its neighboring cells on the left and right sides.
+     To select this rule, use the -replacement_rule od_tap_distance option with the
+     replace_fillers_by_rules command. When you select this rule, you must specify
+
+      • The disallowed spacing range
+         The spacing distance is specified as the number of sites. To specify the disallowed
+         spacing range, use the -tap_distance_range option.
+      • The tap cells considered for the check
+         These cells are called target cells. To specify the target tap cells, use the -tap_cells
+         option.
+      • The tap cells used to replace the violating tap cells
+         These cells are called replacement cells.
+            ◦ To specify the replacement tap cell for left-side violations, use the
+              -left_violation_tap option.
+
+            ◦ To specify the replacement tap cell for right-side violations, use the
+              -right_violation_tap option.
+
+            ◦ To specify the replacement tap cell for both-side violations, use the
+              -both_violation_tap option.
+
+     Note:
+         The target and replacement tap cells must all have the same size.
+
+
+
+IC Compiler™ II Implementation User Guide                                                       538
+V-2023.12
+                                                                                            Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Filler Cells
+
+
+     By default, the command measures the distance to the cells that abut the target
+     tap cell. If the tap cells abut library cells that do not have an OD layer, use the
+     -adjacent_non_od_cells option to specify these library cells. The command skips
+     the specified non-OD cells and measures to distance from the target tap cell to the first
+     neighbor with an OD layer.
+     For example, the following command replaces tap cells named TAP that have a separation
+     distance of three sites:
+     icc2_shell> replace_fillers_by_rules -replacement_rule od_tap_distance \
+        -tap_cells {TAP} -tap_distance_range {3 3} \
+        -left_violation_tap {TAPl} -right_violation_tap {TAPr} \
+        -both_violation_tap {TAPb}
+
+     Figure 98 shows the original row, which violates this rule, and the resulting row, which
+     uses the replacement filler cells to fix the violations. The target filler cells are shown in red,
+     while the replacement filler cells are shown in green.
+
+Figure 98     Fixing a Tap Cell Spacing Violation
+
+
+
+
+     Random Filler Cell Replacement
+     To randomly replace existing filler cells, use the -replacement_rule random option with
+     the replace_fillers_by_rules command. When you select this rule, you must specify
+      • The filler cells to be replaced and their replacements
+         The filler cells to be replaced are called target cells. To specify the target filler cells and
+         their replacements, use the following syntax with the -random_replace option:
+         { {target_cell1 {refill_cell1a refill_cell1b ...}} ... }
+
+         To ignore filler cells that have a physical_status attribute of fixed or locked, use
+         the -skip_fixed_cells option with the replace_fillers_by_rules command.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                            539
+V-2023.12
+                                                                                              Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Filler Cells
+
+
+     When the command finds one of the target cells, it replaces it by randomly selecting one
+     of the replacement cells specified for that target cell. For example, the following command
+     replaces FILL1 cells with one of FILL1a, FILL1b, or FILL1c and replaces FILL2 cells with
+     one of FILL2a or FILL2b:
+     icc2_shell> replace_fillers_by_rules -replacement_rule random \
+        -random_replace { {FILL1 {FILL1a FILL1b FILL1c}}
+                           {FILL2 {FILL2a FILL2b}} }
+
+     Abutting Standard Cells With Specific Filler Cells
+     If your technology requires specific filler cells on the left or right sides of certain standard
+     cells, use the create_left_right_filler_cells command to insert these filler cells.
+     After you run the create_left_right_filler_cells command, perform standard filler
+     cell insertion to fill the remaining gaps in the design.
+     You must use the -lib_cells option to specify the rules for filler cell insertion. Each rule
+     uses the following format:
+     {standard_cells} {left_filler_cells} {right_filler_cells}
+
+      • For the standard_cells argument,
+          ◦ You must specify a list of one or more standard cells
+          ◦ You can use wildcards to specify the cell names
+          ◦ If you specify multiple rules for the same standard cell, the command uses only the
+            last rule specified for that cell.
+      • For the left_filler_cells and right_filler_cells arguments,
+          ◦ At least one of these arguments must contain one or more filler library cells
+             If only one of the arguments contains filler library cells, the tool inserts filler cells
+             only on that side of the standard cells.
+          ◦ The specified filler cells must meet the following requirements:
+             ▪ They must have a design_type attribute of lib_cell or filler.
+             ▪ They must use the same site definition as the standard cells.
+             ▪ The height of the standard cells must be an integer multiple of the filler cell
+               heights.
+          ◦ The command tries to insert the filler cells in the order that you specify; for the best
+            results, specify them from the largest to the smallest.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                                540
+V-2023.12
+                                                                                          Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Filler Cells
+
+
+          ◦ You can use wildcards for the filler cell names.
+             When you use wildcards, the order of the cells is the same as that returned by the
+             get_lib_cells command.
+
+     The following example inserts filler cells on the left and right sides of the SC1 standard
+     cells and only on the left side of the SC2 standard cells. The left and right filler cells are
+     specified in decreasing size order, so that the command inserts the largest possible filler
+     cell.
+     icc2_shell> create_left_right_filler_cells \
+        -lib_cells {
+           { {mylib/SC1} {mylib/LF4X mylib/LF2X} {mylib/RF2X mylib/RF1X} }
+           { {mylib/SC2} {mylib/LF2X mylib/LF1X} {} } }
+
+     When the create_left_right_filler_cells command inserts the filler cells,
+      • It checks for legal locations for the filler cells, but does not check advanced rules such
+        as minimum threshold voltage, oxide-diffusion (OD), or trimpoly (TPO) rules.
+      • It inserts the filler cells immediately next to the standard cells; it does not consider the
+        intercell spacing rules.
+
+     See Also
+      • Standard Filler Cell Insertion
+     Controlling Cell-Based Filler Cell Insertion
+     You can control the following aspects of the filler cell insertion with the
+     create_left_right_filler_cells command:
+
+      • The region in which to insert the filler cells
+         By default, the command inserts filler cells next to the specified standard cells in the
+         entire block.
+          ◦ Use the -boundaries option to restrict filler cell insertion to the specified regions.
+            You can specify one or more rectangular or rectilinear regions.
+          ◦ Use the -voltage_areas option to restrict filler cell insertion to the specified
+            voltage areas.
+      • The orientation of the filler cells
+         By default, the command uses the allowable orientations of the row to place
+         the filler cells. To use the same orientation as the standard cell, use the
+         -follow_stdcell_orientation option. When you use this option, the tool swaps the
+         right and left filler cells when the cell is flipped.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                           541
+V-2023.12
+                                                                                           Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Filler Cells
+
+
+      • The handling of one-unit-tile gaps
+         By default, the command does not consider the one-unit-tile rule. To prevent the tool
+         from inserting filler cells that would leave a one-unit-tile gap, use the -rules no_1x
+         option. When you enable this rule, do not include filler library cells with a width of one-
+         unit tile in the -lib_cells option; otherwise, the tool ignores this rule.
+      • The naming convention used to identify the inserted filler cell instances
+         By default, the command uses the following naming convention for inserted filler cells:
+         xofiller!filler_library_cell_name!number
+         To identify the filler cells inserted in a specific run, use the -prefix option to specify
+         a prefix string. When you use this option, the command uses the following naming
+         convention:
+         xofiller!prefix!filler_library_cell_name!number
+
+
+     Threshold-Voltage-Based Filler Cell Insertion
+     In the threshold-voltage-based flow, the tool selects the filler cells by using user-defined
+     insertion rules, which are based the threshold-voltage types of the cells that border the
+     gap. This flow is typically used only for established foundry nodes.
+     To perform threshold-voltage-based filler cell insertion,
+      1. Ensure that the block is legalized by using the check_legality command.
+      2. Annotate the threshold-voltage types on the reference cells by using the
+         set_cell_vt_type command.
+
+         For example, to specify that all cells whose names end with _vtA have a threshold
+         voltage type of vtA and the invx1 cell has a threshold voltage type of default, use the
+         following commands:
+         icc2_shell> set_cell_vt_type -lib_cells "*/*_vtA" -vt_type vtA
+         icc2_shell> set_cell_vt_type -lib_cells "mylib/invx1" -vt_type default
+
+      3. Define the rules for inserting the filler cells by using the set_vt_filler_rule
+         command.
+         You define the rules by specifying the filler cells to insert based on the threshold-
+         voltage types of the cells on the left and right of the gap being filled.
+         For example, to specify that filler2x or filler1x cells can be inserted in a gap that has
+         default threshold-voltage cells on the left and right sides and fillerA2x and fillerA1x cells
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                             542
+V-2023.12
+                                                                                           Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Filler Cells
+
+
+         can be inserted in a gap that has vtA threshold-voltage cells on the left and right sides,
+         use the following commands:
+         icc2_shell> set_vt_filler_rule -vt_type {default default} \
+            -filler_cells {myLib/filler2x myLib/filler1x}
+         icc2_shell> set_vt_filler_rule -vt_type {vtA vtA} \
+            -filler_cells {myLib/fillerA2x myLib/fillerA1x}
+
+      4. Insert the filler cells by using the create_vtcell_fillers command.
+
+     Controlling Threshold-Voltage-Based Filler Cell Insertion
+     By default, the create_vtcell_fillers command fills all empty space in the horizontal
+     standard-cell rows of the entire block.
+     You can control the following aspects of the filler cell insertion:
+      • The region in which to insert the filler cells
+          ◦ Use the -region option to restrict filler cell insertion to the specified regions.
+          ◦ Use the -voltage_area option to restrict filler cell insertion to the specified voltage
+            areas.
+      • The naming convention used to identify the inserted filler cell instances
+         By default, the command uses the following naming convention for inserted filler cells:
+         xofiller!filler_library_cell_name!number
+         To identify the filler cells inserted in a specific run, use the -prefix option to specify
+         a prefix string. When you use this option, the command uses the following naming
+         convention:
+         xofiller!prefix!filler_library_cell_name!number
+         To change the separator character from the default exclamation mark (!), use the
+         -separator option.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                             543
+V-2023.12
+                                                                                         Feedback
+Chapter 6: Chip Finishing and Design for Manufacturing
+Inserting Metal Fill
+
+
+     Removing the Threshold-Voltage Filler Cell Information
+     To remove the filler cell insertion rules and the threshold-voltage type annotations, use the
+     -clear_vt_information option with the create_vtcell_fillers command.
+
+
+     Removing Filler Cells
+     Filler cells inserted by the IC Compiler II tool have instance names that start with the string
+     xofiller. To remove all the filler cells from a block, use the remove_cells command, as
+     shown in the following example:
+     icc2_shell> remove_cells [get_cells xofiller*]
+
+     If you used the standard filler cell insertion flow and want to remove only those filler cells
+     with DRC violations, use the remove_stdcell_fillers_with_violation command, as
+     described in Checking for Filler Cell DRC Violations.
+
+
+Inserting Metal Fill
+     After routing, you can fill the empty spaces in the block with metal wires to meet the metal
+     density rules required by most fabrication processes. Before inserting metal fill, the block
+     should be close to meeting timing and have very few or no DRC violations.
+     To insert metal fill, run the signoff_create_metal_fill command, as described in
+     Inserting Metal Fill With IC Validator In-Design.
+     Note:
+         An IC Validator license is required to run the signoff_create_metal_fill
+         command.
+
+
+
+
+IC Compiler™ II Implementation User Guide                                                        544
+V-2023.12
+

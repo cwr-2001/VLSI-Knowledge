@@ -1,0 +1,199 @@
+% 第 5 章
+\bichapter{布线与布线后优化}{Routing and Postroute Optimization}
+\label{chap:route}
+
+本章介绍 IC Compiler II 路由器 Zroute 的布线能力，以及布线后优化功能。Zroute 面向多核硬件架构，可高效处理 45~nm 及以下先进工艺设计规则与可制造性设计（DFM）任务。
+
+本章包括以下主题：
+\begin{itemize}
+  \item Zroute 简介（Introduction to Zroute）
+  \item 基本 Zroute 流程（Basic Zroute Flow）
+  \item 布线前提条件（Prerequisites for Routing）
+  \item 定义 Via（Defining Vias）
+  \item 插入 Via Ladder（Inserting Via Ladders）
+  \item 检查可布线性（Checking Routability）
+  \item 布线约束（Routing Constraints）
+  \item 布线应用选项（Routing Application Options）
+  \item 时钟网络布线（Routing Clock Nets）
+  \item 关键网络布线（Routing Critical Nets）
+  \item 次级电源/地 pin 布线（Routing Secondary Power and Ground Pins）
+  \item 信号网络布线（Routing Signal Nets）
+  \item 网络屏蔽（Shielding Nets）
+  \item 执行布线后优化（Performing Postroute Optimization）
+  \item 分析并修复信号电迁移违例（Analyzing and Fixing Signal Electromigration Violations）
+  \item 执行 ECO 布线（Performing ECO Routing）
+  \item 在 GUI 中布线（Routing Nets in the GUI）
+  \item 清理已布线网络（Cleaning Up Routed Nets）
+  \item 分析布线结果（Analyzing the Routing Results）
+  \item 保存布线信息（Saving Route Information）
+  \item 推导掩模颜色（Deriving Mask Colors）
+  \item 插入与移除 Cut Metal 形状（Inserting and Removing Cut Metal Shapes）
+\end{itemize}
+
+% ============================================================
+\section{Zroute 简介}
+\subsection*{Introduction to Zroute}
+
+Zroute 包含五个布线引擎：全局布线（global routing）、轨道分配（track assignment）、详细布线（detail routing）、ECO 布线与布线验证。全局布线、轨道分配与详细布线可通过任务专用命令或自动布线命令调用；ECO 布线与布线验证则使用任务专用命令。
+
+Zroute 主要特性包括：
+\begin{itemize}
+  \item 全布线步骤（含全局布线、轨道分配、详细布线）支持多核多线程；
+  \item 真实连通模型：矩形相触即视为电气连通，无需导线中心线重合；
+  \item 动态迷宫网格：可 off-grid 连接 pin，同时保留网格路由器的速度优势；
+  \item 多边形管理器：识别多边形，并理解 DRC 面向多边形；
+  \item 详细布线阶段并发优化设计规则、天线规则、导线与 via；
+  \item 详细布线阶段并发插入冗余 via；
+  \item 全局/轨道/详细布线内建 soft rule 支持；
+  \item 时序与串扰驱动的全局布线、轨道分配、详细布线与 ECO 布线；
+  \item 智能设计规则处理（合并冗余违例、智能收敛）；
+  \item 带层约束与非默认布线规则（NDR）的 net group 布线；
+  \item 时钟布线；
+  \item 布线验证；
+  \item 以 soft rule 方式优化 DFM 与可制造性（DFY）；
+  \item 支持先进设计规则，如多重图案化（multiple patterning）。
+\end{itemize}
+
+% ============================================================
+\section{基本 Zroute 流程}
+\subsection*{Basic Zroute Flow}
+
+图~\ref{fig:basic-zroute-flow} 给出基本 Zroute 流程，包括时钟布线、信号布线、DFM 优化与布线验证。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 63：Basic Zroute Flow）}\\[0.3em]
+\small 请参阅原版 PDF 插图；可将截图放入 \texttt{figures/} 目录后用 \texttt{\textbackslash includegraphics} 替换。
+\vspace{1.5cm}}}
+\caption{基本 Zroute 流程}
+\label{fig:basic-zroute-flow}
+\end{figure}
+
+% ============================================================
+\section{布线前提条件}
+\subsection*{Prerequisites for Routing}
+
+运行 Zroute 前，block 与物理库须满足：
+\begin{itemize}
+  \item \textbf{库要求}：Zroute 从 technology file 获取全部设计规则信息，布线前须确保规则已在 technology file 中定义。详见 \textit{Synopsys Technology File and Routing Rules Reference Manual}。
+  \item \textbf{Block 要求}：
+  \begin{itemize}
+    \item 电源/地网络已在设计规划后、布局前布线完成（见 \textit{IC Compiler II Design Planning User Guide}）；
+    \item 已完成时钟树综合与优化（见第~\ref{chap:cts}~章）；
+    \item 估计拥塞可接受；
+    \item 估计时序可接受（约 0~ns slack）；
+    \item 估计最大电容与 transition 无违例。
+  \end{itemize}
+\end{itemize}
+后三项可通过 \cmd{check\_routability} 验证布局可布线性（见「检查可布线性」）。
+
+% ============================================================
+\section{定义 Via}
+\subsection*{Defining Vias}
+
+路由器支持以下 via 定义类型：
+\begin{itemize}
+  \item \textbf{Simple via 与 simple via array}：simple via 为单 cut via，由 cut 层及 cut/金属层矩形的高宽指定；simple via array 为多 cut 的 simple via。可用于：带 NDR 的时钟/信号布线、冗余 via 插入、带先进 via 规则的 PG 布线。
+  \item \textbf{Custom via}：由任意 Manhattan 多边形集合构成的多 cut、异形 via；\textbf{仅}可用于冗余 via 插入。
+\end{itemize}
+
+Via 定义来源：
+\begin{itemize}
+  \item 设计库关联 technology file 的 \texttt{ContactCode} 段；
+  \item LEF 文件中的 via rule \texttt{GENERATE} 语句（定义 simple via array）；
+  \item 用户自定义 via（\cmd{create\_via\_def}）。
+\end{itemize}
+
+若希望 Zroute 将某 via 定义用于信号布线，须满足：\appopt{is\_default} 为 \cmd{true}，且 \appopt{is\_excluded\_for\_signal\_routing} 为 \cmd{false}。此外，Zroute 还会使用 technology file fat via table 或 \cmd{create\_routing\_rule} 所定义 NDR 中显式指定的非默认 via。
+
+\subsection{从 LEF 读取 Via 定义}
+\subsubsection*{Reading Via Definitions from a LEF File}
+
+使用 \cmd{read\_tech\_lef} 读取 LEF 中 via rule \texttt{GENERATE} 语句。支持如下 LEF 语法：
+\begin{lstlisting}
+via_rule_name GENERATE [DEFAULT]
+   LAYER lower_layer_name
+      ENCLOSURE lower_overhang1 lower_overhang2
+   LAYER upper_layer_name
+      ENCLOSURE upper_overhang1 upper_overhang2
+   LAYER cut_layer_name
+      RECT llx lly urx ury
+      SPACING x_spacing BY y_spacing
+\end{lstlisting}
+不支持 \texttt{WIDTH} 与 \texttt{RESISTANCE} 语句。
+
+\subsection{创建 Via 定义}
+\subsubsection*{Creating a Via Definition}
+
+使用 \cmd{create\_via\_def} 创建 via 定义；创建后可在设计中任意处使用（类似 technology file 的 \texttt{ContactCode}）。用户 via 定义保存在设计库中，仅该设计可用。可定义 simple via、simple via array 与 custom via。
+
+\subsubsection{定义 Simple Via}
+\subsubsection*{Defining Simple Vias}
+
+\begin{lstlisting}
+create_via_def
+   -cut_layer layer
+   -cut_size {width height}
+   -upper_enclosure {width height}
+   -lower_enclosure {width height}
+   [-min_rows number_of_rows]
+   [-min_columns number_of_columns]
+   [-min_cut_spacing distance]
+   [-cut_pattern cut_pattern]
+   [-is_default]
+   [-force]
+   via_def_name
+\end{lstlisting}
+
+无需指定 enclosure 层：工具根据 technology file 中与 via 层相邻的金属层自动确定。默认创建单 cut via；定义 via array 时指定 \opt{-min\_rows}/\opt{-min\_columns} 与 \opt{-min\_cut\_spacing}。默认 cut pattern 为满阵列；可用 \opt{-cut\_pattern} 修改。覆盖已有定义须用 \opt{-force}。
+
+\begin{lstlisting}
+icc2_shell> create_via_def design_via1_HV \
+  -cut_layer VIA12 -cut_size {0.05 0.05} \
+  -lower_enclosure {0.02 0.0} -upper_enclosure {0.0 0.2}
+
+icc2_shell> create_via_def design_via12 -cut_pattern "01 10"
+\end{lstlisting}
+
+用 \cmd{report\_via\_defs} 报告用户 via 定义。
+
+\subsubsection{定义 Custom Via}
+\subsubsection*{Defining Custom Vias}
+
+\begin{lstlisting}
+create_via_def
+   -shapes { {layer {coordinates} [mask_constraint]} ... }
+   [-lower_mask_pattern alternating | uniform]
+   [-upper_mask_pattern alternating | uniform]
+   [-force]
+   via_def_name
+\end{lstlisting}
+
+\opt{-shapes} 须为一个 via 层与两个金属 enclosure 层指定形状；每层可有多个形状。
+
+\begin{lstlisting}
+icc2_shell> create_via_def design_H_shape_via \
+   -shapes { {VIA12 {0.035 -0.035} {0.100 0.035}}
+             {VIA12 {-0.100 -0.035} {-0.035 0.035}}
+             {METAL1 {-0.130 -0.035} {0.130 0.035}}
+             {METAL2 {-0.100 -0.065} {-0.035 0.065}}
+             {METAL2 {0.035 -0.065} {0.100 0.065}}
+             {METAL2 {-0.100 -0.035} {0.100 0.035}} }
+\end{lstlisting}
+
+双图案化时，可对形状或 enclosure 层分配 mask constraint，二者不可同时使用：
+\begin{itemize}
+  \item 对形状：在 \opt{-shapes} 中用 \cmd{mask\_one}/\cmd{mask\_two}/\cmd{mask\_three}；
+  \item 对 enclosure 层：用 \opt{-lower\_mask\_pattern}/\opt{-upper\_mask\_pattern}（\cmd{uniform} 或 \cmd{alternating}），创建 via 时再指定首个形状的 mask。
+\end{itemize}
+
+\begin{lstlisting}
+icc2_shell> create_via_def VIA12 \
+   -shapes { {M1 {-0.037 -0.010} {-0.017 0.01} mask_two}
+             {M1 {0.017 -0.010} {0.037 0.01} mask_one}
+             {VIA1 {-0.037 -0.01} {0.037 0.01} mask_two}
+             {M2 {-0.044 -0.010} {0.044 0.010} mask_one} }
+icc2_shell> create_via -net n1 -via_def VIA12 \
+   -origin {100.100 200.320}
+\end{lstlisting}
