@@ -7,7 +7,7 @@
 ########################################################################
 ## Variables to control clock NDR
 ########################################################################
-## 15-metal stack: root on M9-M13; shield (internal) on M5-M8
+## 15-metal stack: root M9-M13; shielded internal M5-M8; leaf M1-M4
 ## Note: ICC2 coplanar shields apply on the same layers the net routes on,
 ## so root and shield layer ranges are assigned to root vs internal net types.
 
@@ -39,10 +39,10 @@ set CTS_INTERNAL_NDR_SHIELDING_LAYER_SPACING_LIST "$CTS_NDR_SHIELDING_LAYER_SPAC
 set CTS_INTERNAL_NDR_MIN_ROUTING_LAYER	"M5" ;# Min routing layer for set_clock_routing_rules to which CTS_INTERNAL_NDR_RULE_NAME is applied. 
 set CTS_INTERNAL_NDR_MAX_ROUTING_LAYER	"M8" ;# Max routing layer for set_clock_routing_rules to which CTS_INTERNAL_NDR_RULE_NAME is applied.
 
-## For leaf clock nets
-set CTS_LEAF_NDR_RULE_NAME 		"" ;# Specify rm_leaf as the predefined rule for the example script to prepare a default rule for leaf nets
-set CTS_LEAF_NDR_MIN_ROUTING_LAYER 	$CTS_NDR_MIN_ROUTING_LAYER ;# Min routing layer for set_clock_routing_rules to which rm_leaf is applied.
-set CTS_LEAF_NDR_MAX_ROUTING_LAYER 	$CTS_NDR_MAX_ROUTING_LAYER ;# Max routing layer for set_clock_routing_rules to which rm_leaf is applied.
+## For leaf clock nets (M1-M4)
+set CTS_LEAF_NDR_RULE_NAME 		"rm_leaf" ;# Specify rm_leaf as the predefined rule for the example script to prepare a default rule for leaf nets
+set CTS_LEAF_NDR_MIN_ROUTING_LAYER 	"M1" ;# Min routing layer for set_clock_routing_rules to which rm_leaf is applied.
+set CTS_LEAF_NDR_MAX_ROUTING_LAYER 	"M4" ;# Max routing layer for set_clock_routing_rules to which rm_leaf is applied.
 
 if {$CTS_NDR_RULE_NAME == "" && $CTS_INTERNAL_NDR_RULE_NAME == "" && $CTS_LEAF_NDR_RULE_NAME == ""} {
 	puts "RM-info: [info script] is skipped. None of CTS_NDR_RULE_NAME, CTS_INTERNAL_NDR_RULE_NAME, or CTS_LEAF_NDR_RULE_NAME is specified."
