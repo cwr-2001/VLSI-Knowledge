@@ -7,8 +7,12 @@
 ########################################################################
 ## Variables to control clock NDR
 ########################################################################
-## For root clock nets
-set CTS_NDR_RULE_NAME			"" ;# Specify a clock NDR rule for root nets;
+## 15-metal stack: root on M9-M13; shield (internal) on M5-M8
+## Note: ICC2 coplanar shields apply on the same layers the net routes on,
+## so root and shield layer ranges are assigned to root vs internal net types.
+
+## For root clock nets (M9-M13, 2w2s without shield)
+set CTS_NDR_RULE_NAME			"rm_2w2s" ;# Specify a clock NDR rule for root nets;
 					;# required for the example script to work on the root and internal nets.
 					;# Below are the 3 predefined rules supported:  
 					;# rm_2w2s : double width double spacing 
@@ -18,11 +22,11 @@ set CTS_NDR_SHIELDING_LAYER_WIDTH_LIST 	"" ;# A list of layer_name shield_width 
 					;# required if you specify rm_2w2s_shield_list as CTS_NDR_RULE_NAME.
 set CTS_NDR_SHIELDING_LAYER_SPACING_LIST "" ;# A list of layer_name shield_spacing, for ex, "M1 0.1 M2 0.1 M3 0.1";
 					;# required if you specify rm_2w2s_shield_list as CTS_NDR_RULE_NAME.
-set CTS_NDR_MIN_ROUTING_LAYER		"" ;# Min routing layer for set_clock_routing_rules to which CTS_NDR_RULE_NAME is applied. 
-set CTS_NDR_MAX_ROUTING_LAYER		"" ;# Max routing layer for set_clock_routing_rules to which CTS_NDR_RULE_NAME is applied.
+set CTS_NDR_MIN_ROUTING_LAYER		"M9" ;# Min routing layer for set_clock_routing_rules to which CTS_NDR_RULE_NAME is applied. 
+set CTS_NDR_MAX_ROUTING_LAYER		"M13" ;# Max routing layer for set_clock_routing_rules to which CTS_NDR_RULE_NAME is applied.
 
-## For internal clock nets (by default same values as with the root clock nets)
-set CTS_INTERNAL_NDR_RULE_NAME		"$CTS_NDR_RULE_NAME" ;# Specify a clock NDR rule for internal nets; default is same as CTS_NDR_RULE_NAME;
+## For internal clock nets with shield (M5-M8)
+set CTS_INTERNAL_NDR_RULE_NAME		"rm_2w2s_shield_default" ;# Specify a clock NDR rule for internal nets; default is same as CTS_NDR_RULE_NAME;
 					;# required for the example script to work on the internal nets.
 					;# Below are the 3 predefined rules supported:  
 					;# rm_2w2s : double width double spacing 
@@ -32,8 +36,8 @@ set CTS_INTERNAL_NDR_SHIELDING_LAYER_WIDTH_LIST "$CTS_NDR_SHIELDING_LAYER_WIDTH_
 					;# required if you specify rm_2w2s_shield_list as CTS_INTERNAL_NDR_RULE_NAME.
 set CTS_INTERNAL_NDR_SHIELDING_LAYER_SPACING_LIST "$CTS_NDR_SHIELDING_LAYER_SPACING_LIST" ;# A list of layer_name shield_spacing, for ex, "M1 0.1 M2 0.1 M3 0.1";
 					;# required if you specify rm_2w2s_shield_list as CTS_INTERNAL_NDR_RULE_NAME.
-set CTS_INTERNAL_NDR_MIN_ROUTING_LAYER "$CTS_NDR_MIN_ROUTING_LAYER" ;# Min routing layer for set_clock_routing_rules to which CTS_INTERNAL_NDR_RULE_NAME is applied. 
-set CTS_INTERNAL_NDR_MAX_ROUTING_LAYER "$CTS_NDR_MAX_ROUTING_LAYER" ;# Max routing layer for set_clock_routing_rules to which CTS_INTERNAL_NDR_RULE_NAME is applied.
+set CTS_INTERNAL_NDR_MIN_ROUTING_LAYER	"M5" ;# Min routing layer for set_clock_routing_rules to which CTS_INTERNAL_NDR_RULE_NAME is applied. 
+set CTS_INTERNAL_NDR_MAX_ROUTING_LAYER	"M8" ;# Max routing layer for set_clock_routing_rules to which CTS_INTERNAL_NDR_RULE_NAME is applied.
 
 ## For leaf clock nets
 set CTS_LEAF_NDR_RULE_NAME 		"" ;# Specify rm_leaf as the predefined rule for the example script to prepare a default rule for leaf nets
