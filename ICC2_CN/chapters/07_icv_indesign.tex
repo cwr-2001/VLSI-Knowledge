@@ -1,6 +1,1522 @@
 % 第 7 章
 \bichapter{IC Validator In-Design}{IC Validator In-Design}
 \label{chap:icv}
-\chapterstub{7}{IC Validator In-Design}
 
-原书起始页约 p.545。
+% ============================================================
+% 说明：本章内容为译者基于 Synopsys IC Compiler II Implementation
+% User Guide（V-2023.12）第 7 章主题范围，用中文重新组织撰写的
+% 个人学习笔记，并非对原书文本的逐句翻译。命令名、选项名、默认值等
+% 技术事实性内容力求与原书一致，供个人学习查阅使用；具体版本行为
+% 请以官方 PDF 与 man page 为准。
+% ============================================================
+
+IC Validator In-Design 是 IC Compiler II 与签核级物理验证工具 IC Validator 之间的紧密集成接口。借助这一接口，设计人员无需离开 icc2\_shell 环境、也无需手工导出版图数据，即可直接调用 IC Validator 的验证引擎完成一系列物理实现与验证任务。运行这些功能需要有效的 IC Validator 许可证。
+
+本章围绕以下五类核心能力展开：
+\begin{itemize}
+  \item 签核级设计规则检查（signoff design rule checking），核心命令为 \cmd{signoff\_check\_drc}；
+  \item 对签核 DRC 检查出的违例进行自动修复，核心命令为 \cmd{signoff\_fix\_drc}；
+  \item 基于电压降（IR drop）分析结果对电源网络进行增强，核心命令为 \cmd{signoff\_create\_pg\_augmentation}；
+  \item 插入满足金属密度规则的 metal fill，核心命令为 \cmd{signoff\_create\_metal\_fill}；
+  \item 检测并修复孤立 via（isolated via），核心命令为 \cmd{signoff\_fix\_isolated\_via}。
+\end{itemize}
+
+这些命令统称为 IC Validator In-Design 命令。它们有一套共同的运行前准备流程（配置 IC Validator 执行环境、可选的多核/分布式处理设置、layer mapping 文件），也都遵循相似的「设置应用选项 $\to$ 保存 block 到磁盘 $\to$ 运行命令 $\to$ 查看结果文件」工作模式。掌握第一节所述的准备工作，是正确使用后续各命令的基础。
+
+\begin{noteBox}
+运行任何 IC Validator In-Design 功能都需要一份有效的 IC Validator 许可证。
+\end{noteBox}
+
+% ============================================================
+\section{运行 IC Validator In-Design 命令前的准备工作}
+\subsection*{Preparing to Run IC Validator In-Design Commands}
+
+在调用任何一条 IC Validator In-Design 命令之前，通常需要完成三件事：告诉 IC Compiler II 到哪里去找 IC Validator 可执行程序；根据需要配置多核/分布式运算以缩短验证时间；以及在工艺层号与代工厂 runset 层号不一致时提供 layer mapping 文件。下面分小节说明。
+
+\subsection{搭建 IC Validator 运行环境}
+\subsubsection*{Setting Up the IC Validator Environment}
+
+IC Compiler II 本身并不内置 IC Validator 的验证引擎，而是在需要时以子进程方式调用外部的 IC Validator 可执行程序。因此第一步是通过环境变量 \texttt{ICV\_HOME\_DIR} 告知工具 IC Validator 的安装路径，通常将其写入 shell 的启动配置文件（如 \texttt{.cshrc}）中：
+
+\begin{lstlisting}
+setenv ICV_HOME_DIR /root_dir/icv
+set path = ($path $ICV_HOME_DIR/bin/LINUX.64)
+\end{lstlisting}
+
+\begin{noteBox}
+所指定的 IC Validator 版本必须与当前使用的 IC Compiler II 版本相互兼容，两者不匹配可能导致运行失败或结果不可信。可使用 \cmd{report\_versions} 命令核对版本兼容关系；具体的兼容版本对照信息，请查阅 SolvNet 上的 IC Validator 文档。
+\end{noteBox}
+
+\subsection{启用 IC Validator 多核处理}
+\subsubsection*{Enabling IC Validator Multicore Processing}
+
+默认情况下，IC Validator In-Design 命令使用单一进程完成设计规则检查等工作，这在大型 block 上可能非常耗时。为缩短运行时间，可以启用多核处理——包括多线程、跨主机分布式处理，以及若干子命令的并行执行。用户只需告诉工具在哪些主机上可以使用多少核心，IC Validator 会自行决定如何组合多线程与并行执行以取得最短运行时间。
+
+启用多核处理的命令是 \cmd{set\_host\_options}。该命令默认对所有支持多核处理的 IC Compiler II 命令生效；若只想让配置作用于 IC Validator In-Design 命令，需加上 \opt{-target ICV} 选项。
+
+可以采用以下三种方式之一（或组合）来启用 IC Validator 的多核处理：
+\begin{itemize}
+  \item 直接指定若干台具体主机（Specific Hosts）；
+  \item 借助作业调度系统（Job Scheduler），如 LSF 或 Grid Engine；
+  \item 将上述两种方式混合使用（Hybrid）。
+\end{itemize}
+
+\subsubsection{在指定主机上运行}
+\subsubsection*{Running IC Validator on Specific Hosts}
+
+若不指定主机名或提交协议，IC Validator 默认运行在当前 IC Compiler II 所在的主机上。要在一台或多台指定主机上启用多核处理，需要用 \cmd{set\_host\_options} 指定：
+\begin{itemize}
+  \item \textbf{主机名}：作为命令的位置参数给出一个或多个主机名；
+  \item \textbf{核心数}：用 \opt{-num\_processes} 或 \opt{-max\_cores} 指定；若两者同时给出，则实际使用的核心数为二者的乘积。该核心数适用于所列出的每一台主机。
+\end{itemize}
+
+例如，让当前主机使用 4 个核心：
+\begin{lstlisting}
+icc2_shell> set_host_options -target ICV -num_processes 4
+\end{lstlisting}
+
+又如，让 \texttt{machineA} 与 \texttt{machineB} 各使用 8 个核心（共 16 个核心）：
+\begin{lstlisting}
+icc2_shell> set_host_options -target ICV \
+   -num_processes 2 -max_cores 4 {machineA machineB}
+\end{lstlisting}
+
+\subsubsection{借助作业调度系统运行}
+\subsubsection*{Running IC Validator Using a Job Scheduler}
+
+若希望通过作业调度系统动态申请计算资源，而不是写死具体主机名，可以指定：
+\begin{itemize}
+  \item \textbf{提交协议}（\opt{-submit\_protocol}）：
+        \begin{itemize}
+          \item \texttt{lsf}：使用 LSF（Load Sharing Facility），要求 \texttt{bsub} 命令位于 Linux 路径中；
+          \item \texttt{grid}：使用 Univa Grid Engine（UGE，旧称 SGE / GRD），要求 \texttt{qsub} 命令位于 Linux 路径中。
+        \end{itemize}
+        同样，若不指定主机名或提交协议，IC Validator 默认运行在当前主机上。
+  \item \textbf{申请的主机数}：用 \opt{-num\_processes} 指定；
+  \item \textbf{每台主机使用的核心数}：用 \opt{-max\_cores} 指定；
+  \item （可选）\textbf{提交命令的附加参数}：用 \opt{-submit\_command} 指定完整的提交命令字符串。
+\end{itemize}
+
+例如，通过 LSF 申请 4 台主机、每台 8 核（共 32 核）：
+\begin{lstlisting}
+icc2_shell> set_host_options -submit_protocol lsf -target ICV \
+   -num_processes 4 -max_cores 8
+\end{lstlisting}
+
+为上述作业追加内存需求（1000MB）：
+\begin{lstlisting}
+icc2_shell> set_host_options -submit_protocol lsf -target ICV \
+   -num_processes 4 -max_cores 8 \
+   -submit_command {bsub -R rusage[mem=1000]}
+\end{lstlisting}
+
+通过 Grid Engine 申请等价资源：
+\begin{lstlisting}
+icc2_shell> set_host_options -submit_protocol grid -target ICV \
+   -num_processes 4 -max_cores 8
+\end{lstlisting}
+
+为 Grid Engine 作业指定 project 名称（如 \texttt{bnormal}）：
+\begin{lstlisting}
+icc2_shell> set_host_options -submit_protocol grid -target ICV \
+   -num_processes 4 -max_cores 8 -submit_command "qsub -P bnormal"
+\end{lstlisting}
+
+\subsubsection{混合方式运行}
+\subsubsection*{Running IC Validator Using Hybrid Multicore Processing}
+
+在使用 LSF 时，可以将「固定使用的具体主机」与「按需向 LSF 申请的额外主机」结合起来。做法是：先按前述方法配置具体主机，再用 \opt{-add\_hosts} 选项追加 LSF 配置。这部分追加的资源既是「可选资源」也是「资源上限」——LSF 可能在运行的开始、中途或结束时才把这些主机交给作业，也可能完全不分配。
+
+例如，先固定使用当前主机的 4 个核心，再尝试向 LSF 额外申请最多 4 台主机：
+\begin{lstlisting}
+icc2_shell> set_host_options -target ICV -max_cores 4
+icc2_shell> set_host_options -target ICV -add_hosts \
+   -submit_protocol lsf -num_processes 4
+\end{lstlisting}
+
+\begin{seeAlsoBox}
+\cmd{set\_host\_options} 命令的通用说明，另见「Enabling Multicore Processing」一节。
+\end{seeAlsoBox}
+
+\subsection{定义 IC Validator In-Design 命令使用的 Layer Mapping}
+\subsubsection*{Defining the Layer Mapping for IC Validator In-Design Commands}
+
+IC Compiler II 使用的技术文件（technology file）与代工厂提供的 runset 文件，两者对同一物理层的编号约定不一定相同。当二者层号不一致时，就需要一份 layer mapping 文件，把技术文件中的层号映射到 runset 文件所用的层号。该文件的位置通过应用选项 \appopt{signoff.physical.layer\_map\_file} 指定。
+
+Layer mapping 文件每一行描述技术文件中的一个层与 runset 文件中对应层的映射关系，语法为：
+
+\begin{lstlisting}
+tf_layer[:tf_purpose][:use_type][:mask_type]
+      runset_layer[:runset_data_type]
+\end{lstlisting}
+
+各字段含义如下：
+\begin{itemize}
+  \item \texttt{tf\_layer}（必填）：技术文件中的层号；
+  \item \texttt{tf\_purpose}：技术文件中的 purpose 号；
+  \item \texttt{use\_type}：该几何图形在设计中的用途，取值可为 \texttt{power}、\texttt{ground}、\texttt{signal}、\texttt{clock}、\texttt{boundary}、\texttt{hard\_placement\_blockage}、\texttt{soft\_placement\_blockage}、\texttt{routing\_blockage}、\texttt{area\_fill}、\texttt{track} 之一；
+  \item \texttt{mask\_type}：多重曝光（multiple patterning）掩膜约束；金属层取值为 \texttt{mask\_one}、\texttt{mask\_two}、\texttt{mask\_three}、\texttt{mask\_same}，via 层还额外支持 \texttt{MASK\_FOUR} 至 \texttt{MASK\_FIFTEEN}；
+  \item \texttt{runset\_layer}（必填）：runset 文件中对应的层号；
+  \item \texttt{runset\_data\_type}：runset 文件中对应的 data type 号。
+\end{itemize}
+
+一行中分号（\texttt{;}）之后的内容均视为注释，不影响映射关系。
+
+% ============================================================
+\section{执行签核级设计规则检查}
+\subsection*{Performing Signoff Design Rule Checking}
+
+签核级设计规则检查（signoff design rule checking，signoff DRC）在 IC Compiler II 内部调用 IC Validator 引擎，依据代工厂提供的签核 runset 文件检查布线是否满足工艺规则。它主要有两种使用方式：
+\begin{itemize}
+  \item 运行 \cmd{signoff\_check\_drc} 命令，对整个 block 做一次完整或增量式检查；
+  \item 使用 GUI 中的 Live DRC 功能，在版图窗口中对当前显示区域做交互式检查。
+\end{itemize}
+
+典型流程是：完成布局布线之后先用 \cmd{signoff\_check\_drc} 做一次全芯片检查；之后每次 ECO 之后，既可以再次运行 \cmd{signoff\_check\_drc}（结合增量模式），也可以用 Live DRC 只对刚修改的局部区域做检查。
+
+\begin{seeAlsoBox}
+自动修复签核 DRC 违例，见「自动修复签核 DRC 违例」一节。
+\end{seeAlsoBox}
+
+\subsection{运行 \cmd{signoff\_check\_drc} 命令}
+\subsubsection*{Running the signoff\_check\_drc Command}
+
+运行签核 DRC 检查的一般步骤为：
+\begin{enumerate}
+  \item 按前一节所述搭建好 IC Validator 运行环境；
+  \item （可选）用 \cmd{set\_host\_options} 启用分布式/多核处理；
+  \item 设置本次检查所需的应用选项；至少必须通过 \appopt{signoff.check\_drc.runset} 指定所用的代工厂 runset；
+  \item 用 \cmd{save\_block} 把当前 block 状态保存到磁盘——IC Validator 读取的是磁盘上的版图数据，而非内存中的实时状态，因此运行前务必先保存；
+  \item 运行 \cmd{signoff\_check\_drc} 命令。
+\end{enumerate}
+
+命令默认会依次完成三件事：把 block 加载进 IC Validator（加载规则见下文「读取 Block 的规则」）；执行签核 DRC 检查；生成错误数据文件（error data file）以及一系列 IC Validator 结果文件。随后既可以在 error browser 中查看违例列表，也可以把结果作为自动修复流程（\cmd{signoff\_fix\_drc}）的输入。此外还可以借助 ICV heat map 观察违例在版图上的密度分布。
+
+\begin{seeAlsoBox}
+在 GUI 中交互式检查签核设计规则，见「在 GUI 中交互式检查签核设计规则」一节。
+\end{seeAlsoBox}
+
+\subsubsection{设置签核 DRC 检查的应用选项}
+\subsubsection*{Setting Options for Signoff Design Rule Checking}
+
+运行 \cmd{signoff\_check\_drc} 之前，可通过 \cmd{set\_app\_options} 设置表~\ref{tab:signoff-check-drc-opts} 所列应用选项来配置本次运行；用 \cmd{report\_app\_options} 可查看当前生效的设置。
+
+\begin{longtable}{p{0.30\textwidth}p{0.14\textwidth}p{0.46\textwidth}}
+\caption{签核 DRC 检查的应用选项}\label{tab:signoff-check-drc-opts}\\
+\toprule
+应用选项 & 默认值 & 说明 \\
+\midrule
+\endfirsthead
+\toprule
+应用选项 & 默认值 & 说明 \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\appopt{signoff.check\_drc.runset}（必填） & N/A & 指定 DRC 检查所用的代工厂 runset。 \\
+\appopt{signoff.check\_drc.auto\_eco\_threshold\_value} & 20 & 使用 \opt{-auto\_eco true} 做增量检查时允许的最大改动比例（百分比）。 \\
+\appopt{signoff.check\_drc.excluded\_cell\_types} & \{\} & 指定跳过检查的单元类型，可取 \texttt{lib\_cell}（标准单元）、\texttt{macro}（宏单元）、\texttt{pad}（I/O pad）、\texttt{filler}（填充单元）中的一个或多个。 \\
+\appopt{signoff.check\_drc.fill\_view\_data} & \texttt{read\_if\_uptodate} & 控制是否读取 fill 数据：默认仅当 fill 数据时间戳比 design view 新时才读取；设为 \texttt{read} 表示始终读取，设为 \texttt{discard} 表示从不读取。 \\
+\appopt{signoff.check\_drc.ignore\_blockages\_in\_cells} & true & 控制对宏单元/I-O pad 只读取 frame view 中的 pin 信息（true）还是同时读取 blockage 与 pin 信息（false）。 \\
+\appopt{signoff.check\_drc.ignore\_child\_cell\_errors} & false & 控制错误数据文件中是否同时包含顶层与子单元级违例（false）或只包含顶层违例（true）。 \\
+\appopt{signoff.check\_drc.max\_errors\_per\_rule} & 1000 & 每条规则最多报告的违例数。 \\
+\appopt{signoff.check\_drc.read\_design\_views} & \{\} & 指定需要读取 design view（而非 frame view）的参考单元；design view 能揭示被 frame view 抽象所掩盖的问题。 \\
+\appopt{signoff.check\_drc.read\_layout\_views} & \{\} & 指定需要读取 layout view（而非 frame view）的参考单元；效果与读 GDSII/OASIS 数据一致但可缩短运行时间。 \\
+\appopt{signoff.check\_drc.run\_dir} & \texttt{signoff\_check\_drc\_run} & 指定运行目录，用于存放 \cmd{signoff\_check\_drc} 产生的文件；可为相对路径（在当前目录下创建）或绝对路径。 \\
+\appopt{signoff.check\_drc.user\_defined\_options} & （无） & 追加到 IC Validator 命令行的额外参数字符串；工具不对该字符串做任何检查。 \\
+\appopt{signoff.physical.layer\_map\_file} & （无） & 指定 layer mapping 文件名，用于在技术文件层号与 runset 层号不一致时做映射，见前一节。 \\
+\appopt{signoff.physical.merge\_exclude\_libraries} & （无） & 指定哪些单元库中的单元不参与 \appopt{signoff.physical.merge\_stream\_files} 指定的 stream 数据替换。 \\
+\appopt{signoff.physical.merge\_stream\_files} & （无） & 指定需要合并进当前 block 用于签核 DRC 检查的 stream（GDSII 或 OASIS）文件；使用后这些文件中的数据会替代对应单元库的数据。 \\
+\end{longtable}
+
+\subsubsection{读取 Block 的规则}
+\subsubsection*{Reading Blocks for Signoff Design Rule Checking}
+
+默认情况下，IC Validator 对顶层 block 和标准单元实例读取 design view，对宏单元与 I/O pad 单元实例只从 frame view 中读取 pin 信息。可以按需调整：
+\begin{itemize}
+  \item 把 \appopt{signoff.check\_drc.ignore\_blockages\_in\_cells} 设为 \texttt{false}，可让工具同时读取宏单元/pad 的 frame view 中的布线 blockage 与 pin 信息；
+  \item 通过 \appopt{signoff.physical.merge\_stream\_files} 指定 stream 文件，可让特定参考单元直接使用 GDSII/OASIS 版图数据（\appopt{signoff.physical.merge\_exclude\_libraries} 列出的库除外）；
+  \item 通过 \appopt{signoff.check\_drc.read\_layout\_views} 指定特定参考单元读取 layout view——其内容与生成它所用的 GDSII/OASIS 数据完全一致，但运行速度更快；
+  \item 通过 \appopt{signoff.check\_drc.read\_design\_views} 指定特定参考单元读取 design view。
+\end{itemize}
+
+\begin{noteBox}
+Layout view 与 design view 默认都不包含在单元库中；如需使用，须在库准备阶段分别把 \appopt{lib.workspace.save\_layout\_views}、\appopt{lib.workspace.save\_design\_views} 设为 \texttt{true}，详见 Library Manager User Guide。
+\end{noteBox}
+
+子单元数据的读取优先级依次为：
+\begin{enumerate}
+  \item \appopt{signoff.physical.merge\_stream\_files} 指定的 GDSII/OASIS 数据；
+  \item \appopt{signoff.check\_drc.read\_layout\_views} 指定的 layout view；若找不到 layout view 而该单元又出现在 \appopt{signoff.check\_drc.read\_design\_views} 列表中，则改读 design view；若二者均无，再退回读 frame view；若 frame view 也不存在，该单元在检查中被忽略；
+  \item \appopt{signoff.check\_drc.read\_design\_views} 指定的 design view；找不到则退回 frame view，仍找不到则忽略该单元；
+  \item Frame view。
+\end{enumerate}
+
+例如，对所有 block 都读取 design view：
+\begin{lstlisting}
+icc2_shell> set_app_options \
+   -name signoff.check_drc.read_design_views -value {*}
+icc2_shell> signoff_check_drc
+\end{lstlisting}
+
+又如，只对顶层 block 以及名字以 \texttt{mc} 开头的所有参考单元实例读取 design view，其余子 block 仍读 frame view：
+\begin{lstlisting}
+icc2_shell> set_app_options \
+   -name signoff.check_drc.read_design_views -value {mc*}
+icc2_shell> signoff_check_drc
+\end{lstlisting}
+
+\subsubsection{签核设计规则检查的默认行为与常见定制}
+\subsubsection*{Signoff Design Rule Checking}
+
+不做任何额外设置时，签核 DRC 检查具有以下默认行为，均可按需覆盖：
+
+\begin{itemize}
+  \item \textbf{检查所有单元类型}（标准单元、filler、宏单元、I/O pad）。若要排除某些类型，设置 \appopt{signoff.check\_drc.excluded\_cell\_types}，取值可为 \texttt{lib\_cell}、\texttt{filler}、\texttt{macro}、\texttt{pad} 之一或多个。
+
+  \item \textbf{对整个 block 做检查}。
+        \begin{itemize}
+          \item 若只想检查自上次运行以来发生改动的区域，使用 \opt{-auto\_eco true}。该选项仅当此前已运行过 \cmd{signoff\_check\_drc}，且自那次运行以来 block 的改动比例低于变化阈值（默认 20\%，可通过 \appopt{signoff.check\_drc.auto\_eco\_threshold\_value} 调整）时才可用。默认将当前 block 与上一次 \cmd{signoff\_check\_drc} 所用版本比较；如需与其他 block 比较，用 \opt{-pre\_eco\_design} 指定对比对象。增量检测所需信息来自名为 \texttt{block\_sdrc.err} 的错误数据文件（\texttt{block} 为当前 block 名或 \opt{-pre\_eco\_design} 指定的名字）。
+
+                默认情况下，增量检查报告的违例只覆盖本次改动区域；若想把本次结果与此前的初始违例合并展示，需在运行 \opt{-auto\_eco true} 之前将 \appopt{signoff.check\_drc.merge\_incremental\_error\_data} 设为 \texttt{true}。默认合并时读取的是 \texttt{signoff\_check\_drc.err} 文件中的初始违例；如需换用其他文件，通过 \appopt{signoff.check\_drc.merge\_base\_error\_name} 指定。
+          \item 若只想检查特定区域，用 \opt{-coordinates}（限定区域）和/或 \opt{-excluded\_coordinates}（排除区域）指定；两者可同时使用，重叠部分不做检查。坐标格式为 \texttt{\{\{x1 y1\} \{x2 y2\} ... \{xn yn\}\}}（每组坐标之间要有空格）。
+        \end{itemize}
+
+  \item \textbf{检查 runset 中定义的全部规则}。用 \opt{-select\_rules} 按模式匹配只选中部分规则，或用 \opt{-unselect\_rules} 排除部分规则；两者可组合使用，例如只想做布线本身的校验而跳过金属密度检查时，可选中金属层相关规则、排除密度相关规则。规则名取自 runset 文件 COMMENT 段中的定义。
+
+  \item \textbf{检查所有布线层}。用 \opt{-select\_layers} 限定只检查指定布线层（层名取自技术文件）；或用 \opt{-check\_all\_runset\_layers true} 让检查覆盖 runset 中的全部层，包括非布线层——这通常用于在完成布线层检查后，对整个 block 做一次快速的补充检查；此模式下版图信息来自 design view。
+
+  \item \textbf{每条规则最多报告 1000 条违例}（含顶层与子单元级）。可通过 \appopt{signoff.check\_drc.max\_errors\_per\_rule} 调整上限；也可将 \appopt{signoff.check\_drc.ignore\_child\_cell\_errors} 设为 \texttt{true} 以忽略子单元级违例。
+\end{itemize}
+
+\cmd{signoff\_check\_drc} 会根据所给选项拼装出调用 IC Validator 的命令行；如需追加其他 IC Validator 命令行参数，可通过 \appopt{signoff.check\_drc.user\_defined\_options} 指定（工具不检查该字符串的合法性）。
+
+\begin{noteBox}
+若打算把签核 DRC 结果作为自动修复流程的输入，应在运行 \cmd{signoff\_check\_drc} 前把 \appopt{signoff.check\_drc.ignore\_child\_cell\_errors} 设为 \texttt{true}：Zroute 只能修复顶层违例，这样设置可确保签核 DRC 只报告可被修复的违例。
+\end{noteBox}
+
+\subsubsection{签核 DRC 结果文件}
+\subsubsection*{Signoff DRC Results Files}
+
+\cmd{signoff\_check\_drc} 把输出文件写入运行目录（由 \appopt{signoff.check\_drc.run\_dir} 指定，默认 \texttt{signoff\_check\_drc\_run}），主要包括：
+\begin{itemize}
+  \item \textbf{错误数据文件}：默认名为 \texttt{signoff\_check\_drc.err}，存放于设计库中；可用 \opt{-error\_data} 指定其他文件名。该文件对子单元级错误只在其中一个实例上标注，便于定位底层错误来源。可用它在 error browser 中查看或展示违例。
+  \item \textbf{IC Validator 结果文件}，可用于调试签核 DRC 结果，包括：
+        \begin{itemize}
+          \item \texttt{block.LAYOUT\_ERRORS}——本次运行检测到的违例详情；
+          \item \texttt{block.RESULTS}——本次运行结果摘要；
+          \item \texttt{signoff\_check\_drc.log}——本次运行环境摘要；
+          \item \texttt{icv\_config\_out}——顶层 block 与各单元库的路径信息；
+          \item \texttt{icv\_sdrc.conclude}——违例汇总报告；
+          \item \texttt{layer.map}——本次运行自动生成的 layer mapping 文件；
+          \item \texttt{signoff\_check\_drc.rc}——IC Validator runset 用到的环境变量；
+          \item \texttt{./run\_details} 目录——IC Validator 为本次运行产生的全部原始数据。
+        \end{itemize}
+        更多细节请参阅 IC Validator 文档。
+\end{itemize}
+
+\subsubsection{在 ICV Heat Map 中查看违例}
+\subsubsection*{Viewing the Violations in an ICV Heat Map}
+
+ICV heat map 以密度图的形式展示签核 DRC 违例在 block 上的分布，便于快速定位问题密集的区域。
+
+\begin{noteBox}
+该功能要求 IC Validator 版本不低于 P-2019.06，并需要 IC Validator NXT 许可证。
+\end{noteBox}
+
+查看步骤：
+\begin{enumerate}
+  \item 将应用选项 \appopt{signoff.check\_drc.enable\_icv\_explorer\_mode} 设为 \texttt{true}，开启 ICV heat map：
+\begin{lstlisting}
+icc2_shell> set_app_options \
+   -name signoff.check_drc.enable_icv_explorer_mode -value true
+\end{lstlisting}
+  \item 按前述方法运行签核 DRC 检查；
+  \item 在 GUI 中依次选择 View > Map > ICV Heatmap。
+\end{enumerate}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 99：ICV Heat Map）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{ICV Heat Map 示例}
+\label{fig:icv-heatmap}
+\end{figure}
+
+在 heat map 视图中，可以：
+\begin{itemize}
+  \item 勾选或取消特定违例类型的显示；
+  \item 调节 Alpha（不透明度）百分比，控制色块的透明程度：设为 100\% 时色块完全不透明，数值越低越透明；
+  \item 调节 Bins 值，控制颜色分级的粒度；
+  \item 勾选或取消特定层的显示；
+  \item 在色块上右键选择 Set Style，自定义色块的显示样式。
+\end{itemize}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 100--109：Heat Map 显示与样式设置示例）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{Heat Map 显示选项与样式设置}
+\label{fig:icv-heatmap-config}
+\end{figure}
+
+此外，可将 Error Browser 与 heat map 联动：在 GUI 中打开 View > Error Browser，选中某次 DRC 运行产生的错误数据，再在 Error Browser 中选中具体违例，即可自动在 heat map 上高亮对应位置。
+
+\subsection{在 GUI 中交互式检查签核设计规则}
+\subsubsection*{Checking Signoff Design Rules Interactively in the GUI}
+
+Live DRC 是在 IC Compiler II GUI 中执行交互式签核设计规则检查的功能，效果类似把 IC Validator 检查即时嵌入版图窗口。
+
+\begin{noteBox}
+该功能要求 IC Validator 版本不低于 P-2019.06。
+\end{noteBox}
+
+使用 Live DRC 的步骤：
+\begin{enumerate}
+  \item 按前述方法搭建 IC Validator 环境；
+  \item 设置交互式检查所需的应用选项，至少要指定：
+        \begin{itemize}
+          \item \appopt{signoff.check\_drc\_live.runset}：用于检查的代工厂 runset；
+          \item \appopt{signoff.physical.layer\_map\_file}：把技术文件层号映射到 runset 层号的 layer mapping 文件。
+        \end{itemize}
+  \item 确保版图窗口中显示了想要检查的对象。Live DRC 默认使用各单元的 frame view；若需要更精细的细节，可通过 \appopt{signoff.physical.merge\_stream\_files} 为特定单元指定 GDSII/OASIS 文件，例如：
+\begin{lstlisting}
+icc2_shell> set_app_options \
+   -name signoff.physical.merge_stream_files \
+   -value {stdcell.gds macro.oas}
+\end{lstlisting}
+  \item 在 GUI 菜单栏空白处右键选择 DRC Tools，打开 DRC 工具条；
+  \item 通过 Edit > Options > ICV-Live，或点击 DRC 工具条上的齿轮图标，配置本次检查要使用的规则；若要整体排除密度或连接性相关规则，设置 \appopt{signoff.check\_drc\_live.exclude\_command\_class}；
+  \item 通过 Edit > ICV > Run ICV-Live on Current View，或点击工具条上的运行按钮，执行检查。
+\end{enumerate}
+
+首次运行 Live DRC 时，工具需要处理 IC Validator runset（获取可用规则列表并缓存 runset）以及 \appopt{signoff.physical.merge\_stream\_files} 中指定的 GDSII/OASIS 文件，这一步可能耗时数分钟；只要层、规则、stream 文件不变，后续运行会直接复用缓存而明显加快。若希望提前完成这部分初始化，可预先运行 \cmd{signoff\_init\_live\_drc} 命令。
+
+检查结果同样显示在 Error Browser 中，可以逐条选中并交互式修复。
+
+\begin{seeAlsoBox}
+命令方式的签核 DRC 检查，见「运行 \cmd{signoff\_check\_drc} 命令」一节。
+\end{seeAlsoBox}
+
+\subsubsection{控制用于检查的显示对象}
+\subsubsection*{Displaying Objects for Design Rule Checking}
+
+交互式检查时，IC Validator 实际检查的范围是当前版图窗口中显示的内容，再加上 1 微米的默认延展（extension）。可通过 \appopt{signoff.check\_drc\_live.halo} 调整该延展距离。
+
+可通过 View Settings 与 Hierarchy Settings 面板控制窗口中显示的层、层级深度与单元类型：
+\begin{itemize}
+  \item 打开 View Settings 面板：设置 Level 字段控制显示层级数；在 Layers 页签中勾选需要显示的层；
+  \item 打开 Hierarchy Settings 面板：设置 「View level」 字段控制视图层级数；在 「Expanding cell types」 中勾选 Standard、Fill Cell、Block。
+\end{itemize}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 110：Settings Used to Display Objects for Design Rule Checking）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{用于控制 DRC 显示范围的设置面板}
+\label{fig:drc-display-settings}
+\end{figure}
+
+\subsubsection{DRC 工具条}
+\subsubsection*{DRC Toolbar}
+
+DRC 工具条集中了配置和运行 Live DRC、以及在版图中查看已报告违例所需的按钮。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 111：DRC Toolbar）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{DRC 工具条}
+\label{fig:drc-toolbar}
+\end{figure}
+
+\begin{longtable}{p{0.30\textwidth}p{0.60\textwidth}}
+\caption{DRC 工具条按钮功能}\label{tab:drc-toolbar}\\
+\toprule
+按钮功能 & 说明 \\
+\midrule
+\endfirsthead
+\toprule
+按钮功能 & 说明 \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+运行检查 & 使用 Live DRC 执行设计规则检查。 \\
+选项设置 & 打开对话框查看和设置 Live DRC 应用选项。 \\
+规则配置 & 打开对话框配置本次检查所用的规则。 \\
+选择检查区域 & 在版图中框选本次检查所覆盖的区域。 \\
+恢复上次区域 & 将检查区域重置为上一次 Live DRC 运行所用的区域。 \\
+错误环境叠加开关 & 启用/关闭下层单元中导致违例的 GDSII/OASIS 图形叠加显示；仅当运行检查前已设置 \appopt{signoff.physical.merge\_stream\_files} 时可用。 \\
+清除/高亮全部违例 & 清除或高亮 Live DRC 检测到的全部违例。 \\
+逐条浏览违例 & 依次遍历当前规则下的各条违例。 \\
+缩放/平移跟随 & 控制在浏览违例时是否自动缩放或平移视图。 \\
+显示规则名 & 显示当前高亮违例所属的设计规则名称。 \\
+\end{longtable}
+
+\subsubsection{设置交互式设计规则检查的应用选项}
+\subsubsection*{Setting Options for Interactive Design Rule Checking}
+
+运行交互式检查之前，可通过表~\ref{tab:live-drc-opts} 所列应用选项配置本次运行。
+
+\begin{longtable}{p{0.30\textwidth}p{0.18\textwidth}p{0.42\textwidth}}
+\caption{交互式设计规则检查的应用选项}\label{tab:live-drc-opts}\\
+\toprule
+应用选项 & 默认值 & 说明 \\
+\midrule
+\endfirsthead
+\toprule
+应用选项 & 默认值 & 说明 \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\appopt{signoff.check\_drc\_live.check\_only\_visible\_layers} & \texttt{all\_layers} & 控制是否只检查可见层上定义的规则；取值可为 \texttt{all\_layers}（默认，覆盖所有层）、\texttt{visible\_involved}、\texttt{visible\_only}。 \\
+\appopt{signoff.check\_drc\_live.default\_layers} & （无） & 指定带颜色掩膜的层写入 Live DRC 默认层时所用的层。 \\
+\appopt{signoff.check\_drc\_live.exclude\_command\_class} & \texttt{\{\{density true\} \{connectivity true\}\}} & 指定要从检查中排除的规则类型；默认排除密度与连接性规则。 \\
+\appopt{signoff.check\_drc\_live.halo} & （见说明） & 指定 Live DRC 检查区域在当前显示范围基础上向外延展的距离（微米）。 \\
+\appopt{signoff.check\_drc\_live.hierarchy\_level} & \texttt{visible} & 指定 Live DRC 处理的最大层级深度。 \\
+\appopt{signoff.check\_drc\_live.keep\_enclosing\_results} & false & 控制是否保留检查区域之外的违例；默认只保留完全落在检查区域内的违例。设为 \texttt{true} 时保留完全落在「裁剪区域」（检查区域加上 halo 一半宽度）内的违例；完全落在裁剪区域之外的违例始终被丢弃。 \\
+\appopt{signoff.check\_drc\_live.run\_dir} & \texttt{signoff\_check\_drc\_live\_run} & 指定运行目录。 \\
+\appopt{signoff.check\_drc\_live.runset}（必填） & （无） & 指定用于检查的代工厂 runset。 \\
+\appopt{signoff.check\_drc\_live.user\_defined\_options} & （无） & 追加到 IC Validator 命令行的额外参数字符串。 \\
+\appopt{signoff.physical.layer\_map\_file}（必填） & （无） & 指定 layer mapping 文件。 \\
+\appopt{signoff.physical.merge\_stream\_files} & （无） & 指定合并进当前 block 供交互式检查使用的 stream 文件。 \\
+\end{longtable}
+
+% ============================================================
+\section{自动修复签核 DRC 违例}
+\subsection*{Automatically Fixing Signoff DRC Violations}
+
+Zroute 布线引擎可以利用 \cmd{signoff\_check\_drc} 产生的签核 DRC 结果，自动修复其中检测到的设计规则违例，核心命令是 \cmd{signoff\_fix\_drc}。
+
+整体流程为：
+\begin{enumerate}
+  \item 按前述方法搭建 IC Validator 环境；
+  \item 设置签核 DRC 检查所需的应用选项（见前一节）；
+  \item （可选）生成一份 autofix 配置文件，用来辅助修复过程；该文件定义了「层 $\to$ DRC 规则」的映射关系，\cmd{signoff\_fix\_drc} 只处理该文件中列出的规则。默认情况下命令会自动生成该配置；也可以手工生成，见下文「生成 Autofix 配置文件」；
+  \item 设置签核 DRC 修复所需的应用选项；
+  \item 用 \cmd{save\_block} 保存 block 到磁盘——\cmd{signoff\_fix\_drc} 同样使用磁盘上的版图数据；
+  \item 运行 \cmd{signoff\_fix\_drc} 命令。
+\end{enumerate}
+
+\begin{noteBox}
+若 block 采用了双重曝光（double-patterning）工艺，应先对除双重曝光规则外的其他布线规则做完整的签核 DRC 修复，再单独针对双重曝光的奇环（odd-cycle）违例做一轮修复，详见「自动修复双重曝光奇环违例」一节。
+\end{noteBox}
+
+\subsection{生成 Autofix 配置文件}
+\subsubsection*{Creating an Autofix Configuration File}
+
+Autofix 配置文件的每一行格式为：
+
+\begin{lstlisting}
+"mask_layer_name" "full_IC_Validator_DRC_rule_comment"
+\end{lstlisting}
+
+以井号（\texttt{\#}）开头的行为注释。
+
+若此前已经运行过 \cmd{signoff\_check\_drc}，可以运行 \texttt{\$ICV\_HOME\_DIR/contrib/generate\_layer\_rule\_map.pl} 脚本自动生成配置文件，其语法为：
+
+\begin{lstlisting}
+generate_layer_rule_map.pl
+   -dplog IC_Validator_log_file
+   -tech_file technology_file
+   -o config_file_name
+\end{lstlisting}
+
+其中 \opt{-dplog} 指定的日志文件是上一次 \cmd{signoff\_check\_drc} 运行生成的 \texttt{runset.dp.log}，位于签核 DRC 运行目录（\appopt{signoff.check\_drc.run\_dir} 指定，默认 \texttt{signoff\_drc\_run}）下的 \texttt{run\_details} 子目录中。
+
+生成配置文件后，用应用选项 \appopt{signoff.fix\_drc.config\_file} 指定其位置。
+
+\subsection{设置签核 DRC 修复的应用选项}
+\subsubsection*{Setting Options for Signoff DRC Fixing}
+
+运行 \cmd{signoff\_fix\_drc} 之前，可通过表~\ref{tab:fix-drc-opts} 所列应用选项配置本次运行。
+
+\begin{longtable}{p{0.30\textwidth}p{0.15\textwidth}p{0.45\textwidth}}
+\caption{签核 DRC 修复的应用选项}\label{tab:fix-drc-opts}\\
+\toprule
+应用选项 & 默认值 & 说明 \\
+\midrule
+\endfirsthead
+\toprule
+应用选项 & 默认值 & 说明 \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\appopt{signoff.fix\_drc.advanced\_guidance\_for\_rules} & \texttt{all} & 控制是否使用高级布线引导；默认对所有规则启用（\texttt{all}），设为 \texttt{off} 可关闭该特性。 \\
+\appopt{signoff.fix\_drc.check\_drc} & \texttt{local} & 控制修复后的 DRC 检查范围：\texttt{local}（默认，只检查受本次修复影响的区域）或 \texttt{global}（检查整个 block）。 \\
+\appopt{signoff.fix\_drc.custom\_guidance} & （无） & 设为 \texttt{dpt} 时，本次修复专门针对双重曝光奇环违例，详见后文。 \\
+\appopt{signoff.fix\_drc.fix\_detail\_route\_drc} & \texttt{global} & 控制修复布线类 DRC 违例的范围：\texttt{global}（整个 block）或 \texttt{local}（只在违例附近）。 \\
+\appopt{signoff.fix\_drc.init\_drc\_error\_db} & （无） & 指定复用已有签核 DRC 结果的目录；不设置时命令会先自行运行一次 \cmd{signoff\_check\_drc} 生成初始结果。 \\
+\appopt{signoff.fix\_drc.last\_run\_full\_chip} & false & 控制最后一轮修复循环中的 DRC 检查是否覆盖整个 block（true）还是只覆盖受影响区域（false，默认）。 \\
+\appopt{signoff.fix\_drc.max\_detail\_route\_iterations} & 5 & 签核 DRC 修复后进行搜索修复（search-and-repair）迭代的最大次数。 \\
+\appopt{signoff.fix\_drc.max\_errors\_per\_rule} & 1000 & 每条规则最多尝试修复的违例数。 \\
+\appopt{signoff.fix\_drc.run\_dir} & \texttt{signoff\_fix\_drc\_run} & 运行目录。 \\
+\appopt{signoff.fix\_drc.target\_clock\_nets} & false & 控制修复面向数据网络（false，默认）还是时钟网络（true）。 \\
+\appopt{signoff.fix\_drc.user\_defined\_options} & （无） & 追加到 IC Validator 命令行的额外参数字符串。 \\
+\end{longtable}
+
+\subsection{运行 \cmd{signoff\_fix\_drc} 命令}
+\subsubsection*{Running the signoff\_fix\_drc Command}
+
+默认情况下，\cmd{signoff\_fix\_drc} 执行以下步骤：
+
+\begin{enumerate}
+  \item 运行 \cmd{signoff\_check\_drc} 生成初始的签核 DRC 结果。若已有现成结果，可通过 \appopt{signoff.fix\_drc.init\_drc\_error\_db} 指定其所在目录（相对路径或绝对路径均可，相对路径以当前工作目录为基准），从而跳过重复检查。例如复用默认签核 DRC 运行目录的结果：
+\begin{lstlisting}
+icc2_shell> set_app_options \
+   -name signoff.fix_drc.init_drc_error_db \
+   -value signoff_check_drc_run
+icc2_shell> signoff_fix_drc
+\end{lstlisting}
+        \begin{noteBox}
+        若要复用已有的签核 DRC 结果作为输入，运行 \cmd{signoff\_check\_drc} 时必须已按「生成自动修复流程输入」中所述设置了相应的应用选项。
+        \end{noteBox}
+
+  \item 运行两轮修复循环（repair loop）来修复 DRC 违例。每一轮循环包含：
+        \begin{enumerate}
+          \item 尝试修复上一次 IC Validator 签核 DRC 检查出的违例；
+          \item 对修改后的 block 重新运行一次签核 DRC 检查。
+        \end{enumerate}
+        可用 \opt{-max\_number\_repair\_loop}（取值 1--10）调整循环次数；若某一轮结束后已无剩余违例，工具不会再继续执行后续循环。随着循环轮次增加，该轮修复所涉及的重新布线范围也会相应扩大；可用 \opt{-start\_repair\_loop} 提高起始循环序号来扩大范围，但这可能对 block 造成更大扰动，进而需要 Zroute 做更多额外的检查与修复。
+
+  \item 写出结果汇总报告，详见下文「自动修复设计规则汇总报告」。
+\end{enumerate}
+
+\subsubsection{修复 DRC 违例}
+\subsubsection*{Fixing DRC Violations}
+
+在每一轮修复循环中，\cmd{signoff\_fix\_drc} 尝试修复上一次签核 DRC 检查出的违例：
+\begin{itemize}
+  \item 第一轮循环使用 \appopt{signoff.fix\_drc.init\_drc\_error\_db} 指定目录（未设置时为 \texttt{signoff\_drc\_run\_init}）中的 IC Validator 数据；
+  \item 后续循环使用上一轮循环产生、存放在 \appopt{signoff.fix\_drc.run\_dir} 指定目录（未设置时为 \texttt{signoff\_fix\_drc\_run}）中的数据。
+\end{itemize}
+
+修复阶段的默认行为：
+\begin{itemize}
+  \item 尝试修复上一次检查中的所有违例，但违例数超过 1000 条的规则会被跳过；
+  \item 默认在整个 block 范围内对数据网络做修复。可用 \opt{-coordinates}（限定区域）和/或 \opt{-excluded\_coordinates}（排除区域）调整修复范围，坐标格式同前；
+  \item 可用 \opt{-nets} 明确指定不应受影响的时序关键网络，或用 \opt{-timing\_preserve\_setup\_slack\_threshold} 让工具依据建立时间裕量阈值自动判定关键网络（单位为库时间单位），以避免修复动作破坏时序；
+  \item 修复完成后执行 5 轮详细布线迭代以消除修复过程中新引入的 DRC 违例；
+  \item 修改后的 block 保存为名为 \texttt{block\_ADR\_\#} 的 design view。
+\end{itemize}
+
+可通过以下应用选项调整默认行为：
+\begin{itemize}
+  \item \appopt{signoff.fix\_drc.max\_errors\_per\_rule}：设定忽略某规则所需的违例数阈值；
+  \item \appopt{signoff.fix\_drc.fix\_detail\_route\_drc}：设为 \texttt{local} 可将修复范围限制在违例附近，缩短运行时间；
+  \item \appopt{signoff.fix\_drc.target\_clock\_nets}：设为 \texttt{true} 可让修复面向时钟网络而非数据网络；
+  \item \appopt{signoff.fix\_drc.max\_detail\_route\_iterations}：设定详细布线迭代次数（0--1000）。
+\end{itemize}
+
+\subsubsection{检查 DRC 违例}
+\subsubsection*{Checking for DRC Violations}
+
+修复循环中执行 DRC 检查时，\cmd{signoff\_fix\_drc} 的默认行为为：
+\begin{itemize}
+  \item 对顶层 block 和标准单元实例读取 design view，对宏单元/I-O pad 实例只读取 frame view 的 pin 信息（具体调整方法见前文「读取 Block 的规则」）；
+  \item 初始检查之后，仅对受本轮修复影响的区域做检查。若要在最后一轮循环中对整个 block 做检查，将 \appopt{signoff.fix\_drc.last\_run\_full\_chip} 设为 \texttt{true}（可提升准确性但增加运行时间）；若要让所有循环都对整个 block 做检查，将 \appopt{signoff.fix\_drc.check\_drc} 设为 \texttt{global}（准确性更高但运行时间可能显著增加）；
+  \item 不检查子 block 内部的违例；
+  \item 排除不适合自动修复的规则；如需明确指定要检查的规则，可使用 \opt{-select\_rules} / \opt{-unselect\_rules}；
+  \item 结果存放于 \texttt{signoff\_fix\_drc\_run} 目录（可用 \appopt{signoff.fix\_drc.run\_dir} 更改）。
+\end{itemize}
+
+\begin{noteBox}
+初始签核 DRC 运行的结果单独存放于 \texttt{signoff\_drc\_run\_init} 目录中。
+\end{noteBox}
+
+此外，可通过 \appopt{signoff.fix\_drc.user\_defined\_options} 向 IC Validator 命令行追加其他参数。
+
+\begin{seeAlsoBox}
+执行签核级设计规则检查，见「执行签核级设计规则检查」一节。
+\end{seeAlsoBox}
+
+\subsection{自动修复双重曝光奇环违例}
+\subsubsection*{Automatically Fixing Double-Patterning Odd-Cycle Violations}
+
+若 block 采用双重曝光工艺，非双重曝光布线规则与双重曝光布线规则必须分开进行签核 DRC 修复。步骤如下：
+
+\begin{enumerate}
+  \item 先按「自动修复签核 DRC 违例」中描述的流程，修复非双重曝光相关的违例。运行 \cmd{signoff\_check\_drc} 与 \cmd{signoff\_fix\_drc} 时，用 \opt{-unselect\_rules} 排除双重曝光规则：
+\begin{lstlisting}
+icc2_shell> signoff_check_drc -unselect_rules {list_of_dpt_rules}
+\end{lstlisting}
+        \begin{noteBox}
+        具体的双重曝光规则名称需查阅代工厂提供的设计规则手册（DRM）。
+        \end{noteBox}
+
+  \item 再针对双重曝光奇环违例做一轮专门的修复。运行 \cmd{signoff\_fix\_drc} 之前，把 \appopt{signoff.fix\_drc.custom\_guidance} 设为 \texttt{dpt}：
+\begin{lstlisting}
+icc2_shell> set_app_options \
+   -name signoff.fix_drc.custom_guidance -value dpt
+\end{lstlisting}
+        运行 \cmd{signoff\_check\_drc} 与 \cmd{signoff\_fix\_drc} 时，改用 \opt{-select\_rules} 只保留双重曝光规则：
+\begin{lstlisting}
+icc2_shell> signoff_check_drc -select_rules {list_of_dpt_rules}
+\end{lstlisting}
+
+  \item 按「执行签核级设计规则检查」中描述的流程，重新做一次签核 DRC 检查以验证修复结果。
+\end{enumerate}
+
+\subsection{自动修复设计规则汇总报告}
+\subsubsection*{Summary Report for Automatic Design Rule Fixing}
+
+\cmd{signoff\_fix\_drc} 会在当前工作目录写出汇总报告文件 \texttt{result\_summary.rpt}。下面是该报告的一个示例（数值仅作格式演示）：
+
+\begin{lstlisting}
+Input DRC Error Database............ ./inputs/signoff_check_drc_run
+Limit to Cell....................... my_design
+Maximum Errors/Command.............. 1000
+
+SIGNOFF AUTOFIX DRC SUMMARY:
+DRC NAME     : TOTAL : PROCESSED : TARGETED : REMAINING : FIX RATE : COMMENT
+M0.W.3       :     1 :         1 :        0 :         0 :    --    : 1 ignored <#1>
+M4.L.3       :     4 :         4 :        0 :         0 :    --    : 4 ignored <#2>
+VIA1.S.10.3  :    10 :        10 :        2 :         0 :  100.0%  : 8 ignored <#2>
+TOTAL        :       :           :        2 :         0 :  100.0%  :
+NOTE:
+  #1 : size of error shapes greater than threshold
+  #2 : shapes associated with error are not Zroute modifiable
+\end{lstlisting}
+
+报告各列含义见表~\ref{tab:result-summary}。
+
+\begin{longtable}{p{0.28\textwidth}p{0.58\textwidth}}
+\caption{result\_summary.rpt 各列说明}\label{tab:result-summary}\\
+\toprule
+列名 & 说明 \\
+\midrule
+\endfirsthead
+\toprule
+列名 & 说明 \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+DRC NAME & runset 中该设计规则的名称。 \\
+TOTAL DRC & \cmd{signoff\_check\_drc} 检测到的该规则违例总数。 \\
+PROCESSED DRC & 经过筛选流程、被判断是否可修复的违例数。 \\
+TARGETED DRC & 筛选后自动修复实际尝试修复的违例数。 \\
+REMAINING TARGETED DRC & 自动修复完成后仍然剩余的违例数。 \\
+FIX RATE & 剩余目标违例数占目标违例总数的比例。 \\
+COMMENT & 被忽略违例的原因说明；详细原因代码见报告末尾的 NOTE 部分。 \\
+\end{longtable}
+
+% ============================================================
+\section{通过电源网增强改善实例电压降}
+\subsection*{Improving Instance Voltage Drop by Augmenting the Power Grid}
+
+电源网增强（power grid augmentation，PG augmentation）是一种改善实例电压降（instance voltage drop）的手段：在电源/地网络上添加额外的金属图形，这些图形相当于并联电阻，从而降低标准单元所「看到」的电源网等效电阻。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 112：Power Grid Augmentation）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{电源网增强示意}
+\label{fig:pg-augmentation}
+\end{figure}
+
+IC Compiler II 支持三种电源网增强方式：
+\begin{itemize}
+  \item \textbf{标准电源网增强（standard）}：在可行范围内尽可能多地插入增强图形，以最大程度降低实例电压降；
+  \item \textbf{时序驱动电源网增强（timing-driven）}：在指定区域插入增强图形，但会主动避开时序关键网络周边；
+  \item \textbf{引导式电源网增强（guided）}：只针对存在 IR 违例的单元，沿其到最小路径电阻 tap 点的路径插入增强图形。
+\end{itemize}
+
+三种方式都依赖 RedHawk Fusion 的分析结果来指导增强位置的选择，并最终由 IC Validator 完成增强图形的插入。
+
+\begin{seeAlsoBox}
+RedHawk 与 RedHawk-SC Fusion 分析，另见「RedHawk and RedHawk-SC Fusion」一节。
+\end{seeAlsoBox}
+
+\subsection{标准电源网增强}
+\subsubsection*{Standard Power Grid Augmentation}
+
+标准电源网增强会尽可能多地插入增强图形以降低实例电压降。执行步骤：
+
+\begin{enumerate}
+  \item 确认 block 已完成布线，且几乎没有（或完全没有）DRC 违例；
+  \item 用 RedHawk Fusion 运行一次电压降分析（增强前基线），其结果将用于指导本次增强；
+  \item 按前述方法搭建 IC Validator 环境；
+  \item （可选）用 \cmd{set\_host\_options} 启用分布式/多核处理；
+  \item 设置电源网增强所需的应用选项（见下文表~\ref{tab:pg-aug-opts}）。至少必须指定：
+        \begin{itemize}
+          \item \appopt{signoff.create\_pg\_augmentation.power\_net\_name}：电源网名称；
+          \item \appopt{signoff.create\_pg\_augmentation.ground\_net\_name}：地网名称。
+        \end{itemize}
+        若设计中存在多个电源网，需针对每个电源网各运行一次。
+  \item 用 \cmd{save\_block} 保存 block 到磁盘；
+  \item 运行 \cmd{signoff\_create\_pg\_augmentation} 命令执行增强，必须用 \opt{-node} 指定所用的工艺节点；若因存在多个电源网而需要做增量式增强，后续运行时加上 \opt{-mode add} 以在已有增强图形基础上追加，而非重新生成；
+  \item 再次运行 RedHawk Fusion 电压降分析，测量增强后的效果。
+\end{enumerate}
+
+标准电源网增强运行时，\cmd{signoff\_create\_pg\_augmentation} 会：
+\begin{enumerate}
+  \item 在指定区域插入增强图形。插入过程中会遵循布线设计规则以避免产生新的 DRC 违例。默认对整个 block 做增强；如需限定范围，可组合使用以下选项：
+        \begin{itemize}
+          \item \opt{-coordinates\_ground} / \opt{-excluded\_coordinates\_ground}：限定/排除地网增强的区域；
+          \item \opt{-coordinates\_power} / \opt{-excluded\_coordinates\_power}：限定/排除电源网增强的区域（若限定与排除区域重叠，则不在重叠部分增强）。
+        \end{itemize}
+        增强插入的图形带有 \texttt{shape\_use} 属性值 \texttt{pg\_augmentation}，可据此查询，例如：
+\begin{lstlisting}
+icc2_shell> get_shapes -filter {shape_use=~pg_augmentation}
+\end{lstlisting}
+  \item 生成汇总报告，列出每个电源/地网在各层新增图形的分布，以及新增金属图形数、via 图形数与总图形数；
+  \item 将更新后的 block 保存到磁盘。
+\end{enumerate}
+
+\begin{seeAlsoBox}
+另见「时序驱动电源网增强」「引导式电源网增强」「移除电源网增强图形」各节。
+\end{seeAlsoBox}
+
+\subsection{设置电源网增强的应用选项}
+\subsubsection*{Setting Options for Power Grid Augmentation}
+
+\begin{longtable}{p{0.32\textwidth}p{0.20\textwidth}p{0.38\textwidth}}
+\caption{电源网增强的应用选项}\label{tab:pg-aug-opts}\\
+\toprule
+应用选项 & 默认值 & 说明 \\
+\midrule
+\endfirsthead
+\toprule
+应用选项 & 默认值 & 说明 \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\appopt{signoff.create\_pg\_augmentation.ground\_net\_name}（必填） & （无） & 地网名称。 \\
+\appopt{signoff.create\_pg\_augmentation.power\_net\_name}（必填） & （无） & 电源网名称。 \\
+\appopt{signoff.create\_pg\_augmentation.run\_dir} & \texttt{signoff\_create\_pg\_augmentation\_run} & 运行目录，存放本次运行产生的文件。 \\
+\appopt{signoff.create\_pg\_augmentation.user\_defined\_options} & （无） & 追加到 IC Validator 命令行的额外参数字符串。 \\
+\end{longtable}
+
+\subsection{时序驱动电源网增强}
+\subsubsection*{Timing-Driven Power Grid Augmentation}
+
+时序驱动电源网增强在指定区域插入增强图形，但会绕开时序关键网络周边。该模式默认不开启。执行步骤与标准电源网增强大体相同，区别主要在于第 7 步：运行 \cmd{signoff\_create\_pg\_augmentation} 时，需要额外指定以下选项之一或两者：
+\begin{itemize}
+  \item \opt{-nets}：显式指定关键网络；
+  \item \opt{-timing\_preserve\_setup\_slack\_threshold}：让工具依据建立时间裕量阈值自动判定关键网络（单位为库时间单位）。
+\end{itemize}
+同样需要用 \opt{-node} 指定工艺节点；若涉及多电源网的增量增强，后续运行同样使用 \opt{-mode add}。
+
+时序驱动增强运行时，命令会：
+\begin{enumerate}
+  \item 执行时序分析（含多角多模分析），以最小化对时序的影响；
+  \item 根据所给选项识别时序关键网络；
+  \item 移除已有的增强图形——默认移除整个 block 范围内的增强图形，若使用 \opt{-mode add} 则保留已有图形；
+  \item 在指定区域插入增强图形，但避开关键网络周边；
+  \item 保存更新后的 block；
+  \item 生成汇总报告。
+\end{enumerate}
+
+\begin{seeAlsoBox}
+另见「标准电源网增强」「引导式电源网增强」「移除电源网增强图形」各节。
+\end{seeAlsoBox}
+
+\subsection{引导式电源网增强}
+\subsubsection*{Guided Power Grid Augmentation}
+
+引导式电源网增强只针对存在 IR 违例的单元进行增强：对每个候选单元，沿其到最小路径电阻 tap 点之间的路径插入增强图形。由于只在特定局部区域添加图形，引导式增强所用的金属图形更少、占用的布线资源更小，因而对耦合电容的影响也更低。
+
+执行步骤：
+\begin{enumerate}
+  \item 确认 block 已完成布线，且几乎没有（或完全没有）DRC 违例；
+  \item 用 RedHawk Fusion 运行电压降分析与最小路径电阻分析，其结果将用于指导本次增强；
+  \item 按前述方法搭建 IC Validator 环境；
+  \item （可选）启用分布式/多核处理；
+  \item 用 \cmd{save\_block} 保存 block 到磁盘——本命令同样依赖磁盘上的版图数据；
+  \item 运行 \cmd{fix\_pg\_wire} 命令执行引导式增强，用以下选项之一或两者指定处理范围：
+        \begin{itemize}
+          \item \opt{-number\_pins}：指定按 IR 违例严重程度排序、需要处理的最差实例数量；
+          \item \opt{-voltage\_drop\_threshold}：让工具依据电压降阈值自动判定需要处理的单元。
+        \end{itemize}
+        此外还必须指定：
+        \begin{itemize}
+          \item \opt{-supply\_nets}：需要增强的电源/地网名称；
+          \item \opt{-node}：工艺节点。
+        \end{itemize}
+        更多细节请参阅 \cmd{fix\_pg\_wire} 的 man page。
+  \item 再次运行 RedHawk Fusion 电压降分析，测量增强后的效果。
+\end{enumerate}
+
+\begin{seeAlsoBox}
+另见「标准电源网增强」「时序驱动电源网增强」「移除电源网增强图形」各节。
+\end{seeAlsoBox}
+
+\subsection{移除电源网增强图形}
+\subsubsection*{Removing PG Augmentation Shapes}
+
+如需移除电源网增强图形，对 \cmd{signoff\_create\_pg\_augmentation} 使用 \opt{-mode remove} 选项，工具会移除当前 block 中的全部增强图形。
+
+\subsubsection{ECO 感知的增强图形自动移除}
+\subsubsection*{ECO-Aware Removal of PG Augmentation Shapes}
+
+若 ECO 之后某些电源网增强图形导致了 DRC 违例，可以用 \opt{-mode remove\_by\_drc\_auto} 选项自动移除这些违规图形（包括图形移除后产生的悬空连接）：
+
+\begin{lstlisting}
+icc2_shell> signoff_create_pg_augmentation -node <nodename> \
+   -mode remove_by_drc_auto
+\end{lstlisting}
+
+% ============================================================
+\section{使用 IC Validator In-Design 插入 Metal Fill}
+\subsection*{Inserting Metal Fill With IC Validator In-Design}
+
+完成布线之后，为满足大多数制造工艺要求的金属密度规则，通常需要在版图空白区域插入 fill 图形（metal fill / via fill）。在插入 metal fill 与 via fill 之前，block 应当已经接近满足时序要求，且几乎没有（或完全没有）DRC 违例。
+
+插入步骤：
+\begin{enumerate}
+  \item 按前述方法搭建 IC Validator 环境；
+  \item （可选）启用分布式/多核处理；
+  \item 设置 metal fill 插入所需的应用选项（见下文表~\ref{tab:metal-fill-opts}）；
+  \item 用 \cmd{save\_block} 保存 block 到磁盘——命令使用磁盘上的版图数据；
+  \item 运行 \cmd{signoff\_create\_metal\_fill} 命令执行插入。
+\end{enumerate}
+
+\begin{noteBox}
+\cmd{signoff\_create\_metal\_fill} 会遵循 \cmd{create\_routing\_blockage} 定义的布线 blockage、不在其中插入 fill，但\emph{不会}遵循 \cmd{create\_routing\_guide} 定义的布线引导线。若采用 pattern-based 方式插入且技术文件与 runset 文件的 blockage 层号不一致，需提供 layer mapping 文件。
+\end{noteBox}
+
+插入过程中，IC Validator 会在 block 的 design view 内建立一个名为 \texttt{block.FILL} 的内部子设计，并把生成的 fill 单元（命名为 \texttt{FILL\_INST\_\#}）放入其中；可用 \cmd{get\_fill\_cells} 命令查询这些单元。
+
+插入完成后，还可以：
+\begin{itemize}
+  \item 在 GUI 版图窗口中显示已插入的 metal fill；
+  \item 修改已插入的 metal fill；
+  \item 对含真实 metal fill 的版图执行寄生参数提取，用于时序分析。
+\end{itemize}
+
+\subsection{设置签核 Metal Fill 插入的应用选项}
+\subsubsection*{Setting Options for Signoff Metal Fill Insertion}
+
+\begin{longtable}{p{0.32\textwidth}p{0.16\textwidth}p{0.42\textwidth}}
+\caption{签核 Metal Fill 插入的应用选项（节选常用项）}\label{tab:metal-fill-opts}\\
+\toprule
+应用选项 & 默认值 & 说明 \\
+\midrule
+\endfirsthead
+\toprule
+应用选项 & 默认值 & 说明 \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\multicolumn{3}{l}{\textit{适用于所有插入方式的选项}} \\
+\appopt{signoff.create\_metal\_fill.apply\_nondefault\_rules} & false & 是否在插入时遵循 nondefault 布线规则。 \\
+\appopt{signoff.create\_metal\_fill.auto\_eco\_threshold\_value} & 20 & 使用 \opt{-auto\_eco true} 做增量插入时允许的最大改动比例。 \\
+\appopt{signoff.create\_metal\_fill.flat} & false & 强制使用 flat 模式（true）而非 runset 中指定的模式（false）。 \\
+\appopt{signoff.create\_metal\_fill.read\_design\_views} & \{\} & 指定读取 design view 而非 frame view 的参考单元。 \\
+\appopt{signoff.create\_metal\_fill.read\_layout\_views} & \{\} & 指定读取 layout view 而非 frame view 的参考单元。 \\
+\appopt{signoff.create\_metal\_fill.run\_dir} & \texttt{signoff\_fill\_run} & 运行目录。 \\
+\appopt{signoff.create\_metal\_fill.user\_defined\_options} & （无） & 追加到 IC Validator 命令行的额外参数字符串。 \\
+\appopt{signoff.physical.merge\_exclude\_libraries} & （无） & 排除参与 stream 数据替换的单元库。 \\
+\appopt{signoff.physical.merge\_stream\_files} & （无） & 合并进当前 block 的 stream 文件。 \\
+\midrule
+\multicolumn{3}{l}{\textit{仅适用于 pattern-based 插入的选项}} \\
+\appopt{signoff.create\_metal\_fill.runset} & N/A & pattern-based 插入所用的代工厂 runset（track-based 插入不使用该选项）。 \\
+\appopt{signoff.physical.layer\_map\_file} & （无） & layer mapping 文件（技术文件层号与 runset 层号不一致时需要）。 \\
+\midrule
+\multicolumn{3}{l}{\textit{仅适用于 track-based 插入的选项}} \\
+\appopt{signoff.create\_metal\_fill.max\_density\_threshold} & （无） & 指定各层的最大密度阈值，格式为 \texttt{\{layer\_name max\_density\}}；仅用于 track-based 插入，且在 \opt{-mode add} 下不生效。 \\
+\midrule
+\multicolumn{3}{l}{\textit{仅适用于时序驱动插入（pattern-based 或 track-based）的选项}} \\
+\appopt{signoff.create\_metal\_fill.fill\_over\_net\_on\_adjacent\_layer} & false & 是否在相邻层上、位于网络竖直延展的最小间距范围内插入 fill。 \\
+\appopt{signoff.create\_metal\_fill.fill\_shielded\_clock} & false & 是否为被屏蔽的时钟网络插入 fill。 \\
+\appopt{signoff.create\_metal\_fill.fix\_density\_errors} & false & 是否在插入过程中自动修复密度违例。 \\
+\appopt{signoff.create\_metal\_fill.space\_to\_clock\_nets} & 技术文件最小间距的两倍 & 同层 fill 与时钟网络之间的最小间距。 \\
+\appopt{signoff.create\_metal\_fill.space\_to\_nets} & 技术文件最小间距的两倍 & 同层 fill 与时序关键网络之间的最小间距。 \\
+\appopt{signoff.create\_metal\_fill.space\_to\_nets\_on\_adjacent\_layer} & 技术文件最小间距的两倍 & 相邻层 fill 与时序关键网络之间的最小间距。 \\
+\end{longtable}
+
+\subsection{执行 Metal Fill 插入}
+\subsubsection*{Performing Metal Fill Insertion}
+
+\cmd{signoff\_create\_metal\_fill} 可以完成多种插入模式，下面分别介绍：pattern-based 插入、track-based 插入、使用 IC Validator 参数文件定制细节、典型关键尺寸（TCD）结构插入、时序驱动插入，以及增量式插入。
+
+\subsubsection{基于 Pattern 的 Metal Fill 插入}
+\subsubsection*{Pattern-Based Metal Fill Insertion}
+
+Pattern-based 插入是 \cmd{signoff\_create\_metal\_fill} 的默认模式，依据代工厂 runset 插入金属与 via fill。运行前必须通过 \appopt{signoff.create\_metal\_fill.runset} 指定所用 runset。
+
+该模式下命令依次执行：
+\begin{enumerate}
+  \item 按前文「读取 Block 的规则」相同的原则把 block 加载进 IC Validator；
+  \item 移除已有的 metal/via fill——默认移除全 block 范围内的既有 fill（增量式插入见后文）；
+  \item 在空白区域插入 metal/via fill：默认使用技术文件定义的间距规则，对整个 block 的全部金属/via 层做插入，采用的 hierarchical/flat 模式由 runset 文件指定。可通过以下方式调整默认行为：
+        \begin{itemize}
+          \item 应用选项 \appopt{signoff.create\_metal\_fill.apply\_nondefault\_rules}（设为 true 可额外启用 nondefault 间距规则）、\appopt{signoff.create\_metal\_fill.flat}（设为 true 强制 flat 模式）；
+          \item 命令选项 \opt{-select\_layers} / \opt{-all\_runset\_layers}（限定层，见下文）、\opt{-coordinates} / \opt{-excluded\_coordinates}（限定区域，见下文）。
+        \end{itemize}
+  \item 从指定 via 层及相关金属层对应的 via 层中，移除「悬空 via fill」（floating via fill，即上下未同时被金属包裹的 via fill）；
+  \item 将 fill 数据保存进 design view；
+  \item 把结果文件写入运行目录（见「签核 Metal Fill 结果文件」）。
+\end{enumerate}
+
+\begin{seeAlsoBox}
+另见「时序驱动 Metal Fill 插入」一节。
+\end{seeAlsoBox}
+
+\subsubsection{读取 Block 的规则（Metal Fill）}
+\subsubsection*{Reading Blocks for Signoff Metal Fill Insertion}
+
+规则与「读取 Block 的规则（签核 DRC）」基本一致：默认对顶层与标准单元读 design view，对宏单元/pad 只读 frame view 的 pin 信息；可分别通过 \appopt{signoff.physical.merge\_stream\_files}、\appopt{signoff.create\_metal\_fill.read\_layout\_views}、\appopt{signoff.create\_metal\_fill.read\_design\_views} 指定改用 stream 数据、layout view 或 design view，优先级顺序也与签核 DRC 一致（stream 数据 $>$ layout view $>$ design view $>$ frame view）。
+
+\subsubsection{指定 Metal Fill 插入的层}
+\subsubsection*{Specifying the Layers for Metal Fill Insertion}
+
+默认在所有金属布线层插入 metal fill、在所有 via 层插入 via fill。可通过以下选项之一调整：
+\begin{itemize}
+  \item \opt{-select\_layers}：将插入限定在指定的金属/via 层集合；
+  \item \opt{-all\_runset\_layers true}：对 runset 中定义的所有 fill 层插入（仅适用于 pattern-based 插入）。
+\end{itemize}
+
+指定层之后，命令会：先移除指定层（增量插入时）或全部层（标准插入时）已有的 fill；只在指定层插入新的 fill；并从指定 via 层及与所指金属层相关联的 via 层中移除悬空 via fill。例如指定 \opt{-select\_layers \{M2\}} 时，V1、V2 层上的悬空 via fill 也会被一并移除。
+
+\subsubsection{指定 Metal Fill 插入的区域}
+\subsubsection*{Specifying the Regions for Metal Fill Insertion}
+
+默认对整个芯片插入 metal/via fill。可通过以下选项调整：
+\begin{itemize}
+  \item \opt{-coordinates}：限定插入区域；
+  \item \opt{-excluded\_coordinates}：排除插入区域（若与 \opt{-coordinates} 同时使用，重叠区域不插入）。
+\end{itemize}
+坐标格式同前：\texttt{\{\{x1 y1\} \{x2 y2\} ... \{xn yn\}\}}。
+
+\begin{noteBox}
+传给 IC Validator 的 \texttt{METAL\_FILL\_SELECT\_WINDOW} 边界框坐标会自动向外扩大 1 微米，以避免在指定区域边界处产生 DRC 违例；实际插入仍限定在 \opt{-coordinates} 指定的区域内。另外，使用 \opt{-coordinates} 选项时，命令总是采用 flat fill 模式。
+\end{noteBox}
+
+指定区域后，命令会：移除该区域（或全部区域，取决于标准/增量模式）已有的 fill；只在指定区域插入新 fill；并移除该区域内的悬空 via fill。例如，移除全部 fill 后只在坐标 (100,150)--(300,200) 的矩形\emph{之外}重新填充：
+
+\begin{lstlisting}
+icc2_shell> signoff_create_metal_fill \
+   -excluded_coordinates {{100 150} {300 200}}
+\end{lstlisting}
+
+\subsubsection{基于 Track 的 Metal Fill 插入}
+\subsubsection*{Track-Based Metal Fill Insertion}
+
+Track-based 插入依据技术文件中的属性与规则自动派生出一份 runset，生成与布线 track 对齐的 fill 图形，\emph{不}使用 \appopt{signoff.create\_metal\_fill.runset} 指定的 runset。与 pattern-based 相比，track-based 方式通常能获得更高的密度、更好的密度控制能力，以及在双重曝光层上更均衡的掩膜分布。
+
+要启用 track-based 插入，将 \cmd{signoff\_create\_metal\_fill} 的 \opt{-track\_fill} 选项设为非 \texttt{off} 的值。支持三种密度模式：
+\begin{itemize}
+  \item \textbf{Sparse}（默认）：在信号图形与 fill 图形之间跳过一条 track；
+  \item \textbf{Dense}（用 \opt{-fill\_all\_tracks true} 启用）：不跳过任何 track；
+        \begin{noteBox}
+        若 block 采用双重曝光工艺且尚未预着色（precolored），启用该模式会增加运行时间。
+        \end{noteBox}
+  \item \textbf{Mixed}：部分层用 sparse、部分层用 dense，需要在 IC Validator 参数文件中分别设置相应参数（见下文）。
+\end{itemize}
+
+Track-based 插入的执行步骤与 pattern-based 类似（加载 block、移除已有 fill、插入新 fill、移除悬空 via fill），主要差异在插入细节：
+\begin{itemize}
+  \item 默认依据技术文件的设计规则沿 track 插入，fill 图形长度为 5 微米，宽度等于该层技术文件中定义的 \texttt{defaultWidth} 属性；
+  \item 可用 \appopt{signoff.create\_metal\_fill.apply\_nondefault\_rules} 启用 nondefault 间距规则；
+  \item 可用 \opt{-track\_fill foundry\_node} 启用特定代工厂的设计规则关键字（可用 \texttt{signoff\_create\_metal\_fill -track\_fill list} 查看支持的关键字列表）；
+  \item 可用 \opt{-select\_layers}、\opt{-coordinates}/\opt{-excluded\_coordinates} 限定层与区域；
+  \item 可在 IC Validator 参数文件中设置 \texttt{mx\_fill\_width}、\texttt{mx\_min\_fill\_length}、\texttt{mx\_max\_fill\_length} 等参数调整 fill 图形尺寸（见下文「使用 IC Validator 参数文件」）。
+\end{itemize}
+
+若设置了 \appopt{signoff.create\_metal\_fill.max\_density\_threshold}，命令还会（可选地）对指定层的 fill 做修剪，以尽量满足最大密度阈值；未设置该选项时不做修剪。
+
+保存 fill 数据时的默认行为：默认把 fill 图形的 data type 设为 0（可用参数文件中的 \texttt{mx\_fill\_datatype}、\texttt{viax\_fill\_datatype} 更改）；默认不为 fill 图形设置掩膜约束（若 block 采用双重曝光工艺，可用 \opt{-output\_colored\_fill true} 让工具为 fill 图形分配掩膜约束，此时 mask\_one 对应 data type 235、mask\_two 对应 236，也可通过参数文件中的 \texttt{mx\_fill\_datatype\_color1/2}、\texttt{viax\_fill\_datatype\_color1/2} 自定义）；默认不写出 exclude layer（若代工厂需要，可在参数文件中设置 \texttt{mx\_exclude\_layer\_datatype}）。
+
+结果文件方面，除标准输出文件外，track-based 插入还可用 \opt{-report\_density} 选项输出详细的密度与密度梯度报告（文件名为 \texttt{prefix\_color\_balance\_and\_density\_report.txt} 与 \texttt{prefix\_fill\_density\_gradient\_report.txt}，其中 \texttt{prefix} 可取 \texttt{on}（默认前缀 \texttt{track\_fill}）或自定义字符串）：
+
+\begin{lstlisting}
+icc2_shell> signoff_create_metal_fill -track_fill true \
+   -report_density my_prefix
+\end{lstlisting}
+
+\begin{seeAlsoBox}
+另见「时序驱动 Metal Fill 插入」一节。
+\end{seeAlsoBox}
+
+\subsubsection{使用 IC Validator 参数文件}
+\subsubsection*{Using an IC Validator Parameter File}
+
+可以通过 IC Validator 参数文件对 metal fill 插入做更细粒度的定制：
+\begin{itemize}
+  \item pattern-based 插入：通过 \appopt{signoff.create\_metal\_fill.user\_defined\_options} 把参数文件传给 IC Validator：
+\begin{lstlisting}
+icc2_shell> set_app_options \
+   -name signoff.create_metal_fill.user_defined_options \
+   -value {-D INDESIGN_USER_DEFINED_PARAM_FILE=file_name}
+\end{lstlisting}
+  \item track-based 插入：通过 \cmd{signoff\_create\_metal\_fill} 的 \opt{-track\_fill\_parameter\_file} 选项传入：
+\begin{lstlisting}
+icc2_shell> signoff_create_metal_fill -track_fill true \
+   -track_fill_parameter_file file_name
+\end{lstlisting}
+        运行 track-based 插入时，工具会在运行目录中写出一份名为 \texttt{track\_fill\_params.rh} 的参数文件，其中包含各支持参数的默认取值，可据此修改后用于后续运行。
+\end{itemize}
+
+\begin{noteBox}
+某些行为既可以由 IC Validator 参数控制，也可以由应用选项控制；若两者同时设置，以 IC Validator 参数为准。
+\end{noteBox}
+
+表~\ref{tab:icv-fill-params} 列出参数文件中常用的参数（除特别说明外均只适用于 track-based 插入）。参数名中的 \texttt{mx}／\texttt{vx} 前缀代表技术文件 Layer 段中定义的掩膜名（mask name）；例如若 M11 层在技术文件中的掩膜名为 \texttt{metal12}，则相应参数写作 \texttt{m12\_spare\_fill}、\texttt{m12\_fill\_staggering} 等。
+
+\begin{longtable}{p{0.30\textwidth}p{0.20\textwidth}p{0.38\textwidth}}
+\caption{IC Validator Metal Fill 插入参数（节选）}\label{tab:icv-fill-params}\\
+\toprule
+参数 & 默认值 & 说明 \\
+\midrule
+\endfirsthead
+\toprule
+参数 & 默认值 & 说明 \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\multicolumn{3}{l}{\textit{插入模式相关}} \\
+\texttt{mx\_sparse\_fill} & 1 & 是否对该层使用 sparse 模式（1）还是 dense 模式（0）；使用 \opt{-fill\_all\_tracks true} 时默认值变为 0。 \\
+\texttt{mx\_fill\_staggering} & 0.075 微米 & 控制 fill 图形的错位排布量。 \\
+\texttt{mx\_ignore\_route\_guide} & 0 & 插入时是否忽略（1）该层的布线引导线。 \\
+\texttt{mx\_ignore\_system\_blockage} & 0 & 插入时是否忽略（1）该层的系统 blockage。 \\
+\texttt{mx\_via\_enclosure} & 由 ContactCode 派生 & via 所需的最小金属包裹量。 \\
+\midrule
+\multicolumn{3}{l}{\textit{尺寸与间距相关}} \\
+\texttt{mx\_fill\_width} & \texttt{defaultWidth} & fill 图形宽度。 \\
+\texttt{mx\_min\_fill\_length} & 由 minArea 派生 & fill 图形最小长度。 \\
+\texttt{mx\_max\_fill\_length} & 5 微米 & fill 图形最大长度；减小该值可提高 via 密度但降低金属密度。 \\
+\texttt{mx\_fill2fill\_side\_spacing} & （见技术文件） & fill 图形之间的最小间距。 \\
+\texttt{mx\_fill2route\_side\_spacing} & （见技术文件） & fill 图形与网络图形的最小间距。 \\
+\texttt{mx\_fill2fill\_end\_spacing} & （见技术文件） & fill 图形之间的最小端到端间距。 \\
+\texttt{mx\_fill2Blockage\_x/y} & （见技术文件） & fill 图形与 blockage 的最小间距。 \\
+\texttt{mx\_fill2chipBoundary\_x/y} & （见技术文件） & fill 图形与芯片边界的最小间距。 \\
+\texttt{vx\_iso\_via\_distance} & 3.0 微米 & 判定 via 是否「孤立」时所要求的相邻 via 最大距离。 \\
+\texttt{vx\_min\_spacing} & 由 minSpacing 派生 & via 之间的最小间距；改小可能引入 DRC 违例，改大会降低 via 密度。 \\
+\texttt{vx\_per\_metal} & 1 & 单个 metal fill 图形中容纳的 via fill 数上限；调大可提升 via 密度，但可能连通更多 fill 图形，增加邻近信号网络的电容。 \\
+\midrule
+\multicolumn{3}{l}{\textit{Exclude 层相关}} \\
+\texttt{mx\_exclude\_layer\_datatype} & $-1$ & 指定 exclude 层的 data type；默认值 $-1$ 表示不生成 exclude 层。 \\
+\midrule
+\multicolumn{3}{l}{\textit{输出模式相关}} \\
+\texttt{mx\_compress\_fill} / \texttt{vx\_compress\_fill} & 0 & 是否压缩（1）该层输出的 fill；使用 \opt{-mode add} 时始终不压缩。 \\
+\texttt{mx\_fill\_datatype} / \texttt{vx\_fill\_datatype} & 0 & 插入 fill 图形的 data type。 \\
+\texttt{output\_colored\_fill} & 0 & 双重曝光 block 中是否为 fill 图形分配掩膜约束（使用 \opt{-output\_colored\_fill true} 时默认变为 1）。 \\
+\midrule
+\multicolumn{3}{l}{\textit{密度计算相关}} \\
+\texttt{mx\_density\_gradient\_window} & \texttt{windowSize} 或 50 微米 & 密度梯度检查窗口大小。 \\
+\texttt{mx\_max\_density\_window} & 50 微米 & 最大密度检查窗口大小。 \\
+\texttt{mx\_min\_density} & \texttt{minDensity} 或 10\% & 窗口内允许的最小金属占比。 \\
+\texttt{mx\_min\_density\_window} & \texttt{windowSize} 或 50 微米 & 最小密度检查窗口大小。 \\
+\texttt{mx\_window\_step\_size} & 窗口大小的一半 & 密度检查在 $x$/$y$ 方向的步进大小。 \\
+\end{longtable}
+
+\subsubsection{典型关键尺寸 Metal Fill 插入}
+\subsubsection*{Typical Critical Dimension Metal Fill Insertion}
+
+典型关键尺寸（typical critical dimension，TCD）结构由 marker 层与 fill 层图形组成，用于提升设计良率。启用方法：在运行 \cmd{signoff\_create\_metal\_fill} 前将 \appopt{signoff.create\_metal\_fill.tcd\_fill} 设为 \texttt{true}。默认对整个 block 的所有金属/via 层插入 TCD 结构，可用 \opt{-select\_layers}、\opt{-coordinates}/\opt{-excluded\_coordinates} 调整范围。
+
+\begin{noteBox}
+TCD Metal Fill 插入不能与时序驱动 Metal Fill 插入同时使用。
+\end{noteBox}
+
+\begin{seeAlsoBox}
+另见「移除 Metal Fill」一节。
+\end{seeAlsoBox}
+
+\subsubsection{时序驱动 Metal Fill 插入}
+\subsubsection*{Timing-Driven Metal Fill Insertion}
+
+时序驱动 metal fill 插入会在指定区域插入 fill，同时避开时序关键网络周边；该功能对 pattern-based 与 track-based 两种模式均适用，默认不开启。启用方式是给 \cmd{signoff\_create\_metal\_fill} 加上以下选项之一或两者：
+\begin{itemize}
+  \item \opt{-nets}：显式指定关键网络；
+  \item \opt{-timing\_preserve\_setup\_slack\_threshold}：依据建立时间裕量阈值自动判定关键网络。阈值不宜设得过大，否则可能导致过多网络被判定为关键网络，反而降低金属密度并留下大片空白区域。
+\end{itemize}
+
+时序驱动插入运行时，命令会：
+\begin{enumerate}
+  \item 执行时序分析（含多角多模分析）以最小化对时序的影响；
+  \item 依据所给选项识别时序关键网络；
+  \item 移除已有的 metal/via fill（增量式插入方式见前文）；
+  \item 在指定区域插入 fill，但避开关键网络周边——若要允许在被屏蔽的关键时钟网络上方插入，可将 \appopt{signoff.create\_metal\_fill.fill\_shielded\_clock} 设为 \texttt{true}；
+  \item 调用 IC Validator 完成插入。默认情况下，同层 fill 与关键网络图形之间的最小间距为技术文件最小间距的两倍（该要求也适用于关键网络在相邻层上的竖直延展），可通过下文「时序驱动 Metal Fill 插入的间距设置」中的应用选项覆盖；
+        \begin{noteBox}
+        可以限定时序驱动 metal fill 插入的区域（见前文「指定 Metal Fill 插入的区域」），但不能限定层——命令会对所有布线层（或增量模式下的所有改动层）插入。
+        \end{noteBox}
+  \item （可选）修复密度违例：时序驱动插入的间距要求有时会引发密度违例，可将 \appopt{signoff.create\_metal\_fill.fix\_density\_errors} 设为 \texttt{true}（默认 false）自动修复；
+  \item 把 fill 数据保存为 fill 单元对象；
+  \item 把结果文件写入运行目录。
+\end{enumerate}
+
+\begin{seeAlsoBox}
+另见「基于 Pattern 的 Metal Fill 插入」「基于 Track 的 Metal Fill 插入」两节。
+\end{seeAlsoBox}
+
+\paragraph{时序驱动 Metal Fill 插入的间距设置}
+\hfill\\
+默认情况下，同层间距取技术文件最小间距的两倍，相邻层间距取技术文件最小间距本身。可通过以下应用选项覆盖：
+\begin{itemize}
+  \item \appopt{signoff.create\_metal\_fill.space\_to\_nets}：同层 fill 与时序关键网络之间的最小间距；
+  \item \appopt{signoff.create\_metal\_fill.space\_to\_clock\_nets}：同层 fill 与（通过 \opt{-nets} 指定的）用户定义时钟网络之间的最小间距；
+  \item \appopt{signoff.create\_metal\_fill.space\_to\_nets\_on\_adjacent\_layer}：相邻层 fill 与时序关键网络之间的最小间距；
+  \item \appopt{signoff.create\_metal\_fill.space\_to\_clock\_nets\_on\_adjacent\_layer}：相邻层 fill 与用户定义时钟网络之间的最小间距。
+\end{itemize}
+
+每个选项均采用如下语法为各层分别指定间距：\texttt{\{ \{layer1 value1\} ... \{layern valuen\} \}}，取值既可以是最小间距的倍数（如 \texttt{4x}），也可以是以微米为单位的绝对距离。
+
+例如，将 M2、M3 层的同层最小间距设为最小间距的 4 倍：
+\begin{lstlisting}
+icc2_shell> set_app_options \
+   -name signoff.create_metal_fill.space_to_nets \
+   -value {{M2 4x} {M3 4x}}
+\end{lstlisting}
+
+或直接指定绝对距离（M2 为 0.125 微米，M3 为 0.133 微米）：
+\begin{lstlisting}
+icc2_shell> set_app_options \
+   -name signoff.create_metal_fill.space_to_nets \
+   -value {{M2 0.125} {M3 0.133}}
+\end{lstlisting}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 113：Minimum Spacing From Metal Fill to Critical Net Shape）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{Metal Fill 与关键网络之间的最小间距示意}
+\label{fig:fill-net-spacing}
+\end{figure}
+
+\subsubsection{定义密度设计规则}
+\subsubsection*{Defining the Density Design Rules}
+
+IC Validator 可以检查并修复以下三类密度相关设计规则：
+\begin{itemize}
+  \item \textbf{最小密度}：窗口内允许的最小金属占比。启用 \appopt{signoff.create\_metal\_fill.fix\_density\_errors} 后会检查该规则。默认使用技术文件 DensityRule 段中 \texttt{minDensity} 属性的设置；若某层未定义该属性，则默认取 10\%；也可在 IC Validator 参数文件中用 \texttt{mx\_min\_density} 覆盖。
+  \item \textbf{密度梯度}：相邻密度检查窗口之间允许的最大密度差异百分比。若技术文件中定义了该规则且启用了密度违例修复，则会被检查；使用技术文件 DensityRule 段中的 \texttt{maxGradientDensity} 属性，若某层未定义则不检查该层的梯度规则。
+  \item \textbf{最大开放面积}：不含任何图形、也不与任何图形相交的正方形区域的最大边长。只有在 IC Validator 参数文件中显式定义时才会检查，语法为 \texttt{mn\_max\_open\_area\_rule = value;}（\texttt{n} 为金属层号，\texttt{value} 为正方形边长，单位微米）。
+\end{itemize}
+
+更多关于密度规则定义的信息，请参阅 Synopsys Technology File and Routing Rules Reference Manual。
+
+\subsubsection{增量式 Metal Fill 插入}
+\subsubsection*{Incremental Metal Fill Insertion}
+
+若此前已用 \cmd{signoff\_create\_metal\_fill} 完成过一次插入，可以用增量方式完成以下任务：在特定层或区域追加 fill；替换特定位置已有的 fill；只在改动区域重新做 fill。
+
+\paragraph{在已有 Fill 基础上追加}
+\hfill\\
+使用 \opt{-mode add} 选项可以不移除已有 fill 就直接插入新 fill，可配合 \opt{-select\_layers}（限定层）或 \opt{-coordinates}/\opt{-excluded\_coordinates}（限定区域）控制插入位置。使用这些选项配合 \opt{-mode add} 时，无论 \appopt{signoff.create\_metal\_fill.fix\_density\_errors} 如何设置，都不会执行密度违例修复。
+
+\begin{seeAlsoBox}
+另见「基于 Pattern 的 Metal Fill 插入」「基于 Track 的 Metal Fill 插入」两节。
+\end{seeAlsoBox}
+
+\paragraph{替换已有 Fill}
+\hfill\\
+使用 \opt{-mode replace} 选项可以只对指定位置先移除再插入 fill，通常用于 ECO 之后的局部刷新，须同时指定以下选项之一或多个：\opt{-select\_layers}（限定层）、\opt{-coordinates}/\opt{-excluded\_coordinates}（限定区域）、\opt{-nets}/\opt{-timing\_preserve\_setup\_slack\_threshold}（限定网络）。例如，只移除并重新插入 M1、M3 层的 fill，其余层不受影响：
+
+\begin{lstlisting}
+icc2_shell> signoff_create_metal_fill -mode replace \
+   -select_layers {M1 M3}
+\end{lstlisting}
+
+\begin{seeAlsoBox}
+另见「基于 Pattern 的 Metal Fill 插入」「基于 Track 的 Metal Fill 插入」「时序驱动 Metal Fill 插入」三节。
+\end{seeAlsoBox}
+
+\paragraph{只在改动区域插入}
+\hfill\\
+若此前已运行过 \cmd{signoff\_create\_metal\_fill}，可用 \opt{-auto\_eco true} 将本次插入限定在自上次运行以来发生改动的区域。
+
+\begin{noteBox}
+仅当自上次 \cmd{signoff\_create\_metal\_fill} 运行以来 block 的改动比例低于变化阈值（默认 20\%，可用 \appopt{signoff.create\_metal\_fill.auto\_eco\_threshold\_value} 调整）时，才能使用该选项。
+\end{noteBox}
+
+使用 \opt{-auto\_eco true} 时，工具会自动判定改动的区域与层，移除并重新插入这些位置的 fill，其余既有 fill 保持不变。默认与上一次运行所用的 block 版本比较；如需与其他 block 比较，用 \opt{-pre\_eco\_design} 指定。
+
+\begin{noteBox}
+金属层上的改动会触发相邻 via 层上 fill 的移除与重插，以避免金属图形从 ECO 区域移除后残留悬空 via；若某个单元实例发生改动，工具会保守地认为该实例涉及的所有层都发生了变化。
+\end{noteBox}
+
+例如，只对自上次运行以来改动的区域移除并重新插入（pattern-based 模式）fill：
+
+\begin{lstlisting}
+icc2_shell> signoff_create_metal_fill -auto_eco true
+\end{lstlisting}
+
+可用 \opt{-select\_layers} 进一步限定层，但仅当所指定的层恰好也是自动检测到的改动层之一时才会生效；不能用 \opt{-coordinates}/\opt{-excluded\_coordinates} 限定区域。使用 \opt{-auto\_eco true} 时：不能同时使用 \opt{-mode}、\opt{-all\_runset\_layers}、\opt{-report\_density}；不会在双重曝光层上插入 dense fill（无论 \opt{-fill\_all\_tracks} 如何设置）；也不会修复密度违例（无论 \appopt{signoff.create\_metal\_fill.fix\_density\_errors} 如何设置）。
+
+\begin{seeAlsoBox}
+另见「基于 Pattern 的 Metal Fill 插入」「基于 Track 的 Metal Fill 插入」「时序驱动 Metal Fill 插入」三节。
+\end{seeAlsoBox}
+
+\subsection{签核 Metal Fill 结果文件}
+\subsubsection*{Signoff Metal Fill Result Files}
+
+\cmd{signoff\_create\_metal\_fill} 把输出文件写入运行目录（\appopt{signoff.create\_metal\_fill.run\_dir} 指定，默认 \texttt{signoff\_fill\_run}）；每次运行都会在其中创建一个 \texttt{icv\_run\_\#} 子目录存放本次运行产生的文件，主要包括：
+\begin{itemize}
+  \item \texttt{block.LAYOUT\_ERRORS}——检测到的错误详情；
+  \item \texttt{block.RESULTS}——运行结果摘要；
+  \item \texttt{signoff\_create\_metal\_fill.log}——运行环境摘要；
+  \item \texttt{icv\_config\_out}——顶层 block 与单元库路径信息；
+  \item \texttt{layer.map}——本次运行生成的 layer mapping 文件；
+  \item \texttt{metal\_fill\_params.rh}——本次运行所用的 metal fill 参数与选项；
+  \item \texttt{metal\_fill\_compress\_params.rh}——存储命令及所用压缩模式（flat 记作 NONE，hierarchical 记作 AUTO）；
+  \item \texttt{./run\_details} 目录——IC Validator 为本次插入产生的全部原始数据。
+\end{itemize}
+
+\subsection{查询 Metal Fill}
+\subsubsection*{Querying Metal Fill}
+
+Metal fill 图形存放在命名为 \texttt{FILL\_INST\_\#} 的 fill 单元中：
+\begin{itemize}
+  \item 用 \cmd{get\_fill\_cells} 查询 fill 单元。默认只报告顶层设计中的 fill 单元；加上 \opt{-hierarchical} 可报告整个层级中的全部 fill 单元；
+  \item 用 \cmd{get\_shapes -include\_fill} 查询 fill 图形；加上 \opt{-of\_objects} 可只返回指定 fill 单元关联的图形。
+\end{itemize}
+
+\subsection{在 GUI 中查看 Metal Fill}
+\subsubsection*{Viewing Metal Fill in the GUI}
+
+在版图窗口中查看 metal fill 的步骤：
+\begin{enumerate}
+  \item 打开 View Settings 面板：将 Level 设为 1；在 Objects 页签中勾选 Fill Cell 对象与 Area Fill 金属图形的可见性（若列表中看不到 Area Fill，需展开 Route 对象下的 Shape Use 属性）；
+  \item 打开 Hierarchy Settings 面板：将 「View level」 设为 1；在 「Expanding cell types」 中勾选 「Fill Cell」。
+\end{enumerate}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 114：Settings Used to Display Fill Shapes in the GUI）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{显示 Fill 图形所需的设置}
+\label{fig:fill-display-settings}
+\end{figure}
+
+\subsection{报告金属密度}
+\subsubsection*{Reporting the Metal Density}
+
+用 \cmd{signoff\_report\_metal\_density} 命令报告金属密度信息。计算某一金属层的密度信息时，工具依次按以下优先级确定该层的密度规则与窗口尺寸：
+
+\begin{itemize}
+  \item \textbf{密度规则}优先级：
+        \begin{enumerate}
+          \item \appopt{signoff.report\_metal\_density.user\_defined\_options} 所指参数文件中 \texttt{mx\_min\_density} 参数的设置；
+          \item 应用选项 \appopt{signoff.report\_metal\_density.min\_density} 的设置；
+          \item 技术文件 DensityRule 段中 \texttt{minDensity} 属性的设置；
+          \item 默认值 10\%。
+        \end{enumerate}
+  \item \textbf{窗口尺寸}优先级：
+        \begin{enumerate}
+          \item 参数文件中 \texttt{mx\_min\_density\_window} 或 \texttt{mx\_density\_gradient\_window} 参数的设置；
+          \item 应用选项 \appopt{signoff.report\_metal\_density.density\_window} 或 \appopt{signoff.report\_metal\_density.gradient\_window\_size} 的设置；
+          \item 技术文件 DensityRule 段中 \texttt{windowSize} 属性的设置；
+          \item 默认值 50 微米。
+        \end{enumerate}
+\end{itemize}
+
+命令的其他默认行为：
+\begin{itemize}
+  \item 使用 fill 数据做密度计算（可用 \appopt{signoff.report\_metal\_density.fill\_view\_data} 设为 \texttt{read\_if\_uptodate} 或 \texttt{discard} 调整是否改用较新的 design view）；
+  \item 从芯片边界左下角开始，以窗口大小的一半为步长创建密度与梯度检查窗口（可用 \opt{-starting\_point} 更改起点，用 \appopt{signoff.report\_metal\_density.density\_window\_step} 应用选项或参数文件中的 \texttt{mx\_window\_step\_size} 参数更改步长，二者都设置时以 IC Validator 参数为准）；
+  \item 对整个 block 计算金属密度（可用 \opt{-coordinates} 限定区域，此时多个区域会合并统计，而非逐一分别报告）；
+  \item 对最小到最大布线层之间的每个金属层计算密度（可用 \opt{-select\_layers} 限定层）；
+  \item 默认不生成 heat map（可将 \appopt{signoff.report\_metal\_density.create\_heat\_maps} 设为 \texttt{true} 以生成，供 GUI 查看）；
+  \item 报告文件默认写入当前工作目录下的 \texttt{signoff\_report\_metal\_density\_run} 目录（可用 \appopt{signoff.report\_metal\_density.run\_dir} 更改），报告文件默认命名为 \texttt{report\_metal\_density.txt} 与 \texttt{gradient\_density\_report.txt}（可用 \opt{-output} 更改前缀，例如指定 \opt{-output density.rpt} 时梯度报告会命名为 \texttt{density.rpt.gradient}）。
+\end{itemize}
+
+可通过 \appopt{signoff.report\_metal\_density.user\_defined\_options} 向 IC Validator 命令行追加其他参数。
+
+\begin{seeAlsoBox}
+另见「使用 IC Validator 参数文件」一节。
+\end{seeAlsoBox}
+
+\subsubsection{在 GUI 中查看密度 Heat Map}
+\subsubsection*{Viewing Density Heat Maps in the GUI}
+
+运行 \cmd{signoff\_report\_metal\_density} 之后，可在 GUI 中查看最小密度与梯度密度两类 heat map。
+
+\begin{noteBox}
+只有当 \appopt{signoff.report\_metal\_density.create\_heat\_maps} 设为 \texttt{true} 时，命令才会生成 heat map。
+\end{noteBox}
+
+\begin{itemize}
+  \item 查看最小密度 heat map：依次选择 View > Map > ICV Metal Fill Density。每个色块对应一个密度窗口步进大小，可通过设置 Bin range 来自定义/标准化密度取值区间。
+  \item 查看密度梯度 heat map：依次选择 View > Map > ICV Metal Fill Gradient。每个色条对应一个梯度窗口大小。
+\end{itemize}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 115--116：Minimum Density Heat Map / Density Gradient Heat Map）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{最小密度与密度梯度 Heat Map 示例}
+\label{fig:density-heatmap}
+\end{figure}
+
+\subsection{移除 Metal Fill}
+\subsubsection*{Removing Metal Fill}
+
+移除方式取决于移除范围：
+\begin{itemize}
+  \item 若要移除整个 block、特定层或特定区域的全部 metal fill，使用 \cmd{signoff\_create\_metal\_fill -mode remove}（详见下文）；
+  \item 若只想移除个别 fill 图形（例如手工修复与 metal fill 相关的 DRC 违例时），使用 \cmd{remove\_shapes} 或 \cmd{remove\_fill\_cells} 命令；有时也可以通过修改已有 fill 图形来解决该违例（见「修改 Metal Fill」）。
+\end{itemize}
+
+\subsubsection{通过 IC Validator 移除 Metal Fill}
+\subsubsection*{Removing Metal Fill With the IC Validator Tool}
+
+默认情况下，\cmd{signoff\_create\_metal\_fill -mode remove} 会移除当前 block 中全部的金属/via fill，包括 TCD 结构。可通过以下方式细化范围：
+\begin{itemize}
+  \item \opt{-coordinates}：只移除特定区域的 fill；
+  \item \opt{-select\_layers}：只移除特定层的 fill——默认此时\emph{不}移除 TCD 结构，若需一并移除，须先将 \appopt{signoff.create\_metal\_fill.tcd\_fill} 设为 \texttt{true}；
+  \item \opt{-nets} / \opt{-timing\_preserve\_setup\_slack\_threshold}：只移除关键网络周边的 fill（注意：判定关键网络时不考虑既有 fill，此规则适用于 pattern-based fill，不适用于 track-based fill）；
+  \item \opt{-remove\_by\_rule}：移除时遵循特定规则，可指定 \texttt{ndr}（nondefault 布线规则，适用于两种插入方式）或 \texttt{max\_density\_threshold}（最大密度规则，仅适用于 track-based fill，移除时遵循 \appopt{signoff.create\_metal\_fill.max\_density\_threshold} 设定的阈值）。
+\end{itemize}
+
+例如，移除时遵循 nondefault 布线规则：
+
+\begin{lstlisting}
+icc2_shell> signoff_create_metal_fill -mode remove \
+   -remove_by_rule {ndr}
+\end{lstlisting}
+
+\begin{seeAlsoBox}
+另见「指定 Metal Fill 插入的层」「指定 Metal Fill 插入的区域」两节。
+\end{seeAlsoBox}
+
+\subsubsection{ECO 感知的 Track-Based Metal Fill 自动移除}
+\subsubsection*{ECO-Aware Removal of Track Based Metal Fill Shapes}
+
+若 ECO 之后某些 track-based metal fill 图形导致了 DRC 违例，可用 \opt{-remove\_by\_rule drc\_auto} 选项自动移除这些违规图形（含由此产生的悬空连接）：
+
+\begin{lstlisting}
+icc2_shell> signoff_create_metal_fill -remove_by_rule drc_auto
+\end{lstlisting}
+
+\subsection{修改 Metal Fill}
+\subsubsection*{Modifying Metal Fill}
+
+有时可以通过手工调整 fill 图形边界、增删 fill 图形来修复某个 DRC 违例：
+\begin{itemize}
+  \item 修改 fill 图形边界：用 \cmd{set\_attribute} 修改其 \texttt{bbox} 属性；
+  \item 在顶层 fill 单元中新增 fill 图形：用 \cmd{create\_shape -shape\_use area\_fill}；
+  \item 在指定 fill 单元中新增 fill 图形：用 \cmd{create\_shape -fill\_cell}；
+  \item 删除 fill 图形：用 \cmd{remove\_shapes}。
+\end{itemize}
+
+也可以在 GUI 中直接选中并修改 fill 图形：在 View Settings 面板中选择 「Multiple Levels Active」；在 Hierarchy Settings 面板中将 「View level」 设为至少 2，并在 「Expanding cell types」 中勾选 「Fill Cell」。
+
+\subsection{执行真实 Metal Fill 提取}
+\subsubsection*{Performing Real Metal Fill Extraction}
+
+启用真实 metal fill 提取（用于让时序分析考虑实际插入的 fill 图形而非估计值）的步骤：
+\begin{enumerate}
+  \item 用 \cmd{set\_parasitic\_parameters} 命令为各时序角关联非仿真（non-emulation）TLUPlus 文件，详见 IC Compiler II Timing Analysis User Guide；
+  \item 用以下命令启用真实 metal fill 提取：
+\begin{lstlisting}
+icc2_shell> set_extraction_options \
+   -real_metalfill_extraction floating
+\end{lstlisting}
+\end{enumerate}
+
+关于 IC Compiler II 中寄生参数提取的更多信息，请参阅 IC Compiler II Timing Analysis User Guide。
+
+% ============================================================
+\section{自动修复孤立 Via}
+\subsection*{Automatically Fixing Isolated Vias}
+
+孤立 via（isolated via）是指周围没有足够近的相邻 via、不满足工艺要求的 via。检测并修复孤立 via 的一般步骤：
+
+\begin{enumerate}
+  \item 按前述方法搭建 IC Validator 环境；
+  \item （可选）用 \cmd{set\_host\_options} 启用分布式/多核处理；
+  \item 设置修复孤立 via 所需的应用选项。至少必须通过 \appopt{signoff.fix\_isolated\_via.isolated\_via\_max\_range} 为各 via 层定义「判定为孤立 via 所允许的最大相邻距离」，语法为：
+\begin{lstlisting}
+{ {via_layer1 distance1} ... {via_layern distancen} }
+\end{lstlisting}
+        其中 \texttt{via\_layer} 使用掩膜名（如 \texttt{via1}），\texttt{distance} 单位为微米；
+  \item 运行 \cmd{signoff\_fix\_isolated\_via} 命令执行检查与修复。
+\end{enumerate}
+
+\subsection{设置修复孤立 Via 的应用选项}
+\subsubsection*{Setting Options for Fixing Isolated Vias}
+
+\begin{longtable}{p{0.32\textwidth}p{0.24\textwidth}p{0.34\textwidth}}
+\caption{签核孤立 Via 修复的应用选项}\label{tab:isolated-via-opts}\\
+\toprule
+应用选项 & 默认值 & 说明 \\
+\midrule
+\endfirsthead
+\toprule
+应用选项 & 默认值 & 说明 \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\appopt{signoff.fix\_isolated\_via.isolated\_via\_max\_range}（必填） & N/A & 各 via 层判定孤立 via 所允许的最大相邻距离（微米）；若在此距离内找不到相邻 via，则该 via 被判定为孤立 via，命令会尝试在该距离内插入一个用于修复的 via。 \\
+\appopt{signoff.fix\_isolated\_via.avoid\_net\_types} & \texttt{\{clock pg\}} & 修复孤立 via 时应避开的网络类型，取值可为 \texttt{clock}、\texttt{pg}、\texttt{none} 中的一个或多个。 \\
+\appopt{signoff.fix\_isolated\_via.run\_dir} & \texttt{signoff\_fix\_isolated\_via\_run} & 运行目录。 \\
+\appopt{signoff.fix\_isolated\_via.user\_defined\_options} & （无） & 追加到 IC Validator 命令行的额外参数字符串。 \\
+\end{longtable}
+
+\subsection{运行 \cmd{signoff\_fix\_isolated\_via} 命令}
+\subsubsection*{Running the signoff\_fix\_isolated\_via Command}
+
+该命令既可以只做检查，也可以检查并修复。
+
+\subsubsection{仅检查孤立 Via}
+\subsubsection*{Checking for Isolated Vias}
+
+加上 \opt{-check\_only true} 选项即可只检查而不修复：
+
+\begin{lstlisting}
+icc2_shell> signoff_fix_isolated_via -check_only true
+\end{lstlisting}
+
+以检查模式运行时，命令会生成一份汇总报告，列出各 via 层检测到的孤立 via 数量。
+
+\subsubsection{检查并修复孤立 Via}
+\subsubsection*{Checking and Fixing Isolated Vias}
+
+默认情况下，\cmd{signoff\_fix\_isolated\_via} 同时执行检查与修复，具体步骤为：
+
+\begin{enumerate}
+  \item 依据 \appopt{signoff.fix\_isolated\_via.isolated\_via\_max\_range} 定义的范围检查孤立 via；
+  \item （可选）在每个检测到的孤立 via 周围指定范围内，用 track-based metal fill 插入方式生成 dummy fill 图形，作为后续插入修复 via 的「落脚点」：
+        \begin{itemize}
+          \item 默认情况下，命令会忽略已有的 fill 数据，重新执行一次 track-based fill 插入来生成这些 dummy fill；插入时遵循技术文件定义的沿 track 设计规则，部分代工厂需要额外规则时可通过设置相应的 \texttt{TRACK\_FILL\_FOUNDARY\_name} IC Validator 变量启用（借助 \appopt{signoff.create\_metal\_fill.user\_defined\_options} 设置）：
+\begin{lstlisting}
+icc2_shell> set_app_options \
+   -name signoff.create_metal_fill.user_defined_options \
+   -value {-D TRACK_FILL_FOUNDARY_name}
+\end{lstlisting}
+          \item 若此前已完成过 track-based metal fill 插入，可用 \opt{-update\_track\_fill true} 复用已有的 fill 图形来修复孤立 via；此时须用 \opt{-track\_fill\_runset\_include\_file} 指定初次插入所用的参数文件（即前次运行目录下的 \texttt{track\_fill\_params.rh}）。例如初次插入的运行目录为 \texttt{init\_fill}：
+\begin{lstlisting}
+icc2_shell> signoff_fix_isolated_via -update_track_fill true \
+   -track_fill_runset_include_file init_fill/track_fill_params.rh
+\end{lstlisting}
+        \end{itemize}
+  \item 在指定范围内按以下优先级插入修复 via：（a）在已有的非宽（non-wide）网络图形与 fill 图形之间插入 via；（b）延伸已有非宽网络图形的线端后再插入 via；（c）在宽金属图形与 fill 图形之间插入 via。插入时会遵循布线规则（含双重曝光规则与 nondefault 间距规则），以避免引入新的 DRC 违例；
+        \begin{noteBox}
+        若 block 布线过于拥挤或过于稀疏，命令可能无法修复全部孤立 via。
+        \end{noteBox}
+  \item 移除未被使用的 dummy fill 图形；
+  \item （可选）将更新后的 block 保存到磁盘。默认不自动保存，需要之后手工用 \cmd{save\_block}；若要在运行结束时自动保存，加上 \opt{-save\_design true} 选项；
+  \item 保存结果到磁盘，包括：
+        \begin{itemize}
+          \item 汇总报告：列出修复前后各 via 层的孤立 via 数量；
+          \item 错误数据文件：默认名为 \texttt{signoff\_fix\_isolated\_via.err}（可用 \opt{-error\_data} 更改文件名），可在 error browser 中查看，具体见 IC Compiler II Graphical User Interface User Guide。
+        \end{itemize}
+\end{enumerate}
+

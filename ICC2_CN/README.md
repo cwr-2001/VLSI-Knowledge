@@ -15,7 +15,8 @@ ICC2_CN/
 ├── chapters/
 │   ├── 00_preface.tex    # 前言（已译）
 │   ├── 01_working_with_icc2.tex   # 第 1 章（已译）
-│   ├── 02_…12_….tex      # 第 2–12 章（目录占位，待续译）
+│   ├── 02_…09_….tex      # 第 2–9 章（已译）
+│   ├── 10_…12_….tex      # 第 10–12 章（目录占位，待续译）
 ├── figures/              # 原书插图截图放置处
 ├── scripts/
 │   └── extract_pages.ps1 # 从原版 PDF 提取指定页文本
@@ -34,9 +35,9 @@ ICC2_CN/
 | 4 | Clock Tree Synthesis | 225 | 已译 |
 | 5 | Routing and Postroute Optimization | 323 | 已译 |
 | 6 | Chip Finishing and Design for Manufacturing | 466 | 已译 |
-| 7 | IC Validator In-Design | 545 | 占位 |
-| 8 | Routing Using Custom Router | 631 | 占位 |
-| 9 | Physical Datapath With Relative Placement | 666 | 占位 |
+| 7 | IC Validator In-Design | 545 | 已译 |
+| 8 | Routing Using Custom Router | 631 | 已译 |
+| 9 | Physical Datapath With Relative Placement | 666 | 已译 |
 | 10 | Hierarchical Implementation | 702 | 占位 |
 | 11 | RedHawk and RedHawk-SC Fusion | 740 | 占位 |
 | 12 | ECO Flow | 821 | 占位 |
