@@ -1,0 +1,1237 @@
+CHAPTER 5 — Dynamic Voltage Drop Analysis                                     RedHawk User Manual   | 79
+Introduction
+
+
+                                               Chapter 5
+                            Dynamic Voltage Drop Analysis
+Introduction
+
+              This chapter describes how to run dynamic voltage drop analysis using RedHawk-EV.
+              As described in Chapter 3, "User Interface and Data Preparation", the key required inputs
+              for running dynamic voltage drop analysis are:
+               • LEF files for cell library, including standard cells, memories, and I/Os
+               • Flat or hierarchical DEF files
+               • Synopsys .lib library files
+               • RedHawk .tech technology file - conductor and via resistance, dielectric thicknesses
+                 and dielectric constants, EM current density limits
+               • Pad instance, pad cell, or pad location files
+               • RedHawk Global System Requirements (GSR) file, containing information on toggle
+                 rates, frequency, clock roots, default slews, and block power
+               • Timing windows and slews from STA (recommended).
+               • Extracted parasitics from SPEF or DSPF (recommended)
+               • Pad, wirebond/bump, or package RLC information (recommended)
+               • VCD vector file (recommended if available)
+               • SPICE subcircuits for all memories, I/Os, and IP blocks (optional)
+               • GDSII for memories, I/Os, and IP blocks (optional)
+              It is assumed that input data has been prepared as described in Chapter 3, and static IR
+              voltage drop analysis has been performed, as described in Chapter 4.
+              The following sections describe the dynamic voltage drop analysis methodology and
+              procedures.
+
+Preparing for Dynamic Voltage Drop Analysis
+
+              Perform Cell Characterization
+
+                1.   To create the dynamic current profiles, effective power resistance, and decoupling
+                     capacitance for cells in your design, use the APL tool to perform characterization,
+                     as described in Chapter 9, "Characterization Using Apache Power Library".
+                2.   In the GUI, import the dynamic current profiles (<cell>.current) generated from
+                     APL characterization using the APL-> Import command. The decoupling
+                     capacitance data (<cell>.cdev) is imported using the same form.
+
+              Calculate Power
+
+                3.   If you have already performed power calculation, for example before performing
+                     static analysis, you can import the results using the command Dynamic-> Power-
+                     > Import.
+
+
+
+
+ANSYS, Inc.
+CHAPTER 5 — Dynamic Voltage Drop Analysis                                  RedHawk User Manual    | 80
+Methods of Dynamic Voltage Drop Analysis
+
+                4.   If you have not already performed power calculation, refer to Chapter 4, "Power
+                     Calculation, Static IR Drop and EM Analysis", which describes the procedure for
+                     setting up the proper GSR keywords and running power calculation.
+
+              Network Extraction
+
+                5.   Perform network RLC extraction using the Dynamic -> Network Extraction
+                     command. Any combination of R, L and C extraction can be selected, but use all
+                     three for best accuracy.
+                     If ECO changes have been made to decaps, vias, or pins and extraction must be
+                     performed again, with the GSR keyword EXTRACTION_INC set to 1 (default), an
+                     incremental extraction is performed only in the areas of ECO changes. Full design
+                     extraction is always performed for changes to wires.
+
+              Pad and Package Parameter Setup
+
+                6.   Set up pad and package parameters by selecting Dynamic-> Pad, Wirebond and
+                     Package Constraints.
+                     See Chapter 12, "Package and Board Analysis", for more information about
+                     package and board modeling.
+
+Methods of Dynamic Voltage Drop Analysis
+
+              There are several methods of vectorless and VCD-driven dynamic voltage drop analysis
+              available in RedHawk. The chosen method of performing dynamic voltage drop analysis
+              depends primarily on whether a VCD file is available, and if so, the quality of the VCD
+              information. The goal is to use the best switching information available to construct a
+              realistic switching scenario with the information available. Available methods for
+              performing dynamic analysis are summarized in the Figure 5-1 diagram following.
+
+
+                                           RedHawk Dynamic Analysis
+
+
+
+                                                   VCD-driven
+                     Vectorless Analysis                                        VCD Analysis
+                                                 Vectorless Analysis
+
+
+
+
+                              RTL VCD-driven                    Gate Level VCD-driven
+                             Vectorless Analysis                 Vectorless Analysis
+
+              Figure 5-1      Types of RedHawk Dynamic Analysis
+
+              Use the diagram, which shows key characteristics of vectorless, VCD-driven vectorless,
+              and VCD dynamic analysis, to help decide what type of dynamic analysis to perform.
+               Characteristics of vectorless dynamic analysis
+               • No VCD file available for design.
+
+
+
+ANSYS, Inc.
+CHAPTER 5 — Dynamic Voltage Drop Analysis                                   RedHawk User Manual    | 81
+Methods of Dynamic Voltage Drop Analysis
+
+               • Covers realistic worst case switching scenario.
+               • Uses GSR keywords and the timing file to define realistic toggle rate and switching
+                 times. See section "Setup for Vectorless Power Calculation", page 4-35, for methods
+                 of defining the toggle rate accurately.
+               • Switching scenario is derived statistically and depends on several design-aware
+                 factors, such as:
+                     • areas with structural weaknesses
+                     • instance timing windows
+                     • logic/power/toggle rate of instances
+               • If Boolean function multi-states are defined in either SIM2IPROF or AVM, the state
+                 names should be specified in the GSC file per instance. RedHawk power calculation
+                 and dynamic analysis then automatically use those state definitions in the analysis.
+                 If a GSC file definition is not provided:
+                     • power calculation uses the average charge of all states
+                     • simulation randomly selects one customer state to toggle, unless the toggle
+                        rate is very low
+               Characteristics of VCD-driven vectorless dynamic analysis
+               • VCD file is available, but may not represent the worst case.
+               • Helps drive vectorless switching scenario creation.
+               • Two types of VCD files are available.
+                 - RTL VCD
+                   • Available in early design stages.
+                   • Requires mapping RTL names to DEF. Using formal verification tools such as
+                     Conformal or Formality, an RTL-to-gate level name mapping file is created.
+                     Instance level name mapping, in addition to instance/pin and net level mapping,
+                     also can be performed, using the mapping file format:
+                     adsInst <instance_in_RTL> <instance_in_DEF>
+                   • Switching activity at state points (PIs, FF, latches) is propagated through the
+                     logic using the state propagation algorithm.
+                   • Clock gating is inherently supported in this flow
+                   • For missing VCD coverage, a constraint file can be used to assign toggle rates,
+                     in addition to available RTL VCD, to improve switching activity.
+                   • Realistic toggle rate distribution, which drives vectorless switching scenario
+                     creation.
+                 - Gate-level VCD
+                   • Gate level VCD can be directly mapped to the design
+                   • Peak power cycle is identified by scanning through the entire VCD
+                   • Toggle rates are derived from VCD for all nets and used to guide vectorless
+                      switching scenario creation
+               Characteristics of Event-driven VCD dynamic analysis
+               • Gate-level VCD with timing back annotation is used for a pure VCD analysis.
+               • VCD used for representing worst case and for measurement/correlation purposes.
+               • Peak power cycle(s) are identified by scanning through entire VCD.
+               • Specific cycle analysis with switching events and delays are derived from VCD.
+              The following sections describe the procedures for performing each type of dynamic
+              analysis.
+
+
+
+
+ANSYS, Inc.
+CHAPTER 5 — Dynamic Voltage Drop Analysis                                      RedHawk User Manual      | 82
+Methods of Dynamic Voltage Drop Analysis
+
+              Vectorless Dynamic Analysis
+
+              Overview
+              If there is no VCD file available for the design, then a vectorless methodology can be used
+              to analyze the areas of significant dynamic voltage drop. There are two vectorless
+              methods that can be utilized, one that is beneficial early in the design process with
+              preliminary information that is very fast, and also normal vectorless analysis with good
+              information when high accuracy is required:
+               • Accelerated Dynamic (AD) analysis
+                    • can be used for fast initial prototyping of the design, but is not intended as a
+                       replacement for regular RedHawk analysis (not for sign-off)
+                    • fast simulation time, with average speed-up of 5-6x
+                    • average DvD accuracy degradation of 10-15%
+                    • does not change DvD hot spot trend
+               • normal vectorless analysis
+              The input data and setup for both types of vectorless analysis is the same, as described in
+              the following section.
+
+              Input Data and Assumptions
+              For any vectorless type of analysis STA information is required to achieve reasonable
+              accuracy. The following information defined in the RedHawk timing file (compiled from
+              STA and typically named <design>.timing) is used for vectorless analysis:
+               • Clocks have a specified operating frequency, and domain information. Clock buffers
+                 toggle twice every cycle, once on each positive or negative transition. An analysis of
+                 the expected switching of instances in areas of P/G weakness can be performed using
+                 the EVA_PG_AWARE keyword set to 1 (see section "EVA_PG_AWARE", page C-620)
+                 and TOGGLE_RATE set to 0.
+               • Timing windows for each instance output pin have specified maximum and minimum
+                 rise times and maximum and minimum fall times. Instances that belong to a clock
+                 network are identified by their clock index number.
+               • Transition times (“slew”) for each instance pin have specified maximum and minimum
+                 rise and fall times. The transition times for input pins are also used during design-
+                 specific APL characterization.
+               • Boolean multi-state definitions can be used in vectorless analysis if they are defined in
+                 the Global Switching Configuration file (see section "Global Switching Configuration
+                 (GSC) File", page C-575.
+              The following assumptions are made during dynamic analysis for the instances that
+              switch:
+               • Any instance that is determined to switch and has its timing window in the first cycle of
+                 the simulation period will switch in the first cycle of the simulation period. In the next
+                 cycle of simulation the instance will also switch, but in the opposite direction.
+               • For memories, if the instance is in 'write' mode during the first cycle, the instance will
+                 be in the 'read' mode during the second cycle.
+
+
+              Standard Vectorless Analysis Procedure
+              The following are the key steps in performing vectorless dynamic voltage drop analysis:
+
+
+
+
+ANSYS, Inc.
+CHAPTER 5 — Dynamic Voltage Drop Analysis                                          RedHawk User Manual          | 83
+Methods of Dynamic Voltage Drop Analysis
+
+                1.     For the most accurate power analysis you must compile and input the best toggle
+                       rate information available to indicate the average switching performance of the
+                       instances in the design. The general priorities for setting toggle rates using GSR
+                       keyword values are listed below, from highest to lowest. However, because there
+                       are interactions between values chosen for each keyword in a specific design, see
+                       section "Setting the Toggle Rate", page 4-37, or Appendix C, for more information
+                       about toggle rate specification and instance toggle rate estimation. The general
+                       priorities for toggle rate determination are described in Chapter 4. See section
+                       "Setting the Toggle Rate", page 4-37.
+                2.     To control the switching scenario, set the switching state parameters for instances
+                       in the Global Switching Configuration (GSC) file and refer to the file with the GSR
+                       keyword GSC_FILE.
+                3.     When the best toggle rate information available has been input into the GSR, use
+                       the Dynamic -> Vectorless Dynamic Voltage Drop Analysis command to start
+                       execution.
+                4.     A worst-case switching scenario for the sequential nets is derived by RedHawk
+                       based on the user-specified toggle rate information. The switching scenario
+                       constructed by RedHawk is constrained to meet the known total average chip
+                       power specified in the GSR, so that a realistic switching scenario is obtained.
+                5.     Using the worst-case switching scenarios and current profiles from either the LIB
+                       files, or for more accuracy, from APL characterization, RedHawk performs a
+                       simulation of peak current contributions from all switching events to obtain a
+                       realistic time-varying current over the simulation time at each node.
+                6.     To support multi-state analysis, if Boolean function states are defined in either
+                       SIM2IPROF or AVM, and the state names are specified in the GSC file per
+                       instance, RedHawk power calculation and dynamic analysis automatically use
+                       those state definitions in the analysis.
+                7.     From the time-varying node currents RedHawk computes the associated time-
+                       varying dynamic voltage drop at each node over the simulation time.
+                     Note: You can import a different STA file during or after analysis to create a different
+                     simulation scenario using an ‘import sta’ command in the batch file or from the
+                     TCL command line.
+
+              Unified Clock Gate Handling and Analysis
+
+              There are two ways to handle clock gates-- Gated On Percentage (GOP) and Automatic
+              Clock Gate Handling. Both of these types of analysis flows are merged using the
+              STATE_PROPAGATION GSR keyword, with different options. If this keyword is not
+              defined, state propagation is off and instance switching is determined by default toggle
+              rates in the design. The dynamic part of state propagation is controlled by a separate
+              option, now called FLOP_ON_PERCENTAGE.
+
+              Automatic Clock Gate Handling (default)
+              The GSR setting for basic State Propagation is
+                          STATE_PROPAGATION {
+                                PROPAGATION_MODE probability
+                          }
+              With this invocation the gate enable ratio is automatically set at the output of the clock
+              gates (the enable ratio specifies the probability that any clock gate is On, and is the value
+              used to scale the clock toggle rate down). The enable rate is derived by propagating
+
+
+
+ANSYS, Inc.
+CHAPTER 5 — Dynamic Voltage Drop Analysis                                      RedHawk User Manual      | 84
+Methods of Dynamic Voltage Drop Analysis
+
+              upstream toggle rate values from the primary inputs. You can turn this off by setting the
+              SP option AUTO_CLOCK_TRACING to 0 (On by default).
+
+                  Two Flow Types
+              Basic clock gate handling can be divided into two types of flows, Ratio-Based and On/Off-
+              Based. The basic elements of the two flows are shown graphically in Figure 5-2.
+               • Ratio-Based flow
+                    • The toggle rates at clock gate outputs are scaled down.
+                    • Can be used for both static and dynamic analysis.
+               • ON/OFF-Based flow
+                   • Each clock gate is set to either ON or OFF.
+                   • Can be used to control switching scenarios during dynamic analysis.
+
+
+
+
+              Figure 5-2       Two types of clock gate handling
+
+                  Ratio-Based Approach
+              The syntax for the ratio-based approach is:
+                   STATE_PROPAGATION {
+                         PROPAGATION_MODE probability
+                         CLOCK_GATE_ENABLE_RATIO <ratio>
+                   }
+              In this approach, a single clock gate enable ratio value is specified, which is applied to all
+              clock gates in the design, and the output clock toggle rates are all scaled down by this
+              ratio. Note that this setting is the same as using GOP, along with the TCL command
+              ‘setup analysis_mode static’, but a warning is displayed if GOP is also used, and
+              this option is obsolete.
+              Note that the SP option CLOCK_GATE_ENABLE_RATIO by default affects both Inferred
+              and Instantiated clock gates. Instantiated clock gates are a type of clock gate by lib
+              definition, while Inferred Clock Gates are instances such as AND gates, which can be
+              used as clock gates. However, there is also an option to provide separate control for
+              inferred clock gates, as follows:
+                        STATE_PROPAGATION {
+                             PROPAGATION_MODE probability
+                             CLOCK_GATE_ENABLE_RATIO <>
+
+
+
+ANSYS, Inc.
+CHAPTER 5 — Dynamic Voltage Drop Analysis                                    RedHawk User Manual     | 85
+Methods of Dynamic Voltage Drop Analysis
+
+                             INFERRED_CLOCK_GATE_ENABLE_RATIO <ratio>
+                        }
+              You can set the option “INFERRED_CLOCK_GATE_ENABLE_RATIO 1” if you do not want
+              inferred clock gates to affect the clock toggle rate.
+              The unified flow also offers the flexibility to choose between cascaded and non-cascaded
+              modes of clock gate handling. The following diagram explains cascaded and non-
+              cascaded flows in clock gate handling. When the gating ratio is cascaded, the gating ratio
+              at any gate depends on the upstream gates and their probability of its switching. The
+              following is an example of cascaded flow:
+
+
+
+
+              And the following is a non-cascaded flow.
+
+
+
+
+              The default flow is non-cascaded, to be consistent with the traditional GOP flow. You can
+              enable cascaded-type handling (which is more realistic) using the following setting:
+                        STATE_PROPAGATION {
+                             PROPAGATION_MODE probability
+                             CLOCK_GATE_ENABLE_RATIO <ratio>
+                             ENABLE_CASCADED_CLOCK_GATING 1
+                        }
+              Custom clock gate enable ratio values also can be specified for desired clock gates with
+              the help of a user-defined clock gates file. The keyword setting is:
+                        STATE_PROPAGATION {
+                             PROPAGATION_MODE probability
+                             CLOCK_GATE_ENABLE_RATIO_FILE <cg_ratio.file>
+                        }
+              where the <cg_ratio.file> format is:
+                       #<clock_gate_name> <enable_ratio>
+                       ...
+
+                  ON/OFF-Based Approach
+              In the ON/OFF-based gate handling approach, each clock gate is set either ON or OFF.
+              This is the same as the dynamic behavior of the previous similar option
+              GATED_ON_PERCENTAGE. The GOP option name is changed to FLOP_ON_PERCENTAGE
+              to reflect more accurately the behavior of the option. When the FOP fraction is set 0.5, it
+              does not mean that 50% of the clock gates are ON, it only means that 50% of flops are
+
+
+ANSYS, Inc.
+CHAPTER 5 — Dynamic Voltage Drop Analysis                                     RedHawk User Manual     | 86
+Methods of Dynamic Voltage Drop Analysis
+
+              ON. This is achieved by controlling clock gates upstream of these flops. PowerStream
+              finds the number of flops controlled by each clock gate, looks at the specified FOP
+              fraction value, assesses the number of flops be turned ON to reach the target, and
+              decides which clock gates must be set ON to achieve this target. The syntax is:
+                        STATE_PROPAGATION {
+                             PROPAGATION_MODE probability
+                             FLOP_ON_PERCENTAGE <FOP_fraction>
+                             FOP_CONTROL_FILE <cg_on_off.file>
+                        }
+              Just as for the Ratio-based approach, there is also a custom flow setting file for the ON/
+              OFF approach, using FOP_CONTROL_FILE <cg_on_off.file>, where the
+              <cg_on_off.file> format is:
+                        #<clock_gate_name> <ON/OFF>
+                        ...
+
+              RTL VCD-Driven Vectorless Dynamic Analysis
+
+              Designs with gate level VCD files have a complete set of vectors available for accurate
+              power analysis at the instance level. However, for designs with RTL level VCD data,
+              detailed switching information at the instance level must be estimated. Designers often
+              want to employ unit-delay or true-timing gate-level simulation results as stimuli to achieve
+              very accurate DvD analysis. However, true-timing gate-level simulation data often takes a
+              prohibitive amount of time to generate, and it is often not available until the end of the
+              design cycle.
+              RedHawk provides a state propagation engine to achieve a statistically realistic method of
+              evaluating power in both clock and logic circuits under complex switching conditions,
+              such as clock gating methodologies, without gate-level simulation data. This method
+              automatically produces an accurate set of toggle rates for each instance in the design.
+              RedHawk supports state propagation-based power calculation in the RTL-VCD flow, as
+              well as event propagation-based power calculation. In the RTL VCD-based State
+              Propagation flow the toggle rates for the primary inputs and flop/latch outputs are
+              calculated from the RTL VCD, and then this activity is propagated using State
+              Propagation. This provides a compromise between RTL VCD-driven Event propagation
+              and probabilistic State Propagation, which is useful when you want to calculate power for
+              a longer duration of the VCD, and event propagation engine would have a run time
+              penalty. State propagation analysis is controlled using STATE_PROPAGATION GSR
+              keyword options, as described in Appendix C.
+
+              Data Requirements for State Propagation
+
+                  RTL VCD or FSDB files
+              VCD is the output of functional simulators such as VCS, NC-Verilog and ModelSim. FSDB
+              is a binary and reduced-size version of the VCD file. Both block-level and top-level VCD
+              or FSDB files can be imported into RedHawk. A switching toggle rate is extracted from
+              them for a given time frame (or for the entire VCD simulation period) for all state points.
+              You can also set toggle rates, or override those in VCD file, using a constraint file. For
+              nodes missing in the VCD file, default toggle rates can be used.
+
+
+
+
+                  Mapping files
+
+
+ANSYS, Inc.
+CHAPTER 5 — Dynamic Voltage Drop Analysis                                   RedHawk User Manual      | 87
+Methods of Dynamic Voltage Drop Analysis
+
+              RTL level netlist names map to different gate-level DEF netlist names. RedHawk requires
+              a mapping file in a two-column format, associating each node in the RTL level with the
+              corresponding DEF netlist name, with the RTL names on the left and the DEF names on
+              the right. This mapping information can be easily extracted from tools like Conformal and
+              Formality. Note that in the RTL VCD mapping file the RTL names are on the left and DEF
+              names are on the right.
+
+                  Mapping inverted elements
+              The RedHawk RTL VCD flow supports inverted mapping, such that while annotating from
+              RTL VCD, an inversion is performed before annotating activity to the QN pin. The
+              AutoNameMapping function maps inverted flops using the following syntax in the name
+              mapping file:
+                       <RTL_signal_path_RTL_VCD> <Gate_pin_path_design> -inverted
+              For example,
+                      top/block/count top/block/count_reg/QN -inverted
+              For all inverted mapping, RedHawk first inverts the signal state in RTL VCD and then
+              does annotation to the GATE pin.
+
+              GSR Keywords to Support RTL VCD Flow
+              The Global System Requirements file keywords VCD_FILE (see section "VCD_FILE",
+              page C-616) and BLOCK_VCD_FILE (see section "BLOCK_VCD_FILES", page C-588)
+              specify RTL VCD files, along with parameters affecting how the VCD files will be
+              imported. If multiple VCD files need to be imported, use the BLOCK_VCD_FILE keyword.
+              The VCD_FILE option FILE_TYPE should be set to RTL_VCD or RTL_FSDB, and the
+              option VCD_DRIVEN should be set to “1”, then the State Propagation engine is activated
+              in RTL VCD-driven mode. It scans the RTL VCD to derive the toggle rate at state points
+              (FF/registers), and propagates the toggle rate to downstream logic. See section "Global
+              System Requirements File (*.gsr)", page C-577, for more information on using these RTL-
+              VCD related keywords.
+
+                  State Propagation Constraint File
+              For nodes that are missing in the VCD/FSDB files, toggle rate constraints can be set
+              through a constraint file designated with the CONSTRAINT_FILE option of
+              STATE_PROPAGATION. A template of this constraint file listing all the state points in the
+              design can be generated with the RedHawk TCL command ‘dump sptemplate’. The
+              generated template file from this command is adsRpt/state_propagation.template. An
+              example of a state propagation constraint file is shown below:
+                        # analysis mode: static
+                        # Format: <port/pin> <toggle_rate (2.0-based)>
+                        # 1. Clock roots
+                        clk_A 0
+                        clk_B 1.8
+
+                        # Primary inputs
+                        scan_mode 0.05
+                        scan_en 0.08
+
+                        # Register outputs
+                        i_pram_00/mem3/do[11] 0.15
+
+
+
+
+ANSYS, Inc.
+CHAPTER 5 — Dynamic Voltage Drop Analysis                                      RedHawk User Manual      | 88
+Methods of Dynamic Voltage Drop Analysis
+
+              Note: The maximum toggle rate is 2.0, which means that the signal makes 2 transitions
+              (0>1 and 1>0) every cycle. Fully active clocks have a toggle rate equal to 2.
+              You can propagate a toggle rate of 2 to MUXs during state propagation, independent of
+              the 'Select' pin toggle rate, using the GSR keyword 'SP_CLKMUX_AUTO 1'. Since it is
+              very tedious to identify the Select pins of multiplexers and assign the correct state to
+              them, a toggle rate of 2 can be assigned from a multiplexer onward in the clock network.
+              When using STATE_PROPAGATION without any VCD files, toggle rates are still
+              propagated based on the constraint file or the default toggle rate. Using the constraint file,
+              you can specify toggle rates for clock roots, primary inputs, and outputs of registers. For
+              memories, both input and output toggle counts need to be included.
+              Following setting up the appropriate keyword values and constraint files for estimating
+              toggle rates and performing state propagation, RedHawk can run static and dynamic
+              analysis normally without any additional command.
+
+              RTL VCD Reports
+              There are several reports generated by RTL VCD analysis:
+               • the adsRpt/vcd_uncovered_syms file contains the VCD symbols that are not in the
+                 design.
+               • the adsRpt/vcd_uncovered_mems file contains the memory instances that are not
+                 covered in the design.
+               • the adsRpt/vcd_uncovered_ffs lists ffs/latches that are not covered and are not in the
+                 clock network
+               • the adsRpt/vcd_uncovered_clk_ffs file lists ffs/latches that are not covered and in the
+                 clock network
+              Also note that several other reports are generated if the PS_RTL_EP_REPORT GSR
+              keyword is set, as follows:
+               • adsRpt/vcd_covered_ffs : list of ff/latches that are “covered” in VCD/FSDB, meaning
+                 those in which one of the outputs is covered.
+               • adsRpt/vcd_covered_nets : list of nets that are covered in VCD/FSDB
+               • adsRpt/propagated_insts : list of instances that are propagated
+               • adsRpt/propagated_nets : list of nets that are propagated through
+
+              Gate Level VCD-Driven Vectorless Dynamic Analysis
+
+              Input Data and Assumptions
+              To use the VCD-driven vectorless method in a hierarchical design, specify the VCD file in
+              the GSR file, along with the hierarchical prefix in the VCD and the start and end times, as
+              follows:
+                    BLOCK_VCD_FILE {
+                        VCD_FILE
+                        {
+                        <Hierarch_path/DEF_instance_name1> <VCD file>
+                        FILE_TYPE <VCD | FSDB | RTL_VCD | RTL_FSDB >
+                        FRONT_PATH <redundant_path_string>
+                        SUBSTITUTE_PATH <substitute_path_string>
+                        FRAME_SIZE <cycle_time>
+                        START_TIME <analysis_start_time>
+                        TRUE_TIME [0|1]
+
+
+
+ANSYS, Inc.
+CHAPTER 5 — Dynamic Voltage Drop Analysis                                   RedHawk User Manual    | 89
+Methods of Dynamic Voltage Drop Analysis
+
+                        MAPPING <filename>
+                        }
+                        VCD_FILE
+                        {
+                        <Hierarch_path/DEF_instance_name2> <VCD file>
+                        ...
+                        }
+                        }
+
+                     where
+                      <Hierarch_path/DEF_instance_name> <VCD file>: specifies the hierarchical
+                          block name that matches that identified in the DEF and the absolute or
+                          relative path to the VCD or FSDB file
+                      FILE_TYPE [ VCD | FSDB | RTL_VCD | RTL_FSDB] : identifies the type of input
+                      FRONT_PATH <redundant_path_string> : specifies the string that does not match
+                         the DEF path. Must be replaced by SUBSTITUTE_PATH string.
+                      SUBSTITUTE_PATH <substitute_path_string>: the substitute path string to match
+                         the DEF hierarchy.
+                      FRAME_SIZE <value_ps> : specifies the duration per frame for cycle-by-cycle
+                         power calculation; the cycle time in ps (1/FREQ); default is 5000 ps.
+                      START_TIME <value_ps> : optional, specifies the analysis start time in the VCD
+                         for power calculation; start default time = 0, end default time is end of VCD/
+                         FSDB file.
+                      TRUE_TIME : if =0, uses STA timing data and assumes no glitches; if =1, uses
+                         VCD switching and timing data; default=0.
+                      MAPPING <filename> : name of map file with RTL VCD instance names and
+                         corresponding DEF instance name
+
+              Analysis Procedure
+              The following are the key steps in performing VCD-driven dynamic voltage drop analysis:
+                1.   After putting the appropriate information into the VCD_FILE GSR keyword, use the
+                     Dynamic -> Vectorless Dynamic Voltage Drop Analysis command.
+                     Alternatively, the TCL command for invoking vectorless dynamic analysis is:
+                        perform analysis -vectorless
+                2.   For a VCD-driven vectorless dynamic simulation, the switching and transition times
+                     are obtained automatically from the STA file. The switching scenario is created
+                     based on the toggle rate obtained from the VCD.
+                3.   Using the worst-case switching scenarios and current profiles from either the LIB
+                     files, or more accurately, from APL characterization, RedHawk performs a
+                     simulation of peak current contributions from all switching events to obtain a
+                     realistic time-varying current waveform over the simulation time at each node.
+                4.   From the time-varying node currents RedHawk computes the associated time-
+                     varying dynamic voltage drop at each node over the simulation time.
+                5.   The worst case node voltages are then compiled into an ordered list.
+
+
+
+
+ANSYS, Inc.
+CHAPTER 5 — Dynamic Voltage Drop Analysis                                          RedHawk User Manual     | 90
+Methods of Dynamic Voltage Drop Analysis
+
+              VCD Dynamic Analysis
+
+              Input Data and Assumptions
+              If the VCD file for the full chip or block level is available and the timing information is
+              accurate in the VCD files, then VCD dynamic analysis can be used. Accurate timing in
+              the VCD can be obtained if delays (that is, through SDF) are back-annotated during
+              simulation. In the case of VCD dynamic analysis, the following assumptions are made:
+                1.     Switching scenario. The switching scenario is determined entirely from the VCD
+                       files. Every active net should be described in the VCD; for any net not in the VCD
+                       file, it is assumed that instances attached to the net are inactive.
+                2.     Instance switching. Any instance that is determined to switch from the VCD file
+                       will switch in simulation, with the switching time defined in the VCD file. STA timing
+                       windows are not used.
+                     Note: Instances specified in the GSC file override the VCD file net specification.
+                3.     Transition times. Switching instances use the transition times in the STA file. If an
+                       STA file is not provided, the value of the INPUT_TRANSITION keyword in the GSR
+                       is used for every instance in the design. Therefore, using STA file values is strongly
+                       recommended.
+                4.     Cycle Selection. For automatic cycle selection by RedHawk, set the following
+                       option of the VCD_FILE GSR keyword:
+                          VCD_FILE
+                               {...
+                               SELECT_RANGE <start_time> <end_time>
+                               ...
+                               }
+                       If -1 is set for start and end times, the full VCD period is included in cycle selection.
+                5.     Simulating entire VCD. When DYNAMIC_SIMULATION_TIME is set to 0 and
+                       START/END_TIME are not specified, entire VCD is used for power calculation and
+                       simulation.
+                6.     Multi-state Boolean functions. Boolean definitions of the multi-states are
+                       checked in the VCD file. Where there is a match with definitions in AVM or
+                       SIM2IPROF. the state is triggered using the current profile defined for the state in
+                       AVM or SIM2IPROF.
+
+              VCD Critical Cycle Selection
+              When the critical cycle selection feature is used, RedHawk automatically selects the most
+              critical cycles from a large vector dump. Cycle selection supports both True-time and non-
+              True-time gate and RTL level VCD analysis in power calculation. The method calculates
+              the power for each cycle and finds the cycle consuming the highest power. The time span
+              (width of each cycle) is decided by the keyword DYNAMIC_SIMULATION_TIME. Each
+              span is swept by a small time-step and power is calculated across this span using a
+              sliding window.
+              An ordered list of critical cycles identified during cycle selection is automatically provided
+              in the report file adsRpt/worst_power_cycle.rpt.
+
+                     PRUNE Feature in RTL VCD flow
+              The RTL VCD PRUNE feature improves the performance of RTL_VCD cycle selection by
+              optimizing selection of candidate power-intensive cycles for event propagation, and
+              reducing the total time required for cycle selection. The key features of Pruning are:
+
+
+ANSYS, Inc.
+CHAPTER 5 — Dynamic Voltage Drop Analysis                                      RedHawk User Manual    | 91
+Methods of Dynamic Voltage Drop Analysis
+
+               • No event propagation - The algorithm extracts net weights from the design directly and
+                 does not need to propagate the events. The toggling nets determine the cycle powers
+                 directly.
+               • No timing delay calculation - It is assumed that a net toggling results in subsequent
+                 toggling immediately. This saves most of the work on clocking analysis.
+               • VCD-covered nets only - Typically an RTL-VCD case has VCD coverage less than
+                 10%. The algorithm focuses on the VCD-covered nets only, and hence reduces
+                 memory usage and I/O operations.
+               • Block- based pruning methodology (that is, pruning analysis performed on each block
+                 separately when multiple RTL-VCD files are present)
+               • RTL-VCD file reuse (pruning results are reused for duplicate blocks)
+               • Support for cycle selection mode (VCD_FILE option WORST_DPDT_CYCLE).
+               • Support for VCD_FILE option STA_VCD_FREQ_RATIO and GSR keyword
+                 POWER_VCD_NUM_PROCESS.
+              Pruning is most effective for the following design conditions:
+               • Extensive VCD/FSDB data - The overhead to collect pruning data offsets the
+                 performance gain if the cycle number is not high.
+               • Progressive power profiles - Pruning is more effective when switching intensity
+                 changes in a progressive manner. It is more difficult for cycle powers that vary within a
+                 narrow range and in a rapidly oscillating fashion.
+               • Sporadic impulsive power changes - Pruning is most effective if the cycle power profile
+                 has sporadic impulsive changes. The time spans between the pulses can all be
+                 pruned.
+              The pruning process is enabled by adding the ‘PRUNE 1’ option of the VCD_FILE GSR
+              keyword, such as:
+                       VCD_FILE {
+                           core_top top.vcd
+                           FILE_TYPE RTL_VCD
+                           PRUNE 1
+                           SELECT_RANGE 10000 100000
+                       }
+
+              Multi-Bit Sequential Cell Handling in VCD Analysis
+              Multi-bit sequential cell handling can include individual edge-triggered events, where all
+              input/output pins do not have to trigger off the same event, such as the clock toggle. Multi-
+              bit sequential cell handling considers edge-triggered events if they are defined using the
+              sim2iprof configuration file COMPOSITE_STATE keyword (see section
+              "COMPOSITE_STATE", page E-944).
+
+              Mixed Mode VCD and Vectorless Analysis
+              RedHawk supports input data including both VCD and Vectorless settings, which provides
+              more freedom to fine-tune the settings at block level. Some key features are:
+               • A block level VCD with a top-level vectorless approach is supported, where you can
+                 provide one or more block VCDs.
+               • The GSR keyword BLOCK_VCD_FILE defines one or more VCD blocks for analysis.
+                 Each block is specified using the VCD_FILE option with a block name (hierarchy
+                 path).
+               • Mixed mode allows you to specify a mix of True time and Non-True time VCDs.
+               • S-parameter package models are supported.
+
+
+ANSYS, Inc.
+CHAPTER 5 — Dynamic Voltage Drop Analysis                                     RedHawk User Manual      | 92
+Methods of Dynamic Voltage Drop Analysis
+
+               • CPM creation is enabled.
+               • Allows for scaling VCD and STA frequencies with STA_VCD_FREQ_RATIO. Note that
+                 block level STA_VCD_FREQ_RATIO is supported only in Mixed Mode.
+               • GSR keywords DYNAMIC_SIMULATION_TIME and DYNAMIC_PRESIM_TIME
+                 define the VCD simulation time span. VCD_FILE ‘Start_Time’ is honored, but
+                 ‘End_Time’ is not used. DYNAMIC_PRESIM_TIME defines the presim time span at
+                 ‘Start_Time’ backward. Auto Presim, that is the default DYNAMIC_PRESIM_TIME, or
+                 set to -1, is honored.
+               • Low power analysis is enabled in mixed mode. For procedures to run dynamic voltage
+                 drop analysis on low-power designs, see Chapter 13, "Low Power Design Analysis".
+              The following GSR keywords are supported for non-VCD blocks:
+               • GSC_FILE
+               • BLOCK_POWER_FOR_SCALING(_FILE)
+               • STATE_PROPAGATION
+               • STA_FILE CONST
+               • TOGGLE_RATE_RATIO_COMB_FF
+               • INSTANCE_TOGGLE_RATE(_FILE)
+               • BLOCK_TOGGLE_RATE(_FILE)
+               • TOGGLE_RATE
+              If you provide a block VCD file for a block that has a sub-block not covered in the VCD,
+              then the instances inside sub-block are always Off, unless otherwise specified in the
+              GSC. If simulation time is a multiple of FREQ, then the multi-cycle vectorless approach is
+              used for the instances that are not covered by VCD.
+
+              Analysis Procedure
+                1.   To use VCD files in the analysis, define the desired VCD constraints and parameters in
+                     the GSR keyword VCD_FILE.
+                2.   Invoke the Dynamic -> VCD-based Dynamic Voltage Drop Analysis menu
+                     selection in the GUI, and select the Use VCD Timing option in the dialog box. The
+                     start and end times for VCD simulation can be for any duration in the VCD file. The
+                     utility vcdscan can also be used to determine the start and end times for simulation.
+                3.   For worst-case DvD cycle selection, the procedure is:
+                        setup design
+                        perform pwrcalc # calculates power for the critical cycle
+                        perform extraction
+                        setup package
+                        perform analysis -vcd # dynamic run for the critical cycle
+
+              A sample portion of a GSR file for a mixed mode design follows:
+                       ...
+                       FREQ 200e6
+                       TOGGLE_RATE 0.2
+                       BLOCK_VCD_FILE
+                       {
+                            VCD_FILE
+                            {
+                                  ABCD10_SEL user_data/vcd.1
+                                  front_path "TOP/CHIP/"
+
+
+ANSYS, Inc.
+CHAPTER 5 — Dynamic Voltage Drop Analysis                                    RedHawk User Manual     | 93
+Methods of Dynamic Voltage Drop Analysis
+
+                                   substitute_path ""
+                                   start_time 100000
+                                   true_time 1
+                             }
+                             VCD_FILE
+                             {
+                                 ABCD20_TEG user_data/vcd.2
+                                 front_path "TOP/CHIP/"
+                                 substitute_path ""
+                                 start_time 600000
+                                 true_time 1
+                             }
+                        }
+                        DYNAMIC_PRESIM_TIME 10n
+                        DYNAMIC_SIMULATION_TIME 20n
+                        ...
+              This example has two VCD blocks, ABCD10_SEL and ABCD20_TEG. The ABCD10_SEL
+              block has a VCD presim time (90ns-100ns) and simulation time (100ns-120ns). The
+              ABCD20_TEG block has a VCD presim time (590ns-600ns) and simulation time (600ns-
+              620ns). The remaining sections of the design will be handled as vectorless.
+
+              Gated Clock Dynamic Analysis
+
+              Gated clock control activity is typically defined in the VCD file, and, in the case of RTL-
+              VCD flow, it is propagated through the clock network and logic. However, if no VCD is
+              available, the gated clock domain activity is controlled using the GSR keyword STATE
+              PROPAGATION and option GATED_ON_PERCENTAGE. The state propagation engine
+              is used to propagate the assigned logic level at the gated clock control throughout the
+              downstream clock network, as well as through the data paths controlled by this clock
+              domain. State Propagation uses a vectorless method to model statistically several
+              aspects of gated clock domain activity for static/dynamic analysis. State propagation
+              automatically identifies gated control nets through back-tracing from FF clock pins or STA
+              data.
+
+              Input Data
+              The required input data for gated clock domain analysis is as follows:
+               • Technology file
+               • LEF file that describes macros placed in the design
+               • Top-level DEF file
+               • Voltage source locations (from PLOC/DEF file)
+               • Synopsys Library models (.LIB models)
+               • STA/TIMING file, having TWs defined for all the instances in clock tree network
+               • SPEF file (optional)
+
+              GSR Keywords for Clock Domain Gating
+              State propagation allows users to control gated clock domain activity using the GSR
+              keywords STATE_PROPAGATION and its option GATED_ON_PERCENTAGE
+              <On_fraction>, GATED_CONTROL_FILE <control_filename>, and
+              SP_CLOCK_GATING_RATIO.
+
+
+
+
+ANSYS, Inc.
+CHAPTER 5 — Dynamic Voltage Drop Analysis                                       RedHawk User Manual     | 94
+Methods of Dynamic Voltage Drop Analysis
+
+              State Propagation can find the gating ratio at each clock gate automatically by
+              determining the duty cycle at each enable net and propagating toggle rates from
+              upstream logic to obtain gating ratios for each clock gate in the design. For RTL_VCD
+              State Propagation this helps achieve very accurate power values for sequential logic.
+              For vectorless State Propagation, this provides a much better estimation of chip power, as
+              the gating ratio is derived through propagation from primary inputs. The GSR keyword
+              PS_SP_GATED_CLOCK_LOGIC can be set to 0 to disable this feature.
+              For more control over the gating ratio, set a global gating ratio for all clock gates in the
+              design, using the GSR keyword ‘SP_CLOCK_GATING_RATIO <ratio> ‘, where the
+              <ratio> value must be between 0 and 1.
+              Gated clock control activity can be specified globally using GATED_ON_PERCENTAGE,
+              which counts flop/latches/memory instances at leaf level, and includes always-on leaf
+              cells. Note that by specifying GATED_ON_PERCENTAGE as the fraction 0.5, for
+              example, RedHawk randomly picks 50% of the gated control cells and turns them “On”.
+              However, for dynamic analysis this may not ensure that the clock network power is scaled
+              down to exactly 50%, since it depends upon the gated clock control granularity. Individual
+              settings for certain gated clock instances can be specified using the
+              GATED_CONTROL_FILE option, with the remaining unspecified individual states being
+              assigned according to the global On setting.
+              Modeling methods and the associated keywords for clock gating are described below.
+              The POWER_TRANSIENT_ANALYSIS GSR keyword can be used to specify
+              configuration files to define gated clock control activities for each time frame of interest.
+              Multiple time frames define different clock activities over defined groups of cycles.
+
+                  GSR Settings for State Propagation
+              State propagation analysis is controlled using the following GSR syntax:
+                        STATE_PROPAGATION {
+                             GATED_ON_PERCENTAGE <On_fraction>
+                             PROPAGATION_MODE PROBABILITY
+                             ? CONSTRAINT_FILE <constraint_filename> ?
+                             ? GATED_CLOCK_COVERAGE [ 0| 1]?
+                             ? GATED_CONTROL_FILE <control_filename>?
+                    where
+                      GATED_ON_PERCENTAGE <on_fraction>: specifies the percentage of buffers
+                         that are on, as follows:
+                            All gating cells are on if GATED_ON_PERCENTAGE is 1
+                            All gating cells are off if GATED_ON_PERCENTAGE is 0
+                            Increasing the value of GOP turns on additional buffers, and does not turn
+                                off any that are already turned on. So, any clock buffer that is on with a
+                                GOP of, for example, 0.6, is also on when GOP is set to 0.8.
+                      PROPAGATION_MODE : PROBABILITY automatically determines switching
+                         probability for instances.
+                      CONSTRAINT_FILE : specifies a file describing the toggle rate of key instances
+                         or nets for accurate toggle rate propagation.
+                      GATED_CLOCK_COVERAGE : when set to 1, provides better design coverage
+                         when using GATED_ON_PERCENTAGE, and allows choosing different
+                         clock gate turn-on scenarios for each frame so that overall analysis coverage
+                         is increased. Note that POWER_TRANSIENT_ANALYSIS must also be
+                         turned on.
+
+
+
+
+ANSYS, Inc.
+CHAPTER 5 — Dynamic Voltage Drop Analysis                                      RedHawk User Manual     | 95
+Methods of Dynamic Voltage Drop Analysis
+
+                      GATED_CONTROL_FILE : specifies a file defining the On/Off status of individual
+                         gated control cells, with the following syntax: The format of the gated control
+                         file data is as follows for both static and dynamic analyses:
+                                 <gated_clock_instance> [ On | Off ]
+
+                 Setting State Propagation Constraints
+              The State Propagation flow has a convenient method for assigning gating ratios for clock
+              gates, as well as activity factors for primary inputs. Even before the power calculation
+              step, RedHawk can dump files containing all clock gates and primary inputs. You can
+              then edit these files to set custom clock gating ratios at the required clock gates, and also
+              specify activity at the desired primary inputs. State Propagation then uses these settings
+              to determine toggle rates for all nets in the design.
+              The Tcl command is:
+                        dump sp_constraints
+              This command dumps files state_propagation.cg and state_propagation.pi in the adsRpt
+              directory. The formats of these files are shown below:
+              Format for file adsRpt/state_propagation.cg:
+                       <clock-gate_instance> <gating_ratio> <level>
+
+              Format for file adsRpt/state_propagation.pi:
+                       <net-name> <toggle_rate> <duty_cycle>
+              These files can be edited to give specific gating ratios to clock gates, and also to set
+              activity for the primary nets. All clock gates whose gating ratios have not been defined
+              through a constraint file have their gating ratio derived by default from upstream logic, or
+              from global gating ratio keyword settings. The edited files can be passed back to
+              RedHawk using two GSR keywords.
+              For Clock Gates:
+                       SP_CG_CONSTRAINT_FILE state_propagation.cg
+              For Primary Inputs:
+                       NET_TOGGLE_RATE_FILE state_propagation.pi
+              If there is already a NET_TOGGLE_RATE_FILE, then the constraints file
+              state_propagation.pi is appended to it.
+
+                  adsRpt/state_propagation.GCControls file
+              Each state propagation run dumps out a list of all gated clock control cells’ On/Off states
+              in the adsRpt/state_propagation.GCControls file. If you have your own list of control
+              signals present in the design, you can modify this file with your list and use it as input to
+              the GATED_CLOCK_CONTROL option. The format of the file is (per gate):
+                    <gc_instance_name> <cell_type> [On | Off] <user_setting> <On_fraction>
+              where
+                      gc_instance_name : gated clock instance name
+                      On/Off : whether the gate is set to On or Off
+                      user_setting : 0 - no user setting , 1 – user set to On, 2- user set to Off
+                      On_fraction: actual realized Gated On Percentage so far. The <On_fraction> for
+                         static analysis is the On-percentage/100 for a gated clock instance. For
+                         dynamic analysis the <On_fraction> is the cumulative On percentage up to
+                         the gated clock instance, in ascending order.
+
+
+
+
+ANSYS, Inc.
+CHAPTER 5 — Dynamic Voltage Drop Analysis                                     RedHawk User Manual     | 96
+Methods of Dynamic Voltage Drop Analysis
+
+              Troubleshooting Files and Tips
+              Files that can be helpful in looking at problems are:
+               • adsRpt/state_propagation.template
+               • adsRpt/state_propagation.GCControl
+               • .apache/apache.tr - toggle rate information for each net
+               • .apache/apache.tr.i - toggle rate information for each instance
+              The following steps can be helpful in finding issues in clock domain analysis:
+                1.   Make sure .lib models are defined for all cells present in the clock tree network.
+                2.   Make sure LEF models are defined for all macros used in the design/clock tree
+                     network.
+                3.   Check for adsRpt/apache.refCell.* files in the adsRpt directory.
+                4.   Make sure all the instances present in the clock tree network have timing windows
+                     defined in STA/TIMING file.
+                     • Check adsRpt/apache.tw0 for a list of instances that have missing timing
+                        windows.
+                     • State Propagation gets the clock network information based on the timing file
+                        read in.
+
+              Scan Mode Dynamic Analysis
+
+              One of the largest peak current events in SOC designs occurs during scan chain
+              activation. Since clock skew is always minimized as standard practice, all toggling occurs
+              almost exactly at the same time. The subsequent propagation of changes races down the
+              logic networks. Even if the test frequency is slow relative to the functional frequency, all
+              current consumption occurs in the short period following the edges of the clock.
+              For example, as shown in a typical scan current analysis in Figure 5-3, the high current
+              peaks in scan mode can be 10-100 times the current in normal mode due to the
+              simultaneous switching of most of the registers.
+              A sample output is shown in Figure 5-3 below:
+
+
+
+
+              Figure 5-3       Switching current from scan mode analysis
+
+              Early design vectorless scan mode analysis
+              Full VCD gate-level scan mode analysis is the same as for functional mode analysis, and
+              is described in section "VCD Dynamic Analysis", page 5-90.
+
+
+
+ANSYS, Inc.
+CHAPTER 5 — Dynamic Voltage Drop Analysis                                        RedHawk User Manual   | 97
+Methods of Dynamic Voltage Drop Analysis
+
+              Gate-level timing-annotated VCD with scan activity is usually available very late in design
+              cycle. Therefore, evaluating potential scan clock network problems early in design (based
+              on initial placement) by using this scan methodology, in which RedHawk generates the
+              scenario files from constraint file specifications, can avoid many cases of chip failure and
+              yield reduction.
+              The scan mode flow is a non-true timing flow, in which PowerStream decides the
+              sequence of switching, but the actual time of switching is determined by the STA file.
+              RedHawk can drive the data outputs of scan registers according to the scan outputs, and
+              their behavior is based on the functions described in LIB file.
+              GSR keywords DYNAMIC_SIMULATION_TIME and PRESIM_TIME are also honored in
+              this flow
+
+                  Key characteristics
+               • Toggle activity at scan flip-flops derived from input pattern
+               • Toggle activity at scan flip-flops propagated through combinational logic
+               • Scan input patterns can be simple, such as “1010” (stress pattern), or more design-
+                 specific from ATPG
+               • Activity at all nodes in design highly deterministic (not random)
+
+                  Input Scan File Preparation
+              The input data required for early scan mode analysis requires only preparation of the scan
+              constraint files, and specifying the files and the required patterns using the
+              SCAN_CONSTRAINT_FILES GSR keyword, as follows:
+                        SCAN_CONSTRAINT_FILES {
+                               <scan_chain_file_1> <pattern_1>
+                               <scan_chain_file_2> <pattern_2>
+                               ...
+                        }
+
+              The format of the constraint file contents is:
+                       <inst_name>/<pin_name>
+              Example contents:
+                      FF_inst/Q
+                      ...
+
+              Example 1: All scan chains have the same pattern, 01:
+                       SCAN_CONSTRAINT_FILES {
+                             scan_chain.spc
+                       }
+                    If no pattern is specified, the default pattern “01” is assumed.
+
+
+              Example 2: All scan chains have the same pattern, 0011:
+                      SCAN_CONSTRAINT_FILES {
+                             scan.spc 0011
+                      }
+
+              Example 3: Multiple scan chains, each has its own pattern:
+                      SCAN_CONSTRAINT_FILES {
+
+
+
+ANSYS, Inc.
+CHAPTER 5 — Dynamic Voltage Drop Analysis                                       RedHawk User Manual       | 98
+Methods of Dynamic Voltage Drop Analysis
+
+                              scan_chain_1.spc 01
+                              scan_chain_2.spc 101
+                              scan_chain_3.spc 0011
+                              ...
+                        }
+              Example 4: Using a scan chain order file. You can provide the actual scan chain
+              information, along with the scan pattern, using a scan chain order file. Each scan chain
+              order file contains one scan chain. A sample scan_chain_order file is shown below:
+                         reg_1/Q                  # driver for reg_2
+                         reg_2/Q                  # receiver for reg_1, driver for reg_3
+                         reg_3/QB                 # receiver for reg_2
+                         ...
+              Scan-chain order files dumped from the implementation environment can be converted in
+              the above format using simple scripting. The switching sequence of the scan fflops is
+              determined by the given pattern, whereas switching time is annotated from the STA file.
+              The switching pattern can be directly specified in the GSR-- for example, “10101”, or
+              using a pattern file (in case the pattern is long). If the pattern length is less than the chain
+              length, the pattern is repeated for the remaining chain. If the pattern or pattern-file is not
+              specified, a pattern of “0101…” is used.
+              Sample pattern files, either a single bit in each line:
+                      0
+                      1
+                      1
+                      0
+                      ...
+              or a whole pattern in a single line:
+                        0110...
+
+              During simulation, the pattern is shifted, and that determines the switching activity on the
+              fflops, as well as subsequent data-paths. For example, consider there are 10 registers in
+              the chain, and the scan pattern is “1001”. RedHawk repeats the pattern to make it the
+              same length as the scan-chain length -- so “1001100110”. During simulation, the last
+              fflop output switches from 0 to 1, second to last fflop output switches from 1 to 1, and so
+              on. The same pattern is continued in subsequent clock cycles, as shown below:
+                    0 1 1 0 0 1 1 0 0 1 - at the beginning of simulation
+                    0 0 1 1 0 0 1 1 0 0 - after first clock cycle
+                    1 0 0 1 1 0 0 1 1 0 - after second clock cycle
+
+
+                  Auto Tracing Scan Method
+              RedHawk also can perform auto-tracing of scan chains, using the AUTO_TRACING
+              option, as follows:
+                        SCAN_CONSTRAINT_FILES {
+                              AUTO_TRACING [<pattern>]
+                        }
+              When auto-tracing is specified, PowerStream finds all scan chains in the design and
+              applies the specified <pattern> to those chains.
+
+                  Running RedHawk analysis
+              The normal dynamic analysis flow commands for scan mode are:
+
+
+ANSYS, Inc.
+CHAPTER 5 — Dynamic Voltage Drop Analysis                                   RedHawk User Manual      | 99
+Evaluating DvD Analysis Results
+
+                        setup design <design>.gsr
+                        perform pwrcalc
+                        perform extraction -power -ground -c
+                        perform analysis -vcd
+              The -vcd option has to be specified in the ‘perform analysis’ command so that simulation
+              picks up the scenario created by scan flow.
+
+              Gate-level VCD scan mode analysis
+              Scan mode analysis flow is the same as normal functional mode gate-level VCD analysis,
+              as described in section "VCD Dynamic Analysis", page 5-90.
+
+                  Key characteristics
+               • Determines worst power or worst dynamic voltage drop cycles
+               • Activity derived in chosen cycles from VCD
+               • Dynamic analysis replicates scenario in VCD
+
+Evaluating DvD Analysis Results
+
+              Types of DvD Results
+
+              After completing dynamic analysis, select the IR menu button to display the results.
+              RedHawk-EV outputs include:
+               • Dynamic voltage drop contour maps
+               • Power density and current maps
+               • Capacitance maps, including decap effects
+               • Report files (see Chapter 6, "Reports"), including summary files for dynamic voltage
+                 drop, power, EM and pad current, Error and Warning reports, and command log files.
+              To view a list of high voltage drop instances and their VDD-VSS values, use the Results -
+              > List of Worst DVD Instances for Dynamic Simulation command. A table is displayed
+              showing instances in order of highest DvD, and a number of other related parameters,
+              including
+               • ‘Ave DV’ - average dynamic voltage within the timing window
+               • ‘Max DV’ - maximum dynamic voltage within the timing window
+               • ‘Min DV’ - minimum dynamic voltage within the timing window
+               • ‘Min DV WC’ - minimum dynamic voltage for the whole cycle
+               • location of instance
+               • name of instance
+              The list can be sorted based on any of the four DV parameters.
+               • ‘Max VDD-VSS’
+               • ‘Min VDD-VSS’ over the simulation cycle
+               • ‘Min VDD-VSS over timing window’ of the instance
+               • ‘Avg VDD-VSS over the timing window’.
+
+
+
+
+ANSYS, Inc.
+CHAPTER 5 — Dynamic Voltage Drop Analysis                                     RedHawk User Manual     | 100
+Evaluating DvD Analysis Results
+
+              These parameters are shown in Figure 5-4 below.
+
+                 Vdd-Vss Difference Waveform
+
+
+
+
+                                          m
+                                    M
+
+                                                   Timing Window
+
+
+
+
+                     M minimum difference over simulation time
+                     m minimum difference over TW
+                       effective Vdd-Vss over TW (average)
+
+              Figure 5-4       Instance DvD Analysis Criteria
+
+              The highest voltage drop instances can also be viewed in a voltage drop map by selecting
+              'View -> Dynamic Instance Result and then selecting one of the four maps.
+               • View the wire based voltage drop map
+               • View the instance based voltage drop map
+               • View the decoupling capacitance used in the analysis using the DD button.
+               • View the dynamic power density using the PD button.
+              Note the differences between each.
+              All the log files and data files are under adsRpt directory. Look in that directory to see the
+              files that have been created. Files specific to a dynamic analysis are kept in the Dynamic
+              sub-directory.
+              The file <designName>.ipwr has the time domain current information of the total current
+              demand by all instances in the design, while the file <designName>.ivdd has the time
+              domain current information for the current supplied by the pads.
+              Power and ground waveforms can be plotted using the TCL commands:
+                 plot current [-vdd | -gnd | -pwr | -net ?-name <net_names> ?|
+                      -pad ? -name <pad_names>? ] ?-o <output>? ??-sv? ?-xgr??
+                    where
+                      -vdd | -gnd | -pwr | -pad: plots VDD, GND, PWR, or PAD current
+                         waveforms. If lists of <net_names> or <pad_names> are not given for -net or
+                         -pad, all net or pad current waveforms are displayed.
+                      By default the waveforms are extracted and rendered in Ansys 'sv' format, while ‘-
+                          xgr’ option plots it using the ’Xgraph’ format.
+
+              Filtering Minimum DvD Results
+
+              Using the keyword DVD_GLITCH_FILTER, conditions for filtering (ignoring) some values
+              of minimum DvD over the timing window (called “minTW”), based on voltage level and
+              glitch width conditions, can be set, as shown in the Figure 5-5 diagram. Minimum DvD
+              values can be filtered globally or using instance-specific conditions. An output report
+              listing the included and filtered DvD values is written to the file /adsRpt/Dynamic/
+              <designName>.minTW_filtered. Note: do not use glitch filtering in scan mode or
+
+
+ANSYS, Inc.
+CHAPTER 5 — Dynamic Voltage Drop Analysis                                 RedHawk User Manual    | 101
+Replaying a Previous RedHawk Session
+
+              with power cycle selection. For details on filtering minimum DvD values, see the
+              keyword definition in section "DVD_GLITCH_FILTER", page C-707.
+
+                                         Timing window
+
+
+
+
+                                                                              Meas_V
+
+
+                                               W
+                                               minW
+
+              Figure 5-5     Glitch width filtering with DvD_Glitch_Filter
+
+Replaying a Previous RedHawk Session
+
+              To use the GUI to start a script-based RedHawk run of a previous session, use the menu
+              command File -> Playback, which brings up a project directory dialog box that allows you
+              to select the run script from a command log of a previous session. The command log files
+              have filenames of the type: cmd.log.<date-time>. You must know the date and time of
+              the session to be able to select the correct session to play back.
+
+
+
+TCL Commands to Run Dynamic Voltage Drop Analysis)
+
+              The follow table lists TCL commands available for running DvD analysis.
+
+                                                TCL                                Purpose
+                            <vcd_cycle_time>? ?-a                        Sets up for full VCD dynamic
+                            <start_sim_time>?<end_sim_time>?             DvD analysis when the GSR
+                            ?-w <logical_ path>                          contains the VCD_FILE section
+                            <physical_path>? ?-d                         defining the VCD constraints
+                            <adsPower_directory>? ?-o                    for analysis.
+                            <outputFileName>? ?-msg
+                            <msgFileName>? ?-cmd
+                            <cmdFileName>?
+                            ?-tt <presim_time_ps> ?
+                            perform analysis [-lowpower |                Runs dynamic DvD analysis.
+                            -vcd | -vectorless ]
+
+
+
+
+ANSYS, Inc.
+

@@ -1,0 +1,482 @@
+﻿% 第 19 章 Timing File Creation Using Apache Timing Engine (ATE)（原书 19-517 … 19-528）
+\bichapter{使用 Apache Timing Engine 创建时序文件}{Timing File Creation Using Apache Timing Engine (ATE)}
+\label{chap:ate}
+
+\section{引言}
+\subsection*{Introduction}
+
+为在 RedHawk 中进行准确的静态与动态分析，Apache Timing Engine（ATE）提供时钟域、slew（转换时间）与时序窗等时序信息。这些信息通过时序文件（亦称 STA 文件）提供。
+
+静态分析中，RedHawk 使用时序文件推导频率与转换时间信息，随后在功耗计算步骤中用于计算设计平均功耗。RedHawk 还使用时钟网络信息确定总时钟网络功耗。动态分析中，RedHawk 使用 STA 文件中的时序窗信息。时序窗表示特定 instance pin 的最早与最晚（min/max）时序事件；静态分析不需要，但动态分析需要，以便计算设计中各 instance 的开关时间。ATE 使用多线程 Verilog 处理。
+
+时序文件包含以下信息：
+\begin{itemize}
+  \item 时钟域及其频率
+  \item instance pin 的 min/max 上升/下降 slew
+  \item instance pin 的 min/max 上升/下降到达时间
+  \item 恒定 instance pin（不开关的 pin）
+  \item instance pin 关联的时钟域
+  \item 时钟树识别
+\end{itemize}
+
+时序文件语法请参阅附录 C「Timing Data File」一节。
+
+静态分析中，若使用 \cmd{import power} 命令导入功耗值，则不使用 STA 文件。
+
+动态分析中，若使用 VCD 数据且处于 ``true time'' 模式（即包含时序信息），则不使用 STA 文件的时序窗，因其从 VCD 推导。slew 与时钟树信息仍从 STA 文件推导。
+
+若未向 RedHawk 提供时序文件：
+\begin{itemize}
+  \item 静态分析中，使用 \gsr{INPUT_TRANSITION} 与 \gsr{FREQUENCY} GSR 关键字为所有 instance 获取 slew 与频率值以计算功耗。若使用 \gsr{CLOCK_ROOTS} GSR 关键字，时钟树与 instance 频率从此获取，可影响功耗计算与静态 IR drop 结果。
+  \item 动态分析中，频率、slew 与时钟树信息也可像静态分析一样通过 GSR 关键字指定。但除非使用 true time VCD，RedHawk 无法确定各 instance 关联的开关时间。
+\end{itemize}
+
+\section{概述}
+\subsection*{Overview}
+
+图~\ref{fig:rh-ate-flow} 的数据流展示了输入文件、分析步骤与 STA 文件对应内容。
+
+\figplaceholder{Figure 19-1}{ATE 数据流}
+\label{fig:rh-ate-flow}
+
+ATE 集成于 RedHawk，可通过将 GSR 关键字 \gsr{ENABLE_ATE} 设为 1 启动。SPEF 文件由 ATE 引擎解析并标注到 DEF。ATE SPEF 解析器的优势在于可将 SPEF 数据标注到 DEF 中的 instance/网络，不受默认 RedHawk SPEF 解析器中层次限制的影响，从而为 SPEF 输入数据提供最佳覆盖/标注。ATE 标准输出位于 \texttt{adsRpt/ate.log}。其他 ATE 文件写入 \texttt{.apache/ATE/}。基于 ATE 的 SPEF 导入在处理 DEF/SPEF 层次不匹配的各种 corner case 时更准确。额外所需文件仅为通过 GSR 关键字 \gsr{ATE_CONSTRAINT_FILES} 指定的 SDC 文件。
+
+\subsection{PJX——快速全芯片时钟抖动分析}
+\subsubsection*{PJX - Fast Fullchip Clock Jitter Analysis}
+
+RedHawk 提供快速全芯片时钟抖动分析流程，特性包括：
+\begin{itemize}
+  \item 使用 RedHawk 电压对每 instance 时序进行降额
+  \item 使用基于 SPICE 的 APL 表征模型执行单元延迟降额
+  \item 使用 STA 计算各时钟 pin 的时钟到达时间
+  \item 以每 instance 每周期 N 个电压计算时钟到达时间差异
+  \item 提供文本/GUI 追踪报告以识别抖动源
+  \item 内建于多线程 Apache Timing Engine（ATE）
+  \item 多周期压降分析后可用 TCL 命令 \cmd{perform full_chip_jitter}
+\end{itemize}
+
+\section{配置 ATE}
+\subsection*{Setting up ATE}
+
+\subsection{配置文件}
+\subsubsection*{Configuration File}
+
+ATE 配置文件包含设计与库数据的文件指针列表。必须命名为 \texttt{<top\_design\_name>.ate}。ATE 根据后缀在当前目录自动查找，并从前缀推导顶层设计名。文件格式如下：
+\begin{lstlisting}
+set synopsys_lib {
+     <list of Liberty files>
+}
+set verilog_netlist {
+     <list of Verilog files>
+}
+set spef {
+     <list of signal SPEF files>
+}
+set timing_constraints {
+     <list of SDC files>
+}
+\end{lstlisting}
+
+ATE 也可接受 DEF 网表作为输入，而不使用 Verilog 网表。要指定 DEF 文件作为设计网表，使用 \kw{def_netlist} 关键字代替 \kw{verilog_netlist}。
+
+上述列表中文件顺序不重要，但 Liberty 列表中第一个文件用于获取库默认设置（例如报告时间单位、工作条件与 slew 阈值）。因此通常将主库列在首位。
+
+此外，由于单位约定基于第一个 Liberty 文件，其中使用的单位约定必须与 SDC 文件一致。例如，若 SDC 时间值基于 \texttt{ns}，第一个 Liberty 文件应具有 \texttt{ns} 作为 \texttt{time\_unit}，否则 SDC 值会被错误解释。SDC 生成器通常在 SDC 文件中插入 \texttt{set\_units} 命令以供 SDC 读取器做一致性检查，但该命令不改变单位约定。
+
+从配置文件名推导顶层设计名后，从网表文件列表中找到对应模块，其余模块与之链接。网表与 SPEF 文件的层次级不必相同。ATE 的 SPEF 拼接可处理任意组合。
+
+ATE 使用 SPEF 文件内的 \kw{DESIGN} 关键字查找设计中对应参考单元，因此无需为 SPEF 文件指定 block 名。示例：
+\begin{lstlisting}
+set synopsys_lib {
+     /path/to/lib/file1.lib
+     /path/to/lib/file2.lib
+     /path/to/lib/file3.lib
+}
+set verilog_netlist {
+     /path/to/verilog/fileA.v
+     /path/to/verilog/fileB.v
+     /path/to/verilog/fileC.v
+     /path/to/verilog/fileD.v
+}
+set spef {
+     /path/to/spef/fileK.spef.gz
+     /path/to/spef/fileL.spef.gz
+     /path/to/spef/fileM.spef.gz
+     /path/to/spef/fileN.spef.gz
+     /path/to/spef/fileO.spef.gz
+}
+set timing_constraints {
+    /path/to/sdc/fileX.sdc
+    /path/to/sdc/fileY.sdc
+}
+\end{lstlisting}
+
+某些情况下可能需要覆盖 SPEF 文件中的 \kw{DESIGN} 关键字，将特定 SPEF 文件分配给特定参考单元。可在配置文件中使用 \kw{cell_spef} 关键字代替 \kw{spef}。例如：
+\begin{lstlisting}
+set cell_spef {
+     { cell1_name /path/to/spef/fileK.spef.gz }
+     { cell2_name /path/to/spef/fileL.spef.gz }
+}
+\end{lstlisting}
+
+某些情况下可能需要将特定 SPEF 文件分配给特定 instance。可在配置文件中使用 \kw{inst_spef} 关键字代替 \kw{spef}。例如：
+\begin{lstlisting}
+set inst_spef {
+     { inst1_name /path/to/spef/fileK.spef.gz }
+     { inst2_name /path/to/spef/fileL.spef.gz }
+}
+\end{lstlisting}
+
+可混合使用 \kw{spef}、\kw{cell_spef} 与 \kw{inst_spef} 关键字。优先级依次为 instance 级定义、cell 级定义，以及 SPEF 文件中的 \kw{DESIGN} 关键字。
+
+须在 SDC 文件中正确设置 case analysis 与约束。case analysis 对于获得时钟门控或 mux 的正确工作条件是必要的。
+
+\subsection{命令文件}
+\subsubsection*{Command File}
+
+以下为典型命令文件，在多数情况下可按所示使用：
+\begin{lstlisting}
+set errorAction           continue
+
+LoadGeneralParam
+
+DataPreparation      -files all
+LoadLibrary          -error_action $errorAction
+LoadNetlist          -error_action $errorAction
+LoadTimingConstraint -error_action $errorAction
+LoadParasiticFile    -error_action $errorAction -ground_coupled_caps
+
+ta_set_clock_delay        -propagated [get_clocks *]
+
+getSTA * -gz
+\end{lstlisting}
+
+上述命令序列加载库与设计数据，将所有时钟标记为 propagated，然后启动 \cmd{getSTA} 执行分析并生成 STA 时序文件。
+
+时钟被标记为 propagated，因为否则 instance 上的时钟 pin 会收到理想时钟，导致 RedHawk 仿真不准确。
+
+\subsection{PJX 流程以 STA 电压为标称并控制阈值电压}
+\subsubsection*{PJX flow uses STA voltage as nominal and control on threshold voltage}
+
+RedHawk-PJX 流程可通过用户指定的电压阈值值控制时序延迟降额因子（early/late）的生成，并在 STA 与 GSR 电压不匹配时使用 STA/LIB 电压作为标称。启用以下关键字：
+
+\paragraph{阈值}
+\begin{lstlisting}
+ta_ppx_derate_factors_threshold_voltage <voltage>
+\end{lstlisting}
+指定创建时序延迟降额因子的阈值。有效电压（非 min-max 模式为 Veff，min-max 模式为 Vmin--Vmax）高于该阈值的 instance 在 \texttt{derate\_factors} 文件中无降额因子。
+
+示例：
+\begin{lstlisting}
+setvar ta_ppx_derate_factors_threshold_voltage 0.95
+\end{lstlisting}
+默认：若未提供值，标称电压为阈值。
+
+\paragraph{降额因子文件}
+\begin{lstlisting}
+ta_ppx_derate_factors_domain_threshold_file <domain_threshold_file>
+\end{lstlisting}
+指定包含 PJX 创建时序延迟降额因子时考虑的电压域阈值值的文件。阈值可关联 VDD 域或 VDD-GND 对。使用 VDD-GND 指定的阈值优先于使用 VDD 域指定的阈值。
+
+示例：
+\begin{lstlisting}
+setvar ta_ppx_derate_factors_domain_threshold_file threshold.txt
+\end{lstlisting}
+
+\texttt{threshold.txt} 示例内容：
+\begin{lstlisting}
+vdd1 gnd1 1.14
+vdd1 0.95
+\end{lstlisting}
+
+\paragraph{STA 标称电压}
+\begin{lstlisting}
+ta_ppx_use_sta_nominal_voltage [0|1]
+\end{lstlisting}
+指定在 STA 标称电压（通过 STA 环境——\texttt{.lib}/SDC 指定）与 RedHawk 标称电压（通过 \gsr{VDD_NETS} 关键字指定）冲突时，PJX 使用 STA 电压作为标称。创建的时序延迟降额因子用于将 instance 单元延迟从 STA 标称电压缩放到 RedHawk 静态/动态分析后标注到 instance 的有效电压。
+
+示例：
+\begin{lstlisting}
+setvar ta_ppx_use_sta_nominal_voltage 1
+\end{lstlisting}
+默认：false。以 RedHawk 环境中指定的标称电压为参考。
+
+\subsection{处理理想时钟}
+\subsubsection*{Handling Ideal Clocks}
+
+若设计中存在理想时钟（即部分时钟的时钟树综合未完成，根时钟驱动器直接驱动大量 instance），则不应将其标记为 propagated。否则，由于时钟驱动器扇出极大，RedHawk 结果会非常悲观。要在传播其他时钟的同时不传播理想时钟，可在上述 \cmd{getSTA} 命令前插入：
+\begin{lstlisting}
+ta_set_clock_delay -propagated [get_clocks *]
+ta_set_clock_delay -ideal [get_clocks clkA]
+set ADS_ALLOW_IDEAL_CLOCKS 1
+\end{lstlisting}
+上例中，除 \texttt{clkA} 设为 ``ideal'' 外，所有时钟均标记为 ``propagated''。
+
+默认情况下，若设计中存在理想时钟，\cmd{getSTA} 会报错。因此将 \texttt{ADS\_ALLOW\_IDEAL\_CLOCKS} 设为 1。
+
+若存在理想时钟，建议在 RedHawk 分析中忽略其驱动器，使用 \gsr{IGNORE_INSTANCES} 关键字。也可使用 GSR 关键字设置 \gsr{USE_LIB_MAX_CAP 1} 限制此类驱动器单元的最大负载电容。
+
+\subsection{多线程}
+\subsubsection*{Multi-threading}
+
+ATE 默认以多线程模式运行，利用所有可用处理器。若需限制 ATE 使用的处理器数量，可在命令文件开头添加：
+\begin{lstlisting}
+setvar max_threads <number_of_processors>
+\end{lstlisting}
+若指定数量小于 2，ATE 以单线程模式运行。
+
+\subsection{ATE 特殊变量}
+\subsubsection*{Special ATE Variables}
+
+ATE 特殊变量在 ATE 命令文件中用于设置参数值与功能，本节描述其用法。变量默认值已设为最优精度与性能。必要时可在调用 \cmd{getSTA} 前使用以下语法设置：
+\begin{lstlisting}
+set <variable_name> <value>
+\end{lstlisting}
+
+\paragraph{ADS\_ALLOW\_IDEAL\_CLOCKS [ 0 | 1 ]}
+\begin{itemize}
+  \item \texttt{0}：若时钟为 ideal 则不生成时序文件。含 ideal 时钟的时序文件会导致 RedHawk 结果不准确，因为由该时钟驱动的寄存器看不到时钟树延迟。默认。
+  \item \texttt{1}：即使时钟为 ideal 也生成时序文件。
+\end{itemize}
+
+\paragraph{ADS\_ALLOWED\_PCT\_OF\_NON\_CLOCKED\_REGISTERS <percent\_registers>}
+若设计中超过指定百分比的寄存器未被时钟驱动，ATE 会报错，因为此类寄存器之后的所有组合逻辑得不到 TW，从而降低动态分析精度。默认：5\%。
+
+\paragraph{ADS\_CELLS\_NEED\_INPUT\_TW \{ null | <ref\_cell1> <ref\_cell2> ... \} | ALL}
+指定需要输入时序窗的单元。可使用通配符指定 cell 名。
+\begin{itemize}
+  \item \texttt{\{\}}：不为非时钟输入 pin 生成 TW，以节省运行时间与磁盘空间，因为 RedHawk 不使用它们。但若设计含电源开关（header 与 footer switch），RedHawk 需要其控制 pin 的 TW 以进行 ramp-up 分析。默认。
+  \item \texttt{<ref\_cell1> ...}：为指定参考单元的所有 instance 的所有 pin 生成 TW。名称可使用 ``*'' 通配符。
+  \item \texttt{ALL}：为所有 pin 生成 TW。
+\end{itemize}
+
+\paragraph{ADS\_INPUT\_PINS\_NEED\_TW \{null | <pin\_1> <pin\_2> ... \}}
+指定需要时序窗的输入 pin。本变量与 \texttt{ADS\_PINS\_NO\_TW} 互斥。可使用通配符指定 pin 名。
+\begin{itemize}
+  \item \texttt{\{\}}：处理 \texttt{ADS\_CELLS\_NEED\_INPUT\_TW} 所列单元的非时钟输入 pin 时，为这些单元的所有输入 pin 创建 TW。默认。
+  \item \texttt{\{ pin\_1 pin\_2 … \}}：处理 \texttt{ADS\_CELLS\_NEED\_INPUT\_TW} 所列单元时，仅为这些单元的指定输入 pin 创建 TW。典型用途包括处理带内部电源开关的存储器。存储器常有大量输入 pin，如 DATA、ADDRESS 与电源开关控制 pin。名称可使用 ``*'' 通配符。
+\end{itemize}
+
+\paragraph{ADS\_PINS\_NO\_TW \{ null | <pin\_1> <pin\_2> ... \}}
+指定不创建 TW 的 pin。本变量与 \texttt{ADS\_INPUT\_PINS\_NEED\_TW} 互斥。
+\begin{itemize}
+  \item \texttt{\{\}}：处理 \texttt{ADS\_CELLS\_NEED\_INPUT\_TW} 指定单元的非时钟输入 pin 时，为这些单元的所有输入 pin 创建 TW。默认。
+  \item \texttt{\{ pin\_1 pin\_2 … \}}：处理 \texttt{ADS\_CELLS\_NEED\_INPUT\_TW} 指定单元时，不为这些单元的指定 pin 创建 TW。注意：不应使用本变量排除输出 pin，因为除电源开关单元输出 pin 外，输出 pin 的 TW 为 RedHawk 动态分析所必需。
+\end{itemize}
+
+\subsection{getSTA 命令选项}
+\subsubsection*{getSTA Command Options}
+
+ATE shell 中 \cmd{getSTA} 命令语法为：
+\begin{lstlisting}
+getSTA <net_pattern> [<optional_arguments>]
+\end{lstlisting}
+其中 \texttt{<net\_pattern>} 通常设为 \texttt{*}，表示应为所有网络生成时序信息。
+
+可使用通配符为特定网络模式生成时序信息，例如：
+\begin{lstlisting}
+getSTA block1/*
+\end{lstlisting}
+
+可选参数如下：
+\begin{itemize}
+  \item \opt{-output} \texttt{<file>}：时序文件名（默认：\texttt{<top\_design\_name>.timing}）
+  \item \opt{-block}：为主 IO port 打印时序窗
+  \item \opt{-compact}：以 sta-compact 格式生成文件（默认）
+  \item \opt{-nocompact}：以 legacy 格式生成文件
+  \item \opt{-gz}：以 gzip 格式生成文件
+\end{itemize}
+
+建议使用 sta-compact 格式（默认）以节省磁盘空间，在几乎不损失信息的情况下显著缩小时序文件，对 ATE 运行时间影响可忽略，并在 RedHawk 后续加载时序文件时节省运行时间。时序文件语法见附录 C「Timing Data File」。使用 \opt{-gz} gzip 选项可进一步减小文件。除非已禁用多线程，否则无运行时间损失。
+
+若在 block 级而非顶层运行 ATE，应使用 \opt{-block} 选项，同时为 primary input/output port 生成时序窗。
+
+\section{调用 ATE}
+\subsection*{Invoking ATE}
+
+运行 ATE 前须定义环境变量 \texttt{APACHEROOT}。例如：
+\begin{lstlisting}
+setenv APACHEROOT /install_dir/apacheda/<RedHawk_release>
+set path = ($APACHEROOT/bin $path)
+\end{lstlisting}
+
+然后调用：
+\begin{lstlisting}
+ate ate.cmd >& ate.log
+\end{lstlisting}
+
+\subsection{ATE 命令行选项}
+\subsubsection*{ATE Command Line Options}
+
+ATE 命令行可用以下选项：
+\begin{itemize}
+  \item \opt{-lmwait}：若 license 不可用则等待
+  \item \opt{-v}：显示 ATE 版本
+\end{itemize}
+
+\section{输出文件}
+\subsection*{Output Files}
+
+ATE 创建以下文件与目录：
+\begin{itemize}
+  \item \texttt{<top\_design\_name>.timing}：时序文件
+  \item \texttt{ads\_non\_clocked\_registers.rpt}：未时钟驱动寄存器列表
+  \item \texttt{.ate/}：临时内部文件目录
+  \item 多线程运行时，ATE 将 \texttt{LoadParasiticFile} 阶段输出存入 \texttt{./LoadParasiticFile.log}，避免覆盖其输出。
+  \item \texttt{<top\_design\_name>.html}：提供高层运行统计，如各任务与子任务运行时间/内存分解表、版本与主机信息。评估 ATE 性能时应首先查看此文件。图~\ref{fig:rh-ate-perf} 为其中表示例。
+\end{itemize}
+
+\figplaceholder{Figure 19-2}{ATE 性能表}
+\label{fig:rh-ate-perf}
+
+\section{在 RedHawk 中指定 STA 文件}
+\subsection*{Specifying the STA file in RedHawk}
+
+可使用 GSR 关键字 \gsr{STA_FILE} 在 RedHawk 中指定时序文件：
+\begin{lstlisting}
+STA_FILE {
+     <top_design_name> <file>
+}
+\end{lstlisting}
+更多详情见附录 C「STA\_FILES」一节。RedHawk 在 \cmd{setup design} 阶段导入该文件。
+
+亦可使用 \cmd{import sta} TCL 命令导入时序文件，以支持使用不同时序文件的增量分析。例如：
+\begin{lstlisting}
+import gsr design.gsr
+setup design
+perform pwrcalc
+perform extraction -power -ground -c
+perform dynamic
+import sta new.timing
+perform dynamic
+\end{lstlisting}
+
+\section{ATE 验证}
+\subsection*{ATE Validation}
+
+\subsection{确保时序文件创建与使用的正确性}
+\subsubsection*{Ensuring Correct Creation and Use of the Timing File}
+
+为有效审查时序文件创建与使用，可参考图~\ref{fig:rh-ate-validation} 的数据流，其中展示输入文件、STA 分析相关 ATE 任务与 STA 文件对应内容。
+
+\figplaceholder{Figure 19-3}{ATE 数据流与任务}
+\label{fig:rh-ate-validation}
+
+按此流程做快速检查，可迅速解决基本设置问题（如使用错误文件或缺少时钟定义），无需在生成错误 RedHawk 结果后再回溯。
+
+此外，该流程可在不花费时间处理无关输入文件或运行日志的情况下减少潜在问题。例如，若 STA 文件的 CLOCK 条目有问题，应首先查看 SDC 文件及 Load Timing Constraints 任务的输出消息，然后可沿流程系统回溯到先前任务与相关输入文件。
+
+关键结果检查汇总于以下各节。
+
+\subsection{设置是否正确？}
+\subsubsection*{Is the setup OK?}
+\begin{enumerate}
+  \item 确认配置文件中指定的所有文件存在。缺失文件会被报告。
+  \item 确认没有 behavioral Verilog 文件。STA 基于门级 Verilog 文件，behavioral Verilog 会引发语法错误。
+  \item 确认没有大量缺少 Liberty 和/或 Verilog 模块定义的单元。ATE 将此类单元转为 black-box 以继续运行，并对每个缺少数据的单元报告：
+\begin{lstlisting}
+VLG-0027: Creating black box for ...
+\end{lstlisting}
+  RedHawk 分析所需的单元不应出现此类消息。
+  \item 确认输入文件一致（即来自同一版本设计数据库）：
+  \begin{itemize}
+    \item Verilog/DEF 与 SDC
+    \item Verilog/DEF 与 SPEF
+    \item 提供给 ATE 的 Verilog/DEF 与提供给 RedHawk 的 DEF
+    \item 提供给 ATE 的 Liberty、SPEF 与提供给 RedHawk 的对应文件
+  \end{itemize}
+  \item 确认 SDC 文件具有正确 TCL 语法。例如，文件不应引用未定义变量，且不应包含第三方工具特有命令/变量。支持标准 TCL、SDC 与 collection 命令。
+  \item 确认 SDC 文件在 \texttt{create\_clock} 或 \texttt{create\_generated\_clock} 语句中包含所有时钟定义。
+  \item 确认若 SDC 命令引用库（使用 \opt{-library} 选项），该库在提供给 ATE 的 Liberty 文件中。
+  \item 确认 SDC 文件引用的库单元（例如 \texttt{set\_driving\_cell} 命令）存在于提供给 ATE 的 Liberty 文件中。
+  \item 确认第一个 Liberty 文件使用的单位约定与 SDC 文件一致。若 SDC 文件使用 \texttt{set\_units} 命令且检测到不一致，ATE 会显示 SHL-0661 消息。
+  \item 确认没有非故意的 ideal 时钟。若设计中有合法的 ideal 时钟，请参阅本节「处理理想时钟」。ATE 在 \cmd{getSTA} 任务中为这些情况显示 SHL-0628 消息。
+\end{enumerate}
+
+\subsection{ATE 是否正常运行？}
+\subsubsection*{Did ATE run properly?}
+\begin{enumerate}
+  \item 从第一个任务开始审查错误消息。多数情况下，解决先前错误也会解决部分后续错误。
+  \item 检查 Load Netlist 任务报告的基本设计统计，例如：
+\begin{lstlisting}
+Info: SHL-0581: Number of instances : 133523773
+Info: SHL-0581: Number of nets                   : 136465158
+Info: SHL-0581: Number of terminals : 1378
+\end{lstlisting}
+  \item 通过审查 \texttt{LoadParasiticFile.log} 中的 ``RC annotation'' 表，确认设计中大多数网络已标注 SPEF。
+  \item 确认 STA 文件创建所需的所有 SDC 约束均被识别。审查 Load Timing Constraint 任务中的错误。若部分时钟未创建，在 \cmd{getSTA} 任务中查看 SHL-0631 消息，检查未时钟驱动寄存器数量是否可忽略。
+  \item 审查 HTML 文件，查看是否有子任务造成运行时间/内存瓶颈。若有，审查该任务发出的 UTL-0031 与 UTL-0032 消息以定位瓶颈。
+\end{enumerate}
+
+\subsection{STA 文件是否良好？}
+\subsubsection*{Is the STA file good?}
+\begin{enumerate}
+  \item 确认大多数寄存器连接到时钟。见 \cmd{getSTA} 任务中的 SHL-0631 消息。
+  \item 确认所有时钟均已写入时序文件的 CLOCK 段，且参数正确。
+  \item 通过审查文件末尾的 TIMING\_WINDOW\_OK 指标，确认已为大多数 instance 创建时序窗条目，例如：
+\begin{lstlisting}
+# #####################################################
+#                      SUMMARY
+# #####################################################
+# Total processed pins : 510831
+# -
+# Pin statistics:
+# TIMING_WINDOW_OK            :      504915 (99%)
+# NO_TIMING_WINDOW            :         5278 (1%)
+# CONST                     :          638 (0%)
+\end{lstlisting}
+  例如，对无时序窗的 instance pin，可能有如下条目：
+\begin{lstlisting}
+#BlockA/InstB/Y NO_TW {}
+\end{lstlisting}
+  可能由多种原因引起，包括：
+  \begin{itemize}
+    \item 触发器未连接到时钟。从此 FF 起的所有逻辑将没有 TW。
+    \item 时序路径中的 black-box 阻止 TW 传播。该 black-box 之后的所有 instance 将没有 TW。
+    \item case analysis 设置不正确，导致时钟 mux 中时序弧断裂。
+  \end{itemize}
+  \item 检查 RedHawk 报告的统计，例如：
+\begin{lstlisting}
+Instances (CONST/assigned/Total) 1340/30667/36232
+Nets (CONST/assigned/Total) 1675/35447/38885
+Pin slew (missing/assigned) 26893/105005
+Instance input/clock slew missing 2564 (use GSR default
+input_transition)
+Instance output slew missing 2850 (use average input slew)
+Total number of instances traced (CONST/STA/tracer) =
+       32007/0 (1340/30667/0)
+Total number of nets traced (CONST/STA/tracer) = 37122/0
+       (1675/35447/0)
+Total number of leaf clock nets = 394
+Total number of CLK pins traced as clock = 6630 / 6635
+Active/Quiet Summary:
+    Instance Summary:
+        Total = 36232
+        clock = 859 (active 859)(quiet 0)
+        non-clock = 35373 (active 29808)(quiet 5565)
+    Net Summary:
+        Total = 38885
+        clock = 867 (active 867)(quiet 0)
+        non-clock = 38018 (active 34580)(quiet 3438)
+\end{lstlisting}
+  \item 检查 STA 导入后 RedHawk 在 \texttt{adsRpt} 目录中创建的文件：
+  \begin{itemize}
+    \item \texttt{apache.staBogus}：STA 文件中无法映射到设计（DEF 网表）的 instance 列表
+    \item \texttt{apache.tw0}：设计中未被 STA 文件覆盖的 instance 列表
+    \item \texttt{apache.twclk0}：时钟 pin 未被 STA 文件覆盖的 instance 列表
+    \item \texttt{apache.twclkLate}：时钟到达时间晚于输出信号的 instance 列表
+    \item \texttt{apache.clkPin0}：CLK pin 连接到非时钟网络的 instance 列表
+  \end{itemize}
+\end{enumerate}
+
+\subsection{联系 Ansys 支持}
+\subsubsection*{Contacting Ansys Support}
+
+若需要 Ansys AE 支持，请提供以下信息：
+\begin{itemize}
+  \item 命令文件
+  \item 配置文件
+  \item 标准输出与 \texttt{LoadParasiticFile.log}
+\end{itemize}
+
+若发生崩溃，还请发送运行目录中生成的 \texttt{trace*} 文件。如有可能，还请发送运行所用设计数据。

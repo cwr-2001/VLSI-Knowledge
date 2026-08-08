@@ -1,0 +1,887 @@
+% 第 13 章 ECO Flow
+\bichapter{ECO 流程}{ECO Flow}
+\label{chap:eco}
+
+工程变更指令（engineering change order，ECO）是对已完成或接近完成的设计所做的增量更改。
+可使用 ECO 在无需对整个设计重新综合、布局与布线的情况下，修复功能、时序、噪声与串扰违例；
+也可在保持设计性能的同时实现迟到的设计变更。
+
+下列主题描述 Fusion Compiler 工具支持的各种 ECO 流程，以及在这些流程中执行的任务：
+\begin{itemize}
+  \item 时序或功能变更的通用 ECO 流程（Generic ECO Flow for Timing or Functional Changes）
+  \item Freeze Silicon ECO 流程（Freeze Silicon ECO Flow）
+  \item Signoff ECO 流程（Signoff ECO Flow）
+  \item 增量 Signoff ECO 流程（Incremental Signoff ECO Flow）
+  \item ECO Fusion 流程（ECO Fusion Flow）
+  \item ECO Fusion 电源完整性流程（ECO Fusion Power Integrity Flow）
+  \item 手动实例化备用单元（Manually Instantiating Spare Cells）
+  \item 自动添加备用单元（Automatically Adding Spare Cells）
+  \item 添加可编程备用单元（Adding Programmable Spare Cells）
+  \item 使用 \cmd{eco\_netlist} 命令进行 ECO 更改（Making ECO Changes Using the eco\_netlist Command）
+  \item 使用网表编辑命令进行 ECO 更改（Making ECO Changes Using Netlist Editing Commands）
+  \item 调整单元尺寸（Resizing Cells）
+  \item 在 net 上添加缓冲器（Adding Buffers on Nets）
+  \item 在已布线 net 上添加缓冲器（Adding Buffers on Routed Nets）
+  \item 优化 net 扇出（Optimizing the Fanout of a Net）
+  \item 报告放置 ECO 单元的可用 site（Reporting Available Sites for Placing ECO Cells）
+  \item 识别并撤销非最优 ECO 更改（Identifying and Reverting Nonoptimal ECO Changes）
+  \item 放置 ECO 单元（Placing ECO Cells）
+  \item 将 ECO 单元放置并映射到备用单元（Placing and Mapping ECO Cells to Spare Cells）
+  \item 更新 ECO 单元的电源 net（Updating Supply Nets for ECO Cells）
+  \item 记录对版图所做的更改（Recording the Changes Made to a Layout）
+  \item 执行成组中继器插入与放置的先决条件检查（Performing Prerequisite Check for Group Repeater Insertion and Placement）
+  \item 添加一组中继器（Adding a Group of Repeaters）
+  \item 查询成组中继器（Querying Group Repeater）
+  \item 交换变体单元（Swapping Variant Cell）
+  \item 修复多电压违例（Fixing Multivoltage Violations）
+\end{itemize}
+
+% ============================================================
+\section{时序或功能变更的通用 ECO 流程}
+\subsection*{Generic ECO Flow for Timing or Functional Changes}
+
+当可以灵活地添加新单元并移动或删除现有单元时，使用此流程纳入时序或功能 ECO 更改。
+若设计尚未 tape out，推荐使用此流程。
+
+无约束（unconstrained）ECO 流程包含下列步骤：
+\begin{enumerate}
+  \item 用下列方法之一用 ECO 更改更新设计：
+  \begin{itemize}
+    \item 使用 \cmd{eco\_netlist} 命令，见``使用 \cmd{eco\_netlist} 命令进行 ECO 更改''。
+    \item 使用网表编辑 Tcl 命令，见``使用网表编辑命令进行 ECO 更改''。
+  \end{itemize}
+  \item 使用 \cmd{place\_eco\_cells} 命令更新布局，见``放置 ECO 单元''。
+  \item 向 site 阵列的空白处添加填充单元（filler cells），见``插入填充单元（Inserting Filler Cells）''。
+  为缩短运行时间，在下列情况下使用 \opt{-post\_eco} 选项：
+  \begin{itemize}
+    \item 用 \cmd{create\_stdcell\_fillers} 命令插入金属填充单元时，工具将所插入的填充单元标记为 post-ECO 单元。
+    \item 用 \cmd{remove\_stdcell\_fillers\_with\_violation} 命令移除存在 DRC 违例的填充单元时，工具仅对 post-ECO 单元执行 DRC 检查。
+  \end{itemize}
+  \item 使用 \cmd{route\_eco} 命令更新布线，见``执行 ECO 布线（Performing ECO Routing）''，或手动重布受影响的 net。
+\end{enumerate}
+
+% ============================================================
+\section{Freeze Silicon ECO 流程}
+\subsection*{Freeze Silicon ECO Flow}
+
+若单元布局已固定，且只能更改金属与 via 掩模图形，则使用此流程。
+若设计已 tape out，并希望避免重新生成整套掩模的费用，推荐使用此流程。
+
+要执行 freeze silicon ECO 流程，块中必须包含备用单元（spare cells）。
+可在设计流程的任意时刻用下列方法之一向块添加备用单元：
+\begin{itemize}
+  \item 手动实例化备用单元，见``手动实例化备用单元''。
+  \item 布局后用 \cmd{add\_spare\_cells} 命令自动添加备用单元，见``自动添加备用单元''。
+  \item 在芯片收尾（chip finishing）阶段用 \cmd{create\_stdcell\_fillers} 添加可编程备用单元，见``添加可编程备用单元''。
+\end{itemize}
+
+Freeze silicon ECO 流程包含下列步骤：
+\begin{enumerate}
+  \item 将 \appopt{design.eco\_freeze\_silicon\_mode} 应用选项设为 \texttt{true}，以在 freeze silicon 模式下启用 ECO 更改。
+  \item 用下列方法之一用 ECO 更改更新设计：
+  \begin{itemize}
+    \item 使用 \cmd{eco\_netlist} 命令，见``使用 \cmd{eco\_netlist} 命令进行 ECO 更改''。
+    \item 使用网表编辑 Tcl 命令，见``使用网表编辑命令进行 ECO 更改''。
+  \end{itemize}
+  \item 使用 \cmd{check\_freeze\_silicon} 命令分析 ECO 单元到备用单元的映射。
+  \item 使用 \cmd{place\_freeze\_silicon} 命令自动将全部 ECO 更改映射到备用单元，或使用 \cmd{map\_freeze\_silicon} 命令将每个 ECO 单元手动映射到特定备用单元，见``将 ECO 单元放置并映射到备用单元''。
+  \item 使用 \cmd{route\_eco} 命令更新布线，见``执行 ECO 布线''，或手动重布受影响的 net。
+\end{enumerate}
+
+% ============================================================
+\section{Signoff ECO 流程}
+\subsection*{Signoff ECO Flow}
+
+在 Fusion Compiler 中完成布局布线后，若设计仍有时序或设计规则违例，可在 PrimeTime 中修复这些违例；也可在 PrimeTime 中进行功耗或面积回收（power or area recovery）。
+
+若在 PrimeTime 中对设计做了更改，可生成 ECO 变更列表（change list）文件，并利用 Fusion Compiler 的 ECO 能力将这些更改纳入设计，如图~\ref{fig:fc-signoff-eco} 所示。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.9\textwidth}{\centering\vspace{1.2cm}
+\textit{（原书 Figure 217：Signoff ECO Flow）}\\[0.4em]
+\small Fusion Compiler ECO $\leftrightarrow$ ECO change list file $\leftrightarrow$ PrimeTime timing ECO /\\
+PrimeTime timing and SI analysis / PrimeTime area and power recovery；\\
+StarRC parasitic extraction；Violations? Yes/No
+\vspace{1.2cm}}}
+\caption{Signoff ECO 流程}
+\label{fig:fc-signoff-eco}
+\end{figure}
+
+纳入 PrimeTime ECO 更改的步骤如下：
+\begin{enumerate}
+  \item 通过 source 含有网表编辑命令的 PrimeTime ECO 变更列表 Tcl 文件来更新设计。
+  \item 使用 \cmd{place\_eco\_cells} 命令更新布局，示例如下：
+\begin{lstlisting}
+fc_shell> place_eco_cells -legalize_mode minimum_physical_impact \
+   -eco_changed_cells -legalize_only -displacement_threshold 10
+\end{lstlisting}
+  关于 \cmd{place\_eco\_cells} 的更多信息，见``放置 ECO 单元''。
+  \item 向 site 阵列空白处添加填充单元，见``插入填充单元''。
+  为缩短运行时间，在下列情况下使用 \opt{-post\_eco} 选项：
+  \begin{itemize}
+    \item 用 \cmd{create\_stdcell\_fillers} 插入金属填充单元时，工具将所插入填充单元标记为 post-ECO 单元；
+    \item 用 \cmd{remove\_stdcell\_fillers\_with\_violation} 移除存在 DRC 违例的填充单元时，工具仅对 post-ECO 单元执行 DRC 检查。
+  \end{itemize}
+  \item 使用 \cmd{route\_eco} 更新布线，见``执行 ECO 布线''，或手动重布受影响的 net。
+\end{enumerate}
+
+% ============================================================
+\section{增量 Signoff ECO 流程}
+\subsection*{Incremental Signoff ECO Flow}
+
+在 PrimeTime 中做 ECO 更改并经 Fusion Compiler 无约束 ECO 流程纳入后，可能需要在工具间多次迭代才能达到所需 QoR 目标。
+为缩短整体周转时间，可用增量 signoff ECO 流程降低每次迭代的运行时间。
+该流程由 Fusion Compiler 生成增量设计数据，使你能在 StarRC 中做增量提取，并在 PrimeTime 中做增量时序分析与 ECO，如下图所示。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.9\textwidth}{\centering\vspace{1.2cm}
+\textit{（原书 Figure 218：Incremental Signoff ECO Flow）}\\[0.4em]
+\small Fusion Compiler incremental signoff ECO flow $\leftrightarrow$ Incremental design data /\\
+ECO change list file $\leftrightarrow$ StarRC incremental parasitic extraction $\leftrightarrow$ Incremental parasitics $\leftrightarrow$\\
+PrimeTime incremental timing analysis and ECO $\leftrightarrow$ PrimeTime timing ECO
+\vspace{1.2cm}}}
+\caption{增量 Signoff ECO 流程}
+\label{fig:fc-incr-signoff-eco}
+\end{figure}
+
+在 Fusion Compiler 内执行增量 signoff ECO 流程时，使用 \cmd{record\_signoff\_eco\_changes} 命令。
+该命令将 PrimeTime ECO 纳入设计库、跟踪对设计所做的全部更改，并生成运行 StarRC 增量提取以及 PrimeTime 增量时序分析与 ECO 所需的增量文件。
+
+Fusion Compiler 增量 signoff ECO 流程包含下列步骤：
+\begin{enumerate}
+  \item 使用 \cmd{open\_block} 打开设计库。
+  \item 使用 \cmd{record\_signoff\_eco\_changes} \opt{-start} \opt{-input} 纳入 PrimeTime ECO 更改并开始跟踪对设计的 ECO 更改，示例如下：
+\begin{lstlisting}
+fc_shell> record_signoff_eco_changes -start -input pt_eco.tcl
+\end{lstlisting}
+  \item （可选）使用网表编辑命令对设计做额外时序 ECO 更改。
+  \begin{noteBox}
+  不要对设计做功能 ECO 更改。若这样做，工具将停止跟踪正在对设计执行的 ECO 更改。
+  \end{noteBox}
+  \item 使用 \cmd{place\_eco\_cells} 放置 ECO 单元。
+  \item 使用 \cmd{route\_eco} 更新布线，见``执行 ECO 布线''，或手动重布受影响的 net。
+  \item 使用 \cmd{record\_signoff\_eco\_changes} \opt{-stop} 停止跟踪 ECO 更改并完成增量 signoff ECO 流程，示例如下：
+\begin{lstlisting}
+fc_shell> record_signoff_eco_changes -stop
+\end{lstlisting}
+\end{enumerate}
+
+% ============================================================
+\section{ECO Fusion 流程}
+\subsection*{ECO Fusion Flow}
+
+Fusion Compiler ECO Fusion 流程允许你在 Fusion Compiler 工具内使用 PrimeTime 物理感知 ECO 能力以及 StarRC 提取能力（In-Design signoff extraction）。
+可在实现流程的极晚阶段用此流程修复时序与 DRC 违例，并改善面积与功耗 QoR。
+
+Fusion Compiler ECO Fusion 流程包含下列步骤：
+\begin{enumerate}
+  \item 使用 \cmd{set\_pt\_options} 指定在 Fusion Compiler 内运行 PrimeTime ECO 所需的设置。
+  下列示例指定 PrimeTime 可执行文件路径以及分布式处理设置：
+\begin{lstlisting}
+fc_shell> set_host_options -name pteco_host_option \
+   -submit_command "/lsf/bin/bsub -R \"rusage\[mem=\$MEM\]\""
+fc_shell> set_pt_options -pt_exec /snps_tools/PT/pt_shell \
+   -host_option pteco_host_option
+\end{lstlisting}
+  若当前工作目录中存在 \texttt{.synopsys\_pt.setup} 文件，Fusion Compiler 会使用其中的信息。
+  也可用 \cmd{set\_pt\_options} 的 \opt{-pre\_link\_script} 与 \opt{-post\_link\_script} 指定额外的 PrimeTime 设置。
+  更多信息见 \cmd{set\_pt\_options} 的 man page。
+  \item 按如下方式设置 StarRC 提取：
+  \begin{enumerate}
+    \item 确保已启用 StarRC 提取。
+    StarRC 提取由 \appopt{extract.starrc\_mode} 应用选项控制。默认值为 \texttt{fusion\_adv}。也可设为 \texttt{in-design} 或 \texttt{none}。
+    若要使用原生提取器（native extractor），将该值设为 \texttt{none}。
+    \item 使用 \cmd{set\_starrc\_options} \opt{-config} 指定运行 StarRC 提取的配置文件。
+  \end{enumerate}
+  \item 使用 \cmd{eco\_opt} 命令执行优化。
+  默认情况下，\cmd{eco\_opt} 使用 PrimeTime ECO 能力修复时序（setup 与 hold）与 DRC 违例、移除冗余缓冲器，并改善总功耗 QoR；随后用 Fusion Compiler ECO 布局布线能力纳入这些 ECO 更改。
+  可用 \opt{-type} 选项控制优化类型。
+  下列示例仅用穷尽路径分析（exhaustive path-based analysis）修复时序与 DRC 违例：
+\begin{lstlisting}
+fc_shell> eco_opt -pba_mode exhaustive -types {timing drc}
+\end{lstlisting}
+  下列示例改善漏电功耗 QoR，但不纳入 ECO 更改，而是生成包含 ECO 更改的文件：
+\begin{lstlisting}
+fc_shell> eco_opt -pba_mode exhaustive -types {timing drc} \
+   -write_change_file_only
+\end{lstlisting}
+  更多信息见 \cmd{eco\_opt} 的 man page。
+  \item 使用 \cmd{check\_pt\_qor} 分析 PrimeTime QoR。更多信息见该命令的 man page。
+\end{enumerate}
+
+\begin{noteBox}
+运行 \cmd{eco\_opt} 时，Fusion Compiler 会根据其时序分析设置（如 derating 因子、片上变化设置等）指定 PrimeTime 设置。
+因此，为获得最佳收敛，请确保 postroute 阶段的 Fusion Compiler 时序分析设置与 PrimeTime 一致。
+可用 \cmd{check\_consistency\_settings} 识别两者设置的差异。
+\end{noteBox}
+
+% ============================================================
+\section{ECO Fusion 电源完整性流程}
+\subsection*{ECO Fusion Power Integrity Flow}
+
+Fusion Compiler ECO Fusion 电源完整性流程允许你使用 RedHawk Fusion 电源轨分析功能识别电源完整性问题，并用 PrimeTime 物理感知 ECO 能力加以修复。
+
+该流程包含下列步骤：
+\begin{enumerate}
+  \item 设置 \appopt{rail.database} 应用选项，指定保存 RedHawk Fusion 电源轨分析结果的路径。
+  \item 使用 \cmd{analyze\_rail} \opt{-voltage\_drop} \texttt{dynamic\_vcd} 或 \cmd{analyze\_rail} \opt{-voltage\_drop} \texttt{dynamic\_vectorless} 执行基于动态向量或不基于向量的压降分析。
+  \item 使用 \cmd{set\_pt\_options} 指定在 Fusion Compiler 内运行 PrimeTime ECO 所需的设置。
+  \item 使用 \cmd{eco\_opt} \opt{-type} \texttt{power\_integrity} 修复已识别的电源完整性问题。
+\end{enumerate}
+
+为修复电源完整性（压降）违例，工具在考虑时序与 DRC QoR 的同时对攻击者单元（aggressor cells）进行缩小尺寸（downsize）。
+但该优化要有效，需满足：
+\begin{itemize}
+  \item 攻击者单元不应处于时序或 DRC 关键；
+  \item 单元库中应有更小版本的攻击者单元，且未设置 \texttt{dont\_use} 或 \texttt{dont\_touch} 属性。
+\end{itemize}
+
+下列为运行 ECO Fusion 电源完整性流程的示例脚本：
+\begin{lstlisting}
+set_app_options -name rail.database -value RAIL_DATABASE_BASELINE
+analyze_rail -voltage_drop dynamic_vcd -all_nets \
+   -switching_activity {VCD ./top.vcd top}
+set_pt_options -pt_exec /snps_tools/PT/pt_shell
+eco_opt -type power_integrity
+\end{lstlisting}
+
+% ============================================================
+\section{手动实例化备用单元}
+\subsection*{Manually Instantiating Spare Cells}
+
+可用下列方法之一在块中手动实例化备用单元：
+\begin{itemize}
+  \item 在 Verilog 网表中实例化；
+  \item 使用 \cmd{create\_cell}、\cmd{connect\_pins} 等网表编辑命令添加。
+\end{itemize}
+
+手动实例化备用单元时，应当：
+\begin{itemize}
+  \item 在逻辑层次中均匀分布备用单元，以便更好地处理块内任意位置的 ECO 更改；
+  \item 将其输入适当地接到电源或地，以防止备用单元产生噪声并消耗功耗。
+\end{itemize}
+
+若单元满足下列条件，工具会自动将其识别为备用单元：
+\begin{itemize}
+  \item 不是仅物理单元（physical-only cell）；
+  \item 除时钟 pin 外，所有输入均未连接或接到逻辑常数；备用单元的时钟 pin（若有）可连接到时钟网络；
+  \item 所有输出均未连接。
+\end{itemize}
+
+若在对块执行物理综合之前实例化备用单元，工具会在后续物理综合步骤中放置并合法化这些备用单元。
+但若在已优化、已布局并合法化的块中实例化备用单元，则须用下列步骤放置并合法化：
+\begin{enumerate}
+  \item 使用 \cmd{spread\_spare\_cells} 分散备用单元。
+  默认情况下，该命令在整个 core 区域均匀分布并放置全部备用单元。
+  可用下列两种方法之一指定要放置的备用单元：
+  \begin{itemize}
+    \item 用 \opt{-cells} 放置特定备用单元；
+    \item 用 \opt{-voltage\_areas} 放置属于特定电压区域的全部备用单元。
+  \end{itemize}
+  可如下控制备用单元放置：
+  \begin{itemize}
+    \item 用 \opt{-boundary} 指定放置备用单元的区域；
+    \item 用 \opt{-ignore\_blockage\_types} 忽略特定类型的布局 blockage。默认情况下 \cmd{add\_spare\_cells} 会遵守所有布局 blockage 类型；
+    \item 用 \opt{-random\_distribution} 忽略当前单元密度并随机放置备用单元；
+    \item 用 \opt{-density\_aware\_ratio} 指定按单元密度分布放置的备用单元百分比，其余随机放置。默认全部按密度分布放置。例如 \opt{-density\_aware\_ratio} \texttt{80} 表示 80\% 按密度、20\% 随机放置。
+  \end{itemize}
+  \item 使用 \cmd{place\_eco\_cells} \opt{-legalize\_only} \opt{-cells} 合法化备用单元。
+\end{enumerate}
+
+% ============================================================
+\section{自动添加备用单元}
+\subsection*{Automatically Adding Spare Cells}
+
+布局与优化之后，可用下列步骤添加备用单元并合法化：
+\begin{enumerate}
+  \item 使用 \cmd{add\_spare\_cells} 添加备用单元，并指定下列信息：
+  \begin{itemize}
+    \item 用 \opt{-cell\_name} 指定备用单元名称前缀；
+    \item 用下列两种方法之一指定要插入的备用单元类型与数量：
+    \begin{itemize}
+      \item 用 \opt{-lib\_cell} 与 \opt{-num\_instances} 指定库单元及每种实例数。例如各插入 250 个 AND2 与 OR2：
+\begin{lstlisting}
+fc_shell> add_spare_cells -cell_name spare \
+   -lib_cell {AND2 OR2} -num_instances 250
+\end{lstlisting}
+      \item 用 \opt{-num\_cells} 为各库单元指定不同实例数。例如插入 200 个 NAND2 与 150 个 NOR2：
+\begin{lstlisting}
+fc_shell> add_spare_cells -cell_name spare \
+   -num_cells {NAND2 200 NOR 150}
+\end{lstlisting}
+    \end{itemize}
+    \item （可选）用 \opt{-repetitive\_window} 指定在布局区域中重复的放置窗口。
+    例如在重复的 $20\times20$ 微米窗口中各添加 15 个 AND2 与 OR2：
+\begin{lstlisting}
+fc_shell> add_spare_cells -cell_name spare \
+  -lib_cell {AND2 OR2} -num_instances 15 \
+  -repetitive_window {20 20}
+\end{lstlisting}
+    在重复的 $25\times20$ 微米窗口中添加 20 个 NAND2 与 15 个 NOR2：
+\begin{lstlisting}
+fc_shell> add_spare_cells -cell_name spare \
+   -num_cells {NAND2 20 NOR 15} -repetitive_window {25 20}
+\end{lstlisting}
+  \end{itemize}
+  默认 \cmd{add\_spare\_cells} 在整个设计中均匀分布备用单元。要在特定范围内分布：
+  \begin{itemize}
+    \item 层次块：用 \opt{-hier\_cell}。工具在包围该层次块全部单元的矩形区域内分布；
+    \item 边界框：用 \opt{-boundary}；
+    \item 电压区域：用 \opt{-voltage\_areas}。
+  \end{itemize}
+  还可进一步控制放置：
+  \begin{itemize}
+    \item \opt{-ignore\_blockage\_types}：忽略特定类型布局 blockage；
+    \item \opt{-random\_distribution}：忽略密度并随机放置；
+    \item \opt{-density\_aware\_ratio}：按密度放置的百分比（其余随机）；
+    \item \opt{-input\_pin\_connect\_type}：指定备用单元输入 pin 的连接类型，有效值为 \texttt{tie\_low}、\texttt{tie\_high} 或 \texttt{open}。
+  \end{itemize}
+  \item 使用 \cmd{place\_eco\_cells} \opt{-legalize\_only} \opt{-cells} 合法化备用单元。
+\end{enumerate}
+
+% ============================================================
+\section{添加可编程备用单元}
+\subsection*{Adding Programmable Spare Cells}
+
+若 vendor 提供，Fusion Compiler 支持可编程备用单元（programmable spare cells），亦称门阵列填充单元（gate array filler cells）。
+这些单元可通过金属掩模更改进行编程以实现 ECO，从而降低掩模成本并缩短结果交付时间。
+
+插入可编程备用单元的步骤：
+\begin{enumerate}
+  \item 通过对标准单元与可编程备用单元对应的库单元设置相同的 \texttt{psc\_type\_id} 属性，指定标准单元可映射到的可编程备用单元。
+  下列示例指定：
+  \begin{itemize}
+    \item 名为 BUF1 与 INV1 的标准单元可映射到名为 fill1x 的可编程备用单元（\texttt{psc\_type\_id} 设为 1）；
+    \item 名为 NAND2 与 NOR2 的标准单元可映射到名为 fill2x 的可编程备用单元（\texttt{psc\_type\_id} 设为 2）。
+  \end{itemize}
+\begin{lstlisting}
+fc_shell> set_attribute [get_lib_cells fill_lib/fill1x] \
+   psc_type_id 1
+fc_shell> set_attribute [get_lib_cells stdcell_lib/BUF1] \
+   psc_type_id 1
+fc_shell> set_attribute [get_lib_cells stdcell_lib/INV1] \
+   psc_type_id 1
+fc_shell> set_attribute [get_lib_cells fill_lib/fill2x] \
+   psc_type_id 2
+fc_shell> set_attribute [get_lib_cells stdcell_lib/NAND2] \
+   psc_type_id 2
+fc_shell> set_attribute [get_lib_cells stdcell_lib/NOR2] \
+   psc_type_id 2
+\end{lstlisting}
+  \item 使用 \cmd{create\_stdcell\_fillers} 插入可编程备用单元。例如插入 fill1x 与 fill2x：
+\begin{lstlisting}
+fc_shell> create_stdcell_fillers \
+        -lib_cells {fill_lib/fill1x fill_lib/fill2x}
+\end{lstlisting}
+\end{enumerate}
+
+在 ECO 流程中，工具根据 \texttt{psc\_type\_id} 属性设置、单元宽度与电压区域，将 ECO 单元与可编程备用单元交换。
+若工具从设计中移除 ECO 单元，可重用对应的可编程备用单元。
+
+% ============================================================
+\section{使用 eco\_netlist 命令进行 ECO 更改}
+\subsection*{Making ECO Changes Using the eco\_netlist Command}
+
+可使用 \cmd{eco\_netlist} 命令对块进行 ECO 更改。
+
+若使用 freeze silicon ECO 流程，在运行 \cmd{eco\_netlist} 之前，须将 \appopt{design.eco\_freeze\_silicon\_mode} 设为 \texttt{true}。
+
+使用 \cmd{eco\_netlist} 时，用下列两种方法之一进行 ECO 更改：
+\begin{itemize}
+  \item 用 \opt{-by\_verilog\_file} 指定包含 ECO 更改的 golden Verilog 网表；
+  \item 用 \opt{-block} 指定包含 ECO 更改的 golden 块。
+  使用 \opt{-block} 时，默认：
+  \begin{itemize}
+    \item 工具假定 golden 块在当前设计库中；要指定不同设计库，用 \opt{-golden\_lib}；
+    \item 工具对当前设计做 ECO 更改；要对不同设计更改，用 \opt{-working\_block}；要用 \opt{-working\_lib} 指定含该设计的设计库。
+  \end{itemize}
+\end{itemize}
+
+工具将工作设计与输入 Verilog 网表或 golden 设计比较，并生成包含实现功能更改的网表编辑 Tcl 命令的变更文件。
+必须用 \opt{-write\_changes} 指定输出文件名。
+
+默认情况下，工具忽略下列差异：
+\begin{itemize}
+  \item 仅物理单元的差异。要用 \opt{-compare\_physical\_only\_cells} 考虑这些差异；
+  \item 时序 ECO 更改，如被调整尺寸的单元或被添加/移除的中继器。要用 \opt{-extract\_timing\_eco\_changes} 在功能 ECO 之外同时考虑时序 ECO；
+  \item 电源与地对象的差异。
+\end{itemize}
+
+要对工作设计应用 ECO 更改，source \cmd{eco\_netlist} 生成的变更文件，示例如下：
+\begin{lstlisting}
+fc_shell> eco_netlist -by_verilog_file eco.v \
+   -compare_physical_only_cells -write_changes eco_changes.tcl
+fc_shell> source eco_changes.tcl
+\end{lstlisting}
+
+% ============================================================
+\section{使用网表编辑命令进行 ECO 更改}
+\subsection*{Making ECO Changes Using Netlist Editing Commands}
+
+若 ECO 更改很少，可用网表编辑命令更新设计。
+若使用 freeze silicon ECO 流程，在运行网表编辑命令之前，须将 \appopt{design.eco\_freeze\_silicon\_mode} 设为 \texttt{true}。
+
+网表编辑命令列表见 \textit{Fusion Compiler Data Model User Guide} 中的 Common Design Objects 主题。
+
+\subsection{使用 ECO 脚本进行网表编辑}
+\subsubsection*{Using ECO Scripts for Netlist Editing}
+
+Fusion Compiler 支持在设计规划期间使用 ECO 脚本更改网表。可使用：
+\begin{itemize}
+  \item \cmd{write\_split\_net\_eco}：将物理多扇出 net 的分支上推到顶层；
+  \item \cmd{write\_push\_down\_eco}：将标准单元树下推一层；
+  \item \cmd{write\_spare\_ports\_eco}：在子块上创建备用端口与 net。
+\end{itemize}
+
+更多信息见 \textit{Fusion Compiler Design Planning User Guide} 中的 Generating ECO Scripts for Netlist Editing 主题。
+
+% ============================================================
+\section{调整单元尺寸}
+\subsection*{Resizing Cells}
+
+可用 \cmd{size\_cell} 调整单元尺寸，示例如下：
+\begin{lstlisting}
+fc_shell> size_cell U21 -lib_cell AND2X4
+\end{lstlisting}
+
+若通过将 \appopt{design.eco\_freeze\_silicon\_mode} 设为 \texttt{true} 启用 freeze silicon 模式，默认情况下 \cmd{size\_cell} 在调整尺寸前会检查在五倍单位 site 高度距离内是否有兼容备用单元。若无兼容备用单元，则不调整该单元。
+\begin{itemize}
+  \item 用 \opt{-max\_distance\_to\_spare\_cell} 控制该距离；
+  \item 用 \opt{-not\_spare\_cell\_aware} 禁用此功能。
+\end{itemize}
+
+\subsection{撤销尺寸调整期间所做的更改}
+\subsubsection*{Reverting Changes Made During Resizing}
+
+要用 \cmd{revert\_cell\_sizing} 撤销由 \cmd{size\_cell} 所做的 ECO 更改。
+用 \opt{-include\_adjacent\_sized\_cells} 可同时包含同一行中与指定单元相邻的已调整尺寸单元。
+使用该选项时，默认还撤销指定单元两侧紧邻的已调整尺寸单元；若再使用 \opt{-adjacent\_cell\_distance}，工具会在同一行中递归撤销在指定距离内相邻的已调整尺寸单元。
+
+% ============================================================
+\section{在 net 上添加缓冲器}
+\subsection*{Adding Buffers on Nets}
+
+要对连接到指定 pin 的 net 添加缓冲器，使用 \cmd{add\_buffer} 命令。
+使用时指定下列选项：
+\begin{itemize}
+  \item \opt{-new\_net\_names}：指定要添加的新 net 名称。添加缓冲器时每个缓冲器须一个 net 名；添加反相器对时每对须两个 net 名。
+  \item \opt{-new\_cell\_names}：指定要添加的新单元名称。添加缓冲器时每个缓冲器须一个单元名；添加反相器对时每对须两个单元名。
+  \item \opt{-inverter\_pair}：添加反相器对而非缓冲器单元。须提供具有反相输出的库单元。
+  \item \opt{-respect\_voltage\_areas}：在电压区域层次内插入缓冲器，使其物理上位于对应布局中。与 \opt{-snap} 互斥。
+  \item \opt{-no\_of\_cells}：指定每个 net 要插入的缓冲器单元或反相器对数。
+  \item \opt{-object\_list}：指定须缓冲的 net、pin 或端口列表。若其单元已放置，新缓冲器或反相器对会靠近指定 pin 或端口放置。
+  \item \opt{-lib\_cell}：指定用作缓冲器的库单元（命名库单元或库单元集合）。此为必需选项，与 \texttt{buffer\_lib\_cell} 互斥。
+  \item \opt{-snap}：将新缓冲器放到目标单元旁，对齐到最近 site，并在需要时翻转缓冲器。
+\end{itemize}
+
+% ============================================================
+\section{在已布线 net 上添加缓冲器}
+\subsection*{Adding Buffers on Routed Nets}
+
+要对已完全布线的 net 添加缓冲器或反相器对，使用 \cmd{add\_buffer\_on\_route}，见下列主题：
+\begin{itemize}
+  \item 指定 net 名称、缓冲器类型及其位置
+  \item 控制缓冲器的添加方式
+  \item 为多电压设计指定设置
+  \item 为 Freeze Silicon ECO 流程指定设置
+\end{itemize}
+
+\subsection{指定 net 名称、缓冲器类型及其位置}
+\subsubsection*{Specifying the Net Names, Buffers Types, and Their Locations}
+
+使用 \cmd{add\_buffer\_on\_route} 时必须指定：
+\begin{itemize}
+  \item 要添加缓冲器的 net；
+  \item 用下列方法之一指定要添加的缓冲器类型以及在 net 上的位置：
+  \begin{itemize}
+    \item 按指定配置添加缓冲器
+    \item 在指定位置添加缓冲器
+    \item 按指定间隔添加缓冲器
+    \item 按 net 长度比例的间隔添加缓冲器
+    \item 按指定图案在总线（bus）上添加缓冲器
+  \end{itemize}
+\end{itemize}
+
+\subsubsection{按指定配置添加缓冲器}
+\paragraph*{Adding Buffers in a Specified Configuration}
+
+要用 \opt{-user\_specified\_buffers} 按精确配置添加单元及其位置。
+该选项一次只能在一条 net 上添加单元；可插入不同类型的缓冲器或反相器对，但不能同时混合两者。
+
+对每个添加的单元，用 \texttt{\{instance\_name library\_cell\_name x y layer\_name...\}} 格式指定：实例名、所用库单元、精确坐标、以及该位置上已有布线图形所在的层。
+也可用 \opt{-detect\_layer} 让工具自动检测该位置最近的布线图形，而不指定布线层。
+
+下列示例在 net n22 上添加 ECO1（BUF2，位置 (100,70)，连到 M3）与 ECO2（BUF4，位置 (150,70)，连到 M3）：
+\begin{lstlisting}
+fc_shell> add_buffer_on_route net22 \
+   -user_specified_buffers {ECO1 BUF2 100 70 M3 ECO2 BUF4 150 70 M3}
+\end{lstlisting}
+
+\subsubsection{在指定位置添加缓冲器}
+\paragraph*{Adding Buffers at Specified Locations}
+
+要在 net 的特定位置添加缓冲器，指定：
+\begin{itemize}
+  \item 用 \opt{-lib\_cell} 给出可选库单元列表；
+  \item 用 \opt{-location} 给出精确位置，格式为 \texttt{\{x1 y1 layer1 ....\}}。也可用 \opt{-detect\_layer} 自动检测最近布线图形。
+\end{itemize}
+此方法一次只能在一条 net 上添加单元。
+
+下列示例在 net1 的 (100, 200) 处添加 BUF1 并接到 M4：
+\begin{lstlisting}
+fc_shell> add_buffer_on_route net1 -lib_cell BUF1 \
+   -location {100 200 M4}
+\end{lstlisting}
+
+默认新单元与 net 的名称前缀为 \texttt{eco\_cell} 与 \texttt{eco\_net}。可用 \opt{-cell\_prefix} 与 \opt{-net\_prefix} 分别指定。
+
+\subsubsection{按指定间隔添加缓冲器}
+\paragraph*{Adding Buffers at a Specified Interval}
+
+要对一条或多条 net 按指定间隔添加缓冲器，指定：
+\begin{itemize}
+  \item \opt{-lib\_cell}：可选库单元列表；
+  \item \opt{-first\_distance}：驱动端到第一个缓冲器的距离；
+  \item \opt{-last\_distance}：负载 pin 到最后一个缓冲器的距离。
+  必须与 \opt{-repeater\_distance} 或 \opt{-repeater\_distance\_length\_ratio} 一起使用；也可与 \opt{-first\_distance} 一起使用。但不能与 \opt{-location}、\opt{-user\_specified\_buffers}、\opt{-user\_specified\_bus\_buffers} 一起使用。
+  \begin{noteBox}
+  使用 \opt{-last\_distance} 时，\appopt{eco.add\_buffer\_on\_route.min\_distance\_buffer\_to\_load} 应用选项的值被忽略。
+  \end{noteBox}
+  \item \opt{-repeater\_distance}：缓冲器之间的间隔。
+  可选地用 \opt{-scaled\_by\_layer} 为各层指定不同缩放因子，或用 \opt{-scaled\_by\_width} 以层的默认宽度与实际布线宽度之比作为缩放因子。
+\end{itemize}
+
+示例：在 n2、n5 上每隔 150 微米添加 BUF1，驱动端到第一个中继器 100 微米：
+\begin{lstlisting}
+fc_shell> add_buffer_on_route {n2 n5} -lib_cell BUF1 \
+  -first_distance 100 -repeater_distance 150
+\end{lstlisting}
+
+示例：在 n1 上每隔 100 微米添加 BUF2，首距 50、末距 20：
+\begin{lstlisting}
+fc_shell> add_buffer_on_route -repeater_distance 100 \
+  -first_distance 50 -last_distance 20 net1 -lib_cell BUF2
+\end{lstlisting}
+
+\subsubsection{按 net 长度比例的间隔添加缓冲器}
+\paragraph*{Adding Buffers at an Interval That is a Ratio of the Net Length}
+
+指定：
+\begin{itemize}
+  \item \opt{-lib\_cell}；
+  \item \opt{-first\_distance\_length\_ratio}：驱动端到第一个缓冲器相对总 net 长度的比例；
+  \item \opt{-repeater\_distance\_length\_ratio}：缓冲器间距相对总 net 长度的比例。
+\end{itemize}
+
+示例：在 n3、n21、n41 上按总长度 20\% 的间隔添加 BUF1，首距为总长度的 10\%：
+\begin{lstlisting}
+fc_shell> add_buffer_on_route {n3 n21 n41} -lib_cell mylib/BUF1 \
+  -first_distance_length_ratio 0.1 \
+  -repeater_distance_length_ratio 0.2
+\end{lstlisting}
+
+\subsubsection{按指定图案在总线上添加缓冲器}
+\paragraph*{Adding Buffers on a Bus in a Specified Pattern}
+
+步骤如下：
+\begin{enumerate}
+  \item 使用 \cmd{create\_eco\_bus\_buffer\_pattern} 为总线各 net 定义缓冲器图案，以避免缓冲器成团与重叠。
+\end{enumerate}
+
+\begin{table}[htbp]
+\centering
+\caption{与总线图案相关的命令（原书 Table 72）}
+\begin{tabular}{@{}ll@{}}
+\toprule
+目的 & 命令 \\
+\midrule
+创建总线图案 & \texttt{create\_eco\_bus\_buffer\_pattern} \\
+报告总线图案信息 & \texttt{report\_eco\_bus\_buffer\_patterns} \\
+获取缓冲器图案集合 & \texttt{get\_eco\_bus\_buffer\_patterns} \\
+移除总线图案 & \texttt{remove\_eco\_bus\_buffer\_patterns} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+下列示例创建图~\ref{fig:fc-bus-pat-h} 所示水平总线缓冲器图案：第一个缓冲器在最上方 net；从左起以距离 2 交错，每三个缓冲器后重复：
+\begin{lstlisting}
+fc_shell> create_eco_bus_buffer_pattern -name top_left \
+ -first_buffer top -measure_from left -distance 2 -repeat_after 3
+\end{lstlisting}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}
+\textit{（原书 Figure 219：Buffer Patterns for a Horizontal Bus）}\\[0.3em]
+\small First buffer；交错距离 2
+\vspace{1.0cm}}}
+\caption{水平总线的缓冲器图案}
+\label{fig:fc-bus-pat-h}
+\end{figure}
+
+下列示例创建图~\ref{fig:fc-bus-pat-v} 所示垂直总线图案：第一个缓冲器在最右侧 net；从上起交错距离为 2、3、2，然后重复：
+\begin{lstlisting}
+fc_shell> create_eco_bus_buffer_pattern -name right_top \
+   -first_buffer right -measure_from top \
+   -user_specified_distance {2 3 2}
+\end{lstlisting}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}
+\textit{（原书 Figure 220：Buffer Patterns for a Vertical Bus）}\\[0.3em]
+\small First buffer；交错距离 2、3、2
+\vspace{1.0cm}}}
+\caption{垂直总线的缓冲器图案}
+\label{fig:fc-bus-pat-v}
+\end{figure}
+
+\begin{enumerate}
+  \setcounter{enumi}{1}
+  \item 使用 \cmd{add\_buffer\_on\_route} \opt{-user\_specified\_bus\_buffers} 在总线 net 上添加缓冲器。
+  对每组缓冲器用 \texttt{\{buffer\_pattern\_name library\_cell\_name x y ....\}} 格式指定：图案名、库单元、图案中第一个缓冲器的坐标。
+\end{enumerate}
+
+示例：在 data\_A 总线上用图案 BP1 添加一组 BUF2，第一个缓冲器在 (100, 70)：
+\begin{lstlisting}
+fc_shell> add_buffer_on_route [get_net data_A*] \
+   -user_specified_bus_buffers {BP1 BUF2 100 70}
+\end{lstlisting}
+
+\subsection{控制缓冲器的添加方式}
+\subsubsection*{Controlling How Buffers are Added}
+
+默认情况下，\cmd{add\_buffer\_on\_route}：
+\begin{itemize}
+  \item 在所有布局 blockage、软宏与硬宏之上添加缓冲器。
+  要用 \opt{-dont\_allow\_insertion\_over\_cell} 防止在特定宏上放置；或用 \opt{-respect\_blockages} 防止在所有 blockage 与宏上放置，并可用 \opt{-allow\_insertion\_over\_cell} 列出允许放置的宏。
+  \item 在全局布线与详细布线的 net 上都添加缓冲器。
+  要用 \opt{-only\_global\_routed\_nets} 仅在尚未分配 track 或详细布线的全局布线 net 上添加。
+  \item 在被驱动 pin 的最低公共层次添加缓冲器。
+  要用 \opt{-on\_top\_hierarchy} 在尽可能高的层次添加。
+  \item 若因 net 的逻辑与物理拓扑差异而需要创建新端口，则不在该布线段上添加缓冲器。
+  要用 \opt{-punch\_port} 通过创建新端口在此类布线段上添加。
+\end{itemize}
+
+\subsection{为多电压设计指定设置}
+\subsubsection*{Specifying Settings for Multivoltage Designs}
+
+对于多电压设计：
+\begin{itemize}
+  \item 用 \opt{-respect\_voltage\_areas} 确保遵守主/次电压区域，并在物理位于对应电压区域的逻辑层次中添加单元；
+  \item 用 \opt{-voltage\_area\_specific\_lib\_cells} 按 \texttt{\{va1 lib\_cell1 va2 lib\_cell2 ...\}} 为不同电压区域指定不同库单元（须同时使用 \opt{-lib\_cell}）；
+  \item 用 \opt{-select\_mv\_buffers} 按 \texttt{\{va1 single\_rail\_lib\_cell1 dual\_rail\_lib\_cell1 ...\}} 为不同电压区域指定单轨/双轨库单元（须同时使用 \opt{-lib\_cell}）。未指定的电压区域使用 \opt{-lib\_cell} 中的单元；默认电压区域名为 \texttt{DEFAULT\_VA}；
+  \item 用 \opt{-allow\_physical\_feedthrough\_buffer} 允许在指定电压区域的物理 feedthrough net 上放置缓冲器（只能与 \opt{-respect\_voltage\_areas} 或 \opt{-voltage\_area\_specific\_lib\_cells} 一起使用，且须为主电压区域）。之后用 \cmd{set\_eco\_power\_intention} 更新所添加缓冲器的电源 net 与电源域设置；
+  \item 用 \opt{-respect\_gas\_station} 在指定电源 net 的 gas station 内添加单元。Gas station 是恒定供电区域，用于对穿越掉电电源域的 net 进行缓冲。用 \opt{-max\_distance\_route\_to\_gas\_station} 指定到 gas station 的最大允许距离。
+\end{itemize}
+
+\subsection{为 Freeze Silicon ECO 流程指定设置}
+\subsubsection*{Specifying Settings for the Freeze Silicon ECO Flow}
+
+当 \appopt{design.eco\_freeze\_silicon\_mode} 为 \texttt{true} 并在 freeze silicon 模式下运行 \cmd{add\_buffer\_on\_route} 时，工具在添加缓冲器前检查五倍单位 site 高度距离内是否有备用单元；若无则不添加。
+\begin{itemize}
+  \item 用 \opt{-max\_distance\_to\_spare\_cell} 控制该距离；
+  \item 用 \opt{-not\_spare\_cell\_aware} 禁用此功能。
+\end{itemize}
+
+% ============================================================
+\section{优化 net 扇出}
+\subsection*{Optimizing the Fanout of a Net}
+
+在时序 ECO 流程中，可用 \cmd{split\_fanout} 向 net 添加缓冲器并优化其扇出。
+必须指定：
+\begin{itemize}
+  \item 要用 \opt{-net} 按名称或用 \opt{-driver} 按驱动端指定待优化 net；
+  \item 用 \opt{-lib\_cell} 指定库单元；
+  \item 用下列方法之一指定优化方式：
+  \begin{itemize}
+    \item \opt{-max\_fanout}：该 net 的最大扇出约束；
+    \item \opt{-load}：要缓冲的负载 pin 或端口；可用 \opt{-hierarchy} 指定添加缓冲器的逻辑层次。
+  \end{itemize}
+\end{itemize}
+
+此外还可以：
+\begin{itemize}
+  \item 用 \opt{-on\_route} 在现有布线拓扑上添加缓冲器（与 \opt{-load} 合用时不能指定 \opt{-hierarchy}）；
+  \item 用 \opt{-max\_distance\_for\_incomplete\_route} 对未完全连接到驱动端或负载端子的已布线 net 拆分扇出（指定端子与不完整布线的最大距离）。若在指定距离内找不到或找到多于一条布线段，工具报错；
+  \item 用 \opt{-respect\_blockages} 放置缓冲器时避开布局 blockage 与宏；
+  \item 用 \opt{-cell\_prefix} 与 \opt{-net\_prefix} 指定新单元与 net 的名称前缀（默认 \texttt{eco\_cell}/\texttt{eco\_net}）。
+\end{itemize}
+
+% ============================================================
+\section{报告放置 ECO 单元的可用 site}
+\subsection*{Reporting Available Sites for Placing ECO Cells}
+
+可用 \cmd{report\_cell\_feasible\_space} 报告可用于放置 ECO 单元的 site。
+默认报告整个块；可用 \opt{-voltage\_areas} 限制到特定电压区域，或用 \opt{-boundary} 限制到特定矩形/多边形区域。
+
+% ============================================================
+\section{识别并撤销非最优 ECO 更改}
+\subsection*{Identifying and Reverting Nonoptimal ECO Changes}
+
+可用 \cmd{report\_eco\_physical\_changes} 识别由 \cmd{size\_cell}、\cmd{add\_buffer} 与 \cmd{add\_buffer\_on\_route} 所做的 ECO 更改是否会在 ECO 布局与合法化期间导致大位移。
+
+可用 \cmd{revert\_eco\_changes} 撤销这些命令所做的非最优 ECO 更改；用 \opt{-cells} 指定要撤销的单元。
+
+% ============================================================
+\section{放置 ECO 单元}
+\subsection*{Placing ECO Cells}
+
+对于无约束 ECO 流程，使用 \cmd{place\_eco\_cells} 放置 ECO 单元。
+该命令根据连通性与单元相关延迟推导每个 ECO 单元的布局位置，再将每个 ECO 单元合法化到最近的未占用 site。现有单元保持不动，以尽量减小对其布局的影响。
+
+要放置：
+\begin{itemize}
+  \item 全部未放置单元：用 \opt{-unplaced\_cells}；
+  \item 特定单元：用 \opt{-cells}；
+  \item 仅因 ECO 操作而更改的单元：用 \opt{-eco\_changed\_cells}。
+\end{itemize}
+
+若单元的 \texttt{eco\_change\_status} 属性为下列值之一，则视为已更改：\texttt{create\_cell}、\texttt{change\_link}、\texttt{add\_buffer}、\texttt{size\_cell}。
+运行 \cmd{eco\_netlist} 时工具会自动设置该属性；若未使用 \cmd{eco\_netlist} 更新设计，可用 \cmd{set\_attribute} 手动设置。
+
+\subsection{使用 place\_eco\_cells 时控制布局}
+\subsubsection*{Controlling Placement When Using the place\_eco\_cells Command}
+
+可如下控制 ECO 单元布局：
+\begin{itemize}
+  \item \opt{-channel\_aware}：使用宏之间的通道区域进行 ECO 布局（默认避开通道）。
+  \item \opt{-fixed\_connection\_net\_weight}：为连接到固定点（如 I/O pad 或宏）的 net 指定权重。默认权重为 1；大于 1 的整数使 ECO 单元更靠近固定点。
+  \item 要在 ECO 布局中优先处理特定 net：
+  \begin{enumerate}
+    \item 用 \cmd{set\_eco\_placement\_net\_weight} 指定 net 权重；
+    \item 用 \cmd{place\_eco\_cells} 的 \opt{-honor\_user\_net\_weight} 遵守这些权重。
+  \end{enumerate}
+  用 \cmd{report\_eco\_placement\_net\_weight} 报告所指定的 net 权重。
+  \item 要为 ECO 单元创建虚拟连接并在布局中使用（而非实际连接）：
+  \begin{enumerate}
+    \item 用 \cmd{create\_virtual\_connection} 创建虚拟连接；
+    \item 用 \opt{-use\_virtual\_connection} 在 ECO 布局中使用它们。
+  \end{enumerate}
+\begin{lstlisting}
+fc_shell> create_virtual_connection -name VC_0 \
+   -pins {U1/Y ECO17/A}
+fc_shell> create_virtual_connection -name VC_1 \
+   -pins {U2/Y ECO17/B}
+fc_shell> create_virtual_connection -name VC_2 \
+   -pins {ECO17/Y D17_OUT} -weight 3
+fc_shell> place_eco_cells -cells ECO17 -use_virtual_connection
+\end{lstlisting}
+  用 \cmd{remove\_virtual\_connections} 移除；用 \cmd{get\_virtual\_connections} 查询。
+  \item \opt{-max\_fanout}：忽略连接到 ECO 单元且超过特定阈值的高扇出 net；
+  \item \opt{-ignore\_pin\_connection}：忽略 ECO 单元上特定 pin 的连接。
+\end{itemize}
+
+\subsection{使用 place\_eco\_cells 时控制合法化}
+\subsubsection*{Controlling Legalization When Using the place\_eco\_cells Command}
+
+放置后，\cmd{place\_eco\_cells} 将每个 ECO 单元合法化到最近未占用 site；现有单元保持不动。
+
+可用下列方法控制合法化：
+\begin{itemize}
+  \item \opt{-no\_legalize}：放置后不合法化；
+  \item \opt{-legalize\_only}：仅执行合法化；
+  \item \opt{-legalize\_mode}，取值为：
+  \begin{itemize}
+    \item \texttt{free\_site\_only}（默认）：在空闲 site 上合法化，不移动既有单元。附近无空闲 site 时 ECO 单元可能有大位移；
+    \item \texttt{allow\_move\_other\_cells}：通过移动既有单元将 ECO 单元合法化到最近合法位置；
+    \item \texttt{minimum\_physical\_impact}：先将可就近合法化到空闲 site 的 ECO 单元合法化；对其余单元再通过移动既有单元合法化。
+  \end{itemize}
+  \item \opt{-displacement\_threshold}：指定合法化位移阈值；还可与更大的 \opt{-max\_displacement\_threshold} 合用。
+\end{itemize}
+
+这些位移阈值与 \opt{-legalize\_mode} 的配合如下：
+\begin{itemize}
+  \item \texttt{free\_site\_only}：仅合法化在位移阈值内有空闲 site 的 ECO 单元。超过阈值则不合法化，并创建集合 \texttt{epl\_legalizer\_rejected\_cells}。可随后用下式合法化：
+\begin{lstlisting}
+fc_shell> place_eco_cells \
+   -legalize_mode allow_move_other_cells \
+   -legalize_only -cells $epl_legalizer_rejected_cells
+\end{lstlisting}
+  若同时指定 \opt{-max\_displacement\_threshold}，还会创建集合 \texttt{epl\_max\_displacement\_cells}（为前者子集），用于识别位移极大、希望拒绝其 ECO 更改的单元。
+  \item \texttt{allow\_move\_other\_cells}：不能指定上述两个位移阈值选项。
+  \item \texttt{minimum\_physical\_impact}：先合法化阈值内有空闲 site 的单元；超过阈值的则通过移动既有单元合法化。若还指定 \opt{-max\_displacement\_threshold}，超过该最大阈值的单元不合法化，并放入 \texttt{epl\_max\_displacement\_cells}。
+\end{itemize}
+
+\begin{itemize}
+  \item \opt{-remove\_filler\_references}：指定合法化期间可移除的填充单元类型。填充单元在非固定布局且与 ECO 单元重叠时被移除；默认合法化时不移除任何填充单元。
+  \item 将 \appopt{place.legalize.enable\_advanced\_legalizer} 设为 \texttt{true} 以启用 Advanced Legalizer，并在合法化后移除有违例的填充单元。与 \opt{-remove\_filler\_references} 合用时，仅移除该选项指定的填充单元。此时 \opt{-min\_filler\_distance} 被忽略。
+\end{itemize}
+
+\subsection{以最小物理影响（MPI）放置 ECO 单元}
+\subsubsection*{Placing ECO Cells With Minimal Physical Impact (MPI)}
+
+为尽量减小对既有布局的扰动，在 \cmd{place\_eco\_cells} 中使用：
+\begin{itemize}
+  \item \opt{-legalize\_mode} \texttt{minimum\_physical\_impact}
+  \item \opt{-max\_displacement\_threshold}
+  \item \opt{-remove\_filler\_references}
+\end{itemize}
+
+% ============================================================
+\section{将 ECO 单元放置并映射到备用单元}
+\subsection*{Placing and Mapping ECO Cells to Spare Cells}
+
+对于 freeze silicon ECO 流程，使用 \cmd{place\_freeze\_silicon} 将 ECO 单元放置并映射到备用单元。
+默认放置并映射全部 ECO 单元；用 \opt{-cells} 指定特定单元。示例：
+\begin{lstlisting}
+fc_shell> place_freeze_silicon -cells {ECO1 ECO2 ECO3}
+\end{lstlisting}
+
+该命令将每个 ECO 单元放置并映射到最近的匹配备用单元。因 ECO 更改而删除的单元不会从设计中移除，而是转换为备用单元并保留在设计中。
+
+使用 \cmd{place\_freeze\_silicon} 时可以：
+\begin{itemize}
+  \item 用 \opt{-no\_spare\_cell\_swapping} 将 ECO 单元放到目标备用单元旁但不做映射，以便先分析 QoR；
+  \item 用 \opt{-map\_spare\_cells\_only} 仅映射已放到目标备用单元旁的备用单元；
+  \item 用 \opt{-write\_map\_file} 生成 ECO 单元到备用单元的映射文件；必要时可编辑后用 \cmd{map\_freeze\_silicon} 映射；
+  \item 用 \opt{-min\_filler\_distance} 指定映射到可编程填充单元的 ECO 单元之间的最小距离。
+\end{itemize}
+
+\subsection{为可编程备用单元指定映射规则}
+\subsubsection*{Specifying Mapping Rules for Programmable Spare Cells}
+
+可用 \cmd{set\_programmable\_spare\_cell\_mapping\_rule}（在运行 \cmd{place\_freeze\_silicon} 之前）定义映射规则，以控制：
+\begin{itemize}
+  \item 备用单元与 PG net 的重叠；
+  \item 多高度备用单元的拆分与单高度备用单元的合并；
+  \item 不同类型备用单元的兼容性。
+\end{itemize}
+用 \cmd{report\_programmable\_spare\_cell\_mapping\_rule} 报告或移除所指定的映射规则。
+
+\subsection{将 ECO 单元映射到特定备用单元}
+\subsubsection*{Mapping ECO Cells to Specific Spare Cells}
+
+要用 \cmd{map\_freeze\_silicon} 将 ECO 单元映射到特定备用单元，用 \opt{-eco\_cell} 与 \opt{-spare\_cell} 指定名称。示例：
+\begin{lstlisting}
+fc_shell> map_freeze_silicon -eco_cell ECO1 -spare_cell spare_1
+\end{lstlisting}
+
+也可用映射文件，并通过 \opt{-map\_file} 指定。映射文件格式为：
+\begin{lstlisting}
+ECO_cell_1   spare_cell_1
+ECO_cell_2   spare_cell_2
+...      ...
+\end{lstlisting}
+
+\subsection{将 ECO 单元映射到逻辑等效备用单元}
+\subsubsection*{Mapping ECO Cells to Logically Equivalent Spare Cells}
+
+工具映射 ECO 单元时会查找具有相同库单元名的备用单元；若找不到，该 ECO 单元保持未映射。
+要用下列步骤识别并将此类 ECO 单元映射到逻辑等效（LEQ）备用单元：
+\begin{enumerate}
+  \item 用 \cmd{check\_freeze\_silicon} 识别没有匹配备用单元的 ECO 单元；
+  \item 用 \cmd{create\_freeze\_silicon\_leq\_change\_list} 为这些 ECO 单元查找逻辑等效备用单元。指定：
+  \begin{itemize}
+    \item \opt{-cells}：未映射 ECO 单元名称；
+    \item \opt{-output}：输出文件名。该文件为含网表编辑命令的 Tcl 脚本，将每个 ECO 单元替换为逻辑等效备用单元，可以是：
+    \begin{itemize}
+      \item 具有相同逻辑功能但不同库单元名的单个备用单元；
+      \item 最多两个备用单元的组合，以给出相同逻辑功能。
+    \end{itemize}
+  \end{itemize}
+  \item 查看输出 Tcl 文件，确认映射满意，必要时编辑；
+  \item 在工具中 source 该 Tcl 文件，用逻辑等效单元替换 ECO 单元。
+\end{enumerate}

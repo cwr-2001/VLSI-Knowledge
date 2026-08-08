@@ -1,0 +1,961 @@
+CHAPTER 12 — Package and Board Analysis                                    RedHawk User Manual    | 324
+Introduction
+
+
+                                                Chapter 12
+                                 Package and Board Analysis
+Introduction
+
+              High quality models of off-chip RLC circuit elements such as the package and board can
+              be very significant in achieving an accurate simulation of circuit power. This chapter
+              describes the procedures for creating the required package and board-related circuit
+              models and mapping package port names to die pad names.
+              RedHawk can perform chip-package thermal co-analysis using the integrated Chip
+              Package Analysis (CPA) GUI. Thermal analysis of the package with Chip Thermal
+              Modeling (CTM) is natively supported in RedHawk. You can perform CTM generation,
+              and CTM+package thermal analysis in the same RedHawk session. See Chapter 20,
+              "Chip-Package Analysis (CPA)".
+
+Package and Board Models
+
+              Three types of package models are available, a simple model in which all power pads
+              have the same RLC values and all ground pads have the same RLC values. More
+              complicated package modeling, in which different values can be assigned to each pad,
+              are provided by a Spice subcircuit model or an S-parameter model. These three types of
+              models are described in the following sections.
+
+              Simple Package RLC Model
+
+              A simple package circuit model representation in RedHawk is shown in Figure 12-1.
+              Package parasitics represent RLC values associated with the package substrate itself.
+              The wirebond represents the bondwire (lead frame to bondpad connection) parasitics. For
+              Flip Chip designs, where there is no lead frame, this can be included as a part of package
+              parasitics. Padwire parasitics represent the parasitics of the pad (or bump) wire routing
+              (bondpad/bump to I/O pad cell connection). If this routing is already included in the DEF,
+              RedHawk extracts the information automatically; you do not need to specify these values.
+
+
+
+
+ANSYS, Inc.
+CHAPTER 12 — Package and Board Analysis                                       RedHawk User Manual     | 325
+Package and Board Models
+
+
+
+
+              Figure 12-1      simple package RLC model
+
+              The simple model annotates single RLC values for all pads in the design using TCL
+              commands. This can be done separately for power pads and ground pads. All power pads
+              and all ground pads have the same parasitic values with this command.
+              The commands used for annotating simple RLC package values are:
+                  setup package -r <in Ohm> -c <in pF> -l <in pH>
+                  setup wirebond -power/-ground -r <in Ohm> -c <in pF> -l <in pH>
+                  setup pad -power/-ground -r <in Ohm> -c <in pF>
+              Note that asymmetric power and ground package models are supported, and wirebond
+              and pad constraints can be annotated separately for power and ground. Also, an
+              inductance value is not annotated with pad parasitics, as this routing is significantly small,
+              and generally is considered to be zero in simulation.
+              An example of the simple model specification follows:
+                      setup pad -power -r 0.010000 -c 0.5
+                      setup pad -ground -r 0.010000 -c 0.5
+                      setup wirebond -power -r 0.245000 -l 1420 -c 5
+                      setup wirebond -ground -r 0.245000 -l 1420 -c 5
+                      setup package -r 0.001000 -l 10 -c 10
+              RedHawk also supports more detailed distributed RLCK and S-parameter package and
+              board models for simulation; these models are described in the following sections.
+
+              Distributed RLCK Package and Board Subcircuit Model
+
+              For RLCK package subcircuit models to accurately analyze the dynamic voltage drop
+              associated with these variations, the package parasitics must be in the form of a
+              subcircuit description following conventional SPICE syntax. Ideal voltages are applied at
+              the package balls through the subcircuit, which is connected to the die during analysis.
+              The list of ports in the subcircuit definition may include signal, power and ground ports.
+
+
+
+
+ANSYS, Inc.
+CHAPTER 12 — Package and Board Analysis                                           RedHawk User Manual    | 326
+Package and Board Models
+
+              Note that asymmetric power and ground models are supported. The following circuit
+              elements in the subcircuit netlist are supported.
+
+                             Symbol                               Element
+                                 R                               Resistance
+                                  L                            Self inductance
+                                 Kxx                         Mutual inductance
+                                 C                              Capacitance
+                                 H                  Current-controlled voltage source
+                                  I                            Current source
+                                 V                             Voltage source
+                                 E              Linear voltage-controlled voltage source
+                                 F               Linear current-controlled current source
+                                 G               Linear voltage-controlled current source
+                                 H               Linear current-controlled voltage source
+
+              All elements must be fixed, with no dependencies on any other parameter.
+              In addition, the following functions in the subcircuit netlist are supported. .
+
+                         Function                                       Purpose
+              .inc or .include                  Inclusion of other SPICE-compatible files
+              subckt                            Definition of additional subcircuits.
+
+              The entire off-chip network must be captured in a SPICE subcircuit netlist named
+              ‘REDHAWK_PKG’. In addition, the power and ground ideal sources must be defined in
+              the top-level netlist. All definitions and instantiations in the netlist must follow conventional
+              SPICE syntax.
+                  Note: Voltage values provided in the package netlist are used in RedHawk analysis
+                  and the voltages specified in the GSR file are overridden.
+
+
+
+
+ANSYS, Inc.
+CHAPTER 12 — Package and Board Analysis                                     RedHawk User Manual      | 327
+Package and Board Models
+
+              Figure 12-1 is an illustration of the way package and board parameters are modeled in
+              RedHawk. Each port of the REDHAWK_PKG subcircuit can be connected to one or more
+              pads on the die (note that no node can have “0” as a name).
+
+                         REDHAWK_PKG subcircuit
+                                                                                          Die
+                                        Domain A
+                       Ppcb_A      Pkg Subckt - Vdd_A             PvddA1
+                                                                                          PAD_A1
+                                                 RLC1
+                    VA +_                                                                 PAD_A2
+                       _                                          PvddA2
+                                          RLC2                                            PAD_A3
+
+                                          RLCn                                            PAD_An
+                                                                  PvddAn
+                         Ppcb_B         Domain B
+                                                                  PvddB1
+                                                                                          PAD_B1
+                                   Pkg Subckt - Vdd_B
+                    VB     +
+                                                                                          PAD_B2
+                          __
+                                                                  PvddBn
+                                                                                          PAD_Bn
+
+
+                    Ppcb_vss            Domain Vss                Pvss1
+                                                                                          PAD_Vss1
+                                    Pkg Subckt - Vss
+                 Vss      +
+                          _
+                                                                  Pvssn
+                                                                                          PAD_Vssn
+
+
+                Pkg Subcircuit Wrapper                  Spice                          Die
+                                                        subckt                         pad
+                                                        port                           names
+                                                        names                          in PLOC
+                                                                                       file
+              Figure 12-1         Modeling package parameters in RedHawk
+
+              Support for Package K-parameters
+              RedHawk supports package subcircuit models to more accurately analyze the dynamic
+              voltage drop with off-chip package and board effects. The mutual inductor coefficient K is
+              supported, in addition to basic Spice circuit components (RLC). The mutual inductor
+              coefficient represents the coupling effects among inductors. If the mutual inductance
+              between inductors L1 and L2 is M12, the coefficient K is defined as ‘M12 / sqrt(L1*L2)’. In
+              the package Spice netlist it appears as:
+                         K_L1_L2       L1    L2 0.5
+              The mutual inductance coefficient must have an absolute value between 0 and 1.0. You
+              can specify the K parameter for each pair of inductors for an inductor group (i = 1...N). So
+              the self inductances L11 to LNN, along with mutual inductances Mij (i = 1...N, j = 1...N)
+              constitutes an inductance matrix. In package modeling, such an inductance matrix is
+              usually extracted by field solvers.
+
+
+ANSYS, Inc.
+CHAPTER 12 — Package and Board Analysis                                    RedHawk User Manual        | 328
+Package and Board Models
+
+              Following is an example of a package Spice netlist, top.sp, in a single file, for the model
+              illustration above, including mutual inductance between inductors, K12:
+                     * Top level subcircuit
+                     * The file name must be specified with a GSR keyword
+                     * All ports are mapped (i.e, connected) to RedHawk pads defined
+                     * in the *.ploc file.
+                     * The subcircuit must be named REDHAWK_PKG
+
+                   .subckt REDHAWK_PKG PvddA1 PvddA2 PvddB1 PvddB2 Pvss1 Pvss2
+                   * PCB voltage supplies
+                   Va Ppcb_A 0 1.1v
+                   Vb Ppcb_B 0 1.0v
+                   Vvss Ppcb_vss 0 0v
+                   * Instantiate domain subcircuits. Connect them to the
+                   * corresponding PCB voltage supplies and output ports of
+                   * REDHAWK_PKG
+                   XVDDA_RLC Ppcb_A PvddA1 PvddA2 VDDA_RLC
+                   XVDDB_RLC ...
+                   XVSS_RLC ...
+                   .ends
+
+                   * Package RLC for each voltage domain can be captured in a
+                   * separate subcircuit
+                   .subckt VDDA_RLC Ppcb Pdie1 Pdie2
+                   R1 Ppcb N1 1e-9
+                   L1 N1 Pdie1 1e-12
+                   K12 L1 L2 0.3
+                   C1 Pdie1 0 1e-10
+                   R2 Ppcb N2 0.5e-09
+                   L2 N2 Pdie2
+                   .ends
+                   .subckt VDDB_RLC Ppcb Pdie1 Pdie2
+                   ...
+                   .ends
+                   .subckt VSS_RLC Ppcb Pdie1 Pdie2
+                   ...
+                   .ends
+
+              In order for RedHawk to include the subcircuit model in the simulation, the top-level
+              SPICE netlist must be specified in the RedHawk GSR file, as follows:
+                   PACKAGE_SPICE_SUBCKT top.sp
+
+              Linear Current- and Voltage-Controlled Source Models
+
+              The following Spice linear current- and voltage-controlled sources are available for
+              package modeling in RedHawk:
+               • Type “E” - Linear Voltage-Controlled Voltage Source
+               • Type “F” - Linear Current-Controlled Current Source
+               • Type “G” - Linear Voltage-Controlled Current Source
+               • Type “H” - Linear Current-Controlled Voltage Source
+
+
+
+ANSYS, Inc.
+CHAPTER 12 — Package and Board Analysis                                    RedHawk User Manual   | 329
+Package and Board Models
+
+              The syntax for describing these linear source models is given below. Note that Spice
+              source-type keywords, such as ‘VCVS’ and ‘CCCS’, are optional in the RedHawk syntax.
+
+              Linear Voltage-Controlled Voltage Source (E )
+                  E* N+ N- ?VCVS? NC+ NC- VGain
+                   where
+                      E*       name of the source, starting with E
+                      N+       name of positive node
+                      N-       name of negative node
+                      NC+      name of positive controlling node
+                      NC-      name of negative controlling node
+                      VGain    voltage gain
+
+              Linear Current-Controlled Current Source (F)
+                  F* N+ N- ?CCCS? Vname IGain
+                   where
+                      F*       name of the source, starting with F
+                      N+       name of positive node
+                      N-       name of negative node. Current flows from the positive node through
+                                the source to the negative node
+                      Vname name of the voltage source through which the controlling current flows.
+                      IGain    current gain
+
+              Linear Voltage-Controlled Current Source (G )
+                  G* N+ N- ?VCCS? NC+ NC- TransC
+                   where
+                      G*       name of the source, starting with G
+                      N+       name of positive node
+                      N-       name of negative node
+                      NC+      name of positive controlling node
+                      NC-      name of negative controlling node
+                      TransC transconductance (voltage to current conversion factor)
+
+              Linear Current-Controlled Voltage Source (H)
+                  H* N+ N- ?CCVS? Vname TransR
+                   where
+                      H*       name of the source, starting with H
+                      N+       name of positive node
+                      N-       name of negative node
+                      Vname name of the voltage source through which the controlling current flows
+                      TransR trans-resistance in Ohms (current to voltage conversion factor)
+                  Note: The dummy sources for types “F” and “H” must have a voltage of 0.
+
+
+
+
+ANSYS, Inc.
+CHAPTER 12 — Package and Board Analysis                                    RedHawk User Manual      | 330
+Package and Board Models
+
+              S-Parameter Package and Board Modeling for Static Analysis
+
+              S-parameter package models or PCB models in REDHAWK_PKG subcircuit support
+              static analysis in RedHawk. The same package and PCB models that are used in
+              dynamic analysis can be used in static analysis.
+              The procedure to use S-parameter models in static analysis follows:
+                1.   Make sure that S-parameters data is available at a sufficiently low frequency,
+                     ideally at DC (f=0). Sufficiently low frequency for any design depends on the
+                     electrical length of the structure, and the values of decoupling capacitances
+                     present on the PCB. For example, for a package model, 1 KHz would be a
+                     sufficiently low frequency. For a PCB model with large decoupling capacitors, f <=
+                     10 Hz would be required. Having an S-parameter model outside of these
+                     guidelines could cause modeling problems. Using DC (f=0) data is recommended.
+                2.   Instantiate the S-parameter models in the REDHAWK_PKG subcircuit using the
+                     same syntax as used for the dynamic simulation.
+              Note that there are no practical limitation on the number of ports, and the memory and
+              runtime requirements are low. The approach involves converting the S matrix at DC to a Y
+              matrix, and synthesizing the Y matrix as a network of resistors.
+              A general S-parameter modeling diagram is shown in Figure 12-2 for both static and
+              dynamic analysis. Note that multiple ports on the BGA/VRM side are allowed.
+
+
+
+                            Port 1
+
+
+                            Port 2
+                                                  S-Parameter
+               PLOC                                                                 Port N+1    V
+                                             Package/PCB Model
+
+                             Port N
+
+
+
+
+              Figure 12-2      General S-parameter diagram, static and dynamic analysis
+
+              S-Parameter Package and Board Modeling for Dynamic Analysis
+
+              As the clock frequency of the chip increases, so does the importance of capturing
+              accurate frequency behavior of the package and PCB over the multi-GHz range.
+              Designers typically utilize full-wave electromagnetic solvers, which create frequency-
+              dependent scattering (S) parameters. The resulting package/PCB model is represented
+              by a frequency-domain S-parameter model, in Touchstone format. This feature allows
+              you to utilize the results of the full-wave EM solvers in RedHawk dynamic simulations. For
+              clock frequencies above 500 MHz, S-parameter modeling should be used to achieve
+              accurate results.
+
+              Modeling Methodology
+              The S-parameter model describes, at each specified frequency point, the voltage and
+              current relationships among all the “ports” of a black-box network. Conceptually, the S-
+              parameters model the transfer of power from the source to the load, in terms of the
+              incident (a) and reflected (b) waves, b =Sa at a particular frequency. Both a and b are
+              vectors of size N, and S is a complex N x N matrix, where N is the number of ports.
+
+
+ANSYS, Inc.
+CHAPTER 12 — Package and Board Analysis                                             RedHawk User Manual   | 331
+Package and Board Models
+
+              The k-th component of the incident wave ak and the k-th component of the reflected wave
+              bk is related to the port voltages Vk and currents Ik through the relationships:
+
+                           Vk + Z0 Ik                      Vk – Z0 Ik
+                                                 -
+                     a k = -----------------------                              -
+                                                     b k = ----------------------
+                                2 Z0                            2 Z0
+
+
+              The definition of the S-parameters includes the value of the normalization (reference)
+              impedance Zo, as shown in an example below in Touchstone format (Zo=2 Ohms in this
+              example):
+                        # HZ S RI R 2.000
+              RedHawk presently only supports the scalar reference impedance, thus all ports have the
+              same reference impedance.
+              In order to perform dynamic modeling of package and PCB using S-parameters, ports
+              need to be defined at the package die pad, BGA pad locations, and/or board voltage
+              regulator module (VRM) location. In package/PCB power delivery network modeling, a
+              port is usually defined across a set of Vdd (power) nodes and a set of Vss (ground)
+              nodes. In network analysis terminology, the Vss nodes are called the “reference” nodes of
+              the defined port.
+              A typical port setup scheme for a flip-chip package is as follows:
+                1.       Partition the package die pad area into N partitions.
+                2.       Set up a port in each partition between Vdd nodes and Vss nodes.
+                3.       On the package BGA side, set up ports as required between all Vdd nodes and
+                         Vss nodes.
+              Note that automatic pre-simulation time determination is provided with S-parameter
+              packages and PCB models, the same way for RLCK models, but only in the vectorless
+              (DvD) flow. The presim time determined in this way has an upper limit of 120 ns and a
+              lower limit of 3.5 ns.
+
+              Connecting S-parameter models in the REDHAWK_PKG subcircuit
+              There are two modes of connection, common reference (ports referred to global ground),
+              and differential (floating) reference. In practice, differential connection is used more often,
+              as most EM solvers produce package /PCB models for ground nets with differential port
+              definitions (between the node pairs, and not referred to global ground).
+
+                     S-parameter models with a common reference node
+              The most intuitive way of connecting the S-parameter models is with all ports referred to
+              global ground (SPICE node 0). In this case, each port is defined between a node Nk and
+              the global ground. The use model for the S-parameters is essentially the same as for
+              RLCK models. Specifically, the absolute node voltages (those with respect to the global
+              ground) make sense, and there is no condition imposed on port currents. The sum of the
+              port currents does not have to be zero, as there is also the reference current Iref.
+
+
+
+
+ANSYS, Inc.
+CHAPTER 12 — Package and Board Analysis                                     RedHawk User Manual    | 332
+Package and Board Models
+
+
+
+
+              Figure 12-3      Basic global ground connection S-parameter model
+
+              Figure 12-3 shows the use of S-parameter models with all ports defined between a node
+              and global ground (SPICE node 0). In this case the simplest possible package is a 4-port
+              S-parameter model. From a user standpoint, there is no difference between using an
+              RLCK package model and using an S-parameter model.
+              However, there are several problems in using S-parameters with ports referred to global
+              ground:
+               • Many industrial EM solvers cannot extract S-parameters with ports referred to the
+                 global ground, as sometimes the definition of “global ground” or a common reference
+                 node is not clear.
+               • The number of ports is twice the number for the differential connection method
+                 described below.
+               • RedHawk simulation uses decoupled methodology by default, so having S-
+                 parameters with global ground as reference causes additional inaccuracy, as the RC
+                 branches connected to the global ground get shorted by the package.
+              So to use S-parameters with the ports referenced to the global ground, you must use the
+              coupled mode (GSR keyword 'DYNAMIC_SOLVER_MODE 1') in simulation. For these
+              reasons using differential connection of S-parameters is recommended, as described in
+              the following section.
+
+                  Differential connection of S-parameter models
+              RedHawk automatically detects differential connection of the S parameter packages and
+              PCB models, and disables log reports of absolute voltages ( Vdd/Vss), which are not valid
+              for S-parameter models with differential connections.
+              For differential connection of S-parameters, each port voltage is defined between a pair of
+              non-ground nodes, k(pos) and k(neg), where k is the node number. Thus an N-port S-
+              parameter model is connected between 2N nodes. The simplest example, with 2 ports
+              and 4 nodes, is shown in Figure 12-4, with differential voltages. All VDD pads are grouped
+              together, and all VSS pads are grouped together.
+              Only the differential voltages are defined: (V1=V1(pos)-V1(neg) and V2=V2(pos)-
+              V2(neg)). S-parameters also force a zero sum of currents I(VDD)=-I(VSS) by
+              construction. The S-parameter model in the differential connection does not provide any
+              DC path to global ground that would normally be available through the package and
+              supply voltage sources.
+
+
+
+ANSYS, Inc.
+CHAPTER 12 — Package and Board Analysis                                     RedHawk User Manual     | 333
+Package and Board Models
+
+
+
+
+              Figure 12-4      Basic differential connection S-parameter model
+
+              RedHawk considers an S-parameter model to have differential connections unless one of
+              the following conditions is satisfied, indicating a common reference.
+               • The negative node of all ports is global ground, Spice node 0, which is the
+                 recommended method for S-parameter models with ports referred to a common
+                 reference.
+               • The negative nodes of the ports are connected to global ground with R < 1.2e-5
+                 Ohms.
+               • The negative nodes of the ports are connected to global ground with a zero-volt ideal
+                 voltage source.
+              In these cases, a message is written to the log file that indicates that the S-parameter
+              model has connections with a common reference.
+
+              Specifying S-parameter models in RedHawk
+              RedHawk treats an N-port S-parameter model as a 2N terminal device. In general, an N-
+              port S-parameter network can be described in the following format:
+                   Nxxxx S(N) n1p n1n n2p n2n …… nNp nNn <modelname>
+              where Nxxxx is the network's name, 'n1p' and 'n1n' are the nodes for port 1, 'n2p', 'n2n'
+              are the nodes for port 2, and 'N' is the number of ports in the network. The <modelname>
+              parameter is the model statement name that contains the S-parameter data.
+              The model statement for an S-parameter model is defined as follows:
+                  .model <modelname> nport file = “<filename>” np = <N_value>
+              where 'nport file' and 'np' are the keywords. The <filename> parameter is the name of the
+              S-parameter data file, and <N_value> specifies the number of ports.
+
+
+
+
+ANSYS, Inc.
+CHAPTER 12 — Package and Board Analysis                                    RedHawk User Manual      | 334
+Package and Board Models
+
+              Figure 12-5 shows a method of partitioning flip chip bumps, where Vdd elements are red
+              and Vss elements are black. Each partition would be represented by one port in the S-
+              parameter model.
+
+
+
+
+              Figure 12-5      Partitioned bump model for flip chip package
+
+              The following GSR keyword SPARAM_HANDLING is used to control the behavior of the
+              S-parameter model:
+              SPARAM_HANDLING 2 - enables full passivity enforcement (default)
+              SPARAM_HANDLING 0 - fits an RLCK model accurate at low frequencies
+              The following is the simplest example RedHawk package SPICE netlist, including a two-
+              port s-parameter model:
+                        .subckt REDHAWK_PKG pVdd pVss
+                        Npkg S(2) pVdd pVss bgaVdd bgaVss PKG_MODEL
+                        .model PKG_MODEL nport file = "pkg.s2p" np = 2
+
+                        Vvdd bgaVdd           0       1.2
+                        Vvss bgaVss           0       0.0
+                        .ends
+              Note that multiple S-parameter models in the same REDHAWK_PKG are supported.
+              DC voltages at package nodes are included in the file adsRpt/Dynamic/Vdc.txt, which
+              enables debugging package connectivity problems before finishing transient simulation.
+
+              Saving/reuse of rational approximation and passivity enforcement results
+              For a large number of ports, processing an S-parameter model may take significant time
+              and hence the results of this processing are saved in a subdirectory called SparmCache
+              in the run directory. These results are then available for reuse. The SparmCache directory
+              contains a copy of the original user-specified Touchstone file (*.s#p), and also the file
+              containing the results of rational approximation / passivity enforcement, called *.r#p.
+              If a separate run directory is used, you can copy the SparmCache directory, and the
+              results of the rational approximation passivity enforcement is reused.
+
+              Recommendations and limitations in using S-parameter models
+                1.   The number of ports should not exceed 100, with 50 to 60 ports being a practical
+                     limit for improved runtime / reliability.
+                2.   Only one reference impedance for all ports is supported (the vector of reference
+                     impedances is not supported at this time).
+
+
+
+ANSYS, Inc.
+CHAPTER 12 — Package and Board Analysis                                    RedHawk User Manual    | 335
+Package and Board Models
+
+               3.    Touchstone 2.0 format is not yet supported.
+               4.    The touchstone file should contain the S-matrix, not Y or Z matrices. The second
+                     keyword in the header of touchstone files should be 'S' for S-matrix :
+                        # HZ S RI R 2.000
+               5.    RedHawk’s automatic presim time determination does not currently support S-
+                     parameter models. The presim time can be determined through a transient Spice
+                     analysis of CPM + Pkg + Board models.
+
+              Usage summary and example
+               1.    Make sure the GSR keyword 'SPARAM_HANDLING 2' is set (default).
+               2.    Perform a basic check of the S-parameter model: In the SUtility, check that at low
+                     frequencies there is transmission between ports that have DC connections. For
+                     example, if ports 1 and 6 are connected at DC, and no other ports have DC
+                     connection to ports 1 and 6, S(1,6) should approach 1 (0 dB) at DC.
+                          If a VRM port connects to 10 other ports, the corresponding transmission
+                          term will be around 0.1 in magnitude (-20 dB).
+               3.    Do not combine multiple S-parameters models into one. Multiple S-parameter
+                     models in Redhawk_PKG subcircuit are supported.
+               4.    Create the REDHAWK_PKG subcircuit (required), which defines the ports of the S-
+                     parameter models between a node pair (for the differential connection of S-
+                     parameters). See the 21-port example following.
+
+                    S-parameter differential model example (21 ports)
+                        .subckt REDHAWK_PKG
+                        + bg0_VDD bg0_VSS
+                        + bg1_VDD bg1_VSS
+                        + bg2_VDD bg2_VSS
+                        + bg3_VDD bg3_VSS
+                        + bg4_VDD bg4_VSS
+                        + bg5_VDD bg5_VSS
+                        + bg6_VDD bg6_VSS
+                        + bg7_VDD bg7_VSS
+                        + bg8_VDD bg8_VSS
+                        + bg9_VDD bg9_VSS
+                        + bg10_VDD bg10_VSS
+                        + bg11_VDD bg11_VSS
+                        + bg12_VDD bg12_VSS
+                        + bg13_VDD bg13_VSS
+                        + bg14_VDD bg14_VSS
+                        + bg15_VDD bg15_VSS
+                        + bg16_VDD bg16_VSS
+                        + bg17_VDD bg17_VSS
+                        + bg18_VDD bg18_VSS
+                        + bg19_VDD bg19_VSS
+
+                        * Instantiate package model
+                        *! Port[1] = bg0
+                        *! Port[2] = bg1
+                        *! Port[3] = bg2
+                        *! Port[4] = bg3
+
+
+ANSYS, Inc.
+CHAPTER 12 — Package and Board Analysis                   RedHawk User Manual   | 336
+Package and Board Models
+
+                     *! Port[5] = bg4
+                     *! Port[6] = bg5
+                     *! Port[7] = bg6
+                     *! Port[8] = bg7
+                     *! Port[9] = bg8
+                     *! Port[10] = bg9
+                     *! Port[11] = bg10
+                     *! Port[12] = bg11
+                     *! Port[13] = bg12
+                     *! Port[14] = bg13
+                     *! Port[15] = bg14
+                     *! Port[16] = bg15
+                     *! Port[17] = bg16
+                     *! Port[18] = bg17
+                     *! Port[19] = bg18
+                     *! Port[20] = bg19
+                     *! Port[21] = bottom
+
+                     Npkg S(21)
+                     + bg0_VDD bg0_VSS
+                     + bg1_VDD bg1_VSS
+                     + bg2_VDD bg2_VSS
+                     + bg3_VDD bg3_VSS
+                     + bg4_VDD bg4_VSS
+                     + bg5_VDD bg5_VSS
+                     + bg6_VDD bg6_VSS
+                     + bg7_VDD bg7_VSS
+                     + bg8_VDD bg8_VSS
+                     + bg9_VDD bg9_VSS
+                     + bg10_VDD bg10_VSS
+                     + bg11_VDD bg11_VSS
+                     + bg12_VDD bg12_VSS
+                     + bg13_VDD bg13_VSS
+                     + bg14_VDD bg14_VSS
+                     + bg15_VDD bg15_VSS
+                     + bg16_VDD bg16_VSS
+                     + bg17_VDD bg17_VSS
+                     + bg18_VDD bg18_VSS
+                     + bg19_VDD bg19_VSS
+                     + BGA_VDD BGA_VSS
+                     + PKG_MODEL
+
+                     .model PKG_MODEL nport file = "package.s21p" np=21
+
+                     * finally, we need a power supply to drive all this stuff-
+                     * core supply
+                     V_vdd BGA_VDD 0 1.2
+                     V_vss BGA_VSS 0 0.000
+
+                     .ends
+
+
+
+ANSYS, Inc.
+CHAPTER 12 — Package and Board Analysis                                      RedHawk User Manual     | 337
+Package and Board Models
+
+              Note: the supply sources on the BGA side should be between a node and ground (SPICE
+              node 0), as shown in bold type above. Also note that presim time is automatically
+              determined.
+
+              Recommendations for best S-parameter model extraction
+              The success of RedHawk dynamic simulation depends on having S-parameter models
+              that accurately describe the behavior of the package and/or PCB in the frequency range
+              of interest, with sufficient resolution in the frequency domain. The guidelines for achieving
+              this are given below:
+                1.   Frequency range in the Touchstone file: recommend fmin=0 (DC) or sufficiently
+                     close; fmax=2.5 GHz to 5 GHz. The log grid of frequency points should be used
+                     from 1 Hz to 100 MHz, then linear grid above that.
+                2.   For PCBs with large decoupling capacitors (tens of microfarads), start at a very low
+                     frequency (f=1 Hz, for example), and use 15 to 20 points per decade for the log
+                     grid part.
+                3.   Number of frequency points in the Touchstone file: typically around 250 to 500,
+                     depending on how complicated the frequency dependence is. For complicated
+                     frequency dependencies, 1000 to 2000 frequency points may be needed.
+                4.   Reference impedance : Zo=2 Ohms. A good choice of reference impedance
+                     improves the accuracy of the results. For power/ground networks, the classic
+                     reference impedance of 50 Ohms is too large. Extracting S-parameters with a
+                     reference impedance of Zo=2 Ohms is the best approach, since this is the value
+                     used by default in RedHawk.
+                5.   Number of significant figures to use in Touchstone file data: 12 to 14 decimal
+                     places are recommended. There is no penalty for extra decimal places, but having
+                     too few could be a problem.
+                6.   Maximum number of ports: While the absolute maximum is 100 ports, limiting the
+                     number of ports to 50-60 is best.
+
+              Analysis of the Simulation Results
+              Special care is required when analyzing simulation results obtained with S-parameter
+              models with the differential connections. Remember that only differential voltages
+              (voltage differences) are meaningful using this method. For this reason when displaying
+              voltage waveforms, only display differential voltages, V(vdd)-V(vss), not single-ended
+              voltages V(vdd) and V(vss). In Signal Viewer (sv), you can use the Calculator function to
+              generate the differential waveform V(vdd)-V(vss) from the two waveforms V(vdd) and
+              V(vss). For pad voltages, you can use the plotting utility 'gnuplot' and the file adsRpt/
+              Dynamic/Vpad.data that is created when a package model is present.
+              No such transformation is needed for current values; currents are always “absolute”, and
+              wire voltages should be ignored. The following results retain significance:
+               • Differential voltages at the pads V(vdd)-V(vss) . You can plot the voltage difference at
+                 a pair of pads of dynamic simulation results, as follows:
+                        plot voltage -pad_pair {<pad1_name> <pad2_name> }
+                               ?-sv? ?-xgr? -o <file_name>
+                      Example:
+                           plot voltage -pad_pair {VDD1 VSS90} -sv -o vdrop.txt
+                      Note that pad names are specified inside curly brackets, with no comma between
+                      pad names.
+               • Pad currents and battery currents
+               • Instance voltage drops
+
+
+ANSYS, Inc.
+CHAPTER 12 — Package and Board Analysis                                     RedHawk User Manual     | 338
+Mapping Package Port Names to Die Pad Names in the PLOC File
+
+               • Worst VDD-VSS voltage report.
+
+Mapping Package Port Names to Die Pad Names in the PLOC File
+
+              Mapping of ports on the package to one or more pads on the die is achieved using
+              definitions in the PLOC file. Some package vendors have protocols that can be used in
+              mapping ports and pads. If a protocol is not available, the port/pad locations must be
+              mapped manually.
+              Following is the syntax for a standard *.ploc file with no package model:
+                   <die_pad_name> <X-coord> <Y-coord> <layer> <POWER | GROUND>
+              If you want to include a package subcircuit model, then the syntax of the .ploc file should
+              be modified as follows:
+                    <die_pad_name> <X-coord_um> <Y-coord_um> <layer>
+                        <power/ground_domain_name> <Spice_pkg_port_name>
+              where the power/ground domain name is the name specified in the VDD_NETS GSR
+              keyword, and none of the ports can be named “0’. Signal ports in the package subcircuit
+              can be floating. Multiple pads can be connected to a single port of the package. For
+              example, in the package model provided multiple Vdd_A domain pads can be connected
+              to port PvddA1.
+              The following is a sample .ploc file corresponding to the example design and package:
+                   Pad_A1 3125 4340 metal6 VDD_A PvddA1
+                   Pad_A2 3225 4340 metal7 VDD_A PvddA1
+                   Pad_A3 3325 4340 metal6 VDD_A PvddA2
+                   Pad_A4 3425 4340 metal6 VDD_A PvddA2
+                   Pad_B1 5125 4340 metal7 VDD_B PvddB1
+                   Pad_B2 5225 4340 metal7 VDD_B PvddB1
+                   Pad_B3 5335 4340 metal6 VDD_B PvddB2
+                   Pad_B4 5335 4340 metal6 VDD_B PvddB2
+                   Pad_VSS1 6125 4340 metal7 VSS Pvss1
+                   Pad_VSS2 6225 4340 metal6 VSS Pvss1
+                   Pad_VSS3 6325 4340 metal7 VSS Pvss2
+                   Pad_VSS4 6425 4340 metal7 VSS Pvss2
+                   ...
+              The *.ploc file is imported into RedHawk using standard procedure.
+
+Chip-Die Mapping Using Package Compiler
+
+              Overview
+              Accurate analysis of chip designs require a model of the associated package, in terms of
+              an accurate RLCK Spice subcircuit. The RedHawk Package Compiler can provide this as
+              an extension of the Chip Package Protocol (CPP) header. The Package Compiler has
+              several functions:
+               • wrap the package Spice model into RedHawk-compatible format.
+               • match die and package pins and create an annotated PLOC
+               • compute effective inductance
+               • calculate effective package Inductance for each voltage domain
+               • perform RLCK passivity checks
+               • perform package Spice syntax checks
+
+
+ANSYS, Inc.
+CHAPTER 12 — Package and Board Analysis                                       RedHawk User Manual       | 339
+Chip-Die Mapping Using Package Compiler
+
+              RedHawk Package Compiler makes use of the Chip Package Protocol (CPP) header
+              information to determine the following:
+               • identifies package and die pins
+               • identifies which nodes belong to the die side and which belong to the PCB side
+               • uses CPP header data to differentiate between power nets and ground nets
+              If Package Compiler has already been run, if invoked again it identifies the already-
+              wrapped RedHawk package model and the already-annotated PLOC file, and reruns the
+              same set of checks on the output files for completeness and correctness.
+              An overview of the Package Compiler process and data flow is shown in Figure 12-6.
+              The key features of Package Compiler is “wrapping” the package Spice model subcircuit
+              into one that is RedHawk-compatible, as well as calculating effective inductance for each
+              voltage domain and matching die and package pins.
+
+
+
+                                                               •Package Spice Syntax check
+                Ploc File
+                                                           Check RLCK passivity
+                                                           Calculate effective Inductance for each
+                                                           voltage domain.
+                 Paksi‐E           Spice
+                                   Package                 Match Die and Package pins to create an
+                                                            annotated ploc file
+                                   Model
+                                   with CPP
+                                   Header
+                                                                                      Wrapped Spice
+                                                         Modified                     netlist for use
+                                                         Ploc file                     in RedHawk
+
+
+
+                                                                      RedHawk
+
+              Figure 12-6      Overview of Package Compiler flow
+
+              Inputs
+              The require inputs are:
+               • PLOC file - pin location file to be annotated (*.ploc). The format of the PLOC file is as
+                 follows:
+                   <pin/pad_name> <x_loc> <y_loc> <layername> <P/G_domain_name>
+                 Note that the last column should not be “Power” /”Ground”, but the domain name.
+               • package Spice file - target package Spice model with Chip Package Protocol (CPP)
+                 header to be mapped, wrapped, syntax checked, passivity checked, and effective
+                 inductance calculated.
+               • GSR file : standard RedHawk GSR file that contains information about the voltages to
+                 apply to each die power and ground net, specified with keywords
+                        VDD_NETS {
+                             <die_VDD_name> <voltage>
+                             ...
+                             }
+                        GND_NETS {
+
+
+ANSYS, Inc.
+CHAPTER 12 — Package and Board Analysis                                       RedHawk User Manual        | 340
+Chip-Die Mapping Using Package Compiler
+
+                             <die_VSS_name> <voltage>
+                             ...
+                             }
+
+
+              Command Syntax
+              The syntax for using package compiler from a UNIX command line is:
+                  compile_pkg
+                       [ -m <pkg_model_file>] [ -p <ploc_file> ] [-n <p_n_t_file>]
+                       [ -t <transform_file> ] [ -vv <port_value_file> ]
+                       [ -vg <gsr file> ] [ -g <generic_pkg_file> ]
+                       [ -c ] [ -nma <#_of_match_iter> ] [ -no_leff_calc ]
+                       [ -op <output_ploc_file> ] [ -om <wrapped_model> ]
+                       [ -ow <working directory> ] [ -icf <input_config_file> ]
+                       [ -start_tol <min_dist> -end_tol <max_dist> ]
+                       [-snap ] [ -ee]
+                    where
+                      -m <pkg_model_file> : specifies the package model Spice file.
+                      -p <ploc_file> : specifies the die pin locations and corresponding die nets.
+                      -n <p_n_t_file>: specifies the file defining the package net types
+                      -t <transform_file> : specifies the transformation operations to use for die/
+                            package pin matching.
+                      -vv <port_value_file> : specifies the voltages to assign to package power/ground
+                           PCB pins.
+                      -vg <gsr file> : reads the die net voltages from the GSR file.
+                      -g <generic_pkg_file>: If no -m file supplied, this file can be used to indicate
+                          package pin locations and corresponding package nets.
+                      -c : Checks the data between the already annotated ploc file and -m pkg file.
+                      -nma <#_of_match_iter> : specifies the maximum number of matching attempts.
+                      -no_leff_calc : the effective inductance is not calculated, which reduces runtime.
+                      -op <output_ploc_file> : specifies the name of the output PLOC file.
+                      -om <wrapped_model> : specifies the name of the wrapped Spice model
+                      -ow <working directory> : specifies the working directory for the intermediate files
+                      -icf <input_config_file> : specifies the file that contains input arguments to this
+                            utility
+                      -start_tol <min_dist> -end_tol <max_dist> : specifies the minimum and maximum
+                           separation distance in mapping die and package pins (meters)
+                      -snap : snaps each die pin to the package pin closest to it, even if outside the
+                          tolerance radius.
+                      -ee : forces die ground pins to attach only to package ground pins and die power
+                           pins to attach only to package power pins
+              Note that if you run Package Compiler without the ‘–ee’ and ‘–snap’ options, a file with a
+              list of unmatched ploc pins, called adsPackage/unmatchedPlocPins.txt, is generated, with
+              entries such as the following:
+                         + Best Match: 1/3126 pins lying outside of tolerance 1.8um,
+                         with greatest offset of 264.552452um
+                         + The list of unmatched ploc pins: [ adsPackage/
+                         unmatchedPlocPins.txt ]
+                         !! NOTE: Since -snap option was NOT specified, all pins
+
+
+ANSYS, Inc.
+CHAPTER 12 — Package and Board Analysis                                      RedHawk User Manual       | 341
+Chip-Die Mapping Using Package Compiler
+
+                        lying outside of the tolerance will be commented out in the
+                        annotated ploc file.
+              Using the ‘–ee’ and ‘–snap’ options, Package Compiler snaps any PLOC points lying
+              outside of the tolerance threshold to the closest related package point and no
+              unmatchedPlocPins.txt file is generated.
+
+              Outputs
+              The primary output is the conversion of the original package Spice netlist, <pkg_spice>,
+              of the form:
+                         subckt pkg die1 die2 pcb1 pcb2
+                         ...
+                         .ends
+
+              into the “wrapped” RedHawk-compatible package Spice netlist, redhawk_pkg, that has
+              the format:
+                         include <pkg_spice>
+                         .subckt redhawk_pkg die1 die2
+                         V1 pcb1 0 1.2
+                         V2 pcb2 0 0
+                         Xpkg die1 die2 pkg
+                         .ends
+
+              Note that the new Spice file includes the original package Spice file. The subckt netlist
+              excludes the nodes on the side of the PCB, which are assigned appropriate voltages
+              described by the voltage file.
+              Additional outputs are described following:
+               • <ploc_file>.1 - fully-annotated ploc file after successful die and package pin pair
+                 mapping.
+               • standard checks of circuit syntax, such as:
+                    • annotated Spice nodes and nets exist in the package Spice model
+                    • annotated Spice nodes belong to the correct package net
+                    • die side Spice nodes are not used as voltage sources in the Spice file
+                    • Spice nodes do not have multiple types
+                    • Spice nodes do not belong to multiple nets in CPP header
+                    • PLOC file is fully annotated
+                    • PCB Spice nodes have valid voltages
+               • passivity check - checks RLCK passivity for the package Spice model
+               • package net types file (*.pnt) - automatically created upon successful pin-pair
+                 mapping, and required for effective inductance calculation. In the event that the file is
+                 unavailable (if Package Compiler has not been run yet), it can be provided by using
+                 the ‘–n’ option. The file format is:
+                        .POWER
+                           <pkg_net1>
+                           <pkg_net2>
+                              ...
+                        .GROUND
+                           <pkg_neta>
+                           <pkg_netb>
+                              ...
+
+
+
+ANSYS, Inc.
+CHAPTER 12 — Package and Board Analysis                                     RedHawk User Manual      | 342
+Known Restrictions
+
+               • effective inductance calculation for each Power and Ground net pair. The Package
+                 Compiler makes use of the CPP (Chip Package Protocol) header to gather information
+                 needed for the calculation. To determine which package nets are power and which are
+                 ground, it makes use of the file, which is automatically created upon successful pin-
+                 pair mapping. For example, for the sample PNT file above, it calculates the
+                 inductances:
+                         <pkg_net1> to <pkg_neta>
+                         <pkg_net1> to <pkg_netb>
+                         <pkg_net2> to <pkg_neta>
+                         <pkg_net2> to <pkg_netb>
+                 A testbench is created for each calculation, named:
+                 <pkg_model>.<power_name>_<gnd_name>.leff.sp
+                 for example, model.sp.pkg_net1_pkg_neta.leff.sp.
+                 By default, the utility uses the NSpice binary to extract the effective impedance
+                 ($APACHEROOT/bin/nspice)
+                 You can use the ‘sv’ waveform viewer to view the waveform file generated [*.aa0].
+               • <ploc_file>.map.1 file - contains the list of die -to -package pin mappings.
+               • <ploc_file>.T file - contains the transformation parameters (rotation, mirror,
+                 translation) used to match the die to the package
+               • *.leff.sp files - testbench Spice files used to extract the effective inductances between
+                 power and ground package net pairs.
+               • *.leff.aa0 files - contain the effective inductance graphs that can be viewed with the
+                 ‘sv’ viewer.
+
+Known Restrictions
+
+              The following restrictions must be observed in package models:
+               • Only the previously-described SPICE keywords are supported.
+               • Mapping the nodes of the package to their locations on-chip is currently supported
+                 only through the .ploc file.
+               • The user-created top-level SPICE netlist must use the ‘REDHAWK_PKG’ keyword as
+                 the subcircuit model.
+
+
+
+
+ANSYS, Inc.
+

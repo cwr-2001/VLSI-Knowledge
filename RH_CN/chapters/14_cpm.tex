@@ -1,0 +1,702 @@
+﻿% 第 14 章 芯片电源建模 CPM（原书 14-394 … 14-418）
+\bichapter{芯片电源建模（CPM）}{Chip Power Modeling (CPM)}
+\label{chap:cpm}
+
+\section{引言}
+\subsection*{Introduction}
+
+\begin{noteBox}
+CPM 生成比常规动态压降分析复杂得多，须在全频段（DC 到数 GHz）保持电路时域与频域响应。典型用法虽常接续 DvD 分析，但其设置与网络表述未必适合 CPM，带来额外复杂度。
+
+自 12.2 版起，RedHawk 要求使用独立 CPM 流程（GSR：\texttt{GENERATE\_CPM 1}），与动态压降分析分离，便于针对 CPM 优化而不影响标准 DvD。
+\end{noteBox}
+
+封装与 PCB 设计者需要准确且相对简单的 IC 电源模型，以设计优化有效封装与板级 PDN（阻抗、谐振频率等）。芯片 PDN 等效电路须同时提供准确多端阻抗模型与真实最坏开关场景的电流波形。
+
+Apache 芯片电源模型（CPM）支持 die-package-board 协同设计与动态电源完整性验证，基于 RedHawk 全芯片动态电源完整性平台，在芯片与封装设计各关键阶段生成紧凑准确的 PDN 模型。
+
+CPM 除默认无向量与 VCD 模式外，支持 VectorLess™ 时钟门控开关模式：生成模拟时钟门控模式切换的多周期瞬态场景，捕获模式切换时的电流跃迁，有助于理解封装/板级 $L\,di/dt$ 效应。CPM 还有谐振频率感知激励模式：指定系统谐振频率后，VectorLess 引擎生成在谐振附近引入大部分能量的多周期电流特征，同时保持逻辑与时序属性。
+
+CPM 连接 IC 与封装/PCB 的 PDN 设计。系统设计者可用 CPM 评估片上寄生对全局 PDN 阻抗的影响、诊断 chip-package LC 谐振、验证封装/板级动态噪声裕量、优化片外去耦电容布局。电流特征与寄生网络以多端等效电路分布表示时空依赖。最简单单元可视为串联 $R\_{\mathrm{DIE}}$ 与 $C\_{\mathrm{DIE}}$，并联电流开关（图~\ref{fig:cpm-simple}）。
+
+\figplaceholder{Figure 14-1}{PDN 与简单芯片电源模型}
+
+SPICE 兼容 CPM 含非线性开关/非开关器件寄生、P/G 线寄生、去耦电容及信号互连负载有效 RC；并含基于晶体管级 SPICE 仿真的全芯片开关电流特征。
+
+\section{设计流程}
+\subsection*{Design Flow}
+
+CPM 在封装-IC 协同设计全流程各阶段均有价值（图~\ref{fig:cpm-flow}）：综合/布图规划阶段早期 CPM 与封装/板原型；布局布线后细化 CPM 与优化；时序收敛/去耦插入后最终 CPM 与 sign-off。
+
+\figplaceholder{Figure 14-2}{基于 CPM 的 IC 系统协同设计流程}
+
+须设 \texttt{GENERATE\_CPM 1} 以启用改进的独立 CPM 流程。
+
+\section{RedHawk 对芯片 PDN 的建模}
+\subsection*{RedHawk Modeling of Chip Power Delivery Network}
+
+CPM 可按 P/G pad 数量及速度/精度权衡以多种方式建模芯片 PDN。
+
+\subsection{基于 Pad 数量的建模选择}
+\subsubsection*{Modeling Choices Based on Number of Pads}
+
+倒装芯片 pad 众多时，将 bump 区域划分为矩形分区，每分区每 Vdd/Vss 网生成一组端子。线键设计可将 pad 按 PLOC 中 Spice 节点名分组。pad 数较少时，每个 pad 单独对应 CPM 端子。
+
+片上所有显著电容源均纳入 RedHawk 模型（图~\ref{fig:cpm-chip-circuit}）：
+\begin{itemize}
+  \item 有意去耦（RedHawk 表征）
+  \item 器件本征去耦
+  \item 信号负载电容（SPEF/StarRC）
+  \item P/G 线间耦合电容（RedHawk 提取）
+\end{itemize}
+
+\figplaceholder{Figure 14-3}{RedHawk 芯片电源建模电路}
+
+\subsubsection{倒装芯片 CPM}
+bump 区域可划分为 $N \times M$ tile；$K$ 个 P/G 网时最大外端子数为 $K \times N \times M$（图~\ref{fig:cpm-flipchip}）。
+
+\figplaceholder{Figure 14-4}{倒装芯片电源电路建模}
+
+\subsubsection{线键 CPM}
+通常每个线键 pad 对应一个端子（图~\ref{fig:cpm-wirebond}）。PLOC 分组时 CPM 默认按 PLOC 分组生成外端口。
+
+\figplaceholder{Figure 14-5}{线键芯片电源电路建模}
+
+\subsubsection{3DIC CPM 生成}
+可对完整 3DIC 生成组合 CPM（图~\ref{fig:cpm-3dic}）：
+\begin{lstlisting}
+import gsr mem.gsr -die mem
+import gsr logic.gsr -die logic
+setup design
+perform pwrcalc
+perform extraction -power -ground -r -c
+perform powermodel -nx 1 -ny 1 -o 3dic_cpm.sp
+\end{lstlisting}
+
+\figplaceholder{Figure 14-6}{3DIC CPM 生成}
+
+\subsection{基于速度与精度的建模选择}
+\subsubsection*{Modeling Choices Based on Analysis Speed and Accuracy}
+
+\textbf{高速建模（MOR）}：以 DC/零频为中心的模型阶次缩减，高频开关时精度下降但省时。通常假设 P/G 对称；\texttt{DYNAMIC\_SOLVER\_MODE 1} 可取消对称假设，更准确但更慢、更耗内存。
+
+\textbf{高精度建模：}
+\begin{itemize}
+  \item \textbf{AC 建模}（默认）：显著改善精度并与 RedHawk 仿真更好相关。分电流特征计算与无源部分缩减；对含非开关实例串联 RC 支路及开关电流源的原始 RC 网做 grid RC 缩减，在指定端口与频段内频响匹配（容差 $<0.2\%$），导出 R/C/L/G 被动 SPICE 网表，保证被动性，适用于 NSPICE/HSPICE 等。
+  \item \textbf{S 参数建模}：生成 RLC 网格 Touchstone S 参数：
+\begin{lstlisting}
+perform powermodel -grid [RC |RLC ]
+    -options <config_file_path>
+\end{lstlisting}
+  或运行目录 \texttt{RC\_reduction.config}。配置须含 \texttt{portFileName=<port file>}、\texttt{sParam=true}、可选 \texttt{Zo=<value>}、\texttt{broadbandSpice=true}。
+\end{itemize}
+
+配置示例：
+\begin{lstlisting}
+sParam=true
+Zo=50
+portFileName=port.file
+broadbandSpice=true
+\end{lstlisting}
+
+端口文件格式：\texttt{<CPM\_port\_name1> <CPM\_port\_name2>}。CPM 端口名为 pad 名或 PLOC 第 6 列分组名。输出 \texttt{-o rc\_grid.sp} 时 Touchstone 为 \texttt{rc\_grid.Snp}（$n$ 为端口数）。
+
+S 参数封装模型支持自动 presim 时间：\texttt{DYNAMIC\_PRESIM\_TIME -1}。
+
+\subsubsection{ESD 感知 CPM}
+为系统级 ESD 分析创建 ESD-aware CPM；clamp 连接建模为 CPM 端口，clamp 子电路纳入模型：
+\begin{lstlisting}
+setup analysis_mode esd
+setup design <GSR_file>
+perform extraction -power -ground
+perform powermodel -esd ?-esd_clamp <file>? ...
+\end{lstlisting}
+若 GSR 已用 \texttt{ESD\_CLAMP\_FILE} 指定 clamp 文件，则无需 \texttt{-esd\_clamp}。
+
+\section{CPM 仿真流程}
+\subsection*{CPM Simulation Procedures}
+
+\subsection{初始设置与准备}
+\subsubsection*{Initial Setup and Preparation}
+
+CPM 输入与全芯片 DvD 相同：正确 APL/AVM 表征（第~9~章）。开关电流取决于瞬态开关活动，须正确设置翻转率（无向量，第~5~章；或 VCD）。与 DvD 不同，CPM 运行\textbf{无需}封装模型。倒装芯片还须决定 X/Y 分区数。
+
+\subsection{运行 CPM}
+\subsubsection*{Running CPM}
+
+从 RedHawk 流程读入数据、功耗计算、片上 P/G 提取，再基于分区网络生成功率递送网络电气模型与电流轮廓。
+
+步骤：
+\begin{enumerate}
+  \item \textbf{导入并设置设计}：GSR 须含 \texttt{GENERATE\_CPM 1}。
+\begin{lstlisting}
+setup design <design>.gsr
+\end{lstlisting}
+  \item \textbf{本地临时目录}：大设计多核时用 \texttt{CACHE\_DIR} 将 \texttt{linear.*} 写在本地盘；CPM 结束后删除。
+  \item \textbf{功耗计算}：\texttt{perform pwrcalc}
+  \item \textbf{提取}：\texttt{perform extraction -power -ground -c -l}
+  \item \textbf{开关场景}：无向量（GSR 设置，第~5~章）或 \texttt{VCD\_FILE}
+  \item \textbf{生成 CPM}：
+\begin{lstlisting}
+perform powermodel [ -wirebond | <flip chip partitions>| -cdie| -static
+| -lowpower | -esd ] ? -esd_clamp <file> ? ? -parasitic ? ?-vcd ?
+?<no model option-default>? ? -pincurrent ? ? -rleak ? ? -rleak_par?
+?-solver mor? ?-plocname? ? -ind? ? -no_afs? ? -passive ?
+? [ -noglobal_gnd | -global_gnd ] ? ? -high_capacity 1 ?
+? -repeat_current [ <start_time> | presim | best ]? -probe ?
+? -internal_node -cell_file <cell_list_filename> ? ? -reportcap ?
+? -o <output_filename> ? ? -reuse ? ? -io ? ? port_grouping
+<group_cfg_file> ? ? -esd_spice ? ? -cecm_subckt
+\end{lstlisting}
+\end{enumerate}
+
+主要选项说明：
+\begin{itemize}
+  \item \texttt{-wirebond}：线键封装
+  \item \texttt{-nx/-ny}：倒装分区；\texttt{-nx 1 -ny 1} 生成 \texttt{adsRpt/CPM/apache.Cdie}
+  \item \texttt{-cdie}：单端口 $C\_{\mathrm{die}}/R\_{\mathrm{die}}$，无电流波形
+  \item \texttt{-static}：DC 静态 CPM
+  \item \texttt{-lowpower}： ramp-up 分析支持
+  \item \texttt{-esd}：含 clamp 的 ESD CPM
+  \item \texttt{-parasitic}：仅无源部分，仅用于 DC/AC
+  \item \texttt{-vcd}：基于 VCD 的最坏开关场景
+  \item \texttt{-pincurrent}：不强制电流守恒，改善与 RedHawk 动态相关
+  \item \texttt{-rleak}/\texttt{-rleak\_par}：泄漏电阻
+  \item \texttt{-solver mor}：关闭默认 AC 求解器
+  \item \texttt{-plocname}：CPM 端口用 pad/分组名
+  \item \texttt{-ind}：片上电感（须 extraction 用 \texttt{-l}）
+  \item \texttt{-no\_afs}：关闭自适应频率扫描（$>50$ 端口推荐）
+  \item \texttt{-passive}：MOR 被动 enforced 模型（收敛问题时）
+  \item \texttt{-noglobal\_gnd}/\texttt{-global\_gnd}：寄生是否接 Spice 节点 0
+  \item \texttt{-high\_capacity 1}：ASIM3D 求解器（默认开）
+  \item \texttt{-repeat\_current}：从指定时刻重复电流特征
+  \item \texttt{-probe}：iCPM 内部节点探测（须 \texttt{PROBE\_NODE\_FILE}）
+  \item \texttt{-internal\_node -cell\_file}：暴露实例内部 P/G pin 为端口
+  \item \texttt{-port\_grouping}：bump 分组配置
+  \item \texttt{-reportcap}：电容分量日志
+  \item \texttt{-o}：输出文件名（默认 \texttt{PowerModel.sp}）
+  \item \texttt{-reuse}：复用已生成电流波形
+  \item \texttt{-io}：I/O 单元纳入 CPM
+\end{itemize}
+
+倒装示例：
+\begin{lstlisting}
+perform powermodel -nx <num_x> -ny <num_y> -o <output_filename>
+perform powermodel -wirebond -solver mor -o <output_filename>
+perform powermodel -nx 2 -ny 3 -parasitic -o cpm.sp
+\end{lstlisting}
+
+AC 模式可用多线程；默认处理器数 $\le \min(\text{可用数}, 8)$；环境变量 \texttt{MAX\_CPU} 可调整。
+\subsection{\cmd{perform powermodel} 全选项说明}
+\subsubsection*{Complete perform powermodel Option Reference}
+
+完整命令语法：
+\begin{lstlisting}
+perform powermodel [ -wirebond | -nx <x> -ny <y> | -cdie | -static
+| -lowpower | -esd ] ? -esd_clamp <file> ? ? -parasitic ? ? -vcd ?
+? -pincurrent ? ? -rleak ? ? -rleak_par ? ? -solver mor ? ? -plocname ?
+? -ind ? ? -no_afs ? ? -passive ? ? [ -noglobal_gnd | -global_gnd ] ?
+? -high_capacity [0|1] ? ? -repeat_current [ <t> | presim | best ] ?
+? -probe ? ? -internal_node -cell_file <file> ? ? -reportcap ?
+? -o <output> ? ? -reuse ? ? -io ? ? -port_grouping <cfg> ?
+? -esd_spice ? ? -cecm_subckt ? ? -user_config -group_file <file> ?
+? -couple_gridc ?
+\end{lstlisting}
+
+\paragraph{模式与分区选项}
+\begin{itemize}
+  \item \texttt{-wirebond}：线键封装，每 P/G 连接一个端口
+  \item \texttt{-nx/-ny}：倒装 X/Y 分区；\texttt{-nx 1 -ny 1} 生成 \texttt{adsRpt/CPM/apache.Cdie}
+  \item \texttt{-cdie}：等价于 \texttt{-nx 1 -ny 1} 但跳过电流波形计算，仅 $C_{\mathrm{die}}/R_{\mathrm{die}}$
+  \item \texttt{-static}：DC 静态 CPM（电阻网 + 平均电流）
+  \item \texttt{-lowpower}：支持 ramp-up 分析的 CPM
+  \item \texttt{-esd}：含 clamp 端口与子电路的 ESD-aware CPM；GSR 已有 \texttt{ESD\_CLAMP\_FILE} 时可省略 \texttt{-esd\_clamp}
+  \item \texttt{-parasitic}：仅无源部分，适用于 DC/AC，不可用于瞬态
+  \item \texttt{-vcd}：基于 VCD 的最坏开关场景
+\end{itemize}
+
+\paragraph{电流与求解器选项}
+\begin{itemize}
+  \item \texttt{-pincurrent}：不强制 Vdd/Vss 电流守恒，改善与 RedHawk 动态相关（RedHawk 电流不平衡时推荐）
+  \item \texttt{-rleak}：在 VDD 端口与参考 VSS 端口间加泄漏电阻
+  \item \texttt{-rleak\_par}：在各分区定义的 POWER/GROUND 端口对间加泄漏电阻（须 \texttt{partition.txt}）
+  \item \texttt{-solver mor}：关闭默认 AC 求解器（\texttt{solver ac}），改用 MOR
+  \item \texttt{-passive}：MOR 被动 enforced 模型（收敛问题时，可能略降精度）
+  \item \texttt{-no\_afs}：关闭自适应频率扫描（$>50$ 端口推荐）；默认 AFS 选 7--9 个频率点
+  \item \texttt{-high\_capacity 1}：ASIM3D 求解器（默认开）；\texttt{0} 切换为 asim\_mixed
+\end{itemize}
+
+\paragraph{端口与探测选项}
+\begin{itemize}
+  \item \texttt{-plocname}：CPM 端口用 pad/分组名；倒装分区名为 \texttt{PAR\_0\_0\_VDD1} 等形式
+  \item \texttt{-ind}：含片上电感（须 extraction 使用 \texttt{-l}）；仅 \texttt{-l} 无 \texttt{-ind} 则忽略电感
+  \item \texttt{-probe}：iCPM 内部节点探测（须 \texttt{PROBE\_NODE\_FILE}）
+  \item \texttt{-internal\_node -cell\_file}：暴露实例内部 P/G pin 为端口（命名 \texttt{<inst>\_<net>}）；须配合 \texttt{-pincurrent}
+  \item \texttt{-port\_grouping <cfg>}：bump 分组，格式 \texttt{CPM\_Port\_Grouping \{ \#region layer nx ny llx lly urx ury \}}
+  \item \texttt{-io}：I/O 单元纳入 CPM
+  \item \texttt{-reuse}：复用已生成电流波形以尝试不同分区
+  \item \texttt{-reportcap}：写出电容分量日志（intentional/intrinsic/load/grid/well decap）
+  \item \texttt{-repeat\_current}：从指定时刻（ns）、\texttt{presim} 或 \texttt{best} 重复电流 PWL；非零值取 PWL 最近时间点
+  \item \texttt{-esd\_spice} / \texttt{-cecm\_subckt}：ESD 电路 spice 文件名与子电路名
+  \item \texttt{-user\_config -group\_file}：用户可配置多组电流源（见下文）
+  \item \texttt{-couple\_gridc}：EMI 建模时耦合网格电容（须 \texttt{COUPLEC 1}）
+\end{itemize}
+
+\paragraph{倒装/线键/无源生成示例}
+\begin{lstlisting}
+perform powermodel -nx 4 -ny 4 -o flipchip_cpm.sp
+perform powermodel -wirebond -solver mor -o wirebond_cpm.sp
+perform powermodel -nx 2 -ny 3 -parasitic -o cpm_passive.sp
+perform powermodel -nx 1 -ny 1 -vcd -pincurrent -global_gnd -o cpm_vcd.sp
+\end{lstlisting}
+
+AC 模式默认线程数 $\le \min(\text{CPU 数}, 8)$；环境变量 \texttt{MAX\_CPU} 可调整上限。
+
+
+\subsubsection{基本电源完整性分析推荐设置}
+\begin{lstlisting}
+DYNAMIC_TIME_STEP <ps>          # < 20ps
+DYNAMIC_PRESIM_TIME <time> 1.0  # TSM 勿 > 1.0
+DYNAMIC_SOLVER_MODE 1           # 多 Vdd 设计必需
+perform powermodel [-wirebond | -nx <x> -ny <y> ] -plocname
+    -repeat_current <start_time> -rleak -ind
+\end{lstlisting}
+
+表~\ref{tab:cpm-pincurrent}、表~\ref{tab:cpm-gnd} 描述 \texttt{-pincurrent} 与 \texttt{-noglobal\_gnd}/\texttt{-global\_gnd} 影响。
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{\texttt{-pincurrent} 选项影响}
+\label{tab:cpm-pincurrent}
+\begin{tabular}{llll}
+\toprule
+\texttt{-pincurrent} & Dynamic Solver & I(t) & 无源部分 \\
+\midrule
+未用 & 0/1 & N-1 端口电流汇到公共 VSS & VDD/VSS 耦合，不受选项影响 \\
+使用 & 0/1 & 所有 N 端口电流到节点 0 & 同上 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{\texttt{-noglobal\_gnd}/\texttt{-global\_gnd} 影响}
+\label{tab:cpm-gnd}
+\begin{tabular}{lll}
+\toprule
+选项 & 无源部分 \\
+\midrule
+\texttt{-global\_gnd} & 电容接到 Spice 节点 0 \\
+\texttt{-noglobal\_gnd}（默认） & VDD/VSS 间耦合 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{EMI 建模推荐}
+\begin{lstlisting}
+COUPLEC 1
+DYNAMIC_SOLVER_MODE 1
+DYNAMIC_TIME_STEP <ps>
+DYNAMIC_PRESIM_TIME <time> 1.0
+perform powermodel -pincurrent -couple_gridc [-wirebond |
+    -nx <x> -ny <y> ] -plocname -repeat_current <start_time> -rleak -ind
+\end{lstlisting}
+
+\subsection{用户指定端口分组}
+\subsubsection*{User-specified Grouping for Port Creation}
+
+线键（\texttt{-wirebond}）：每 P/G 连接一个端口。倒装：\texttt{-nx/-ny} 分区，每区每域一个端口。混合方式：PLOC 第 6 列分组 + \texttt{-wirebond}（图~\ref{fig:cpm-wb-group}）。
+
+\figplaceholder{Figure 14-7}{线键端口分组}
+
+示例 PLOC：
+\begin{lstlisting}
+#source name #loc_x #loc_y #layer #POWER/GROUND #Group name
+DVDD1 10 5 METAL6 POWER GROUP_POWER_1
+DVDD2 15 5 METAL6 POWER GROUP_POWER_1
+DVSS1 10 15 METAL6 GROUND GROUP_GROUND_1
+...
+\end{lstlisting}
+
+\subsection{任意分区泄漏电阻}
+\subsubsection*{Modeling leakage resistance using arbitrary partitioning}
+
+\texttt{-rleak\_par} 在 PLOC 第 6 列定义的 POWER/GROUND 端口间捕获泄漏电阻。须 \texttt{partition.txt}，格式 \texttt{<package node> <group name>}：
+\begin{lstlisting}
+bump_vcc1 part1
+ref1 part1
+\end{lstlisting}
+命令：\texttt{perform powermodel -rleak\_par -wirebond}
+
+\subsection{iCPM 内部节点探测}
+\subsubsection*{iCPM- Internal Node Probing}
+
+iCPM 在用户定义器件位置增加端子，评估系统级仿真中片上 PDN 压降：
+\begin{lstlisting}
+perform powermodel -nx 1 -ny 1 -probe -o cpm_probe.sp
+\end{lstlisting}
+GSR：\texttt{PROBE\_NODE\_FILE <file>}，格式 \texttt{<X> <Y> <Metal> <Port\_name>}。亦可用 \texttt{-internal\_node -cell\_file}。
+
+\subsection{谐振频率感知模式}
+\subsubsection*{Resonance frequency-aware mode}
+
+先用常规 CPM 无源部分与封装做 AC 分析得谐振频率，再第二次运行设：
+\begin{lstlisting}
+DYNAMIC_FREQUENCY_AWARE 40e6
+\end{lstlisting}
+（例：40\,MHz）
+
+\subsection{功率瞬态模式（可变功率）}
+\subsubsection*{Power Transient Mode (variable power)}
+
+模拟逐帧功率/电流瞬态（门控时钟、复位到运行、流量切换等）：
+\begin{lstlisting}
+POWER_TRANSIENT_ANALYSIS {
+    <duration_frame_1_sec> <config_file_1>
+    <duration_frame_2_sec> <config_file_2>
+    ...
+}
+\end{lstlisting}
+
+配置文件中可用：\texttt{GSC\_FILE}、\texttt{INSTANCE\_POWER\_FILE}、\texttt{GSC\_OVERRIDE\_IPF}、\texttt{BLOCK\_POWER\_FOR\_SCALING}、\texttt{STATE\_PROPAGATION}、\texttt{TOGGLE\_RATE} 等。配置关键字覆盖 GSR（\texttt{GSC\_FILE}、\texttt{STATE\_PROPAGATION} 除外）。目前仅支持无向量模式；不支持 \texttt{VCD\_FILE}、\texttt{STA\_FILE}、\texttt{BLOCK\_POWER\_ASSIGNMENT}、\texttt{PAR} 等。
+
+\subsection{用户可配置模式}
+\subsubsection*{User-configurable mode}
+
+允许封装/板工程师在不重生成模型的情况下组合不同区域/功能块贡献：
+\begin{lstlisting}
+perform powermodel -user_config -group_file <file>
+\end{lstlisting}
+
+分组文件格式：
+\begin{lstlisting}
+GROUP <group name1>
+INSTANCE <inst_name_1A> ... ;
+GROUP <group name2>
+INSTANCE <inst_name_2A> ... ;
+\end{lstlisting}
+支持通配符与 \texttt{\#} 注释。未分组实例归入 ``others''。各组电流源并联，用 SPICE 注释启用/禁用组（图~\ref{fig:cpm-user-config}）。
+
+\figplaceholder{Figure 14-10}{创建用户可配置 CPM}
+
+\figplaceholder{Figure 14-11}{多组电流/电压分析}
+
+\figplaceholder{Figure 14-12}{CPM 分析结果示例}
+\subsection{VectorLess 与谐振频率感知模式}
+\subsubsection*{VectorLess and Resonance Frequency-Aware Modes}
+
+\paragraph{VectorLess 时钟门控开关模式}
+CPM 除无向量与 VCD 外，支持 VectorLess™ 时钟门控开关模式：生成模拟时钟门控模式切换的多周期瞬态，捕获模式切换电流跃迁，有助于理解封装/板级 $L\,di/dt$ 效应。
+
+\paragraph{谐振频率感知激励}
+流程：
+\begin{enumerate}
+  \item 用常规 CPM 无源部分接封装做 AC 分析，得到系统谐振频率 $f_{\mathrm{res}}$
+  \item 第二次 CPM 运行设 GSR：
+\begin{lstlisting}
+DYNAMIC_FREQUENCY_AWARE 40e6
+\end{lstlisting}
+  （例：40\,MHz）VectorLess 引擎生成在谐振附近引入大部分能量的多周期电流特征，同时保持逻辑与时序属性。
+\end{enumerate}
+
+\figplaceholder{Figure 14-8}{频率感知 CPM 模式}
+
+\subsection{功率瞬态模式配置详解}
+\subsubsection*{Power Transient Mode Configuration Details}
+
+GSR：
+\begin{lstlisting}
+POWER_TRANSIENT_ANALYSIS {
+    <duration_frame_1_sec> <config_file_1>
+    <duration_frame_2_sec> <config_file_2>
+    ...
+}
+\end{lstlisting}
+
+各帧配置文件可含：\texttt{GSC\_FILE}、\texttt{INSTANCE\_POWER\_FILE}、\texttt{GSC\_OVERRIDE\_IPF}、\texttt{BLOCK\_POWER\_FOR\_SCALING}、\texttt{STATE\_PROPAGATION}（含 \texttt{PROPAGATION\_MODE}、\texttt{GATED\_ON\_PERCENTAGE} 等）、\texttt{TOGGLE\_RATE}、\texttt{INSTANCE/BLOCK\_TOGGLE\_RATE} 等。配置关键字覆盖 GSR（\texttt{GSC\_FILE}、\texttt{STATE\_PROPAGATION} 除外）。
+
+\begin{noteBox}
+功率瞬态分析\textbf{仅}支持无向量模式；不支持 \texttt{VCD\_FILE}、\texttt{STA\_FILE}、\texttt{BLOCK\_POWER\_ASSIGNMENT}、\texttt{PAR} 等。仿真以第一帧电荷为参考，首帧配置影响动态结果。
+\end{noteBox}
+
+\subsection{用户可配置模式详解}
+\subsubsection*{User-Configurable Mode Details}
+
+分组文件示例：
+\begin{lstlisting}
+GROUP GS1
+INSTANCE Bl_1
+Bl_2/Inst1
+Inst2
+Bl_3/MEM*;
+GROUP GS2
+INSTANCE Bl_4/*;
+\end{lstlisting}
+
+未分组 instance 归入 ``others''。无 \texttt{-pincurrent} 时每组 $(P-1)$ 个 PWL 源；有 \texttt{-pincurrent} 时 $P \times N_g$ 个源。PWL 名以组名前缀（如 \texttt{Icsg1\_1}）便于在 SPICE 中注释启用/禁用组。
+
+示例多组分析结果（峰值电流 / 峰峰 DvD）：
+\begin{center}
+\small
+\begin{tabular}{cccccc}
+\toprule
+Block 1 & Block 2 & Rest & Peak $I$ & Peak-to-Peak DvD \\
+\midrule
+ON & ON & ON & 192\,A & 95\,mV \\
+OFF & ON & ON & 139\,A & 72\,mV \\
+ON & OFF & ON & 130\,A & 66\,mV \\
+ON & ON & OFF & 116\,A & 53\,mV \\
+OFF & OFF & ON & 76\,A & 42\,mV \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+
+\subsection{CPM LDO 分析支持}
+\subsubsection*{CPM LDO analysis support}
+
+含 LDO 的芯片可直接 \texttt{perform powermodel}；端子数对应 APLDO 行为模型。检测到 LDO 时自动启用 \texttt{-plocname}，在 LDO pin 生成内部端口。顶层 \texttt{adsPowerModel} 仅含 pad 端口；注释标明 LDO 实例与子电路名。
+
+系统级仿真须含封装/PCB 与 LDO 子电路（晶体管级或行为级）。推荐 \texttt{-pincurrent -global\_gnd}。
+
+\begin{noteBox}
+\begin{enumerate}
+  \item 二进制 CPM（Sentinel-PI）不实例化 LDO 子电路
+  \item CPM 头含 LDO 端子坐标与层信息
+  \item LDO 可与 \texttt{-probe} 配合，不可与 \texttt{-internal\_node}/\texttt{-cell\_file} 同用
+\end{enumerate}
+\end{noteBox}
+
+\section{CPM 输出}
+\subsection*{CPM Outputs}
+
+输出包括：
+\begin{itemize}
+  \item CPM 模型文件
+  \item \texttt{get\_cdie.sp} NSpice 网表
+  \item \texttt{*.cdie}：$1\times1$ 分区有效 $R\_{\mathrm{die}}/C\_{\mathrm{die}}$
+  \item S 参数模型差分输出电压
+\end{itemize}
+
+\subsection{CPM 模型文件}
+\subsubsection*{CPM Model Files}
+
+CPM 含无源部分（\texttt{*.sp.inc}）与分区电流特征（\texttt{*.sp}）。输出至 \texttt{adsRpt/CPM} 三种格式：
+\begin{itemize}
+  \item 标准 SPICE（默认）
+  \item HSPICE 优化（\texttt{<design>\_hspice.sp}，100+ 端口时 Foster VCCS）
+  \item Sentinel-PI 二进制（\texttt{<design>\_snpi.sp}）
+\end{itemize}
+
+\figplaceholder{Figure 14-13}{CPM 模型要素}
+
+\subsection{get\_cdie.sp 与 *.cdie 文件}
+\subsubsection*{get\_cdie.sp File / *.cdie File}
+
+\texttt{get\_cdie.sp} 用于计算指定频率（默认 50\,MHz）$R\_{\mathrm{die}}/C\_{\mathrm{die}}$ 及 1\,MHz--1\,GHz 曲线。多 P/G 网时生成 \texttt{get\_cdie\_<pwr>\_<gnd>.sp}。
+
+\texttt{-nx 1 -ny 1} 或 \texttt{-cdie} 时在 \texttt{adsRpt/CPM/apache.Cdie} 输出各频率 $C\_{\mathrm{die}}$、$R\_{\mathrm{die}}$（精确 Y 矩阵计算，无近似）。
+
+\begin{noteBox}
+AC 分析仅连接无源部分（\texttt{.inc}），勿将 CPM 端口接全局地。默认 Norton 电流模型：选一地端口作为各 PWL 负端，端口电流和为零。\texttt{-pincurrent} 时各 PWL 参考节点 0，部分工具不支持。
+\end{noteBox}
+
+\figplaceholder{Figure 14-14}{两端口 CPM 等效电路}
+
+示例 CPM 头含 presimulation 时间，用于 CPM 与 RedHawk 波形对齐（须平移 presim 时间）。
+
+\section{使用芯片电源模型}
+\subsection*{Using the Chip Power Model}
+
+将 CPM SPICE 网表接封装/PCB 后用 NSPICE 或其他 SPICE 仿真。主要应用：
+\begin{itemize}
+  \item 全局 PDN 阻抗、IC-封装谐振（AC，仅用无源部分）
+  \item 封装/板级动态噪声预算
+  \item 封装/板去耦优化
+\end{itemize}
+
+差分电压：S 参数封装模型为差分性质。可用：
+\begin{lstlisting}
+plot voltage -pad_pair {VDD1 VSS2} -sv -o vdrop.txt
+\end{lstlisting}
+
+\section{验证模型}
+\subsection*{Validating the Model}
+
+精度验证步骤：
+\begin{enumerate}
+  \item 无封装模型运行 RedHawk 生成 CPM；\texttt{DYNAMIC\_TIME\_STEP 10e-12} 最佳；presim 步长与仿真一致或设 \texttt{DYNAMIC\_PRESIM\_TIME}
+  \item CPM 接封装模型 SPICE 仿真
+  \item 在 pad 连接点测电流与电压
+  \item 同封装模型在 RedHawk 做 DvD（相同 presim）；RedHawk 波形须平移 presim 时间
+  \item 测所有 bump 电流与 VDD/GND 波形
+  \item 比较两路波形（图~\ref{fig:cpm-validate}）
+\end{enumerate}
+
+\figplaceholder{Figure 14-15}{CPM 与全芯片 RedHawk 仿真比较}
+\subsection{CPM 验证流程详述}
+\subsubsection*{Detailed CPM Validation Procedure}
+
+\begin{enumerate}
+  \item \textbf{生成 CPM}：无封装模型运行 RedHawk；推荐 \texttt{DYNAMIC\_TIME\_STEP 10e-12}；\texttt{DYNAMIC\_PRESIM\_TIME} 步长与主仿真一致
+  \item \textbf{接封装 SPICE}：将 CPM \texttt{.sp} + \texttt{.sp.inc} 与封装/板网表级联
+  \item \textbf{Pad 点测量}：在 bump/pad 连接点探针电流与电压
+  \item \textbf{RedHawk 对照 DvD}：相同封装模型、相同 presim；RedHawk 波形须\textbf{平移} presim 时间后与 CPM 对齐
+  \item \textbf{比较}：所有 bump 的 VDD/GND 电流与电压波形应一致（图~\ref{fig:cpm-validate}）
+\end{enumerate}
+
+\paragraph{AC 分析注意事项}
+\begin{itemize}
+  \item AC 仅连接无源部分（\texttt{.inc}），勿将 CPM 端口接全局地
+  \item 默认 Norton 电流模型：选一 VSS 端口作为各 PWL 负端，端口电流和为零
+  \item \texttt{-pincurrent} 时各 PWL 参考节点 0，部分第三方工具不支持
+  \item \texttt{get\_cdie.sp} 默认 50\,MHz 计算 $R_{\mathrm{die}}/C_{\mathrm{die}}$；多 P/G 网生成 \texttt{get\_cdie\_<pwr>\_<gnd>.sp}
+\end{itemize}
+
+\paragraph{CPM 输出格式}
+\begin{itemize}
+  \item 标准 SPICE（默认）：\texttt{PowerModel.sp} + \texttt{PowerModel.sp.inc}
+  \item HSPICE 优化：\texttt{<design>\_hspice.sp}（100+ 端口时 Foster VCCS）
+  \item Sentinel-PI 二进制：\texttt{<design>\_snpi.sp}
+  \item \texttt{-nx 1 -ny 1}：\texttt{adsRpt/CPM/apache.Cdie} 各频率精确 $C_{\mathrm{die}}$、$R_{\mathrm{die}}$
+\end{itemize}
+
+\paragraph{系统级应用}
+将 CPM 接封装/PCB 后 NSPICE 仿真，用于：全局 PDN 阻抗与 IC-封装谐振（AC）；封装/板级动态噪声预算；片外去耦优化。差分电压测量：
+\begin{lstlisting}
+plot voltage -pad_pair {VDD1 VSS2} -sv -o vdrop.txt
+\end{lstlisting}
+
+CPM 头含 presimulation 时间，用于与 RedHawk 波形时间对齐。
+\subsection{CPM LDO 实例化与系统级仿真}
+\subsubsection*{CPM LDO Instantiation and System Simulation}
+
+CPM 头注释示例：
+\begin{lstlisting}
+* ****** CPM-LDO ***
+* LDO cell | SPICE subcircuit name
+* VDD_REG_FC_ISO_580173    VDD_REG_FC_ISO
+\end{lstlisting}
+
+顶层 \texttt{adsPowerModel} 实例化各 LDO：
+\begin{lstlisting}
+X_VDD_REG_FC_ISO_580173 VDD_REG_FC_ISO_580173__vddhv
++ VDD_REG_FC_ISO_580173__vddcore0 ... VDD_REG_FC_ISO
+\end{lstlisting}
+
+系统级仿真须含封装/PCB 与 LDO 子电路（晶体管级或 APLDO 行为级）。晶体管级模型可能有偏置 pin，须 ``包装'' 偏置源后供 CPM 调用。推荐 \texttt{-pincurrent -global\_gnd}。
+
+\paragraph{*.cdie 文件示例}
+\begin{lstlisting}
+Cdie and Rdie between nets VDD and VSS
+4.700000e+08 Hz, Cdie=2.662143e-11 F, Rdie=2.902836e+00 Ohm
+6.250000e+08 Hz, Cdie=2.635451e-11 F, Rdie=2.874828e+00 Ohm
+...
+\end{lstlisting}
+频率点为精确 Y 矩阵计算结果，无等效电路近似。
+
+\paragraph{HSPICE 与 Sentinel-PI 输出}
+100+ 端口时 HSPICE 优化格式使用 Foster VCCS 消除内部节点；\texttt{<design>\_snpi.sp} 为二进制 Sentinel-PI 格式（不含 LDO 实例子电路）。
+
+\subsection{3DIC 与 ESD CPM 命令回顾}
+\subsubsection*{3DIC and ESD CPM Command Review}
+
+3DIC 组合 CPM：
+\begin{lstlisting}
+import gsr mem.gsr -die mem
+import gsr logic.gsr -die logic
+setup design
+perform pwrcalc
+perform extraction -power -ground -r -c
+perform powermodel -nx 1 -ny 1 -o 3dic_cpm.sp
+\end{lstlisting}
+
+ESD-aware CPM：
+\begin{lstlisting}
+setup analysis_mode esd
+setup design <GSR_file>
+perform extraction -power -ground
+perform powermodel -esd ?-esd_clamp <file>? ...
+\end{lstlisting}
+
+
+\subsection{CPM 建模速度与精度选择回顾}
+\subsubsection*{Modeling Speed vs Accuracy Review}
+
+\begin{itemize}
+  \item \textbf{MOR（高速）}：以 DC/零频为中心模型阶次缩减；高频开关时精度下降但省时；通常假设 P/G 对称；\texttt{DYNAMIC\_SOLVER\_MODE 1} 取消对称假设
+  \item \textbf{AC 建模（默认高精度）}：分电流特征与无源缩减；对含非开关 RC 支路及开关电流源做 grid RC 缩减，频响匹配容差 $<0.2\%$；被动性保证
+  \item \textbf{S 参数}：\cmd{perform powermodel -grid [RC|RLC] -options <cfg>}；\texttt{sParam=true}、\texttt{portFileName}、\texttt{broadbandSpice=true}
+\end{itemize}
+
+\subsection{泄漏电阻 partition.txt 完整示例}
+\begin{lstlisting}
+# partition.txt
+bump_vcc1 part1
+bump_vcc2 part2
+ref1 part1
+ref2 part2
+\end{lstlisting}
+命令：\cmd{perform powermodel -rleak_par -wirebond}。输出 CPM 中形如 \texttt{R0\_A320 GROUP44\_GROUND GROUP44\_POWER 99660.43}。
+
+\subsection{iCPM 与 internal\_node 对比}
+\begin{itemize}
+  \item \textbf{-probe + PROBE\_NODE\_FILE}：按坐标/层定义探测端口
+  \item \textbf{-internal\_node -cell\_file}：暴露列表中 instance 的内部 P/G pin，命名 \texttt{inst\_net}；GSC 可用 \texttt{<inst> EXCLUDE} 排除其电流与电容
+  \item 不可与 LDO 的 \texttt{-internal\_node} 同用；LDO 可与 \texttt{-probe} 配合
+\end{itemize}
+
+\subsection{验证清单}
+\begin{enumerate}
+  \item CPM 与 RedHawk 使用相同 presim 与 \texttt{DYNAMIC\_TIME\_STEP}
+  \item 所有 bump 电流波形对比（\texttt{-pincurrent} 时注意参考节点差异）
+  \item 所有 VDD/GND 电压波形对比（平移 presim 时间）
+  \item AC：仅连接 \texttt{.inc}，不测全局地
+  \item 差分 pad 对：\cmd{plot voltage -pad_pair \{VDD1 VSS2\} -sv}
+\end{enumerate}
+
+\subsection{CPM 与 RedHawk DvD 的差异}
+\subsubsection*{CPM vs Full-Chip DvD Analysis}
+
+CPM 生成须在全频段（DC 至数 GHz）保持时域与频域响应，设置与网络表述与常规 DvD 分析不同。自 12.2 版起须 \texttt{GENERATE\_CPM 1} 启用独立 CPM 流程；CPM 运行\textbf{无需}封装模型（与 DvD 不同），但验证时须接封装做波形对比。VectorLess™ 时钟门控与谐振频率感知模式可生成更贴近系统级 SSO/EMI 场景的电流激励。
+
+\begin{seeAlsoBox}
+CPM 详细 GSR 与 \cmd{perform powermodel} 选项亦见附录 D；LDO 与 CPM 协同见第~\ref{chap:lp}~章 LDO 分析流程。
+\end{seeAlsoBox}
+
+\subsection{CPM 输出文件一览}
+\subsubsection*{CPM Output File Summary}
+
+\begin{itemize}
+  \item \texttt{adsRpt/CPM/PowerModel.sp} + \texttt{PowerModel.sp.inc}：标准 SPICE CPM
+  \item \texttt{<design>\_hspice.sp}：HSPICE 优化格式
+  \item \texttt{<design>\_snpi.sp}：Sentinel-PI 二进制
+  \item \texttt{get\_cdie.sp} / \texttt{get\_cdie\_<pwr>\_<gnd>.sp}：$R_{\mathrm{die}}/C_{\mathrm{die}}$ 计算网表
+  \item \texttt{adsRpt/CPM/apache.Cdie}：$1\times1$ 分区各频率 $C_{\mathrm{die}}$、$R_{\mathrm{die}}$
+  \item \texttt{-reportcap}：电容分量日志（intentional/intrinsic/load/grid/well）
+\end{itemize}
+
+\subsection{基本 PI 与 EMI CPM 推荐命令回顾}
+\subsubsection*{Recommended PI and EMI CPM Commands}
+
+\textbf{基本电源完整性：}
+\begin{lstlisting}
+DYNAMIC_TIME_STEP <ps>          # < 20ps
+DYNAMIC_PRESIM_TIME <time> 1.0
+DYNAMIC_SOLVER_MODE 1           # 多 Vdd 必需
+perform powermodel [-wirebond | -nx <x> -ny <y> ]
+    -plocname -repeat_current <t> -rleak -ind
+\end{lstlisting}
+
+\textbf{EMI 建模：}
+\begin{lstlisting}
+COUPLEC 1
+perform powermodel -pincurrent -couple_gridc ...
+    -plocname -repeat_current <t> -rleak -ind
+\end{lstlisting}
+
+\paragraph{验证步骤摘要}
+无封装 RedHawk 生成 CPM $\rightarrow$ 接封装 SPICE $\rightarrow$ pad 点测 I/V $\rightarrow$ 同封装 RedHawk DvD 对照（平移 presim）$\rightarrow$ 比较全部 bump 波形。
+

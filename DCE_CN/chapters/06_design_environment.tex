@@ -1,0 +1,262 @@
+% 第 6 章 Defining the Design Environment
+\bichapter{定义设计环境}{Defining the Design Environment}
+\label{chap:env}
+
+在优化设计之前，必须定义设计预期工作的设计环境，即指定工作条件与系统接口特性。
+工作条件包括温度、电压与工艺偏差。
+系统接口特性包括输入驱动、输入/输出负载以及扇出负载。
+设计环境模型会直接影响综合结果。
+
+要了解如何定义设计环境，见：
+\begin{itemize}
+  \item 工作条件
+  \item 定义工作条件
+  \item 对系统接口建模
+  \item 在端口上设置逻辑约束
+  \item 使用 UPF 的多电压设计
+\end{itemize}
+
+图~\ref{fig:dce-env-cmds} 说明了用于定义设计环境的命令。
+
+\figplaceholder{Figure 23: Commands Used to Define the Design Environment}{用于定义设计环境的命令}{fig:dce-env-cmds}
+
+% ============================================================
+\section{工作条件}
+\subsection*{Operating Conditions}
+
+在多数工艺中，工作温度、电源电压与制造工艺参数的变化会强烈影响电路性能。
+这些因素称为工作条件（operating conditions），一般具有下列特征：
+\begin{itemize}
+  \item \textbf{工作温度变化}\\
+        设计日常工作中温度变化不可避免。
+        温度波动对性能的影响多数按线性缩放处理，但某些亚微米硅工艺需要非线性表征。
+  \item \textbf{电源电压变化}\\
+        设计供电电压在工作时可能偏离既定理想值。
+        常使用复杂计算（结合阈值电压偏移），但逻辑级性能计算也会使用简单线性缩放因子。
+  \item \textbf{工艺变化}\\
+        该变化反映半导体制造工艺偏差。
+        通常将工艺变化按性能计算中的百分比偏差处理。
+\end{itemize}
+
+进行时序分析时，DC Explorer 必须考虑工艺、温度与电压预期变化下的最坏情况与最好情况场景。
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 定义工作条件
+\end{itemize}
+\end{seeAlsoBox}
+
+% ============================================================
+\section{定义工作条件}
+\subsection*{Defining the Operating Conditions}
+
+多数逻辑库预定义了多组工作条件。设置工作条件之前，您可以：
+\begin{itemize}
+  \item 使用 \cmd{report\_lib} 命令列出逻辑库中定义的工作条件\\
+        逻辑库必须已加载到内存后才能运行 \cmd{report\_lib}。
+        要查看内存中已加载的库，使用 \cmd{list\_libs} 命令。
+        下例对存储在 \texttt{my\_lib.db} 中的 \texttt{my\_lib} 库生成报告：
+\begin{lstlisting}
+de_shell> read_file my_lib.db
+de_shell> report_lib my_lib
+\end{lstlisting}
+  \item 使用 \cmd{current\_design} 命令列出当前设计已定义的工作条件
+\end{itemize}
+
+若逻辑库包含工作条件规范，可将其作为默认值。
+要显式指定工作条件（覆盖默认值），使用 \cmd{set\_operating\_conditions} 命令。
+下例将当前设计的工作条件设为最坏情况商用条件（worst-case commercial）：
+\begin{lstlisting}
+de_shell> set_operating_conditions WCCOM -library my_lib
+\end{lstlisting}
+
+\subsection{多角多模设计}
+\subsubsection*{Multicorner-Multimode Designs}
+
+设计常需在多种模式与多种工作条件（亦称 corner）下工作。
+此类设计称为多角多模（multicorner-multimode）设计。
+工具可同时跨多种模式与 corner 进行分析与优化。
+多角多模功能提供 DC Explorer 与 IC Compiler 流程之间的兼容性。
+
+要定义模式与 corner，使用 \cmd{create\_scenario} 命令。
+scenario 定义包括指定 TLUPlus 库、工作条件与约束的命令。
+如何定义 scenario，见「定义 Scenario」。
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 工作条件
+  \item 优化多角多模设计
+\end{itemize}
+\end{seeAlsoBox}
+
+% ============================================================
+\section{对系统接口建模}
+\subsection*{Modeling the System Interface}
+
+要对设计与外部系统的交互建模，执行下列任务：
+\begin{itemize}
+  \item 定义输入端口的驱动特性
+  \item 定义输入与输出端口上的负载
+  \item 定义输出端口上的扇出负载
+\end{itemize}
+
+\subsection{定义输入端口的驱动特性}
+\subsubsection*{Defining Drive Characteristics for Input Ports}
+
+为确定入站信号的延时与转换时间特性，DC Explorer 需要每个输入端口的外部驱动强度与负载信息。
+驱动强度是输出驱动电阻的倒数；输入端口上的转换延时等于驱动电阻与输入端口电容负载的乘积。
+
+默认情况下，DC Explorer 假定输入端口驱动电阻为零，即无限驱动强度。
+要设置现实的驱动强度，使用下列命令之一：
+\begin{itemize}
+  \item \cmd{set\_driving\_cell} 命令在由逻辑库单元驱动的端口上设置驱动特性。\\
+        该命令将库引脚与输入端口关联，使延时计算器能准确建模外部驱动器的驱动能力。
+        要移除端口上的 driving cell 属性，使用 \cmd{remove\_driving\_cell} 命令。
+  \item \cmd{set\_input\_transition} 命令在输入驱动能力无法用逻辑库单元表征时，在顶层端口上设置信号转换时间。
+\end{itemize}
+
+\cmd{set\_driving\_cell} 与 \cmd{set\_input\_transition} 都会影响端口转换延时，但它们不会在输入端口上设置设计规则约束（如最大扇出与最大转换时间）。
+不过，若指定的 driving cell 本身带有设计规则约束，则 \cmd{set\_driving\_cell} 会在输入端口上放置这些设计规则约束。
+
+图~\ref{fig:dce-drive-char} 给出层次化设计示例。
+顶层设计有两个子设计 U1 与 U2。
+顶层设计的 I1 与 I2 端口由外部系统驱动，驱动电阻为 1.5。
+
+\figplaceholder{Figure 24: Drive Characteristics}{驱动特性}{fig:dce-drive-char}
+
+要为本例设置驱动特性，按下列步骤操作：
+\begin{enumerate}
+  \item 使用 \cmd{set\_driving\_cell} 命令定义驱动电阻。
+\begin{lstlisting}
+de_shell> current_design top_level_design
+de_shell> set_driving_cell -lib_cell IV {I1 I2}
+\end{lstlisting}
+  \item 将当前设计改为 \texttt{sub\_design2}，以描述该子设计端口上的驱动能力。
+\begin{lstlisting}
+de_shell> current_design sub_design2
+\end{lstlisting}
+  \item 使用 \cmd{set\_driving\_cell} 将 IV 单元的驱动能力与 I3 端口关联。
+\begin{lstlisting}
+de_shell> set_driving_cell -lib_cell IV {I3}
+\end{lstlisting}
+  \item AN2 单元不同弧的转换时间不同。检查 setup 违例时，指定最慢的 AN2 弧（假定最慢弧为从 B 到 Z）。
+\begin{lstlisting}
+de_shell> set_driving_cell -lib_cell AN2 -pin Z -from_pin B {I4}
+\end{lstlisting}
+\end{enumerate}
+
+检查 setup 违例时，最坏情况弧为最慢弧；检查 hold 违例时，最坏情况弧为最快弧。
+
+\begin{noteBox}
+对重负载驱动端口（如时钟网络），请将驱动强度保持为零，以免 DC Explorer 对网络进行缓冲。
+时钟网络的缓冲应在时钟树综合中单独进行。
+\end{noteBox}
+
+\subsection{定义输入与输出端口上的负载}
+\subsubsection*{Defining Loads on Input and Output Ports}
+
+默认情况下，DC Explorer 对输入与输出端口施加零电容负载。
+要在输入与输出端口上设置电容负载值，使用 \cmd{set\_load} 命令。
+DC Explorer 用该值选择合适的输出 pad 驱动强度，并对输入 pad 上的转换时间建模。
+
+下例在 \texttt{out1} 引脚上设置电容负载：
+\begin{lstlisting}
+de_shell> set_load 30 {out1}
+\end{lstlisting}
+
+负载值的单位应与目标逻辑库一致。
+例如，若库以皮法（picofarads）表示负载，则用 \cmd{set\_load} 设置的值也必须以皮法计。
+要列出库单位，使用 \cmd{report\_lib} 命令。
+
+\subsection{定义输出端口上的扇出负载}
+\subsubsection*{Defining Fanout Loads on Output Ports}
+
+要对一个或多个端口的外部扇出效应建模，使用 \cmd{set\_fanout\_load} 命令在输出端口上指定预期扇出负载值。例如：
+\begin{lstlisting}
+de_shell> set_fanout_load 4 {out1}
+\end{lstlisting}
+
+DC Explorer 会尽量保证：输出端口上的扇出负载，加上连接到输出端口驱动器的单元扇出负载之和，小于库、库单元与设计的最大扇出限制。
+
+扇出负载是无量纲数值，表示对总扇出的数值贡献，可理解为连接到网络的标准单元输入个数；它不是电容值。
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 定义最大扇出
+\end{itemize}
+\end{seeAlsoBox}
+
+% ============================================================
+\section{在端口上设置逻辑约束}
+\subsection*{Setting Logic Constraints on Ports}
+
+为改善优化结果，可在端口上设置逻辑约束以消除冗余端口或反相器，方法如下：
+\begin{itemize}
+  \item \textbf{设置逻辑等价}\\
+        某些输入端口由逻辑相关信号驱动。
+        要定义两个输入端口逻辑等价或逻辑相反，分别使用 \cmd{set\_equal} 或 \cmd{set\_opposite} 命令。\\
+        下例指定 \texttt{IN\_X} 与 \texttt{IN\_Y} 端口逻辑相等：
+\begin{lstlisting}
+de_shell> set_equal IN_X IN_Y
+\end{lstlisting}
+
+  \item \textbf{为输入端口赋常值}\\
+        为输入设置常值可使 DC Explorer 在优化期间简化周围逻辑，并生成更小设计。
+        要为当前设计中的输入分别赋 don't care、逻辑 1 或逻辑 0，使用 \cmd{set\_logic\_dc}、\cmd{set\_logic\_one} 或 \cmd{set\_logic\_zero} 命令。
+        图~\ref{fig:dce-simp-in} 给出简化输入端口逻辑的示例。
+
+\figplaceholder{Figure 25: Simplified Input Port Logic}{简化的输入端口逻辑}{fig:dce-simp-in}
+
+        下例将 A、B 输入设为 don't care，将 IN 输入设为逻辑 1：
+\begin{lstlisting}
+de_shell> set_logic_dc {A B}
+de_shell> set_logic_one IN
+\end{lstlisting}
+        要复位这些命令设置的值，使用 \cmd{remove\_attribute} 命令。
+
+  \item \textbf{指定未连接的输出端口}\\
+        若某输出未使用（即未连接），驱动该输出的逻辑可在优化期间被最小化或消除，如图~\ref{fig:dce-unconn-out} 所示。
+
+\figplaceholder{Figure 26: Minimizing Logic Driving an Unconnected Output Port}{最小化驱动未连接输出端口的逻辑}{fig:dce-unconn-out}
+
+        要指定输出与外部逻辑未连接，使用 \cmd{set\_unconnected} 命令。
+        要复位该命令设置的属性，使用 \cmd{remove\_attribute} 命令。
+\end{itemize}
+
+% ============================================================
+\section{使用 UPF 的多电压设计}
+\subsection*{Multivoltage Designs Using UPF}
+
+使用 IEEE\texttrademark\ 1801 统一功耗格式（Unified Power Format，UPF）标准命令，可为多电压设计指定低功耗意图，以及各电源域的验证策略，包括该域的隔离单元、保持单元与电平移位单元。
+在 compile 期间，工具按所指定策略自动插入这些电源管理单元。
+
+要在 DC Explorer 中使用 UPF 命令，必须将 \varname{de\_enable\_upf\_exploration} 变量设为 \texttt{false}（其默认值为 \texttt{true}），并且需要 Power Compiler 许可证。
+
+在多电压设计中，子设计实例（块）工作在不同电压下。
+为降低功耗，使用 UPF 命令指定电源域。
+电源域中的块可独立于其他电源域的电源状态上电/下电，但存在相对 always-on 关系的两个电源域除外。
+特别地，可定义电源域，并用电平移位单元与隔离单元调整电源域之间的电压差，以及隔离关断电源域。
+
+电源域定义为共享下列内容的一个或多个层次块的分组：
+\begin{itemize}
+  \item 主电压状态或电压范围（即相同工作电压）
+  \item 电源网络连接（hookup）要求
+  \item 下电控制与应答信号（若有）
+  \item 电源开关风格
+  \item 相同的工艺、电压与温度（PVT）工作条件值（电源域中除电平移位单元外的所有单元）
+  \item 相同的非线性延时模型（NLDM）目标库集合或其子集
+\end{itemize}
+
+电源域不是 voltage area。
+电源域是逻辑层次的分组，而对应的 voltage area 是将电源域层次中的单元放入的物理布局区域。
+这种对应并非自动建立；您需要将层次与 voltage area 对齐。
+
+除电源域外，还需使用 UPF 命令为功耗意图指定供电网络、功耗策略、电源状态表与工作电压等信息。
+
+要实现使用 UPF 的多电压设计，见：
+\begin{itemize}
+  \item \textit{Power Compiler User Guide}
+  \item \textit{Synopsys Multivoltage Flow User Guide}
+\end{itemize}
+
+要使用最小 UPF 运行 RTL UPF 设计探索，见第~\ref{chap:upf}~章「UPF 探索」。

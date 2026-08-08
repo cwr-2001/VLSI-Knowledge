@@ -1,0 +1,1977 @@
+                                                                                      Feedback
+
+
+
+
+17
+Advanced Analysis Techniques
+     To learn about PrimeTime advanced timing analysis techniques, see
+     •   Parallel Arc Path Tracing
+     •   Support for Retain Arcs
+     •   Asynchronous Logic Analysis
+     •   Three-State Bus Analysis
+     •   Data-to-Data Checking
+     •   Time Borrowing in Latch-Based Designs
+     •   Advanced Latch Analysis
+
+
+Parallel Arc Path Tracing
+     To ensure that the report_timing command uses only the worst arc in each sense set
+     of parallel arcs for path tracing, set the timing_report_use_worst_parallel_cell_arc
+     variable to true. This results in the following path tracing.
+
+Figure 200    Worst arc used for path tracing
+
+
+
+
+     Only paths with the worst arc behaviors through the logic with a given rise and fall edge
+     sequence are returned. The worst arc is the fastest arc for minimum delay tracing and
+     it is the slowest arc for maximum delay tracing. Subcritical timing paths through other
+     combinations of timing arcs with the same edge direction sequence are not returned.
+     However, since timing arcs with different senses are still considered unique, different paths
+     with unique rise and fall edge sequences through nonunate gates are still returned.
+
+
+
+
+PrimeTime® User Guide                                                                         639
+T-2022.03
+                                                                                          Feedback
+Chapter 17: Advanced Analysis Techniques
+Support for Retain Arcs
+
+
+     This might cut down substantially on the number of paths returned by large -nworst
+     values, improving analysis efficiency. If the -nworst limit is not being reached, such as
+     when reporting paths to a single endpoint, a lesser number of timing paths are returned.
+     If -nworst has reached its limit, such as when reporting across an entire path group, the
+     paths that are returned up to the limit might have a more varied topological exploration
+     of the logic. This can help improve the efficiency of reporting scripts, bottleneck analysis,
+     ECO scripts that are driven by timing_path collections.
+     This feature affects both the report_timing and get_timing_paths commands
+     when you specify an -nworst value greater than 1. Only parallel arcs of the same sense
+     are affected. If there are different sense arcs in parallel, such as positive_unate and
+     negative_unate across an XOR gate, they are still considered unique. This feature
+     affects path tracing behavior at reporting time only. It does not affect the behavior of the
+     update_timing command. You can change the value of the variable at any time without
+     incurring a timing update penalty.
+
+
+Support for Retain Arcs
+     PrimeTime can load retain arcs for timing models from library files, annotate the retain arcs
+     from SDF input files, and report these arcs. Retain arcs are similar to hold-check arcs and
+     are typically used for modeling random access memory (RAM). They are defined between
+     a clock pin and the data output of a RAM, and they are always defined in parallel with
+     the parent arc, which is the ordinary or default delay arc between the same two pins. A
+     retain arc does not generate an actual timing check during timing analysis, but is treated
+     as another delay arc that is connected in parallel with its parent arc.
+     Clock-to-output retain arcs guarantee that the RAM output does not change for a specific
+     interval of time after the clock edge. When the retain arc delay is less than its parent arc,
+     the retain arc appears in a timing report for only the minimum delay paths. When the retain
+     arc delay is longer than its parent arc, the retain arc can also appear in the maximum
+     delay path report with no error messages or warnings.
+     To report all of the timing arcs for cells in a logic library, including retain arcs, use the
+     -timing_arcs option with the report_lib command. Use the check_timing retain
+     command to check if the retain arc has a delay greater than its parent arc.
+     The read_sdf command supports retain arcs, but the default behavior of the write_sdf
+     command does not support those arcs. To write out retain arcs, use SDF version 3.0
+     format, not the default version 2.1 format, by specifying the following syntax:
+     pt_shell> write_sdf -version 3.0 file
+
+     To map retaining information for arcs, use these functions:
+     •   min_rise_retain_delay
+
+     •   min_fall_retain_delay
+
+
+PrimeTime® User Guide                                                                                640
+T-2022.03
+                                                                                          Feedback
+Chapter 17: Advanced Analysis Techniques
+Asynchronous Logic Analysis
+
+
+     •   max_rise_retain_delay
+
+     •   max_fall_retain_delay
+
+
+
+Asynchronous Logic Analysis
+     To simplify the timing verification designs with asynchronous logic, isolate the
+     asynchronous logic into separate blocks, then disable the timing of these blocks.
+     PrimeTime does not support self-timed asynchronous logic where no global clock is
+     used. Isolate this type of logic in a level of hierarchy and then use full-timing gate-level
+     simulation to verify valid timing and functional capability.
+     PrimeTime can analyze designs:
+     •   With no combinational feedback loops; loops containing flip-flops or latches are
+         adequate (combinational feedback loops are automatically broken)
+     •   Without unclocked memory elements, such as RS latches
+     •   With a single clock or multiple clocks fanning in to each register clock pin
+     •   With known and fixed phase relationship between the clocks at the start and end
+         registers of every path (Interacting clocks must have a single base period over which
+         all clock waveforms repeat.)
+
+   Figure 201    Base period of clocks
+
+                                 10          20         30         40         50        60           70
+                  Phi1
+
+                  Phi2
+
+                  Phi3
+
+                  Phi4
+
+                  Phi5
+
+                  Phi6
+
+                                                    Base period
+                                           Least common multiple of periods
+
+
+
+
+PrimeTime® User Guide                                                                               641
+T-2022.03
+                                                                                    Feedback
+Chapter 17: Advanced Analysis Techniques
+Asynchronous Logic Analysis
+
+
+
+     Combinational Feedback Loop Breaking
+     A combinational feedback loop is a path that can be traced though combinational logic
+     back to its starting point.
+
+Figure 202    Combinational feedback loop
+
+
+
+
+     To analyze such a path, PrimeTime must break the loop (stop tracing the path) at some
+     point within the loop. Check a design for the presence of combinational feedback loops
+     with the check_timing -include loops command.
+     By default, PrimeTime identifies each feedback loop and disables one of the timing arcs of
+     the loop, such as the timing arc from one input to one output of a NAND gate in the loop.
+     In some cases, this approach can result in some real paths not being reported because
+     the paths are broken by the disabled arcs.
+     In the following example, no timing arc of the combinational loop can be broken without a
+     valid path of the design also being broken.
+
+
+
+
+PrimeTime® User Guide                                                                         642
+T-2022.03
+                                                                                      Feedback
+Chapter 17: Advanced Analysis Techniques
+Asynchronous Logic Analysis
+
+
+Figure 203    Loop breaking example
+
+             ff1
+
+
+
+
+             ff2                                             ff4
+                                           u2
+                            u1
+                                   2
+                             1              3
+                                            ff3
+
+
+
+
+                                    4
+
+
+
+
+     Arcs #1 and #4 cannot be broken because breaking them would break the valid path ff1 –
+     u2 – u1 – ff3. Arcs #2 and #3 cannot be broken because breaking them would break the
+     valid path ff2 – u1 – u2 – ff4.
+     There are multiple places in a feedback loop that could be broken. If you want to break
+     a feedback loop at a timing arc different from the one selected by default, run the
+     set_disable_timing command to break the loop at a specific point.
+
+     Design Compiler also uses loop breaking to analyze timing. The points at which Design
+     Compiler and PrimeTime break a loop can be different, possibly leading to different timing
+     results. If you want to ensure consistent loop breaking between the two tools, set the
+     timing_keep_loop_breaking_disabled_arcs variable to true in PrimeTime. In that
+     case, PrimeTime inherits the loop-breaking choices from the .ddc or .db file generated
+     by Design Compiler. By default, this variable is set to false. After changing this variable
+     setting, a timing update is necessary to see the change.
+     The report generated by report_disable_timing distinguishes between arcs disabled by
+     PrimeTime and those disabled by inheritance from the .ddc or .db file.
+
+
+     Unrelated Clocks
+     Sometimes a design has paths between unrelated clocks. Unrelated clocks have different
+     frequencies that do not have a reasonable base period. PrimeTime attempts to find a base
+     period and phase relationship anyway, which typically is not useful.
+
+
+
+
+PrimeTime® User Guide                                                                          643
+T-2022.03
+                                                                                         Feedback
+Chapter 17: Advanced Analysis Techniques
+Three-State Bus Analysis
+
+
+Figure 204    Unrelated clock waveforms
+                                      40 ns
+             CLK1
+
+                     period = 40 ns
+
+             CLK2
+                     period = 41 ns
+
+
+                                      41 ns
+
+
+
+     The clocks do not expand to a reasonable base period, and the resulting setup
+     requirement is quite restrictive. In this case, you might want to verify the timing with
+     dynamic simulation rather than use PrimeTime.
+     To exclude asynchronous paths from static timing analysis to improve runtimes and avoid
+     false violations, enter the following command:
+     pt_shell> set_false_path -from [get_clocks clk40] \
+               -to [get_clocks clk41]
+
+     In some cases, you might know the required minimum and maximum path delays for the
+     combinational logic between two registers of unrelated clocks. In these cases, specify the
+     path delay constraint using the set_max_delay and set_min_delay commands for that
+     path.
+
+
+Three-State Bus Analysis
+     By default, PrimeTime checks for setup and hold violations in three-state bus designs.
+     It checks the worst delay path to ensure that the latched signals are stable and are not
+     unknown (X) values. This ensures proper timing checks for transient bus contention and
+     transient floating bus conditions.
+     PrimeTime considers that a disabling transition on a three-state cell can cause either
+     a 1 or 0 delay on the output. By default, PrimeTime considers three_state_disable and
+     three_state_enable arcs (as defined in the library) during path tracing. Although this
+     is different from propagating an X value, the effect for static timing is the same as for
+     propagating an X value.
+
+
+
+
+PrimeTime® User Guide                                                                            644
+T-2022.03
+                                                                                       Feedback
+Chapter 17: Advanced Analysis Techniques
+Three-State Bus Analysis
+
+
+
+     Limitations of the Checks
+     The three-state bus checks have these limitations:
+     •   PrimeTime checks the potential for setup or hold errors due to bus contention or float
+         conditions. PrimeTime does not check logical and power violations for bus contention
+         or float conditions.
+     •   The analysis is pessimistic; some reported violations might never happen because of
+         state dependencies.
+     •   In some simulators, Z does not propagate to X until after the charge decay time.
+         PrimeTime does not model this effect; it uses the gate delay equations to propagate Z
+         and X. This might be pessimistic compared to some simulators.
+
+
+     Disabling the Checks
+     If you know that bus contention or floating buses do not occur in your design, disable
+     these checks by setting these variables to true:
+     timing_disable_bus_contention_check
+         When you set this variable to true, propagation of maximum delay along
+         three_state_disable timing arcs and minimum delay along three_state_enable
+         arcs is disabled. These checks are valid only during transient bus contention.
+         The default is false.
+     timing_disable_floating_bus_check
+         When you set this variable to true, propagation of minimum delay along
+         three_state_disable timing arcs and maximum delay along three_state_enable
+         arcs is disabled. These checks are valid only during floating bus conditions. The
+         default is false.
+
+
+     Bus Contention
+     Some designs rely on a bus configuration in which many three-state drivers control the
+     bus. In most designs, no two drivers with different logical outputs can be simultaneously
+     enabled at the steady state (when the enable pins of the three-state drivers assume their
+     steady-state values for any clock cycle). When multiple drivers drive the same bus, it is
+     called bus contention.
+     Although you can design a circuit so that no steady-state bus contention occurs, a design
+     might contain transient bus contention conditions. Transient bus contention conditions
+     occur during the transition of the bus control from one driver to another. During this short
+     transient period, the logical value for the bus is unknown (X value) if the drivers contending
+     for control of the bus are imposing conflicting logical values. For static timing analysis,
+
+
+PrimeTime® User Guide                                                                          645
+T-2022.03
+                                                                                       Feedback
+Chapter 17: Advanced Analysis Techniques
+Three-State Bus Analysis
+
+
+     setup checks ensure that this X value, assumed during transient bus contention, is not
+     latched. The setup check is measured from the time the bus becomes stable.
+
+
+     Floating Buses
+     A floating bus condition can arise for three-state bus configuration designs. A floating
+     bus condition occurs when no driver is enabled. In this case, the bus immediately gets
+     an unknown (X) value. For static timing analysis, hold checks ensure that this X value,
+     assumed when the bus switches to the floating mode, is not latched. The hold checks are
+     measured to the time the bus becomes floating.
+
+
+     Three-State Buffers
+     Two timing arc types are used to describe timing behavior of three-state buffers. These
+     timing arc types are defined in the library.
+     three_state_disable timing arc
+        Specifies the time the three-state pin takes to go from a high or low state to the
+        high-impedance state.
+     three_state_enable timing arc
+        Specifies the time a three-state pin takes to go from the high-impedance state to
+        a high state or low state.
+
+
+     Performing Transient Bus Contention Checks
+     The following circuit shows how PrimeTime performs transient bus contention checks and
+     floating bus checks.
+
+Figure 205    Circuit example
+                        U1
+
+                                bus1                FF4
+                 I1 0
+                EN1
+                                                      D
+                EN2
+                                                          CP
+                 I2 1
+
+                        U2
+
+
+
+
+PrimeTime® User Guide                                                                          646
+T-2022.03
+                                                                                               Feedback
+Chapter 17: Advanced Analysis Techniques
+Three-State Bus Analysis
+
+
+Figure 206    Transient bus contention check
+
+                 EN1
+
+
+
+                 EN2                                                     three_state_disable
+                                                                         arc delay
+                    three_state_enable
+                    arc delay
+                                                  Bus contention
+                 FF4/D
+                                                              Setup
+                                                             violation
+                                                Hold
+                                              violation
+                                  Required                                Required
+                                  hold time                              setup time
+
+
+                FF4/CP
+
+
+
+     In Figure 205, if EN1 turns off after EN2 turns on, there is a potential bus contention for
+     some time. The signal arriving at FF4/D is X state until the contention is over and the new
+     bus value propagates along the path. If I1=0 and I2=1, the waveforms for the circuit in
+     Figure 205 are as shown in Figure 206.
+     The setup violation for FF4/CP is seen only if the three_state_disable arc delay is
+     considered. A transition to the Z state must be propagated as a possible transition to logic
+     0 or logic 1 to find all possible cases. A similar situation occurs for the hold check. The
+     hold violation is seen only if the three_state_enable arc delay is considered.
+     This bus contention region is bounded by the minimum three_state_enable arc delay of
+     any bus driver from one side and by the maximum three_state_disable arc delay from the
+     other side. If you know that such bus contention regions can never occur, disable checking
+     for both setup and hold violations that occur due to this bus contention region.
+     Disable the checks by setting the timing_disable_bus_contention_check variable to
+     true, causing PrimeTime to ignore the three_state_enable arc delay for hold violation
+     checking and the three_state_disable arc delay for setup violation checking.
+     Even when you set this variable to true, PrimeTime considers the three_state_enable arc
+     delay for setup violation checking and the three_state_disable arc delay for hold violation
+     checking. This occurs during a floating bus region, which is described in Performing
+     Floating Bus Checks.
+
+
+
+
+PrimeTime® User Guide                                                                                647
+T-2022.03
+                                                                                        Feedback
+Chapter 17: Advanced Analysis Techniques
+Three-State Bus Analysis
+
+
+
+     Performing Floating Bus Checks
+     A floating bus occurs when the bus is at a valid logic value and then begins to float. Timing
+     analysis ensures that the float does not propagate an X to the register data pin until after
+     the hold check. PrimeTime assumes the same setup and hold relationships as for any
+     other data signals.
+     The following figure shows another situation that can arise that yields a transient floating
+     bus condition.
+
+Figure 207     Floating bus contention check
+
+
+               EN1
+                                                             three_state_enable
+               EN2                  three_state_disable           arc delay
+                                          arc delay
+
+
+                                              Floating bus
+              bus1
+                                                           Setup
+                                                          violation
+                                           Hold
+                                         violation
+                             Required                                  Required
+                             hold time                                setup time
+
+
+             FF4/CP
+
+
+     In Figure 207, the hold violation for FF4/CP is seen only if the three_state_disable
+     arc delay is considered. A transition to the Z state must be propagated as a possible
+     transition to logic 0 or logic 1 to find all possible cases. A similar situation happens for
+     the setup check. The setup violation is seen only if the three_state_enable arc delay is
+     considered.
+     Because the three_state_enable arc delays are considered, by default PrimeTime
+     checks for all setup and hold violations that occur due to the floating bus region. The
+     floating bus region is bounded by the minimum three_state_disable arc delay of any
+     bus driver from one side and by the maximum three_state_enable arc delay from the
+     other side. PrimeTime ignores charge decay here (it assumes that the logical value for the
+     bus immediately becomes unknown—(X)—when the bus is floating).
+     If you know that such floating bus regions can never occur, disable checking for both
+     setup and hold violations that occur due to this bus contention region. To disable the
+     checks, set the timing_disable_floating_bus_check variable to true. In this case,
+     PrimeTime ignores the three_state_disable arc delay for hold violations checking and
+
+
+PrimeTime® User Guide                                                                           648
+T-2022.03
+                                                                                      Feedback
+Chapter 17: Advanced Analysis Techniques
+Data-to-Data Checking
+
+
+     the three_state_enable arc delay for setup violations checking. Even when you set this
+     variable to true, the three_state_enable arc delay is considered for setup violation
+     checking and the three_state_disable arc delay is considered for hold violation
+     checking. This occurs during a bus contention region, which is described in Performing
+     Transient Bus Contention Checks.
+
+
+Data-to-Data Checking
+     PrimeTime can perform setup and hold checking between two data signals, neither of
+     which is defined to be a clock, at any two pins. This feature can be useful for checking the
+     following types of timing constraints:
+     •   Constraints on handshaking interface logic
+     •   Constraints on asynchronous or self-timed circuit interfaces
+     •   Constraints on signals with unusual clock waveforms that cannot be easily specified
+         with the create_clock command
+     •   Constraints on skew between bus lines
+     •   Recovery and removal constraints between asynchronous preset and clear input pins
+     A timing constraint between two data (nonclock) signals is called a nonsequential
+     constraint. You can define such checks in PrimeTime by using the set_data_check
+     command, or define them for a library cell by setting nonsequential constraints for the cell
+     in Library Compiler. Use data checks only in situations such as those described earlier. Do
+     not consider data checks as a replacement for standard sequential checking.
+
+
+     Data Check Examples
+     The following example shows a cell with a nonsequential constraint.
+
+
+
+
+PrimeTime® User Guide                                                                          649
+T-2022.03
+                                                                                       Feedback
+Chapter 17: Advanced Analysis Techniques
+Data-to-Data Checking
+
+
+Figure 208    Simple data check example
+
+
+             Constrained pin    D1
+
+
+                                D2
+                  Related pin
+
+
+
+
+             D1
+
+
+                                             Hold
+                        Setup
+             D2
+
+
+
+     The cell has two data inputs, D1 and D2. The rising edge of D2 is the active edge that
+     might be used to latch data at D1. Pin D1 is called the constrained pin and Pin D2 is called
+     the related pin. In a sequential setup or hold check, pin D2 is considered as the clock pin.
+     However, for any of a number of reasons, it might be desirable to consider the signal at D2
+     a data signal, and not define it to be a clock.
+     In this example, the signal at D1 must be stable for a certain setup time before the
+     active edge. It must also be stable for a certain hold time after the active edge. If these
+     nonsequential constraints are not already defined for the library cell, you can define them
+     in PrimeTime. To do so, use commands similar to the following:
+     pt_shell> set_data_check -rise_from D2 -to D1 -setup 3.5
+     pt_shell> set_data_check -rise_from D2 -to D1 -hold 6.0
+
+     The “from” pin is the related pin and the “to” pin is the constrained pin. If the data checks
+     apply to both rising and falling edges on the related pin, use -from instead of -rise_from
+     or -fall_from , as shown in the following example:
+     pt_shell> set_data_check -from D2 -to D1 -setup 3.5
+     pt_shell> set_data_check -from D2 -to D1 -hold 6.0
+
+     The resulting timing checks are shown in the following figure.
+
+
+
+
+PrimeTime® User Guide                                                                          650
+T-2022.03
+                                                                                   Feedback
+Chapter 17: Advanced Analysis Techniques
+Data-to-Data Checking
+
+
+Figure 209    Data checks on rising and falling edges
+
+
+             Constrained pin    D1
+
+
+                                D2
+                  Related pin
+
+
+
+
+             D1
+
+
+                        Setup               Hold
+
+             D2
+
+
+
+
+     Define a no-change data check by specifying only a setup check from the rising edge and
+     a hold check from the falling edge:
+     pt_shell> set_data_check -rise_from D2 -to D1 -setup 3.5
+     pt_shell> set_data_check -fall_from D2 -to D1 -hold 3.0
+
+     PrimeTime interprets this as a no-change check on a positive-going pulse. The resulting
+     timing check is shown in the following figure.
+
+Figure 210    No-change data check
+
+             Constrained pin    D1
+
+
+                                D2
+                  Related pin
+
+
+
+
+             D1
+
+
+
+                        Setup                      Hold
+             D2
+
+
+
+
+PrimeTime® User Guide                                                                      651
+T-2022.03
+                                                                                       Feedback
+Chapter 17: Advanced Analysis Techniques
+Data-to-Data Checking
+
+
+     Data checks are nonsequential, so they do not break timing paths. For example, in
+     Figure 211, the data check between D1 and D2 does not interrupt the timing paths shown
+     by the dashed-line arrows. If you define the signal at D2 to be a clock, the check is
+     sequential, and the paths are terminated at D1.
+
+Figure 211       Timing paths not broken by data checks
+
+
+             D         Q
+
+
+
+                 ff1            Combinational       D1
+                                                                                         D         Q
+                                   Logic
+
+                                                    D2    Data
+                                                          check
+                                                                                             ff3
+             D         Q                                  dchk
+
+
+
+                 ff2
+
+
+     You can specify a data check pin as a path endpoint for the report_timing command. In
+     that case, PrimeTime reports the data checks that apply to the pin. For example, for the
+     circuit shown in Figure 211, report_timing -to dchk/D1 generates a data check report,
+     whereas report_timing -through dchk/D1 reports the timing on standard paths that
+     pass through the specified pin.
+     To remove data checks set with the set_data_check command, use the
+     remove_data_check command.
+
+
+     Data Checks and Clock Domains
+     In a data check, signals arriving at a constrained pin or related pin can come from different
+     clock domains. PrimeTime checks the signal paths separately and puts them into different
+     clock groups, just like standard sequential checks.
+     If the related pin has signals from multiple clock domains, you might want to specify
+     which clock domain to analyze at that pin for the data check. To specify a clock domain to
+     analyze, either use the -clock clock_name option of the set_data_check command, or
+     disable all clocks other than the clock of interest.
+
+
+
+
+PrimeTime® User Guide                                                                              652
+T-2022.03
+                                                                                       Feedback
+Chapter 17: Advanced Analysis Techniques
+Time Borrowing in Latch-Based Designs
+
+
+
+     Library-Based Data Checks
+     PrimeTime performs data checking for any cell that has nonsequential timing constraints
+     defined in the library cell, if the signal at the related pin is not defined to be a clock in
+     PrimeTime. If the signal is defined to be a clock, PrimeTime converts the nonsequential
+     checks to sequential checks and does not block this clock signal from further propagation.
+     If a combinational arc from the related pin exists (such as with an integrated clock-gating
+     cell), the clock is free to continue propagation down this arc.
+     In Library Compiler, you define nonsequential constraints on a cell by specifying a related
+     pin and by assigning the following timing_type attributes to the constrained pin:
+     non_seq_setup_rising
+     non_seq_setup_falling
+     non_seq_hold_rising
+     non_seq_hold_falling
+
+     For more information about defining nonsequential constraints in Library Compiler, see the
+     Library Compiler documentation.
+     Defining nonsequential constraints in the library cell results in a more accurate analysis
+     than using the set_data_check command because the setup and hold times can be
+     made sensitive to slew of the constrained pin and the related pin. The set_data_check
+     command is not sensitive to slew.
+     To specify which clock domain to use at the related pin for data checks defined in
+     library cells, use the set_data_check ... -clock clock_name command. The
+     remove_data_check command does not remove data checks defined in library cells.
+
+
+
+Time Borrowing in Latch-Based Designs
+     Transparent latches present unusual challenges for static timing analysis tools. A
+     technique known as time borrowing (also known as “cycle stealing”) gives latch-based
+     designs a distinct advantage over flip-flop based designs because a level-sensitive latch is
+     transparent for the duration of an active clock pulse. This technique can relax the normal
+     edge-to-edge timing requirements of synchronous designs. However, it is harder to control
+     the timing of latch-based designs because of the multiphase clocks used and the lack of
+     “hard” clock edges at which events must occur.
+
+
+     Borrowing Time From Logic Stages
+     In a design using level-sensitive latches, a path can borrow time from the next logic
+     stage by taking advantage of the fact that latches are transparent while the gate input
+     is asserted. Figure 212 shows latch-based stages using a simple two-phase clocking
+     scheme.
+
+
+
+PrimeTime® User Guide                                                                          653
+T-2022.03
+                                                                                                Feedback
+Chapter 17: Advanced Analysis Techniques
+Time Borrowing in Latch-Based Designs
+
+
+Figure 212     Latch-based timing paths
+                              Borrowing path
+
+
+                          D        Q            8.92           D         Q         0.77         D         Q
+
+                          G                      P1           G                     P2          G
+
+                              U1                                    U2                               U3
+          Phi1
+
+             Phi2
+
+
+
+                                       P1
+             Phi1
+
+
+                                                Borrow time =
+                                                8.92 – 5.0 = 3.92
+                        U2 opening edge
+                                            Time given to
+             Phi2                           startpoint = 3.92 P2              U2 closing edge
+
+                                                              8.92
+                                                                     9.69
+
+
+                    0                       5                            10                     15
+
+
+     A design using level-sensitive latches allows a combinational logic path with a delay longer
+     than the available cycle time if it is compensated by shorter path delays in subsequent
+     latch-to-latch stages. For the two-phase design, the available time for latch-to-latch paths
+     is half the clock cycle.
+     In Figure 212, U1, U2, and U3 are positive-level-sensitive latches (active when G = 1), and
+     P1 and P2 are combinational logic paths. For now, assume a library setup time of zero for
+     the latches and zero delay from D to Q in transparent mode. For positive-level-sensitive
+     latches, PrimeTime uses the rising (opening) edge as the reference edge.
+     The figure shows path delays of P1 = 8.92 and P2 = 0.77. There might appear to be a
+     violation at U2 because the data arrives at U2 after the rising edge of phi2. However,
+     because the U2 latch is transparent for 5 ns and P2 is less than that amount, path P1 can
+     borrow the slack time (3.92 ns) from the path between U2 and U3. Therefore, the sum of
+     P1 and P2 is 9.69, which is less than the required time of 10.00 at U3.
+
+
+
+
+PrimeTime® User Guide                                                                                     654
+T-2022.03
+                                                                                       Feedback
+Chapter 17: Advanced Analysis Techniques
+Time Borrowing in Latch-Based Designs
+
+
+     Latch Timing Reports
+     If the data signal arrives before the opening edge at the endpoint latch, PrimeTime models
+     this behavior just as it would for a flip-flop. The opening edge of the clock (rising edge in
+     this example) captures the data at the endpoint. The same clock edge launches the data
+     at the startpoint of the next path.
+     On the other hand, if the data signal arrives while the latch is transparent (after the
+     opening edge but before the closing edge at the endpoint latch), PrimeTime models the
+     behavior at the next stage as a launch from the data pin of the latch, rather than from the
+     clock pin. In this case, there is no timing violation and the slack is considered zero. The
+     amount of time borrowed by the stage ending at the latch becomes the departure time
+     for the next stage, subject to certain adjustments described in Maximum Borrow Time
+     Adjustments. A data signal arriving after the closing edge at the endpoint latch is a timing
+     violation.
+     Figure 213 shows how PrimeTime calculates and reports slack for a range of
+     combinational delays through P1, which results in different arrival times at U1 (see the
+     schematic in Figure 212). Figure 213 does not consider the effects of latch setup time,
+     latency, uncertainly, and clock reconvergence pessimism removal.
+
+
+
+
+PrimeTime® User Guide                                                                           655
+T-2022.03
+                                                                                                   Feedback
+Chapter 17: Advanced Analysis Techniques
+Time Borrowing in Latch-Based Designs
+
+
+Figure 213      Latch-based timing path slack calculation
+
+                     Slack
+
+
+
+                                                                                              Arrival time at U2
+                 0                                                                            endpoint
+                                Arrival before          Arrival during
+                                opening edge:           transparency:                 Arrival after
+                                positive slack          zero slack                    closing edge:
+                                                                                      negative slack
+
+
+
+         Phi1
+                                   P1
+
+
+
+                                                      Borrow time
+                             U2 opening edge
+
+                                                     Maximum borrow time        U2 closing edge
+         Phi2
+
+
+
+
+                       0                         5                         10                      15
+
+
+     The following example shows how the report_timing command reports a timing path
+     ending at a transparent latch with time borrowing. The “time borrowed from endpoint” and
+     “time given to startpoint” statements in this report correlate with Figure 212.
+     ****************************************
+     Report : timing
+              -path short
+              -delay max
+              -max_paths 1
+     Design : time_borrow
+     ****************************************
+     Wire Loading Model Mode: enclosed
+
+     Startpoint: U1 (positive level-sensitive latch clocked by
+     Phi1)
+     Endpoint: U2 (positive level-sensitive latch clocked by Phi2)
+     Path Group: Phi2
+     Path Type: max
+
+     Point                                                          Incr          Path
+
+
+PrimeTime® User Guide                                                                                      656
+T-2022.03
+                                                                     Feedback
+Chapter 17: Advanced Analysis Techniques
+Time Borrowing in Latch-Based Designs
+
+
+     ------------------------------------------------------------
+     clock Phi1 (rise edge)                   0.00       0.00
+     clock network delay (ideal)              0.00       0.00
+     U1/G (LATCH)                             0.00       0.00 r
+     U1/Q (LATCH)                             0.57       0.57 r
+     ...
+     U2/D (LATCH)                             8.35       8.92 r
+     data arrival time                                   8.92
+
+     clock Phi2 (rise edge)                   5.00       5.00
+     clock network delay (ideal)              0.00       5.00
+     U2/G (LATCH)                             0.00       5.00 r
+     time borrowed from endpoint              3.92       8.92
+     data required time                                  8.92
+     ------------------------------------------------------------
+     data required time                                  8.92
+     data arrival time                                  -8.92
+     ------------------------------------------------------------
+     slack (MET)                                         0.00
+
+     Time Borrowing Information
+     -----------------------------------------------
+     Phi2 nominal pulse width                 5.00
+     library setup time                      -0.46
+     -----------------------------------------------
+     max time borrow                          4.54
+     actual time borrow                       3.92
+     -----------------------------------------------
+
+     Startpoint: U2 (positive level-sensitive latch clocked by
+     Phi2)
+     Endpoint: U3 (positive level-sensitive latch clocked by Phi1)
+     Path Group: Phi1
+     Path Type: max
+
+     Point                                    Incr       Path
+     ----------------------------------------------------------
+     clock Phi2 (rise edge)                   5.00       5.00
+     clock network delay (ideal)              0.00       5.00
+     time given to startpoint                 3.92       8.92
+     U2/D (LATCH)                             0.00       8.92 r
+     U2/Q (LATCH)                             0.53       9.45 r
+     ...
+
+     U3/D (LATCH)                             0.24       9.69 f
+     data arrival time                                   9.69
+
+     clock Phi1 (rise edge)                  10.00      10.00
+     clock network delay (ideal)              0.00      10.00
+     U3/G (LATCH)                             0.00      10.00 r
+     time borrowed from endpoint              0.00      10.00
+     data required time                                 10.00
+
+
+
+PrimeTime® User Guide                                                      657
+T-2022.03
+                                                                                     Feedback
+Chapter 17: Advanced Analysis Techniques
+Time Borrowing in Latch-Based Designs
+
+
+     ----------------------------------------------------------
+     data required time                                 10.00
+     data arrival time                                  -9.69
+     ----------------------------------------------------------
+     slack (MET)                                         0.31
+
+     Time Borrowing Information
+     -----------------------------------------------
+     Phi1 nominal pulse width                 5.00
+     library setup time                      -0.49
+     -----------------------------------------------
+     max time borrow                          4.51
+     actual time borrow                       0.00
+     -----------------------------------------------
+
+     For the U2 to U3 path, time must be added to compensate for the time borrowed, so
+     PrimeTime adds 3.92 ns to the launch time of U2. This is reported in the second path’s
+     timing report. Because the P2 path has enough slack, neither path is in violation.
+
+
+     Maximum Borrow Time Adjustments
+     The maximum amount of time that can be borrowed at an endpoint latch is based on the
+     clock pulse width (the time from the opening edge to the closing edge of the gate signal)
+     as defined by the create_clock command, minus the library setup time of the latch,
+     which is shown in Figure 214.
+
+
+
+
+PrimeTime® User Guide                                                                         658
+T-2022.03
+                                                                                         Feedback
+Chapter 17: Advanced Analysis Techniques
+Time Borrowing in Latch-Based Designs
+
+
+Figure 214     Maximum borrow time reduced by setup requirement
+
+                              Time-borrowing path                Delayed-launch path
+
+
+                          D        Q                    D        Q                        D         Q
+
+                          G                             G                                 G
+
+                              U1                            U2                                U3
+          phi1
+
+             phi2
+
+
+
+
+             phi1
+
+
+                                                                                Library setup
+                           U2 opening edge                                      time for U2 = 0.4
+
+                                                                                U2 closing edge
+             phi2                                Maximum borrow time
+
+
+
+                    0                        5                             10
+
+
+     For better accuracy, PrimeTime adjusts this amount further for the effects of clock latency,
+     clock uncertainty, and clock reconvergence pessimism removal.
+     Clock latency can be defined with the set_clock_latency command or
+     calculated by PrimeTime from propagated delays in the clock tree (enabled by
+     set_propagated_clock). Latency values can be different for the rising and falling edges
+     of the clock pulse, which can affect the pulse width and thus the maximum borrow time.
+     See Figure 215.
+
+
+
+
+PrimeTime® User Guide                                                                               659
+T-2022.03
+                                                                                               Feedback
+Chapter 17: Advanced Analysis Techniques
+Time Borrowing in Latch-Based Designs
+
+
+Figure 215      Maximum borrow time adjustment for latency
+
+                               Time-borrowing path                    Delayed-launch path
+
+
+                           D        Q                        D        Q                         D        Q
+
+                           G                                 G                                 G
+
+                               U1                                U2                                 U3
+       phi1
+                                                           rise latency = 2.3
+         phi2                                              fall latency = 1.3
+                                                           max borrow time adjustment = –1.0
+
+
+         phi1
+
+
+
+                                                                 Maximum borrow time
+
+                                                                 U2 opening                 U2 closing
+         phi2                                        2.3         edge               1.3     edge
+
+
+
+
+                   0                          5                                10
+
+
+
+
+     Clock uncertainty can be defined with the set_clock_uncertainty command. For a
+     setup check, PrimeTime considers the earliest possible arrival of capture clock edges.
+     Differences in uncertainty between rising and falling edges can affect the clock pulse width
+     and maximum borrow time. See Figure 216.
+
+
+
+
+PrimeTime® User Guide                                                                                    660
+T-2022.03
+                                                                                              Feedback
+Chapter 17: Advanced Analysis Techniques
+Time Borrowing in Latch-Based Designs
+
+
+Figure 216     Maximum borrow time adjustment for uncertainty
+
+                                  Time-borrowing path                   Delayed-launch path
+
+
+                              D        Q                     D          Q                     D        Q
+
+                              G                              G                                G
+
+                                  U1                               U2                             U3
+          phi1
+                                                           rise uncertainty = 2.1
+             phi2                                          fall uncertainty = 1.8
+                                                           max borrow time adjustment = +0.3
+
+
+             phi1
+
+
+                        U2 opening           Maximum borrow time
+                        edge
+
+                                                         U2 closing
+             phi2                          2.1           edge               1.8
+
+
+
+
+                    0                             5                               10
+
+
+
+
+     Clock reconvergence pessimism removal (CRPR) is an analysis technique that corrects
+     any inaccuracy resulting from a common segment in the launch and capture clock paths.
+     To enable this feature, set the timing_remove_clock_reconvergence_pessimism
+     variable to true.
+     Application of CRPR shifts the clock edge times, like clock uncertainty. However, applying
+     clock uncertainty makes the analysis more pessimistic, whereas applying CRPR makes
+     the analysis less pessimistic, so the direction of the edge shift is in the positive direction
+     rather than the negative direction. Differences in CRPR between rising and falling edges
+     can affect the clock pulse width and maximum borrow time, which is shown in Figure 217.
+
+
+
+
+PrimeTime® User Guide                                                                                  661
+T-2022.03
+                                                                                            Feedback
+Chapter 17: Advanced Analysis Techniques
+Time Borrowing in Latch-Based Designs
+
+
+Figure 217      Maximum borrow time adjustment for CRPR
+
+                              Time-borrowing path                  Delayed-launch path
+
+
+      Common              D        Q                      D        Q                        D         Q
+      segment in
+      clock path          G                               G                                 G
+      not shown
+                              U1                              U2                                 U3
+             phi1
+                                                        crpr rise = 0.3
+              phi2                                      crpr fall = 0.2
+                                                        max borrow time adjustment = –0.1
+
+
+             phi1
+
+
+
+                                                      Maximum borrow time
+
+                                            0       U2 opening           0.2        U2 closing
+             phi2                                   edge                            edge
+
+
+
+
+                     0                       5                                 10
+
+
+
+     To calculate the maximum allowable borrow time, PrimeTime starts with the clock pulse
+     width and then adjusts it for the applicable effects of clock latency, clock uncertainty, clock
+     reconvergence pessimism removal, and library setup time of the endpoint latch. The
+     report_timing command reports the clock pulse width and the adjustments as follows:
+     Time Borrowing Information
+     ---------------------------------------------------
+     CLK nominal pulse width                  5.00
+     clock latency difference                -1.00
+     clock uncertainty difference             0.30
+     CRPR difference                         -0.10
+     library setup time                      -0.40
+     ---------------------------------------------------
+     max time borrow                          3.80
+     ---------------------------------------------------
+     ...
+
+
+
+
+PrimeTime® User Guide                                                                                 662
+T-2022.03
+                                                                                                 Feedback
+Chapter 17: Advanced Analysis Techniques
+Time Borrowing in Latch-Based Designs
+
+
+
+     Time Borrowed and Time Given
+     PrimeTime calculates the amount of time borrowed in relation to the arrival time of the
+     opening clock edge at the latch. PrimeTime first adjusts the arrival time of the opening
+     edge to account for path-specific effects of both uncertainty and CRPR (if applicable).
+     Then it compares the adjusted value to the signal arrival time at the data pin to determine
+     the amount of time borrowed at the path endpoint, if any.
+     If uncertainty and CRPR exist for the opening edge of the latch, the time borrowed is
+     different from the amount of time given to the startpoint of the next stage. To determine the
+     time given to the startpoint, PrimeTime subtracts the uncertainty and CRPR adjustments.
+     This subtraction is necessary in transparent mode to make the launch at the next stage
+     occur precisely when the signal arrives at the data pin, as shown in Figure 218. When the
+     timing_early_launch_at_borrowing_latches variable is disabled, the data arrival and
+     launch times are not identical, owing to the deliberate application of a late clock latency to
+     launch the next stage. This mode is recommended when CRPR is enabled. Note that the
+     CRPR adjustment to the time given to the startpoint of the next stage is not applied in this
+     mode.
+
+Figure 218     Borrow time and time given to startpoint in transparent mode
+
+                                                                      data arrival time at endpoint = data
+                                                                      departure time for next stage
+
+
+             phi1
+
+
+
+
+                    actual time borrow
+                        time given to startpoint
+
+
+             phi2
+
+
+      Adjustment for clock
+      uncertainty and CRPR (to               Nominal opening edge
+      determine borrow time)                 (starting time for next stage)
+
+
+
+
+PrimeTime® User Guide                                                                                        663
+T-2022.03
+                                                                                      Feedback
+Chapter 17: Advanced Analysis Techniques
+Time Borrowing in Latch-Based Designs
+
+
+     The report_timing command reports the amount of time borrowing and uncertainty and
+     CRPR adjustments as follows:
+     Time Borrowing Information
+     ---------------------------------------------------
+     CLK nominal pulse width                  5.00
+     clock latency difference                -1.00
+     clock uncertainty difference             0.30
+     CRPR difference                         -0.10
+     library setup time                      -0.40
+     ---------------------------------------------------
+     max time borrow                          3.80
+     ---------------------------------------------------
+     actual time borrow                       3.40
+     open edge uncertainty                   -2.10
+     open edge CRPR                           0.30
+     ---------------------------------------------------
+     time given to startpoint                 1.60
+     ---------------------------------------------------
+
+     In most cases, data arrival before the opening clock edge results in no borrowing, whereas
+     data arrival after the opening clock edge results in borrowing. When borrowing occurs,
+     the arrival time minus the clock edge time is reported as “time borrowed from endpoint”
+     from the perspective of the path segment ending at the latch. This same amount of time
+     is reported as “time given to startpoint” from the perspective of the path segment starting
+     from the latch. However, in certain cases, data arrival just before the clock edge can result
+     in borrowing. This happens when the D-to-Q delay of the latch is more than its clock-to-Q
+     delay, and the arrival time is very close to the clock edge, as shown in Figure 219. Under
+     these circumstances, the data departure time for the next path is determined by the data
+     arrival time and the D-to-Q delay, rather than the clock-to-Q delay of the no-borrowing
+     case.
+
+
+
+
+PrimeTime® User Guide                                                                         664
+T-2022.03
+                                                                                        Feedback
+Chapter 17: Advanced Analysis Techniques
+Time Borrowing in Latch-Based Designs
+
+
+Figure 219    Negative borrow time
+
+                                                  Data arrival time at endpoint
+
+
+              phi1
+                         Negative
+                         borrow time                    Data departure time at startpoint
+                                                        determined by arrival time and D-to-Q delay
+
+                                   1.1
+                               D          Q
+
+                              G
+                                    0.8
+              phi2
+
+
+                     0                        5                              10
+
+
+     PrimeTime accounts for this condition by allowing time borrowing. The arrival time minus
+     the clock edge time is a negative number, so the amount of borrowing is negative. The
+     borrowed amount is reported as “time given to endpoint” from the perspective of the path
+     segment ending at the latch, and “time borrowed from startpoint” from the perspective of
+     the path segment starting from the latch. This amount of time cannot exceed the difference
+     between the D-to-Q delay and clock-to-Q delay of the latch.
+
+
+     Limiting Time Borrowing
+     The set_max_time_borrow command limits time borrowing to a specified amount for all
+     latch endpoints within a specified scope of the design. Use this command to set a more
+     restrictive constraint on borrowing. At the specified latch endpoints, PrimeTime limits
+     borrowing to the specified amount or to the default determined by the adjusted pulse
+     width, whichever is smaller.
+     If the default_max_time_borrow constraint is zero, no time borrowing is allowed and
+     PrimeTime analyzes the latch like a flip-flop.
+     If the default_max_time_borrow constraint is negative, the data signal must be stable
+     before the open edge of the clock. Use this feature to ensure that the enable input arrives
+     before the clock (on a gated-clock latch, for example).
+     To show the max_time_borrow attributes, use the report_exceptions command.
+     To remove the maximum time borrow limit set on specified objects using
+     set_max_time_borrow, use the remove_max_time_borrow command.
+
+
+
+
+PrimeTime® User Guide                                                                            665
+T-2022.03
+                                                                                        Feedback
+Chapter 17: Advanced Analysis Techniques
+Advanced Latch Analysis
+
+
+     These commands set maximum time borrowing of 2.5 on all latches clocked by clk:
+     pt_shell> create_clock -period 10 -waveform {0 5} clk
+
+     pt_shell> set_max_time_borrow 2.5 find(clock,clk)
+
+     pt_shell> report_timing -to latch1/D
+
+     The max_time_borrow attribute, which is specified by the set_max_time_borrow
+     command, effectively reduces the pulse available for time borrowing from 5.0 to 2.5:
+     Time Borrowing Information
+     -----------------------------------------------
+     user max_time_borrow                     2.50
+     -----------------------------------------------
+     max time borrow                          2.50
+     actual time borrow                       0.00
+     -----------------------------------------------
+
+     The time borrowed from an endpoint is usually the same as the time given to the next
+     startpoint when the endpoint and startpoint are both the D pin of the same latch. There
+     can be a small difference due to uncertainty and CRPR adjustment of the opening edge
+     of the latch. Sometimes, if the borrowing at D is small, the most critical path from the latch
+     still comes from G; however, if you do the explicit report from D, then the time given is the
+     same as the time borrowed.
+
+
+Advanced Latch Analysis
+     By default, timing violations are reported by analyzing single-segment paths between
+     latches. Borrowing paths are introduced for borrowing (or failing) latches. The borrowing
+     paths are single-segment paths that end at the D pin of the next latch or flip-flop. The
+     single-segment nature of timing paths can be an obstacle to fixing timing and performing
+     power optimization on latch designs.
+     You can optionally analyze paths through latches without breaking the paths into
+     segments. In that case, a transparent latch is both a throughpath and an endpoint. Each
+     latch can have paths ending at the D pin of the latch, as well as paths passing through
+     the latch toward another endpoint. In addition, each latch clock pin can be a startpoint of
+     a path. Advanced latch analysis provides global visibility of timing paths through latches,
+     which can improve power and design optimization.
+     The following table summarizes the commands and variables for advanced latch analysis:
+     Table 41      Commands and variables for advanced latch analysis
+
+Command or variable                        Usage
+
+timing_enable_through_paths                Enables advanced latch analysis
+
+
+
+PrimeTime® User Guide                                                                           666
+T-2022.03
+                                                                                               Feedback
+Chapter 17: Advanced Analysis Techniques
+Advanced Latch Analysis
+
+
+     Table 41      Commands and variables for advanced latch analysis (Continued)
+
+Command or variable                        Usage
+
+set_latch_loop_breaker                     Breaks latch loops at specified points, overriding the default
+                                           points chosen by the tool
+
+get_latch_loop_groups                      Returns a list of collections of pins, each collection
+                                           containing the data pins of a latch loop group
+
+report_latch_loop_groups                   Reports information about latch data pins involved in loops
+                                           of transparent latches
+
+timing_through_path_max_segments           Specifies the maximum number of successive latch path
+                                           segments analyzed per path
+
+timing_report_skip_early_paths_at_i Prevents reporting of throughpaths that arrive early at
+ntermediate_latches                 intermediate latches
+
+report_timing                              Traces paths backward or forward through loop-breaker
+-trace_latch_borrow                        latches
+-trace_latch_forward
+
+
+
+     For details about running the advanced latch analysis, see the following topics:
+     •   Enabling Advanced Latch Analysis
+     •   Breaking Loops
+     •   Latch Loop Groups
+     •   Timing Exceptions Applied to Latch Paths
+     •   Reporting Paths Through Latches
+     •   Calculation of the Worst and Total Negative Slack
+     •   Normalized Slack Analysis
+     •   Finding Recovered Paths
+
+
+     Enabling Advanced Latch Analysis
+     To enable advanced latch analysis, set the timing_enable_through_paths variable to
+     true. By default, this variable is set to false.
+
+
+
+
+PrimeTime® User Guide                                                                                  667
+T-2022.03
+                                                                                          Feedback
+Chapter 17: Advanced Analysis Techniques
+Advanced Latch Analysis
+
+
+
+     Breaking Loops
+     Loops present a challenge when viewing throughpaths as timing paths. Finding the worst
+     path through a circuit with loops is only possible for very small, simple circuits.
+     To avoid issues with loops, selected latches are designated as loop-breaker latches.
+     Paths do not propagate through loop-breaker latches. By default, loop-breaker latches are
+     selected by PrimeTime. The tool tries to select a small set of loop-breaker latches, based
+     on the connectivity of the design. The tool does not consider arrival values when selecting
+     loop-breaker latches.
+     The report_timing command does not find paths through loop-breaker latches. For each
+     report_timing command, the tool reports the worst timing path based on paths that do
+     not pass through any loop-breaker latch.
+
+     Specifying Loop-Breaker Latches
+     To manually specify loop-breaker latches, use this command:
+     set_latch_loop_breaker -pin pin_list
+
+     You can specify a particular latch as a loop breaker if
+     •   The latch is not on a critical path
+     •   The latch is part of a path that is not a loop, but the tool might detect a latch loop (such
+         as a register file with a read and write port, which are never used simultaneously)
+     •   The latch is used with a pulse clock or has only a small transparency window
+     •   There are other latches in a latch loop that should not be treated as loop breakers
+
+     Finding Loop-Breaker Latches
+     To find the loop-breaker latches, query the is_latch_loop_breaker attribute on the pins
+     of sequential cells. This attribute is set to true for the D pin of a loop-breaker latch. For
+     example, to create a collection of loop-breaker latch pins:
+     get_pins -hierarchical * -filter "@is_latch_loop_breaker"
+
+
+     Latch Loop Groups
+     A single latch can be part of multiple latch loops. The set of all intersecting latch loops is
+     called a latch loop group. Every latch in the latch loop group is involved in at least one loop
+     with every other latch in the group.
+     In the following example, a single latch loop group contains three latches (L1, L2, and L3).
+     Between every two latches in the latch loop group, it is possible to form a loop.
+
+
+
+PrimeTime® User Guide                                                                             668
+T-2022.03
+                                                                                         Feedback
+Chapter 17: Advanced Analysis Techniques
+Advanced Latch Analysis
+
+
+Figure 220    Single latch loop group with three latches
+
+
+
+
+     Listing Collections of Latch Loop Groups
+     To list the collections that contain the latch D pins that make up a particular latch loop
+     group, use this command:
+
+     get_latch_loop_groups
+        [-of_objects list_of_transparent_d_pins]
+        [-loop_breakers_only]
+
+     This command returns a Tcl list of collections. Each collection has the latch D pins that
+     make up a particular latch loop group. By default, the command returns every latch loop
+     group. If you use the -of_objects option, the tool includes only those loop groups that
+     include the specified latch D pins. If you use the -loop_breakers_only option, the tools
+     includes only loop breaker pins in the collections.
+     The command does not report latches outside of loops.
+
+     Reporting Latch Loop Groups
+     To report information about latch loop groups, use the report_latch_loop_groups
+     command. Example 28 shows the report. The report lists the latch D pins on the left. The
+     latch loop groups are given a number listed in the second column. You can distinguish
+     which latch D pins are in which group by the number. The attributes on the right indicate
+
+
+
+
+PrimeTime® User Guide                                                                             669
+T-2022.03
+                                                                                        Feedback
+Chapter 17: Advanced Analysis Techniques
+Advanced Latch Analysis
+
+
+     if the latch is a loop breaker, and also indicates whether you requested the D pin to be a
+     loop breaker or to be avoided as a loop breaker.
+
+Example 28 Report of latch loop groups
+     pt_shell> report_latch_loop_groups
+     ****************************************
+     Report : latch loop groups
+     ...
+     ****************************************
+     Attributes
+     b - loop breaker d pin
+     p - long path breaker d pin, but not in a loop
+     u - user requested to be a loop breaker using set_latch_loop_breaker
+     a - user requested to avoid with set_latch_loop_breaker -avoid
+     Latch Latch Loop Attributes
+     D pin Group
+     ------------------------------------------------------------------------
+     DUT/Latch1/D NA pu
+     DUT/Latch2/D 1 b
+     DUT/Latch3/D 1
+     DUT/Latch4/D 2 bu
+     DUT/Latch5/D 2 a
+
+     If a latch D pin is not in a loop, the latch loop group column indicates “NA”. It is
+     possible for latch D pins that are not in a loop to be path breakers. if you do not use the
+     -loop_breakers_only option, the tool does not report these pins.
+
+     Specifying the Maximum Number of Latches Analyzed per Path
+     By default, the tool reports a maximum of five successive latches per path. The tool limits
+     the maximum length of each path by introducing additional loop-breaker latches even
+     where there are no loops.
+     To override the default behavior and consider a different maximum number latches per
+     path, set the timing_through_path_max_segments variable to the required number. Set
+     a higher number to increase the analysis accuracy for long paths. Set a lower number to
+     decrease the runtime.
+     A setting of zero means no limit on the number of latches analyzed per path. If this setting
+     causes excessively long runtimes, you should revert to the default setting or use some
+     other reasonable setting.
+
+
+     Timing Exceptions Applied to Latch Paths
+     When using advanced latch analysis, timing exceptions must be satisfied within one
+     path segment. All -from, -through, and -to option specifiers must be met in one path
+     segment to be applied.
+     To learn how the tool applies timing exceptions when running advanced latch analysis, see
+
+
+PrimeTime® User Guide                                                                              670
+T-2022.03
+                                                                                     Feedback
+Chapter 17: Advanced Analysis Techniques
+Advanced Latch Analysis
+
+
+     •   False Path Exceptions
+     •   Multicycle Path Exceptions
+     •   Maximum and Minimum Delay Exceptions
+     •   Clock Groups
+     •   Specification of Exceptions on Throughpaths
+
+     False Path Exceptions
+     If a throughpath has a satisfied false path exception on any of its segments, the path
+     becomes a false throughpath, and the tool does not check constraints at the end of the
+     path.
+
+Figure 221    False path exceptions on throughpaths
+
+
+
+
+     Multicycle Path Exceptions
+     If a throughpath has a satisfied multicycle path exception on a segment, the exception
+     affects the expected transparency window of latches downstream of the exception, and
+     affects the required time at the path endpoint. Different multicycle path exceptions can
+     apply to different segments of the same throughpath.
+
+
+
+
+PrimeTime® User Guide                                                                           671
+T-2022.03
+                                                                                     Feedback
+Chapter 17: Advanced Analysis Techniques
+Advanced Latch Analysis
+
+
+Figure 222    Multicycle path exceptions affect the downstream latch windows
+
+
+
+
+     There is a throughpath from F1 to F4. When both exceptions are applied, the required time
+     for the path is 40 (minus setup time). For the path from F1 to L2/D, the required time is 25
+     (minus setup time) if the exceptions are applied.
+     The multicycle path exceptions also affect normalized slack by changing the allowed
+     propagation delay of paths.
+
+     Maximum and Minimum Delay Exceptions
+     The tool supports maximum delay exceptions for throughpaths when the endpoint of the
+     maximum delay is the D pin of a latch. The exceptions apply a maximum delay to the
+     segment only, overriding the normal pulse relation for the segment. Throughpaths for
+     which the maximum delay exception is not satisfied are not affected, even if they pass
+     through the D pin. For throughpaths that are affected by the exception, the exception
+     affects the local constraint at the latch but does not affect path recovery or normalized
+     slack calculations for the path.Minimum delay exceptions ending at the D pin of a latch
+     affect local hold time constraints for single-segment paths. Throughpaths are not affected
+     because hold checks are not performed for throughpaths.
+
+     Clock Groups
+     Use clock groups to indicate that two clocks do not communicate. You cannot use clock-
+     to-clock false path exceptions to do this because they do not work for all throughpaths;
+     the false path exception does not conform to the rule that the exception must start and
+     become satisfied within one segment.
+
+
+PrimeTime® User Guide                                                                        672
+T-2022.03
+                                                                                       Feedback
+Chapter 17: Advanced Analysis Techniques
+Advanced Latch Analysis
+
+
+     Note:
+         You can use clock-to-clock false paths for hold checks because hold checks are
+         not applied on throughpaths.
+     The tool applies clock-to-clock exceptions only if the throughpath has a segment that
+     satisfies the exception. For example, if the first intermediate latch is clocked by clkA, and
+     the second intermediate latch is clocked by clkB, then set_false_path -from clkA -to
+     clkB causes the throughpath to be false.
+
+     Clock groups are taken into account for throughpaths. Throughpaths are not constrained if
+     the throughpath relies on two clocks that are exclusive. This is true even if the throughpath
+     relies on the exclusive clocks only at intermediate latches.
+     When several clocks arrive at the clock pin of a latch, as shown by the following circuit
+     example, potentially distinct throughpaths can be created. Exclusive clock groups are
+     honored by preventing some of the potential throughpaths.
+
+Figure 223    Circuit with multiple clocks at latches
+
+
+
+
+     If no clock groups are set, the following paths are valid from F1/clk to F4/D:
+     •   F1/clk -> L1/D(clk_b) -> L1/Q -> L2/D(clk_d) -> F4/D
+     •   F1/clk -> L1/D(clk_b) -> L1/Q -> L2/D(clk_e) -> F4/D
+     •   F1/clk -> L1/D(clk_c) -> L1/Q -> L2/D(clk_d) -> F4/D
+     •   F1/clk -> L1/D(clk_c) -> L1/Q -> L2/D(clk_e) -> F4/D
+     Setting the following clock groups reduces the number of valid paths:
+     set_clock_groups -exclusive -group {clk_b} -group {clk_d}
+     set_clock_groups -exclusive -group {clk_c} -group {clk_e}
+
+     The following valid paths remain:
+     •   F1/clk -> L1/D(clk_b) -> L1/Q -> L2/D(clk_e) -> F4/D
+     •   F1/clk -> L1/D(clk_c) -> L1/Q -> L2/D(clk_d) -> F4/D
+
+
+
+PrimeTime® User Guide                                                                            673
+T-2022.03
+                                                                                        Feedback
+Chapter 17: Advanced Analysis Techniques
+Advanced Latch Analysis
+
+
+     Using Clock-to-Clock False Path Exceptions for Setup Only
+     For clocks that are exclusive, use the set_clock_groups command.
+     If you want to avoid setup checks between two clocks, but you also want to keep the hold
+     checks, use the set_false_path exception for a partial solution:
+     set_false_path -from [get_clocks clkA] -to [get_clocks clkB] -setup
+
+     Single-segment paths launched from clkA and captured by clkB are affected by the
+     exception. Throughpaths are not affected unless there is a segment in the throughpath
+     that satisfies the exception. For example, if the launch clock of the path is clkA, and the
+     first intermediate latch is clocked by clkB, the exception is applied to the throughpath.
+     However, for throughpaths launched by clkA and captured by clkB, but have an
+     intermediate latch clocked by other clocks, the exception is not applied.
+
+     Specification of Exceptions on Throughpaths
+     Exception specifications that use multiple path specifiers should only use specifiers that
+     are satisfied within one path segment. It is incorrect to specify exceptions with specifiers
+     that are not satisfied in one segment.
+     For the following circuit, these exceptions are incorrectly specified and have no effect on
+     throughpaths:
+     set_multicycle_path 2 -from F1/clk -through L1/Q
+     set_multicycle_path 2 -from F1/clk -to F4/D
+
+Figure 224    Incorrectly specified exceptions on throughpaths
+
+
+
+
+     Exceptions that are incorrectly specified have no effect on timing; to list these exceptions,
+     use the report_exceptions -ignored command.
+
+
+     Reporting Paths Through Latches
+     In circuits with latches, the transitive slack provides an estimate of the needed timing
+     improvement for paths through a certain pin. To find the critical path that determines the
+     transitive slack at a specified pin, use this command:
+     report_timing -through pin_name
+
+
+
+PrimeTime® User Guide                                                                              674
+T-2022.03
+                                                                                      Feedback
+Chapter 17: Advanced Analysis Techniques
+Advanced Latch Analysis
+
+
+     To improve the slack at a specified pin, you can choose any location on the critical path to
+     perform optimization. If you want to optimize power, the same report indicates the timing
+     path that limits sizing operations at the specified pin.
+     The report for throughpaths includes a description of each intermediate transparency
+     window.
+
+Figure 225    Slack example with borrowing
+
+
+
+
+             Pin      Arrival                Required                    Slack
+
+             F1/clk   0                      2                           +2
+
+             L1/D     4 (path from F1/clk)   6 (from downstream;         +2
+                                             local required time is 7)
+
+             L1/Q     4 (path from F1/clk)   6                           +2
+
+             F3/D     8 (path from F1/clk)   10                          +2
+
+
+
+Example 29 Timing report of paths through latches
+     pt_shell> report_timing
+     ****************************************
+     Report : timing
+             -path full
+             -delay max
+     ...
+     ****************************************
+       Startpoint: F1/clk (rising edge-triggered flip-flop clocked by CLK)
+       Endpoint: F3/clk (rising edge-triggered flip-flop clocked by CLK)
+       Path Group: CLK
+       Path Type: max
+       Point                            Incr       Path
+       ---------------------------------------------------
+       clock CLK (rise edge)            0.00       0.00
+
+
+PrimeTime® User Guide                                                                         675
+T-2022.03
+                                                                                      Feedback
+Chapter 17: Advanced Analysis Techniques
+Advanced Latch Analysis
+
+
+        clock network delay (ideal)       0.00      0.00
+        F1/clk (flop)                     0.00      0.00 r
+        F1/Q (flop)                       0.00      0.00 r
+        delay1/z (delay)                  9.00      9.00 f
+        L1/D (latch)                      0.00      9.00 f
+        ---------------------------------------------------
+         Transparency Window #1 (missed)
+        clock CLK (rise edge)                       3.00
+        clock network delay (ideal)       0.02      3.02
+        Transparency max open edge                  3.02
+        clock CLK (fall edge)                       7.00
+        clock network delay (ideal)       0.03      7.03
+        library setup time               -0.01      7.02
+        inter-clock uncertainty          -0.02      7.00
+        Transparency max close edge                 7.00
+        L1/D (latch)                                9.00
+        Path recovery                    -2.00      7.00
+        ---------------------------------------------------
+        L1/D (latch)                      0.00      7.00 f
+        L1/Q (latch)                      0.00      7.00 f
+        delay2/z (delay)                  2.00      9.00 r
+        F3/D (flop)                       0.00      9.00 r
+        data arrival time                           9.00
+        clock CLK (rise edge)            10.00     10.00
+        clock network delay (ideal)       0.00     10.00
+        F3/clk (flop)                              10.00 r
+        library setup time                0.00     10.00
+        data required time                         10.00
+        ---------------------------------------------------
+        slack (MET)                                 1.00
+        ---------------------------------------------------
+        normalization delay                        10.00
+        normalized slack                            0.10
+
+     The last section of the report describes the normalized slack data. For more information
+     about normalized slack, see Normalized Slack Analysis.
+
+     Filtering Paths That Arrive Early at Intermediate Latches
+     By default, the report_timing command reports throughpaths that arrive before the
+     open edge of intermediate latches along the path. To filter out these throughpaths, set the
+     timing_report_skip_early_paths_at_intermediate_latches variable to true.
+
+     This is an example of filtering a path that arrives early.
+
+
+
+
+PrimeTime® User Guide                                                                        676
+T-2022.03
+                                                                                       Feedback
+Chapter 17: Advanced Analysis Techniques
+Advanced Latch Analysis
+
+
+Figure 226 Filtering throughpaths with the
+timing_report_skip_early_paths_at_intermediate_latches variable
+                                    Data arrives             report_timing and get_timing_paths
+                                     early at I2               does not report this throughpath
+                            f1                      I2                        f3
+
+
+
+
+            clk
+
+
+
+
+     Reporting Through Loop-Breaker Latches
+     The tool considers downstream timing when calculating the required time at a loop-
+     breaker latch. This occurs when you use the report_timing or get_timing_paths
+     command without the -to option. For example:
+     report_timing -through $latch_loop_breaker
+     report_timing -from $startpt -through $latch_loop_breaker
+     report_timing -from $startpt
+
+     Tracing Forward Through Loop-Breaker Latches
+     The tool traces forward through loop-breaker latches when you use the report_timing
+     command with the -trace_latch_forward option. This capability is similar to the
+     -trace_latch_borrow option, which traces backward.
+
+     The trace begins from a primary path specified by the -from or -through options.
+     Additional path segments are included in the timing report, tracing forward from the
+     endpoint of the primary path segment. The trace is in the direction of the worst required
+     time. The following example shows reporting through loop-breaker latches.
+
+
+
+
+PrimeTime® User Guide                                                                             677
+T-2022.03
+                                                                                            Feedback
+Chapter 17: Advanced Analysis Techniques
+Advanced Latch Analysis
+
+
+Figure 227     Report of a path through a loop-breaker latch
+             Point                                    Incr       Path
+               ---------------------------------------------------------------
+               clock clk (rise edge)                    0.00       0.00
+               clock network delay (propagated)        60.00      60.00
+               fd_in2/CP (FD1)                          0.00      60.00 r
+               fd_in2/Q (FD1)                           1.58      61.58 f
+               b2/Z (B1I)                              39.00 H   100.58 f
+               ...
+               ld1/D (LD1)                              0.00     103.88 f
+               data arrival time                                 103.88
+
+              clock clk' (rise edge)                             30.00            30.00
+              clock network delay (propagated)                   22.00            52.00       Open edge
+              clock reconvergence pessimism                      44.00            96.00
+              ld1/G (LD1)                                                         96.00 r     clock path
+              transparency open edge                                              96.00
+
+
+              time required through endpoint                     98.00    Constraint
+              data required time                                 98.00
+              ---------------------------------------------------------------
+              data required time                                 98.00
+              data arrival time                                -103.88
+              ---------------------------------------------------------------
+              slack (VIOLATED)                                   -5.88
+
+
+
+
+     Calculation of the Worst and Total Negative Slack
+     The following pin attributes return the local slack in a latch-based path:
+     •   max_rise_local_slack
+
+     •   max_fall_local_slack
+
+     These attributes are defined on the D pins of latches and other timing endpoints.
+     The “local” slack (for example, max_fall_local_slack) is the timing slack considering
+     the data arrival at the local pin and setup constraints at the local pin, without considering
+     constraints downstream from the pin of a transparent latch. If there are no constraints
+     at the pin, the attribute is undefined. The “normal” slack attributes (for example,
+     max_fall_slack and max_slack) consider the constraints downstream from the pin of a
+     transparent latch.
+     The worst negative slack (WNS) is the slack at the endpoint of the worst violating
+     path. The path can be a single segment or throughpath. If there are no violating
+     paths, the WNS is zero. The WNS is the minimum of all max_rise_local_slack and
+     max_fall_local_slack attributes.
+
+
+PrimeTime® User Guide                                                                             678
+T-2022.03
+                                                                                        Feedback
+Chapter 17: Advanced Analysis Techniques
+Advanced Latch Analysis
+
+
+     The tool calculates the total negative slack (TNS) using the following equation:
+     TNS = For all timing endpoints, summation of
+     minimum(0, minimum(max_rise_local_slack, max_fall_local_slack))
+
+
+     Normalized Slack Analysis
+     With advanced latch analysis, you can use the normalized slack to calculate the maximum
+     frequency for a path unless it is a recovered path (see Finding Recovered Paths) or a path
+     that contains latches identified as a loop breaker or a path breaker (see Reporting Latch
+     Loop Groups). The following example shows the normalized slack for three paths in a
+     circuit.
+
+Figure 228    Example of normalized slack
+
+
+
+
+     The tool computes the allowed propagation delay for the path using ideal clock edges; the
+     tool ignores setup time, uncertainty, and clock latency. The allowed propagation delay can
+     be half-cycle, full-cycle, or multiple cycles; it can also be more complicated to compute
+     when the launch and capture of a path exist in different clock domains.
+     To report and sort paths by normalized slack, use the report_timing command with the
+     -normalized_slack option.
+
+     For information about running normalized slack analysis, see Reporting Normalized Slack.
+
+
+     Finding Recovered Paths
+     A path is recovered when the arrival time at a latch is later than the closing edge of the
+     transparency window minus the clock uncertainty and setup time. To find recovered paths,
+
+
+
+
+PrimeTime® User Guide                                                                         679
+T-2022.03
+                                                                                      Feedback
+Chapter 17: Advanced Analysis Techniques
+Advanced Latch Analysis
+
+
+     query the is_recovered timing path attribute. The attribute is set to true for a path that
+     was recovered at an intermediate latch.
+
+
+
+
+PrimeTime® User Guide                                                                         680
+T-2022.03
+

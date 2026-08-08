@@ -1,0 +1,783 @@
+% 第 13 章 Analyzing and Resolving Design Problems
+\bichapter{分析并解决设计问题}{Analyzing and Resolving Design Problems}
+\label{chap:analyze}
+
+使用 DC Explorer 生成的报告来分析并调试设计。可在 compile 设计之前与之后生成报告。
+compile 前生成报告，以检查属性、约束与设计规则是否设置正确；compile 后生成报告，以分析结果并调试设计。
+
+要了解如何分析并解决设计问题，见：
+\begin{itemize}
+  \item 修复由不受支持的 Technology 文件属性引起的错误
+  \item 比较 DC Explorer 与 IC Compiler 环境
+  \item 检查设计一致性
+  \item 检查未映射单元
+  \item 指定输出端口方向不正确时的严重级别
+  \item 分析设计问题
+  \item 分析面积
+  \item 分析时序
+  \item 生成结果质量（QoR）
+  \item 调试带有 \texttt{dont\_touch} 属性的单元与网
+  \item 使用命令进行 RTL 交叉探测
+  \item 在批处理模式下报告逻辑级
+\end{itemize}
+
+% ============================================================
+\section{修复由不受支持的 Technology 文件属性引起的错误}
+\subsection*{Fixing Errors Caused by Unsupported Technology File Attributes}
+
+有时 IC Compiler 会新增支持某些 DC Explorer 尚未支持的 technology 文件属性。
+在这些情况下，使用同一 technology 文件时，DC Explorer 会发出 TFCHK-009 错误消息，而 IC Compiler 不会。
+
+若读入 technology 文件时出现 TFCHK-009 错误，请检查属性拼写并确保拼写正确。
+若仍有 TFCHK-009 错误，可用下列两种方法之一消除这些错误。
+在使用任一方法之前，请确认可以安全移除或忽略这些新属性而不影响工具功能。
+多数情况下，新属性与新的布线规则相关，不应影响 DC Explorer 的功能。
+\begin{itemize}
+  \item 从 technology 文件的指定节中移除这些新属性。
+  \item 若新属性可安全忽略，可将变量 \varname{ignore\_tf\_error} 设为 \texttt{true}，使工具忽略不受支持的属性。
+        这会使工具忽略所有 TFCHK-009 错误，但错误仍会写入日志文件。
+\end{itemize}
+
+% ============================================================
+\section{比较 DC Explorer 与 IC Compiler 环境}
+\subsection*{Comparing DC Explorer and IC Compiler Environments}
+
+有时 DC Explorer 与 IC Compiler 的环境设置不同，这些差异可能导致相关性问题。
+为帮助修复 DC Explorer 与 IC Compiler 之间的相关性问题，可在 Linux shell 中使用 \cmd{consistency\_checker} 命令比较各自环境。
+
+在比较两个环境之前，需要确定每个工具的环境。为此，使用 \cmd{write\_environment} 命令，如示例~\ref{ex:write-env-dce} 与示例~\ref{ex:write-env-icc} 所示。
+在 DC Explorer 中，在 \cmd{compile\_exploration} 之前运行 \cmd{write\_environment}；在 IC Compiler 中，在 \cmd{place\_opt} 之前运行 \cmd{write\_environment}。
+
+\begin{lstlisting}[caption={在 DC Explorer 中使用 write\_environment},label=ex:write-env-dce]
+de_shell> write_environment -consistency -output DCE.env
+\end{lstlisting}
+
+\begin{lstlisting}[caption={在 IC Compiler 中使用 write\_environment},label=ex:write-env-icc]
+icc_shell> write_environment -consistency -output ICC.env
+\end{lstlisting}
+
+获得各工具环境后，用 \cmd{consistency\_checker} 命令比较环境，如示例~\ref{ex:consistency-checker} 所示。
+
+\begin{lstlisting}[caption={比较 DC Explorer 与 IC Compiler 环境},label=ex:consistency-checker]
+%consistency_checker -file1 DCE.env -file2 ICC.env \
+   -folder temp-html html_report | tee cc.log
+\end{lstlisting}
+
+生成的 HTML 输出报告列出不匹配的命令与变量。
+在示例~\ref{ex:consistency-checker} 中，HTML 输出报告写入 \texttt{./html\_report} 目录。
+要访问该报告，在任意 Web 浏览器中打开 \texttt{./html\_report/index.html}。
+为减少相关性问题，请在继续优化之前修复这些不匹配。
+
+除 HTML 输出报告外，工具在运行 \cmd{consistency\_checker} 时还会向 shell 打印摘要报告。
+可如示例~\ref{ex:consistency-checker} 所示使用 Linux \cmd{tee} 命令将该报告保存到文件；本例中保存为 \texttt{./cc.log}。
+
+\begin{noteBox}
+\texttt{./temp} 目录存放工具执行 \cmd{consistency\_checker} 时使用的中间文件。命令完成后可移除 \texttt{./temp} 目录。
+\end{noteBox}
+
+% ------------------------------------------------------------
+\subsection{压缩格式的环境文件}
+\subsubsection*{Environment Files in Compressed Format}
+
+要生成 gzip 格式的工具环境输出，对 \cmd{write\_environment} 指定 \opt{-compress} 选项。
+可将输出文件再 source 回 IC Compiler 工具。
+对于一致性检查，必须先解压用 \opt{-compress} 生成的输出文件；在使用 \cmd{consistency\_checker} 之前，用 Linux \cmd{gunzip} 命令解压。
+
+下列示例生成压缩文件 \texttt{DCE.tcl.gz}，并在 Linux shell 中解压以供一致性检查：
+\begin{lstlisting}
+de_shell> write_environment -consistency -output DCE.tcl -compress
+Terminals:                   145
+Hard Macros:                  38
+Site Rows:                   351
+Bounds:                        3
+Placement Blockages:          22
+Route Guides:                  3
+Preroutes:                    20
+
+%gunzip DCE.tcl.gz
+\end{lstlisting}
+
+\begin{seeAlsoBox}
+SolvNetPlus 文章 31000，``Using the Consistency Checker to Automatically Compare Environment Settings Between Design Compiler and IC Compiler''
+\end{seeAlsoBox}
+
+% ============================================================
+\section{检查设计一致性}
+\subsection*{Checking for Design Consistency}
+
+当设计不含错误时称为一致，例如：未连接端口、常量值端口、无输入或输出引脚的单元、单元与其引用不匹配、多驱动网、连接类违例，或递归层次定义。
+
+DC Explorer 会对所有被 compile 的设计运行 \cmd{check\_design -summary} 命令。也可显式运行该命令以验证设计一致性。命令按如下方式报告警告与错误消息列表：
+\begin{itemize}
+  \item 若发现问题是 DC Explorer 无法解决的，则报告错误。例如，递归层次（设计引用自身）是错误。不能对 \cmd{check\_design} 报告有错误的设计进行 compile。
+  \item 若发现问题表明设计损坏或设计错误，但严重程度不足以导致 \cmd{compile} 失败，则报告警告。
+\end{itemize}
+
+报告默认以标准输出格式显示。报告开头为摘要节，显示检查类型与已检测到的违例数量；随后列出错误与警告消息。
+
+可用 \cmd{check\_design} 的 \opt{-html\_file\_name} 选项指定 HTML 格式报告。指定该选项与文件名时，DC Explorer 在当前目录创建 HTML 文件。
+
+图~\ref{fig:check-design-html} 给出 HTML 格式 \cmd{check\_design} 报告示例。
+报告将信息组织为 Input/Outputs、Cells、Designs 等节；每节列出检查类型与违例数量。
+若有违例，数量为可点击的 HTML 链接以显示更多信息。图中报告显示五个黑盒违例；点击数字 5 可展开报告以显示五个高亮违例。
+
+\figplaceholder{Figure 81: HTML check\_design Report Example}{HTML 格式 check\_design 报告示例}{fig:check-design-html}
+
+默认情况下，在 compile 或执行 \cmd{check\_design} 期间，若三态总线由非三态驱动器驱动，DC Explorer 发出警告消息。
+可将变量 \varname{check\_design\_allow\_non\_tri\_drivers\_on\_tri\_bus} 设为 \texttt{false}，使 DC Explorer 改为显示错误消息；默认值为 \texttt{true}。
+当变量为 \texttt{false} 时，\cmd{compile\_exploration} 在报告错误后停止；但 \cmd{check\_design} 在报告错误后继续运行。
+
+可对 \cmd{check\_design} 使用选项，按检查类型过滤消息，例如与端口、网、单元相关的警告，以及与多重实例化设计相关的信息消息等。
+例如，若指定 \opt{-multiple\_designs} 选项，报告显示多重实例化设计列表以及实例名与相关属性（如 \texttt{dont\_touch}、\texttt{black\_box}、\texttt{ungroup}）。
+默认情况下，与多重实例化设计相关的消息被抑制。
+
+% ============================================================
+\section{检查未映射单元}
+\subsection*{Checking for Unmapped Cells}
+
+可通过以下方式对 \cmd{check\_design} 指定 \opt{-unmapped} 选项，报告设计中的未映射单元：
+\begin{itemize}
+  \item \opt{-unmapped} 选项\\
+        指定该选项时，\cmd{check\_design} 报告未映射单元总数，并显示带有未映射单元名及其设计名的 LINT-61 警告消息。默认情况下这些消息被抑制。
+
+例如：
+\begin{lstlisting}
+de_shell> check_design -unmapped
+****************************************
+check_design summary:
+...
+****************************************
+Name                               Total
+----------------------------------------------------------------
+Cells                                2
+Cell is unmapped (LINT-61)           2
+----------------------------------------------------------------
+Warning: In design 'unit_2', cell 'A_out_reg' is unmapped (LINT-61)
+Warning: In design 'unit_0', cell 'I_2' is unmapped (LINT-61)
+\end{lstlisting}
+
+  \item 带有 LINT-61 警告消息 ID 的 \opt{-unmapped} 选项\\
+        当指定 \opt{-unmapped \{LINT-61\}} 时，如下例所示，命令显示关于未映射单元的格式化详细报告：
+\begin{lstlisting}
+de_shell> check_design -unmapped {LINT-61}
+****************************************
+Report:      LINT-61
+Total Count: 2
+Severity:    Warning
+Message:     In design '', cell '' is unmapped
+...
+****************************************
+Design            Cell
+----------------------------------------------------------------
+unit_2            A_out_reg
+unit_0            I_2
+----------------------------------------------------------------
+\end{lstlisting}
+\end{itemize}
+
+\begin{seeAlsoBox}
+检查设计一致性
+\end{seeAlsoBox}
+
+% ============================================================
+\section{指定输出端口方向不正确时的严重级别}
+\subsection*{Specifying the Severity Level for Incorrect Output Port Directions}
+
+当输出端口方向未按设计中的指定使用时，可指定 \cmd{compile} 与 \cmd{check\_design} 命令发出的严重级别。
+为此，使用变量 \varname{check\_design\_allow\_inconsistent\_output\_port}。
+
+将该变量设为下列值之一时：
+\begin{itemize}
+  \item \texttt{true}（默认）\\
+        \cmd{compile} 与 \cmd{check\_design} 发出 LINT-68 警告消息且不退出。
+  \item \texttt{false}\\
+        \cmd{compile} 以 LINT-70 错误消息退出，而 \cmd{check\_design} 发出相同错误消息但不退出。
+\end{itemize}
+
+% ============================================================
+\section{分析设计问题}
+\subsection*{Analyzing Design Problems}
+
+可使用表~\ref{tab:analyze-cmds} 所列命令分析设计问题。
+
+\begin{table}[htbp]
+\centering
+\caption{分析设计对象的命令}
+\label{tab:analyze-cmds}
+\small
+\begin{tabularx}{\textwidth}{@{}l l X@{}}
+\toprule
+\textbf{对象} & \textbf{命令} & \textbf{说明} \\
+\midrule
+Design &
+\begin{tabular}[t]{@{}l@{}}
+\cmd{report\_area}\\
+\cmd{report\_design}\\
+\cmd{report\_design\_mismatch}\\
+\cmd{report\_hierarchy}\\
+\cmd{report\_missing\_constraints}\\
+\cmd{report\_resources}
+\end{tabular}
+&
+报告设计大小与对象计数；设计特性；设计不匹配；设计层次；当前设计中缺失的约束；资源实现。 \\
+\midrule
+Instances & \cmd{report\_cell} & 显示关于实例的信息。 \\
+\midrule
+References & \cmd{report\_reference} & 显示关于引用的信息。 \\
+\midrule
+Pins &
+\begin{tabular}[t]{@{}l@{}}
+\cmd{report\_transitive\_fanin}\\
+\cmd{report\_transitive\_fanout}
+\end{tabular}
+& 报告扇入逻辑；报告扇出逻辑。 \\
+\midrule
+Ports &
+\begin{tabular}[t]{@{}l@{}}
+\cmd{report\_port}\\
+\cmd{report\_bus}\\
+\cmd{report\_transitive\_fanin}\\
+\cmd{report\_transitive\_fanout}
+\end{tabular}
+& 显示端口信息；总线端口信息；扇入/扇出逻辑。 \\
+\midrule
+Nets &
+\begin{tabular}[t]{@{}l@{}}
+\cmd{report\_net}\\
+\cmd{report\_bus}\\
+\cmd{report\_transitive\_fanin}\\
+\cmd{report\_transitive\_fanout}
+\end{tabular}
+& 报告网特性；总线网特性；扇入/扇出逻辑。 \\
+\midrule
+Clocks & \cmd{report\_clock} & 显示关于时钟的信息。 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+% ============================================================
+\section{分析面积}
+\subsection*{Analyzing Area}
+
+使用 \cmd{report\_area} 命令显示当前设计或实例的面积信息与统计。
+该命令报告组合面积、非组合面积与总面积。
+若已设置当前实例，则对该实例所属设计生成报告；否则对当前设计生成报告。
+使用 \opt{-hierarchy} 选项可报告层次中各单元所用面积。
+
+示例~\ref{ex:report-area} 给出 \cmd{report\_area} 命令生成的报告：
+
+\begin{lstlisting}[caption={report\_area 报告示例},label=ex:report-area]
+de_shell >report_area
+...
+Library(s) Used:
+test_lib (File: test_lib.db)
+
+Number of ports:                          565
+Number of nets:                          9654
+Number of cells:                         8120
+Number of combinational cells:           6594
+Number of sequential cells:              1526
+Number of macros:                           0
+Number of buf/inv:                       1439
+Number of references:                     163
+
+Combinational area:       562404.432061
+Noncombinational area:    6720840.351067
+Net Interconnect area:    undefined  (Wire load has zero net area)
+
+Total cell area:          7283244.783128
+Total area:               undefined
+\end{lstlisting}
+
+% ------------------------------------------------------------
+\subsection{将块抽象中单元面积报告为宏单元面积}
+\subsubsection*{Reporting the Area of Cells in a Block Abstraction as a Macro Cell Area}
+
+DC Explorer 将块抽象中单元的面积按标准单元面积计算，这可能导致 \cmd{report\_area} 报告更高的利用率。
+
+可将变量 \varname{block\_abstraction\_compute\_area\_as\_macro} 设为 \texttt{true}，使工具将块抽象中单元的面积计算并报告为宏单元面积；默认值为 \texttt{false}。
+
+% ============================================================
+\section{分析时序}
+\subsection*{Analyzing Timing}
+
+使用 \cmd{report\_timing} 命令为当前设计或当前实例生成时序报告。
+默认情况下，该命令列出每个路径组中最长最大延时路径的完整路径。
+DC Explorer 根据控制端点的时钟对路径分组；所有未与时钟关联的路径属于默认路径组。
+也可用 \cmd{group\_path} 命令创建路径组。
+
+在开始调试时序问题之前，请确保已：
+\begin{itemize}
+  \item 定义工作条件（operating conditions）
+  \item 指定现实的约束
+  \item 适当预算时序约束
+  \item 正确约束各路径
+  \item 描述时钟偏斜（clock skew）
+\end{itemize}
+
+若运行物理流程，可对 \cmd{report\_timing} 使用 \opt{-physical} 选项，在路径报告中报告引脚位置以及路径中引脚与网的电容负载。
+当变量 \varname{de\_enable\_physical\_flow} 设为 \texttt{true} 时启用物理流程。
+
+生成初始已映射网表后，使用 \cmd{report\_constraint} 命令检查设计性能。
+
+表~\ref{tab:timing-cmds} 列出时序分析命令。
+
+\begin{table}[htbp]
+\centering
+\caption{时序分析命令}
+\label{tab:timing-cmds}
+\begin{tabularx}{\textwidth}{@{}l X@{}}
+\toprule
+\textbf{命令} & \textbf{分析任务说明} \\
+\midrule
+\cmd{report\_design} & 显示工作条件、模式、时序范围、内部输入/输出以及禁用的时序弧。 \\
+\cmd{check\_timing} & 检查未约束时序路径与时钟门控逻辑。 \\
+\cmd{report\_port} & 显示未约束的输入/输出端口与端口负载。 \\
+\cmd{report\_timing\_requirements} & 显示施加于设计的所有时序例外。 \\
+\cmd{report\_clock} & 检查时钟定义与时钟偏斜信息。 \\
+\cmd{report\_path\_group} & 显示设计中所有时序路径组。 \\
+\cmd{report\_timing} & 检查设计时序。 \\
+\cmd{report\_constraint} & 检查设计约束。 \\
+\cmd{report\_delay\_calculation} & 报告延时弧计算的细节。 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+% ============================================================
+\section{生成结果质量}
+\subsection*{Generating Quality of Results}
+
+可使用 \cmd{create\_qor\_snapshot}、\cmd{query\_qor\_snapshot} 与 \cmd{report\_qor} 等报告命令，为设计在当前状态下生成结果质量（QoR）报告。
+\cmd{create\_qor\_snapshot} 从时序、设计规则、面积、功耗、拥塞、时钟树综合、布线等方面度量并报告设计质量，并将质量信息存入一组快照文件。
+随后可用 \cmd{query\_qor\_snapshot} 检索并报告该快照；也可选择性地检索、排序并显示所需信息。
+\cmd{report\_qor} 显示当前设计的 QoR 信息与统计。
+
+要了解如何生成结果质量，见：
+\begin{itemize}
+  \item 度量结果质量
+  \item 分析结果质量
+  \item 报告结果质量
+\end{itemize}
+
+% ------------------------------------------------------------
+\subsection{度量结果质量}
+\subsubsection*{Measuring Quality of Results}
+
+要用一组报告文件度量设计当前状态的 QoR 并存储质量信息，使用 \cmd{create\_qor\_snapshot} 命令。
+可用不同优化策略或在设计不同阶段捕获 QoR 信息并比较结果质量。
+例如，可在首次 compile 设计后、DFT 插入后，以及增量 compile 后再创建快照。
+
+可用命令选项指定分析条件，例如零线负载、每个时序组的最大路径数，以及每个端点的最大路径数。
+
+使用 \cmd{create\_qor\_snapshot} 创建快照时，必须至少用 \opt{-name} 选项指定快照名称。例如：
+\begin{lstlisting}
+de_shell> create_qor_snapshot -name my_snapshot1
+\end{lstlisting}
+
+报告写入当前工作目录下名为 \texttt{snapshot} 的目录中的一组文件；这组文件充当快照报告的数据库。
+无需访问这些文件，也不得修改它们。
+随后运行 \cmd{query\_qor\_snapshot} 并用创建快照时相同的名称指定 \opt{-name}（本例中为 \texttt{my\_snapshot1}）时，该命令以文本或 HTML 格式显示结果。
+
+% ------------------------------------------------------------
+\subsection{分析结果质量}
+\subsubsection*{Analyzing Quality of Results}
+
+\cmd{query\_qor\_snapshot} 读取先前由 \cmd{create\_qor\_snapshot} 生成的 QoR 报告，并通过收集每条路径的信息来分析结果。
+可用各种搜索查询所收集的信息，并以文本或 HTML 格式显示结果。HTML 报告使您能快速找到有大扇出或转换退化等问题的路径。
+
+命令选项允许过滤与排序搜索结果，并以文本或 HTML 格式显示；可指定要显示的数据列。
+例如，可为指定数值范围（如 WNS、逻辑级等）生成 \cmd{set\_false\_path} 约束。
+该命令不对设计执行额外分析，仅处理已保存在快照报告文件中的报告信息；因此其执行远快于 \cmd{create\_qor\_snapshot}。
+
+可用 \opt{-filters} 选项对路径应用过滤器。例如，下列命令报告最差负 slack 小于零的所有路径：
+\begin{lstlisting}
+de_shell> query_qor_snapshot -name my_snapshot -filters "-wns ,0"
+\end{lstlisting}
+
+下列示例报告满足任一指定过滤要求的所有路径：
+\begin{lstlisting}
+de_shell> query_qor_snapshot -name my_snapshot \
+   -filters "-wns -4.0-fanout 20"
+\end{lstlisting}
+
+若不指定 \opt{-filters} 选项，\cmd{query\_qor\_snapshot} 自动应用一组默认过滤器。最大条件下的默认过滤设置如下例所示：
+\begin{lstlisting}
+de_shell> query_qor_snapshot -name my_snapshot \
+   -filters "-wns ,0 -zero_path ,0 -fanout 40 -logic_levels 50"
+\end{lstlisting}
+
+此示例分析名为 \texttt{my\_snapshot1} 的快照，并报告最差负 slack 在 $-4.0$ 与 $-3.0$ 时间单位之间的路径。
+
+\begin{lstlisting}[caption={报告具有最差负 Slack 的路径},label=ex:qor-wns]
+de_shell> query_qor_snapshot -name my_snapshot1 \
+   -filters "-wns -4.0,-3.0"
+\end{lstlisting}
+
+此示例报告 slack 差于 $-1.0$ 时间单位且扇出大于 40 的路径。
+
+\begin{lstlisting}[caption={按 Slack 与扇出报告路径},label=ex:qor-fanout]
+de_shell> query_qor_snapshot -name my_snapshot2 \
+   -filters "-wns ,-1.0 -fanout 40"
+\end{lstlisting}
+
+此示例读取名为 \texttt{max\_logic\_level} 的快照，并指定 \opt{-filters} 以报告逻辑级在 2 与 14 之间的所有路径。
+
+\begin{lstlisting}[caption={报告指定逻辑级之间的所有路径},label=ex:qor-ll]
+de_shell> query_qor_snapshot -name max_logic_level \
+   -filters "-logic_level 2,15"
+\end{lstlisting}
+
+注意：逻辑级为 2 的路径包含在报告中，但逻辑级为 15 的路径被排除。
+
+有时最差时序路径从某一层次块开始并在另一层次块结束；识别并分组这些路径可能很困难。
+\opt{-hierarchy} 选项启用顶层视图，并自动查找跨越层次边界的潜在路径分组，以便更高效地分析问题路径。
+使用 \opt{-hierarchy} 时，必须指定 \opt{-to}、\opt{-from} 或 \opt{-through} 选项。
+下列示例查找从模块 A 开始、在模块 B 结束、跨越硬宏的违例路径：
+
+\begin{lstlisting}[caption={报告跨越层次边界的时序违例},label=ex:qor-hier]
+de_shell> query_qor_snapshot -name snap_shot3 -hierarchy \
+   -from {A/*} -to {B/*}
+\end{lstlisting}
+
+\cmd{query\_qor\_snapshot} 自动生成提取时序模型（ETM）与硬宏之间所有违例路径的报告。
+可应用过滤器，或通过指定 \opt{-to}、\opt{-from} 与 \opt{-through} 展开顶层路径。
+下列示例查找经过模块 A、B 或 C 的违例路径：
+
+\begin{lstlisting}[caption={报告经过指定模块的违例路径},label=ex:qor-through]
+de_shell> query_qor_snapshot -name snap_shot4 -hierarchy \
+   -through {A B C}
+\end{lstlisting}
+
+此示例使用 \opt{-incremental} 选项，保留先前分析结果（经过模块 A、B 与 C），并应用关于从模块 A 或 B 开始、在模块 A 或 B 结束的路径的额外查询。
+
+\begin{lstlisting}[caption={增量报告},label=ex:qor-incr]
+de_shell> query_qor_snapshot -hierarchy -incremental \
+   -from {A/* B/*} -to {A/* B/*}
+\end{lstlisting}
+
+此示例报告从模块 C 开始、在模块 B 结束，且最差负 slack 差于 $-3.0$~ns 或扇出大于 40 的路径。
+
+\begin{lstlisting}[caption={按 WNS 与扇出报告经过指定模块的路径},label=ex:qor-wns-fanout]
+de_shell> query_qor_snapshot -name my_snapshot5 \
+-hierarchy -from top/A/C/* -to top/B/* \
+-filters "-wns ,-3.0 -fanout 40"
+\end{lstlisting}
+
+% ------------------------------------------------------------
+\subsection{报告结果质量}
+\subsubsection*{Reporting Quality of Results}
+
+\cmd{report\_qor} 命令显示当前设计的结果质量信息及其他统计。
+它报告时序路径组细节、单元计数与当前设计统计（包括组合、非组合与总面积）。
+该命令还报告静态功耗、设计规则违例与 compile 时间细节。
+注意：\cmd{report\_qor} 不属于 \cmd{create\_qor\_snapshot} 与 \cmd{query\_qor\_snapshot} 命令集。
+
+此示例给出 \cmd{report\_qor} 生成的报告。在 Cell Count 节中，报告显示设计中的宏数量。
+要成为宏单元，单元必须是非层次的，并且在其库单元上设置了 \texttt{is\_macro\_cell} 属性。
+
+\begin{lstlisting}[caption={report\_qor 报告示例},label=ex:report-qor]
+de_shell> report_qor
+...
+  Timing Path Group 'clk'
+  -----------------------------------
+  Levels of Logic:               1.00
+  Critical Path Length:          0.02
+  Critical Path Slack:           -0.68
+  Critical Path Clk Period:      8.00
+  Total Negative Slack:          -393.61
+  No. of Violating Paths:        1066.00
+  Worst Hold Violation:          0.00
+  Total Hold Violation:          0.00
+  No. of Hold Violations:        0.00
+  -----------------------------------
+
+  Cell Count
+  -----------------------------------
+  Hierarchical Cell Count:          7
+  Hierarchical Port Count:       2360
+  Leaf Cell Count:              43978
+  Buf/Inv Cell Count:            6764
+  CT Buf/Inv Cell Count:            4
+  Combinational Cell Count:     37212
+  Sequential Cell Count:         6773
+  Macro Count:                      0
+ -----------------------------------
+
+  Area
+  -----------------------------------
+  Combinational Area:   562404.432061
+  Noncombinational Area:
+                       6720840.351067
+  Net Area:                  0.000000
+  Net XLength        :     2836623.25
+  Net YLength        :     2555007.75
+  -----------------------------------
+  Cell Area:           7283244.783128
+  Design Area:         7283244.783128
+  Net Length        :      5391631.00
+
+  Design Rules
+  -----------------------------------
+  Total Number of Nets:         47207
+  Nets With Violations:             5
+  Max Trans Violations:             3
+  -----------------------------------
+
+  Hostname: machine
+  Compile CPU Statistics
+  -----------------------------------------
+  Overall Compile Time:              631.32
+  Overall Compile Wall Clock Time:   288.11
+\end{lstlisting}
+
+% ------------------------------------------------------------
+\subsection{通过控制路径组创建改善 QoR}
+\subsubsection*{Improving QoR by Controlling Path Groups Creation}
+
+可指示工具自动创建路径组以改善 QoR。为此，在 elaborate 之后、优化之前对 \cmd{create\_auto\_path\_groups} 指定 \opt{-mode rtl} 选项。例如：
+\begin{lstlisting}
+de_shell> create_auto_path_groups -mode rtl
+de_shell> compile_exploration
+de_shell> remove_auto_path_groups
+de_shell> report_qor
+\end{lstlisting}
+
+工具为每个层次创建一个路径组；若有多层层次，则为每一层创建路径组。
+要用仅包含用户指定路径组的 QoR 报告，使用 \cmd{remove\_auto\_path\_groups} 移除工具创建的路径组。
+该命令移除所有路径组，但保留您用 \cmd{group\_path} 创建的路径组。
+
+\begin{seeAlsoBox}
+创建报告与缺失约束
+\end{seeAlsoBox}
+
+% ============================================================
+\section{调试带有 dont\_touch 属性的单元与网}
+\subsection*{Debugging Cells and Nets With the dont\_touch Attribute}
+
+若 DC Explorer 未优化或移除某个单元或网，原因往往是对象上的 \texttt{dont\_touch} 属性。
+显式 \texttt{dont\_touch} 属性较易调试；但要确定对象为何具有隐式 \texttt{dont\_touch} 可能较难，尤其当对象上存在多种重叠的隐式 \texttt{dont\_touch} 时。
+即使移除对象上的 \texttt{dont\_touch} 设置，仍可能看到对象被报告为具有 \texttt{dont\_touch}；这发生在对象因多种原因具有 \texttt{dont\_touch} 的情况。
+
+为帮助调试单元或网中的对象为何被标记为 don't touch，DC Explorer 提供下列各节所述命令。
+
+% ------------------------------------------------------------
+\subsection{报告 Don't Touch 单元与网}
+\subsubsection*{Reporting Don't Touch Cells and Nets}
+
+要报告设计中所有 \texttt{dont\_touch} 单元与网以及对每个报告对象适用的 \texttt{dont\_touch} 类型，使用 \cmd{report\_dont\_touch} 命令。
+对完整设计层次报告 \texttt{dont\_touch} 对象。
+
+非 \texttt{dont\_touch} 的单元或网会被跳过。也可对 \cmd{report\_dont\_touch} 指定单元或网的集合。
+
+下列示例显示特定网的 \texttt{dont\_touch} 类型报告。本例用 \cmd{report\_dont\_touch} 调查 \texttt{Multiplier/Product[0]} 网上的 \texttt{dont\_touch} 类型。
+该网与其上所有类型的 \texttt{dont\_touch} 一并列出。表图例为所报告的每种 \texttt{dont\_touch} 类型提供详细说明。可能的 \texttt{dont\_touch} 类型很多，但仅列出相关类型。
+
+\begin{lstlisting}
+de_shell> report_dont_touch [get_nets Multiplier/Product[0]]
+...
+Description for Net dont_touch Types:
+  inh_parent   -  Net inherits dont_touch from parent
+  mv_iso       -  Prevents buffering between isolation cells and
+                  power domain boundary
+
+Object                        Class       Types
+------------------------------------------------------------------
+Multiplier/Product[0]         net         inh_parent, mv_iso
+------------------------------------------------------------------
+\end{lstlisting}
+
+如示例所示，\texttt{Multiplier/Product[0]} 网从父单元继承了一个 \texttt{dont\_touch}。
+该网位于某一层次块内部，其父层次单元上设置了显式 \texttt{dont\_touch}。
+该网还因多电压综合而具有隐式 \texttt{dont\_touch}。
+
+下列示例显示设计中所有单元的 \texttt{dont\_touch} 报告：
+\begin{lstlisting}
+de_shell> report_dont_touch -class cell -nosplit
+...
+Description for Cell dont_touch Types:
+  inh_ref            - Cell inherits dont_touch from reference design or
+                       library cell
+  ph_fixed_placement - Cell with fixed placement
+
+Object                                      Class     Types
+-------------------------------------------------------------------------
+headerfooter5_HDRDID1BWPHVT_R5_C0           cell      ph_fixed_placement
+headerfooter6_HDRDID1BWPHVT_R6_C0           cell      ph_fixed_placement
+u_des_soft_macro/u_8/u_mem                  cell      inh_ref
+-------------------------------------------------------------------------
+Total 3 dont_touch cells
+1
+\end{lstlisting}
+
+要返回当前定义的单元与网 \texttt{dont\_touch} 类型及其说明的按字母排序列表，使用 \cmd{list\_dont\_touch\_types} 命令。
+在构建 \texttt{dont\_touch} 对象集合时查找可用类型，该命令很有用。
+默认情况下，\cmd{list\_dont\_touch\_types} 列出 cell 与 net 对象类的所有 \texttt{dont\_touch} 类型。
+
+使用 \opt{-class class\_name} 选项可将列表限制为 cell 或 net 对象类；\texttt{class\_name} 值可为 \texttt{cell} 或 \texttt{net}。
+
+下列示例给出默认 \cmd{list\_dont\_touch\_types} 输出的摘录，列出网与单元的所有 \texttt{dont\_touch} 类型：
+\begin{lstlisting}
+de_shell> list_dont_touch_types
+...
+**************************************************
+Class  Type            Description
+-------------------------------------------------------------------------
+net    cts_synthesized Net is synthesized with clock tree synthesis
+net    dft_scanbuf     Net connected to input pin of scan compression
+                       buffer cell
+net    dtn             Net in dont_touch network set by the
+                       set_dont_touch_network command
+net    dtn_charz       Net in dont_touch network through
+ characterization
+net    fp_abutted      Net is floorplan abutted net
+net    fp_border       Net is dangling on floorplan border
+net    idn             Net in ideal network set by the set_ideal_network
+                       command
+...
+-------------------------------------------------------------------------
+1
+\end{lstlisting}
+
+% ------------------------------------------------------------
+\subsection{创建 Don't Touch 单元与网的集合}
+\subsubsection*{Creating a Collection of Don't Touch Cells and Nets}
+
+可分别使用 \cmd{get\_dont\_touch\_cells} 与 \cmd{get\_dont\_touch\_nets} 命令，创建当前设计中相对于当前实例的 \texttt{dont\_touch} 单元与网集合。
+若没有单元或网匹配指定条件，命令返回空字符串。
+
+可在命令提示符下使用这些命令，或将其嵌套为另一命令（如 \cmd{query\_objects}）的参数；也可将命令结果赋给变量。
+
+从命令提示符发出时，这些命令的行为如同已调用 \cmd{query\_objects} 以显示集合中的对象。
+默认最多显示 100 个对象；可通过设置变量 \varname{collection\_result\_display\_limit} 更改该值。
+
+下列示例查询 \texttt{InstDecode} 块下因 \texttt{ideal\_network} 设置而具有 \texttt{dont\_touch} 的单元：
+\begin{lstlisting}
+de_shell> get_dont_touch_cells -type idn InstDecode/*
+{InstDecode/reset_UPF_LS InstDecode/U38 InstDecode/U36}
+\end{lstlisting}
+
+下列示例查询名为 \texttt{block1} 的块中以 \texttt{NET} 开头的多电压类型 \texttt{dont\_touch} 网：
+\begin{lstlisting}
+de_shell> get_dont_touch_nets -type mv* block1/NET*
+{block1/NET1QNX block1/NET2QNX}
+\end{lstlisting}
+
+% ============================================================
+\section{使用命令进行 RTL 交叉探测}
+\subsection*{RTL Crossing-Probing Using Commands}
+
+为改善时序、拥塞或 datapath 提取，可在命令行使用 RTL 交叉探测能力检查 RTL 设计，并识别需修改的代码行。
+
+必须有已 analyze 并 elaborate 或已综合的设计，才能使用下列交叉探测命令：
+\begin{itemize}
+  \item \cmd{get\_cross\_probing\_info}\\
+        该命令以字符串形式返回指定单元或端口的交叉探测数据，说明单元或端口在何处创建，以及对象来自哪个文件与行号。
+        设计中某些对象可能已合并，因而返回多个源位置。\\
+        每个对象的结果用一对花括号分隔各源位置以及各对象。例如，若指定两个对象 \texttt{obj1} 与 \texttt{obj2}，其中 \texttt{obj1} 有一个源位置、\texttt{obj2} 有两个源位置，工具按下列格式返回结果：
+\begin{lstlisting}
+{ {obj1_file1:obj1_line1} } { {obj2_file1:obj2_line1}
+{obj2_file2:obj2_line2} }
+\end{lstlisting}
+        要防止结果中出现重复的 \texttt{file:linenumber} 组合，对 \cmd{get\_cross\_probing\_info} 使用 \opt{-unique\_source} 选项。此时工具按下列格式返回结果：
+\begin{lstlisting}
+obj1_file1:obj1_line1 obj2_file1:obj2_line1 obj2_file2:obj2_line2
+\end{lstlisting}
+        下列示例显示带 \opt{-unique\_source} 选项的 \cmd{get\_cross\_probing\_info} 结果：
+\begin{lstlisting}
+prompt> get_cross_probing_info [get_cells -hierarchical] \
+ -unique_source
+/usr/joe/my_design/m.v:21 /usr/joe/my_design/m.v:22
+/usr/joe/my_design/m.v:28 /usr/joe/my_design/m.v:12
+/usr/joe/my_design/m.v:13 /usr/joe/my_design/m.v:14
+/usr/joe/my_design/m.v:4
+\end{lstlisting}
+
+  \item \cmd{cross\_probing\_filter}\\
+        该命令允许通过指定源文件与行号按下列格式过滤集合：
+\begin{lstlisting}
+"file_pattern[:line_pattern]"
+\end{lstlisting}
+        下列示例显示 \cmd{cross\_probing\_filter} 的结果，返回源自以 \texttt{m.v} 结尾的源文件第 21 行的单元：
+\begin{lstlisting}
+prompt> cross_probing_filter [get_cells -hierarchical] -source \
+ "*m.v:21"
+{mid1/bot1/c1 mid1/bot2/c1}
+\end{lstlisting}
+        设计中因合并而具有多个源位置的对象，只要任一源位置匹配任一指定源模式，就会返回在集合中。
+
+  \item \cmd{report\_cross\_probing}\\
+        该命令以报告形式报告指定单元或端口的交叉探测数据。
+        若对象由工具生成，则文件与行号不适用，以连字符（\texttt{-}）表示。
+        此时报告会说明对象来源是 UPF、DFT 引擎还是其他来源。
+        已合并的对象在报告中按每个源位置显示多次。
+\end{itemize}
+
+\begin{seeAlsoBox}
+RTL 交叉探测
+\end{seeAlsoBox}
+
+% ============================================================
+\section{在批处理模式下报告逻辑级}
+\subsection*{Reporting Logic Levels in Batch Mode}
+
+作为在 GUI 中显示逻辑级直方图的替代，可在命令行或脚本中使用 \cmd{report\_logic\_levels} 命令报告逻辑级。
+
+\begin{noteBox}
+必须有已映射设计才能运行逻辑级报告。
+\end{noteBox}
+
+要将逻辑级报告与现有脚本集成，在批处理模式下使用 \cmd{report\_logic\_levels}。
+可用该命令报告整个设计或选定路径组的逻辑级。
+该命令报告所有类型路径的逻辑级，包括同时钟路径、跨时钟路径、不可行路径与多周期路径。
+所报告的逻辑级数排除缓冲器与反相器。
+
+要报告逻辑级：
+\begin{enumerate}
+  \item （可选）用 \cmd{set\_analyze\_rtl\_logic\_level\_threshold} 命令设置不同于默认的特定逻辑级阈值。\\
+        默认情况下，工具根据路径所需的延时值推导逻辑级阈值。
+  \begin{itemize}
+    \item 要为整个设计设置逻辑级阈值，输入：
+\begin{lstlisting}
+de_shell> set_analyze_rtl_logic_level_threshold threshold_value
+\end{lstlisting}
+    \item 要为特定路径组设置逻辑级阈值，输入：
+\begin{lstlisting}
+de_shell> set_analyze_rtl_logic_level_threshold \
+   -group path_group threshold_value
+\end{lstlisting}
+          路径组设置覆盖整个设计的全局阈值。
+    \item 要复位所有阈值，输入：
+\begin{lstlisting}
+de_shell> set_analyze_rtl_logic_level_threshold -reset
+\end{lstlisting}
+    \item 要复位特定组设置，输入：
+\begin{lstlisting}
+de_shell> set_analyze_rtl_logic_level_threshold \
+   -group path_group -reset
+\end{lstlisting}
+  \end{itemize}
+
+  \item （可选）通过设置变量 \varname{logic\_level\_report\_summary\_format} 指定报告摘要节中的字段。默认值为 \texttt{\{\%group \%period \%wns \%num\_paths \%max\_level\}}。例如：
+\begin{lstlisting}
+de_shell> set_app_var logic_level_report_summary_format \
+   {%group %num_paths %max_level %min_level %avg_level}
+...
+\end{lstlisting}
+
+  \item （可选）通过设置变量 \varname{logic\_level\_report\_group\_format} 指定报告路径组节中的字段。默认值为 \texttt{\{\%slack \%ll \%llthreshold \%startpoint \%endpoint\}}。例如：
+\begin{lstlisting}
+de_shell> set_app_var logic_level_report_group_format \
+   {%slack %ll %startclk %endclk %infeas %startpoint %endpoint}
+...
+\end{lstlisting}
+
+  \item 使用 \cmd{report\_logic\_levels} 命令报告逻辑级。下列示例生成 \texttt{clk\_i} 路径组的逻辑级报告：
+\begin{lstlisting}
+de_shell> report_logic_levels -group clk_i
+\end{lstlisting}
+        逻辑级报告包含三个节：摘要、逻辑级分布与逻辑级路径报告。
+\end{enumerate}
+
+\begin{seeAlsoBox}
+分析 RTL
+\end{seeAlsoBox}

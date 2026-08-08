@@ -1,0 +1,903 @@
+﻿% 第 8 章 Analysis of DvD and Cross-coupling Noise Impacts on Timing（原书 8-171 … 8-210）
+\bichapter{DvD 与串扰噪声对时序的影响分析}{Analysis of DvD and Cross-coupling Noise Impacts on Timing}
+\label{chap:noise}
+
+\section{引言}
+\subsection*{Introduction}
+
+当设计规模进入 65\,nm 以下，更小几何与更高密度使串扰噪声与耦合延迟增加，对芯片整体时序产生不利影响。现有多数时序分析工具基于单元级（或门级）静态分析，仅考虑单元延迟与耦合延迟。
+
+随着更多设计采用 32\,nm 及以下工艺，传统静态分析方法已不足，尤其考虑电源完整性对时序的影响时。分析并收敛整体芯片时序时，必须考虑核心、I/O 与存储器同时开关引起的动态压降与地弹。
+
+设计工具通常依赖单元抽象、粗粒度查表模型与半精度快速 SPICE 引擎，可能导致不准确、过度约束与边际 guard-band 设计。实际上，sub-90nm 设计需要能并发分析真实硅片中纳米级物理效应（如耦合电容与动态压降）的解决方案，否则临近 tapeout 可能出现显著时序错误或噪声问题。
+
+\subsection{对时序的影响}
+\subsubsection*{Impacts on Timing}
+
+图~\ref{fig:rh-pi-si-timing} 波形展示动态压降与电源/地噪声对电路时序的影响。「without PI and SI noise」波形为典型良好上升波形。
+
+\figplaceholder{Figure 8-1}{信号噪声（SI）与压降（PI）对时序的影响}
+\label{fig:rh-pi-si-timing}
+
+\subsection{概述}
+\subsubsection*{Overview}
+
+RedHawk 时序分析工具可识别并分析由电源与地噪声引起的潜在信号串扰与时序问题，以便在设计 signoff 前修正。工具依托 foundry 认证的 signoff 精度全芯片动态电源完整性方案 RedHawk，以及高容量高性能 SPICE 仿真器 NSPICE，为 65\,nm 及以下门尺寸设计提供最准确的时序分析。抖动分析提供快速 Fullchip 与 Spice 级 Sign-off 方案。
+
+时序分析考虑信号完整性与动态电源完整性对时钟树与关键时序路径（含 I/O、IP 与存储器）的并发效应；准确计算门传播延迟、耦合延迟、互连延迟、低电源电压下的上升时间退化及邻近导线串扰影响，并精确跟踪信号波形、串扰噪声与 glitch。RedHawk 集成流程默认并发分析 PI 与 SI，考虑耦合 RLC 网络、攻击者与受害者驱动/接收器、最坏/最好耦合延迟、攻击者矢量敏化与对齐、时序窗口过滤及电源/地动态压降。亦可按需独立进行 SI 与 PI 分析。
+
+时序分析最便捷地在 RedHawk 环境内通过 TCL 或 GUI 运行，可获得波形、时钟树与抖动等图形结果。若先前 RedHawk 运行已生成必要输入文件，亦可批处理运行并以文本输出评估结果。
+
+图~\ref{fig:rh-timing-flow} 为整体设计流程。
+
+\figplaceholder{Figure 8-2}{RedHawk 时序分析设计流程}
+\label{fig:rh-timing-flow}
+
+RedHawk 电路时序分析类型：
+\begin{itemize}
+  \item 时钟树分析（含抖动与 skew 分析）
+  \item 关键路径延迟分析
+\end{itemize}
+
+\subsection{PJX 时钟树抖动分析}
+\subsubsection*{PJX Clock Tree Jitter Analysis}
+
+高频设计中时钟信号质量对时序收敛至关重要。时钟树抖动尤其影响时钟到达时间，常导致时序失败。抖动可由串扰噪声、同时开关噪声等多种源引起。RedHawk 执行多周期 Spice 仿真以准确预测时钟树抖动，验证 Vdd/Gnd 噪声下时钟网络抖动是否在规格内，并计入占空比变化。
+
+RedHawk 提供两种时钟抖动方案——高容量 Fullchip 级 ATE 抖动方案与 Sign-off 精度 NX 抖动方案（图~\ref{fig:rh-pjx-jitter}）。可分别执行 fullchip 与 sign-off 抖动分析。
+
+\figplaceholder{Figure 8-3}{RedHawk PJX 时钟树抖动分析}
+
+集成 RedHawk PJX 时钟树抖动分析工作流：
+\begin{center}
+Setup Design $\rightarrow$ Power Calculation $\rightarrow$ Extraction $\rightarrow$ DvD Analysis $\rightarrow$ Fullchip Jitter Analysis $\rightarrow$ Sign-Off Analysis
+\end{center}
+
+\subsection{Skew 分析}
+\subsubsection*{Skew Analysis}
+
+优化的时钟树与时钟 mesh 对数字电路设计至关重要，主要用于时钟 skew 控制。RedHawk 可分析串扰与电源/地网格噪声如何影响时钟 skew，并以 RedHawk 的 SPICE 精度优化时钟树与时钟 mesh 设计。
+
+\subsection{分析模式}
+\subsubsection*{Analysis Modes}
+
+时钟树抖动与 skew 分析有四种模式：
+\begin{itemize}
+  \item \textbf{Basic analysis mode}——理想电压评估时钟树/ mesh 参数，无电容耦合分析；常用于与 PrimeTime 结果比对；支持多 Vdd/Vss 设计。
+  \item \textbf{Signal integrity analysis only mode}——理想电压下对关键攻击者/受害者网络（slew、delay、slack 受电容耦合不利影响）做有效耦合分析；无需动态压降分析。
+  \item \textbf{Power integrity analysis only mode}——评估动态压降对信号/时钟网络 slew、delay、slack 的不利影响；不做电容耦合分析。
+  \item \textbf{Simultaneous power and signal integrity analysis mode}——评估电容耦合与动态压降的并发影响。
+\end{itemize}
+
+时钟树抖动分析始终考虑电源完整性；可通过适当设置同时考虑信号完整性。
+
+\subsection{时序分析应用}
+\subsubsection*{Timing Analysis Applications}
+
+精确时序分析在纳米级 IC 流程中很有价值，可在制造前发现电源与时序相关问题，尤其面对动态压降、地弹与串扰噪声时。
+
+\paragraph{False Violation Filter（虚假违例过滤）}
+许多设计室用单元级方法验证时序与 SI。建立时间检查对最终硅片性能至关重要；保持时间与峰值噪声检查可发现功能性失败。单元库按类型检查但对各 instance 不够准确，表征故意保守，可能产生大量虚假违例。SPICE 精度结果可作为识别真实违例的 golden reference。
+
+\paragraph{Design Margin Adjustment（设计裕量调整）}
+设计规格常要求额外 guard-band 以弥补时序/SI 工具或模型抽象的不准确。时序分析可能减少或消除 guard-band，设计者可依赖 SPICE 精度作为 tape-out 参考。
+
+\paragraph{Methodology Calibration（方法学校准）}
+设计室常用单元级工具求周转时间、晶体管级工具求精度。RedHawk 为 SPICE 级工具，可定位单元建模与库表征的不准确来源，改进流程整体精度，引导设计向硅片收敛。
+
+\paragraph{Case Analysis for Stress Test（应力测试案例分析）}
+设计者有时通过应力测试验证可靠性，关注总线、I/O pad、长导线网络、时钟网络等关键点，分析耦合延迟与噪声对脆弱信号网络的影响，以及压降与地弹对电源/地网络的影响。
+
+\paragraph{Silicon Correlation（硅片相关性）}
+可测试不同工艺角、电源电压与温度，与设计实片相关；良好相关性有助于优化各工艺条件下的良率；关键路径精炼后可微调设计以实现量产高良率。
+
+\paragraph{LEF-SPICE Pin 映射}
+若 LEF pin 名与 Spice pin 名不同，可在时序分析配置文件中使用 \gsr{LEF2SPICE_PIN_MAPPING}：
+\begin{lstlisting}
+LEF2SPICE_PIN_MAPPING {
+    <LEF_pin_name> <Spice pin_name>
+   ...
+}
+\end{lstlisting}
+
+\section{PJX Fullchip 时钟树抖动分析}
+\subsection*{PJX Fullchip Clock Tree Jitter Analysis}
+
+\subsection{概述}
+\subsubsection*{Overview}
+
+PJX-full-chip 是快速全芯片分析工具，在芯片时序影响背景下提供抖动相关压降结果。PJX 计算电压诱导抖动以识别导致抖动的网格缺陷/薄弱点，聚焦电压诱导而非 SI 效应。
+
+PJX 是基于 STA 的初步高层分析工具，非仿真；不能替代包含 PI、SI 及其他抖动因素的 SPICE 级抖动计算。
+
+\subsection{流程与接口说明}
+\subsubsection*{Flow and Interface Description}
+
+PJX-full-chip 使用内置多线程 Apache Timing Engine（ATE）进行 N 周期时序计算。每周期使用 RedHawk 每 instance 周期电压与 APL 模型计算电压降额延迟，再进行时序分析计算所有时钟叶 pin（网络端点）的时钟到达时间。端点抖动基于 N 次到达时间的差异。
+
+PJX-full-chip GUI 可分析抖动时钟、端点、路径追踪、瓶颈区域与 instance 的时序影响。GUI 集成于 RedHawk，可将抖动路径追踪（flyline）叠加于各类 RedHawk 色阶图，通过可视化诊断导致抖动的网格薄弱点（如抖动时钟元件周围低 decap、路径段等）。
+
+\subsection{输入数据准备与设置}
+\subsubsection*{Input Data Preparation and Setup}
+
+确保 PJX-full-chip 精度与覆盖的 RedHawk 输入与设置：
+\begin{itemize}
+  \item GSR 中指定完整 APL 文件，覆盖全部时钟网络单元；PJX 用 APL 做单元延迟降额
+  \item RedHawk DvD 分析须多周期模式；矢量无关动态分析在 \cmd{perform analysis} 加 \opt{-mcycle}；VCD 或静态分析无需此选项
+  \item STA 时序文件须与 DEF 网表、SDC 一致；外部 Verilog 来源须保证 Verilog 一致性，否则设 \gsr{ENABLE_ATE 1} 由 RedHawk/ATE 生成与 DEF/SDC 一致的 STA
+  \item 指定经历抖动的动态仿真时间范围
+  \item 指定足够 presim 时间，避免初始周期瞬态被误判为抖动原因
+  \item PJX 需要 \texttt{redhawk\_pjx} license
+  \item 用 GSR 关键字指定 SDC：
+\begin{lstlisting}
+ATE_CONSTRAINT_FILES {
+     <SDC_file1>
+     <SDC_file2>
+     ...}
+\end{lstlisting}
+  SDC 须与 GSR 中 DEF 网表一致，否则 \texttt{fullchipjitter.log} 的 Load Timing Constraint 段报告 mismatch 错误
+  \item 若导入的 RedHawk DB 无 SDC，可在命令行临时指定：
+\begin{lstlisting}
+gsr set ATE_CONSTRAINT_FILES { /path/to/sdc/file.sdc }
+\end{lstlisting}
+\end{itemize}
+
+\subsection{运行 PJX Fullchip 抖动分析}
+\subsubsection*{Running PJX Fullchip Jitter Analysis}
+
+GUI：Tools / Clock Jitter / Fullchip Jitter / Analyze。
+
+或在 RedHawk 命令文件中于多周期 DvD 或静态分析完成后添加：
+\begin{lstlisting}
+perform jitter -fullchip
+\end{lstlisting}
+
+\subsection{分析结果}
+\subsubsection*{Analyzing Results}
+
+PJX full-chip 结果在集成 GUI 中查看：Tools $\rightarrow$ Clock Jitter $\rightarrow$ Fullchip Jitter。
+
+集成 GUI 可在 DvD、decap 等色阶图上叠加最差抖动路径 flyline，提供全芯片抖动问题全局视角。
+
+Tools $\rightarrow$ Clock Jitter $\rightarrow$ Fullchip Jitter $\rightarrow$ Long Term Jitter Report 按各域最坏长期抖动（占周期百分比）对时钟排序。长期抖动定义为端点 pin 记录到达时间中最早与最晚到达时间之差。
+
+对选中项可显示：
+\begin{itemize}
+  \item \textbf{Show Summary}：所选时钟最差 1000 个端点摘要；Show Browser 显示自时钟源到端点的 schematic 连通；Highlight 显示路径 flyline；Show Trace 显示源到端点路径详情（最早/最晚周期、路径上 instance 周期电压、绝对抖动、占周期百分比抖动）
+  \item \textbf{Show Detail}：所选时钟整个网络的抖动详情；可搜索、Show Browser、高亮与缩放
+  \item \textbf{Show Browser}：所选时钟整个网络的 schematic；Highlight 在 RedHawk GUI 显示整个网络 flyline
+\end{itemize}
+
+Tools $\rightarrow$ Clock Jitter $\rightarrow$ Fullchip Jitter $\rightarrow$ Long Term Cycle-2-Cycle Jitter Report 以类似格式显示「Long-Term Cycle-2-Cycle」抖动：端点 pin 相邻周期到达时间差的最大值。
+
+\texttt{adsRpt/fullchipjitter.log} 记录 PJX-full-chip 分析；错误与警告分别在 \texttt{adsRpt/fullchipjitter.err} 与 \texttt{adsRpt/fullchipjitter.warn}。
+
+\section{PJX 时钟树抖动 Sign-Off 分析}
+\subsection{PJX Fullchip 与 Sign-Off 方案对比}
+\subsubsection*{Comparison of Fullchip and Sign-Off Jitter Solutions}
+
+RedHawk 提供两种互补的时钟抖动分析路径：
+\begin{itemize}
+  \item \textbf{PJX Fullchip（ATE 级）}——基于 STA 与 RedHawk 多周期有效电压的快速全芯片筛查；适合早期识别电压诱导抖动热点与网格薄弱区域；\textbf{不能}替代含 PI、SI 与其他抖动源的 SPICE 级 sign-off。
+  \item \textbf{PJX Sign-Off（NX 级）}——多周期 Spice 仿真，并发考虑 P/G 噪声波形、耦合电容与单元级精度；用于 tape-out 前最终抖动 sign-off。
+\end{itemize}
+
+集成工作流：
+\begin{center}
+Setup Design $\rightarrow$ Power Calculation $\rightarrow$ Extraction $\rightarrow$ DvD Analysis $\rightarrow$ Fullchip Jitter Analysis $\rightarrow$ Sign-Off Analysis
+\end{center}
+
+\subsection{PJX Fullchip 长期抖动报告详解}
+\subsubsection*{Long Term and Cycle-to-Cycle Jitter Reports}
+
+\textbf{Long Term Jitter Report} 按各时钟域最坏长期抖动（占时钟周期百分比）排序。长期抖动定义为：对端点 pin 记录的所有到达时间，最早与最晚到达时间之差。
+
+对选中时钟可执行：
+\begin{itemize}
+  \item \textbf{Show Summary}——最差 1000 个端点摘要；Show Browser 显示自源到端点的 schematic；Highlight 显示 flyline；Show Trace 显示路径详情（最早/最晚周期、路径 instance 周期电压、绝对抖动与占周期百分比）
+  \item \textbf{Show Detail}——整个网络的 per-pin 抖动表，可搜索、浏览、高亮与缩放
+  \item \textbf{Show Browser}——整个时钟网络的 schematic 连通，Highlight 在 GUI 显示全网 flyline
+\end{itemize}
+
+\textbf{Long Term Cycle-2-Cycle Jitter Report} 格式类似，但抖动量为相邻周期到达时间差的最大值。
+
+\subsection{抖动配置关键字补充详述}
+\subsubsection*{Additional Jitter Configuration Keyword Details}
+
+\paragraph{\gsr{EXTEND\_CYCLE\_SELECTION}}
+管理非连续周期集合，语法 \texttt{[-1 | 0 | 1]}：
+\begin{itemize}
+  \item \texttt{-1}：丢弃非连续周期（例：指定 10 15 16 17 时丢弃 10）
+  \item \texttt{0}：保留原样（10 15 16 17）
+  \item \texttt{1}：补充周期使序列连续（按 worst-best-worst/best-worst-best 排序添加 9--11 或 10--12 等）
+\end{itemize}
+
+\paragraph{\gsr{DEFINE\_CASE\_ANALYSIS}}
+降低串扰悲观度，可选 \texttt{pgvolt}、\texttt{clock\_jitter\_worst}、\texttt{clock\_jitter\_best}（默认 \texttt{PGVOLT}）。
+
+\paragraph{\gsr{JITTER\_FAST\_MODE}}
+快速抖动仿真：\texttt{1} = 有效 DvD PWL；\texttt{2} = 多周期有效 VDD；\texttt{0} = 完整波形（默认）。
+
+\paragraph{\gsr{CLK\_INST\_FILE} 文件格式}
+\begin{lstlisting}
+#| Clock Tree Instance Summary
+# Root=CK1 Period=2000(ps) Freq=500.000(Mhz)
+# InstName CellName (InstType) Freq EffVdd
+T_buf1 zbfp (C_COMB) 500.000MHz
+T_buf3 zbfp (C_COMB) 500.000MHz
+...
+# Buffer/Gate=29 Sequential(Total) Leafs=2(2)
+\end{lstlisting}
+
+\paragraph{\gsr{DYNAMIC\_SIMULATION\_CYCLES}}
+列出或范围指定抖动仿真周期：
+\begin{lstlisting}
+DYNAMIC_SIMULATION_CYCLES { 10 15 16 17 }
+DYNAMIC_SIMULATION_CYCLES { 10 : 20 }
+\end{lstlisting}
+
+\paragraph{\gsr{COUPLING\_CAP\_RATIO\_THRESHOLD}}
+攻击者耦合电容占受害者总电容比例阈值，低于阈值不纳入耦合分析（默认 0.05）。
+
+\paragraph{\gsr{COUPLING\_WINDOW\_MARGIN}}
+以受害者 rise time 倍数扩展 TW 检查重叠（默认 1.0）。
+
+\paragraph{\gsr{GROUP\_CLUSTERING} / \gsr{GROUP\_CLUSTERING\_DEPTH}}
+聚类抖动仿真以加速：\texttt{ENABLE|DISABLE}（默认 DISABLE）；\gsr{GROUP\_CLUSTERING\_DEPTH} 为每簇最大逻辑层数（默认 3）。
+
+\paragraph{\gsr{SIMULATION\_REDO\_MAX}}
+PWL 对齐最大迭代次数（默认 10）。
+
+\paragraph{边到边 DDR 抖动报告格式}
+Report 1（\texttt{adsRpt/Jitter/edge\_to\_edge.jitter}）表头示例：
+\begin{lstlisting}
+# CLOCK : <clock pin name>
+# DATA_1 : <data pin name>
+# Ideal Bit Period : <ideal bit period>
+CLOCK                    DATA_1
+Rise Edge No   Setup Time (ps)   Hold Time (ps)   ...
+Min tDS/tDH(ps)  <min setup>      <min hold>       ...
+Edge-to-edge jitter (ps)           <jitter>
+\end{lstlisting}
+
+Report 2（\texttt{tree\_*\_pi/peak\_to\_peak.jitter}）按逻辑路径顺序列出各 instance pin 的周期与 C2C 抖动摘要。
+
+\subsection*{PJX Clock Tree Jitter Sign-Off Analysis}
+
+\subsection{概述}
+\subsubsection*{Overview}
+
+RedHawk 中成功完成 DvD 分析后，可执行时钟树抖动分析。
+
+\subsection{时钟树抖动 Sign-Off 分析所需输入}
+\subsubsection*{Required Inputs for Clock Tree Jitter Sign-Off Analysis}
+
+\begin{enumerate}
+  \item \textbf{SPICE 单元网表（CIR）}——定义 I/O pad 单元电压电平；抖动分析将 SPICE 网表匹配到 instance 并将 P/G 端口连到本地电压源
+  \item \textbf{SPICE 工艺库文件}——晶体管模型、工艺角、片上工艺变化（OCV）、PVT
+  \item \textbf{附加时序约束}——配置文件关键字 \gsr{DEFINE_DESIGN_CONSTRAINTS}
+\end{enumerate}
+
+\subsection{输入数据准备}
+\subsubsection*{Input Data Preparation}
+
+\paragraph{Spice 单元网表（.CIR）文件}
+RedHawk 从 \gsr{SPICE_NETLIST} 指定文件读取各单元 Spice 网表。可用 \texttt{.include}，但须完整路径，例如：
+\begin{lstlisting}
+.include '/projects/AABB15/src/abcd18_3.cir'
+.include '/projects/AABB15/src/abcd18io_4.cir'
+\end{lstlisting}
+子电路端口按名连接到设计网络。若子电路端口名为 \texttt{gnd}，可执行：
+\begin{lstlisting}
+SPICE_CELL_TOKEN_RENAME gnd vss
+\end{lstlisting}
+（因 Spice 中 GND 为全局虚拟地节点）。子电路端口与 instance 端口一致性会被检查，不匹配时日志警告。
+
+\paragraph{SPICE 工艺库数据}
+通过抖动配置文件中 \gsr{DEVICE_MODEL_LIBRARY} 包含 Spice 器件模型，例如：
+\begin{lstlisting}
+INCLUDE /usr/cadtool/technology/logic018param.l
+DEVICE_MODEL_LIBRARY /usr/cadtool/technology/logic018io.l SS
+DEVICE_MODEL_LIBRARY '/projects/BCM7315B0/technology/logic018.l' SS
+\end{lstlisting}
+
+\paragraph{附加时序约束}
+在 \gsr{DEFINE_DESIGN_CONSTRAINTS} 中补充缺失信息：
+\begin{enumerate}
+  \item SPF 缺外部负载：\cmd{set_load 4000 "sdram_dqm[7]"}（单位 ff）
+  \item SPF 缺网络电阻：\cmd{set_resistance 100 "net_clock"}（Ohm）
+  \item 控制 instance 输入状态：\cmd{set_logic_one/set_logic_zero "mux_1/sel"}
+  \item 经分频电路分析时钟树：\cmd{set_clock_divider div_reg:q}
+  \item 在指定 pin 停止分析：\cmd{set_clock_leaf clk_mux:i0}
+  \item 排除子树：\cmd{exclude_clock_leaf clk_reg:d}
+\end{enumerate}
+
+\subsection{时钟树抖动分析设置流程}
+\subsubsection*{Clock Tree Jitter Analysis Setup Procedure}
+
+\begin{enumerate}
+  \item \textbf{RedHawk 数据准备}
+  \begin{itemize}
+    \item 多数文件应已为 DvD 分析准备
+    \item 准备并使用封装网表或 lumped RLC 模型
+    \item GSR 关键字示例：
+    \begin{itemize}
+      \item \gsr{JITTER_ENABLE 1}——使 RedHawk 流程「抖动感知」，动态仿真优化为仅提取时钟 instance 波形
+      \item \gsr{CYCLE_SELECTION}——\texttt{WORST\_JITTER\_CYCLE}、\texttt{WORST\_PERIOD\_JITTER\_CYCLE}、\texttt{WORST\_MIN/MAX\_PERIOD\_JITTER\_CYCLE}、\texttt{WORST\_C2C\_JITTER\_CYCLE}
+      \item \gsr{IGNORE_JITTER_FASTSIM 1}——用功耗 histogram 选最关键抖动周期（默认 0）
+    \end{itemize}
+    \item 提供含耦合电容的 SPEF 以进行串扰分析
+  \end{itemize}
+  \item \textbf{选择时钟根}——DvD 分析后：
+\begin{lstlisting}
+report clocknetwork -o <output_filename>
+\end{lstlisting}
+  或 Tools $\rightarrow$ Clock Jitter $\rightarrow$ Clock Network Summary（图~\ref{fig:rh-clk-summary}）。根据各时钟根 DvD 选择用于抖动分析的根（图~\ref{fig:rh-clk-root-select}）。
+  \item \textbf{抖动分析准备}——配置文件须含 \gsr{SPICE_NETLIST/SPICE_SUBCKT_DIR}、\gsr{DEVICE_MODEL_LIBRARY/INCLUDE}、\gsr{CLOCK_SOURCES}（若未在 TCL 指定）。可选优化关键字：\gsr{CLOCK_TREE_MAX_LEVEL}、\gsr{DEFINE_CASE_ANALYSIS}、\gsr{EXTEND_CYCLE_SELECTION}、\gsr{FALL/RISE_SLEW}、\gsr{JITTER_FAST_MODE}、\gsr{JITTER_CUTOFF_FREQ}、\gsr{LEF2SPICE_PIN_MAPPING}、\gsr{SETTLE_TIME/SETTLE_TIME_RATIO}、\gsr{STA_SWITCH_TIME_READ}、\gsr{TIMING_WINDOW_OVERLAP_RATIO_THRESHOLD}、\gsr{DEFINE_DESIGN_CONSTRAINTS}
+  \item \textbf{抖动分析 TW 过滤}——SI 抖动分析中，\gsr{TIMING_WINDOW_OVERLAP_RATIO_THRESHOLD} 按攻击者与受害者 TW 重叠比例过滤耦合计算：
+\begin{lstlisting}
+TIMING_WINDOW_OVERLAP_RATIO_THRESHOLD <value>
+\end{lstlisting}
+\end{enumerate}
+
+\figplaceholder{Figure 8-4}{日志窗口与 clocknetwork 命令帮助}
+
+\figplaceholder{Figure 8-5}{Clock Network Summary}
+
+\figplaceholder{Figure 8-6}{时钟根选择对话框}
+
+\subsection{边到边 DDR 时钟抖动测量}
+\subsubsection*{Edge-to-Edge DDR Clock Jitter Measurements}
+
+边到边抖动为触发事件与响应事件之间延迟的变化，仅对驱动系统定义，为输入参考抖动指标。
+
+\paragraph{Write Mode}
+对参考信号（Clock）每个 rise/fall 沿，测量到 Data 信号最近 rise/fall 沿的 Setup/Hold（图~\ref{fig:rh-ddr-write}）：
+\begin{lstlisting}
+DDR_DIFFERENTIAL_JITTER
+{
+WRITE_PATH ? -idealBitPeriod <bit_period> ?
+   -clock <clock_pin> -data {<data_pin1> <data_pin2> ... }
+}
+\end{lstlisting}
+
+\figplaceholder{Figure 8-7}{边到边抖动——Write Mode}
+
+\paragraph{Read Mode}
+对每个 Clock 仅利用上升沿捕获相对最近 Data rise/fall 的 Setup/Hold（图~\ref{fig:rh-ddr-read}）：
+\begin{lstlisting}
+DDR_DIFFERENTIAL_JITTER
+{
+READ_PATH ? -idealBitPeriod <bit_period> ?
+   -clock <clock_pin> -data {<data_pin1> <data_pin2> ... }
+}
+\end{lstlisting}
+
+\figplaceholder{Figure 8-8}{边到边抖动——Read Mode}
+
+\subsection{从 RedHawk GUI 运行时钟树抖动 Sign-Off 分析}
+\subsubsection*{Running Clock Tree Jitter Sign-Off Analysis from the RedHawk GUI}
+
+完成 RedHawk 数据设置并创建时序配置文件后，通过 Tools 菜单调用。
+
+若尚未做 DvD 分析，按菜单顺序：
+\begin{itemize}
+  \item Tools $\rightarrow$ Clock Jitter $\rightarrow$ Clock Network Summary
+  \item Dynamic $\rightarrow$ Power $\rightarrow$ Calculate/Import、Network Extraction、Pad/Wirebond/Package Constraints
+  \item Clock Jitter Analysis（按 GSR 中 \gsr{STATE_PROPAGATION} 或 \gsr{VCD_FILE} 做矢量无关或 VCD 抖动周期选择）
+  \item Clock Jitter Report
+  \item Clock Jitter Bottleneck Report
+\end{itemize}
+
+若已完成 DvD，可直接运行 Clock Jitter Analysis；RedHawk 执行矢量无关或 VCD True Time 动态仿真，提取多周期 P/G 波形并做多周期 Spice 仿真。
+
+\subsection{批处理模式运行时钟树抖动 Sign-Off 分析}
+\subsubsection*{Running Clock Tree Jitter Sign-off Analysis in Batch Mode}
+
+批处理前完成与 GUI 相同的设置。
+
+\paragraph{批处理调用设置}
+若未做 DvD，对仅 PI 或并发 PI/SI 模式，运行至 package setup 或加载动态分析前保存的 DB。示例 TCL：
+\begin{lstlisting}
+import gsr design_dynamic.gsr
+setup design
+import apl cell.current
+import apl -c cell.cdev
+perform pwrcalc
+perform extraction -power -ground -c
+setup pad -power -r 0.010000 -c 0.5
+setup pad -ground -r 0.010000 -c 0.5
+setup wirebond -power -r 0.245000 -l 1420 -c 5
+setup wirebond -ground -r 0.24500 -l 1420 -c 5
+setup package -r 0.002 -l 100 -c 5
+\end{lstlisting}
+
+\paragraph{抖动分析命令行调用}
+\begin{lstlisting}
+[perform jitter_cycle_select]  # 可选
+perform analysis [options]
+perform jitter [options]
+show jitter [options]
+\end{lstlisting}
+
+完整语法：
+\begin{lstlisting}
+perform jitter -config <psi_jitter_config> [-clk_source <clk_src>]
+[-leaf_inst_pin <leaf_inst_pin>][-no_data_check ]
+[-mode [ waveform_pg | effVDD | eff_pg ]]
+\end{lstlisting}
+\begin{itemize}
+  \item \texttt{waveform\_pg}：基于 RedHawk P/G 电压波形
+  \item \texttt{effVDD}：基于 RedHawk 多周期有效 Vdd
+  \item \texttt{eff\_pg}：基于有效 P/G 电压
+\end{itemize}
+
+批处理模式仅能指定单个 \texttt{clk\_src} 与 \texttt{leaf\_inst\_pin}。
+
+示例：
+\begin{lstlisting}
+setup design test.gsr
+perform pwrcalc
+perform extraction -power -ground
+perform jitter_cycle_select -type WORST_JITTER_CYCLE -vcd
+perform analysis -vcd
+perform jitter -config psi.jitter_config
+show jitter c2c rise
+\end{lstlisting}
+
+可在 post-dynamic DB 上运行：
+\begin{lstlisting}
+import db post_dynamic.db
+perform jitter -config ...
+export db post_jitter.db
+import db post_jitter.db
+\end{lstlisting}
+
+\paragraph{指定时钟 instance}
+\begin{enumerate}
+  \item \cmd{report clocknetwork -root <root_name> -o <clk_out>}
+  \item 手动编辑 \texttt{<clk\_out>} 缩减时钟 buffer（勿添加新 instance）
+  \item 配置文件中 \gsr{CLK_INST_FILE <edited_clk_out>}，\gsr{CLOCK_SOURCES} 与 \texttt{report clocknetwork} 的 root 一致
+  \item \cmd{perform jitter -config psi.config}
+\end{enumerate}
+
+\subsection{时钟树抖动结果}
+\subsubsection*{Clock Tree Jitter Results}
+
+\paragraph{Clock Tree Jitter Report}
+Tools $\rightarrow$ Clock Jitter $\rightarrow$ Sign-off Jitter $\rightarrow$ Clock Jitter Report 创建周期抖动与 cycle-to-cycle 抖动摘要表（图~\ref{fig:rh-clk-jitter-report}）。
+
+列含义：Clock Root、Leaf Num、Inst Num、Max P Jitter R/F、Max C-C Jitter R/F、Skew R/F、Max/Min Delay R/F。
+
+\figplaceholder{Figure 8-9}{Clock Tree Jitter Report}
+
+\paragraph{Clock Tree Browser Display}
+Tools$\rightarrow$ Clock Jitter$\rightarrow$ Clock Jitter Report 中 Show Browser 打开 Clock Tree Browser（最多 500 条路径）。功能：路径符号摘要、Pin 信息、Highlight、Clear Highlight、Zoom to Instance、Up/Down、Close（图~\ref{fig:rh-clk-browser}--\ref{fig:rh-clk-zoom}）。
+
+\figplaceholder{Figure 8-10}{时钟树浏览器显示}
+
+\figplaceholder{Figure 8-11}{高亮的时钟网络}
+
+\figplaceholder{Figure 8-12}{缩放到时钟 instance}
+
+\paragraph{Clock Tree Jitter Details Report}
+Clock Jitter Report 中 Show Detail 打开按 pin 的详细结果（图~\ref{fig:rh-jitter-details}）。列：Pin Name、Cell Type、Level、VDrop (R/F)、GBnce (R/F)、Delay (R/F)、Slope (R/F)、P Jitter (R/C-C Jitter R/F)。底部按钮：Type、Search、Waveform selection、Plot、Select All、Clear Selected、Show Browser、Zoom、Highlight tree、Clear Highlight。
+
+\figplaceholder{Figure 8-13}{Clock Tree Jitter Details 显示}
+
+\paragraph{边到边 DDR 时钟树抖动报告}
+\begin{itemize}
+  \item Report 1：\texttt{adsRpt/Jitter/edge\_to\_edge.jitter}——Clock 与 Data 路径边到边相对抖动摘要（Setup/Hold 表格式）
+  \item Report 2：\texttt{adsRpt/Jitter/tree\_*\_pi/peak\_to\_peak.jitter}——路径上各 instance pin 的周期与 C2C 抖动快速摘要
+\end{itemize}
+
+\paragraph{波形图}
+选中 pin 后点击 Plot 显示多周期时钟波形（图~\ref{fig:rh-jitter-waveform}）；最早与最晚转换时间差即为抖动（图~\ref{fig:rh-jitter-rise}、图~\ref{fig:rh-jitter-fall}）。
+
+\figplaceholder{Figure 8-14}{Plot 波形显示}
+
+\figplaceholder{Figure 8-15}{抖动上升波形}
+
+\figplaceholder{Figure 8-16}{抖动下降波形}
+
+\paragraph{Clock Jitter Bottleneck Report}
+Tools $\rightarrow$ Clock Jitter $\rightarrow$ Sign-off jitter $\rightarrow$ Clock Jitter Bottleneck Report 显示最差抖动薄弱点排序（图~\ref{fig:rh-jitter-bottleneck}）。修复排名最高 pin 的抖动可最大化整体改善。
+
+参数：No、Max/Min Delay、Delay Diff、DS Leaf Jitter、P/C-C Jitter (R/F)、Level、Leaf \#、Pin Name。按钮：Reset to Default Order、Go To Location、Up/Down、Previous/Next 1000。
+
+\figplaceholder{Figure 8-17}{Jitter Bottleneck Report}
+
+\figplaceholder{Figure 8-18}{Clock Jitter Bottleneck Report}
+
+\paragraph{抖动色阶图}
+View $\rightarrow$ Clock Jitter Map $\rightarrow$ 选择：Rise/Fall Period Jitter、Rise/Fall C-to-C Jitter。TCL：
+\begin{lstlisting}
+show jitter [period | c2c] [rise | fall]
+\end{lstlisting}
+（图~\ref{fig:rh-period-jitter-map}、图~\ref{fig:rh-c2c-jitter-map}）。
+
+\figplaceholder{Figure 8-19}{Period jitter 色阶图}
+
+\figplaceholder{Figure 8-20}{Instance cycle-to-cycle jitter 色阶图}
+
+\paragraph{文本报告}
+Sign-off 时钟树抖动分析输出写入 \texttt{adsRpt/Jitter}（图~\ref{fig:rh-jitter-dir}）：\texttt{jitter.log/err/warn}、\texttt{tree\_<id>\_<suffix>}（\texttt{tree.sdf}、\texttt{tree.skw}、\texttt{tree.leaf}、\texttt{tree.jitter}、\texttt{jitter.bottleneck}、\texttt{tree.jitter\_detail}、\texttt{jitter.wfm} 等）及 \texttt{DomainRpt/subtree\_*}。
+
+关闭 \texttt{DomainRpt} 额外输出：
+\begin{lstlisting}
+CLOCKTREE_DOMAIN_SPLIT_REPORT 0
+\end{lstlisting}
+
+\figplaceholder{Figure 8-21}{时序分析目录结构——jitter}
+
+\section{时钟树 Skew 分析}
+\subsection*{Clock Tree Skew Analysis}
+
+\subsection{概述}
+\subsubsection*{Overview}
+
+Skew 分析中 RedHawk 计算门传播延迟、互连延迟与 slew，报告时钟树 rise/fall skew，反映 DvD 对时序的实际硅片性能影响，支持快速噪声感知时序收敛。
+
+\subsection{所需输入与数据准备}
+\subsubsection*{Required Inputs and Data Preparation}
+
+与时钟树抖动 Sign-Off 分析相同（见「时钟树抖动 Sign-Off 分析所需输入」与「输入数据准备」）。
+
+\subsection{时钟树 Skew 分析流程}
+\subsubsection*{Procedure for Clock Tree Skew Analysis}
+
+\paragraph{从 RedHawk GUI 运行}
+在时序配置文件中设 \gsr{SIGNAL_INTEGITY 1} 以分析串扰影响。完成 DvD 设置或加载合适 DB 后：
+\begin{enumerate}
+  \item Timing$\rightarrow$ Sign-off Clock Tree$\rightarrow$ Analysis
+  \item 在 Clock Tree Set up 对话框指定 config 文件名并 Run
+\end{enumerate}
+
+\paragraph{批处理模式}
+\begin{lstlisting}
+perform clockskew -config <config_file>
+?-clk_source <clk_src>? ?-leaf_inst_pin <leaf_inst_pin> ?
+?-no_data_check? ?-mode [basic | static | dynamic]?
+\end{lstlisting}
+
+示例：
+\begin{lstlisting}
+setup design test.gsr
+...
+perform clockskew -config psi.skew_config
+\end{lstlisting}
+
+各分析模式：
+\begin{itemize}
+  \item \textbf{Basic}——\cmd{setup design} 后即可：\cmd{perform clockskew -config <config> -mode basic}（覆盖配置文件中 \gsr{POWER_INTEGITY 1}）
+  \item \textbf{仅 SI}——\gsr{SIGNAL_INTEGITY 1}，SPEF 须含耦合电容；同上命令
+  \item \textbf{仅 PI}——默认 dynamic：\cmd{perform clockskew -config <config> -mode dynamic}；静态：\texttt{-mode static}（覆盖 \gsr{POWER_INTEGITY 0}）
+  \item \textbf{并发 PI+SI}——\texttt{-mode [static|dynamic]} 且 \gsr{SIGNAL_INTEGITY 1}
+\end{itemize}
+
+\subsection{时钟树 Skew 分析结果}
+\subsubsection*{Clock Tree Skew Analysis Results}
+
+\paragraph{Clock Tree Skew Summary Report}
+Timing $\rightarrow$ Sign-off Clock Tree $\rightarrow$ Clock Tree Report（图~\ref{fig:rh-skew-summary}）。
+
+列：Clock Root、Leaf Num、Inst Num、Skew R/F、Max/Min Delay R/F。
+
+\figplaceholder{Figure 8-22}{Clock Tree Skew 摘要报告}
+\label{fig:rh-skew-summary}
+
+\paragraph{文本报告}
+输出至 \texttt{adsRpt/Clkskw}（图~\ref{fig:rh-skew-dir}）：\texttt{skew.log/err/warn}、\texttt{tree\_<id>\_<suffix>}（basic、pi、si、pisi）、\texttt{tree.sdf/skw/leaf} 及 \texttt{DomainRpt/subtree\_*}。临时文件在 \texttt{.apache/clkskw}。
+
+关闭 DomainRpt：
+\begin{lstlisting}
+CLOCKTREE_DOMAIN_SPLIT_REPORT 0
+\end{lstlisting}
+
+\figplaceholder{Figure 8-23}{时序分析目录结构——skew}
+\paragraph{Clock Tree Skew 文本报告目录结构}
+Sign-off skew 分析输出至 \texttt{adsRpt/Clkskw}：
+\begin{lstlisting}
+|___adsRpt/Clkskw
+        |___ skew.log / skew.err / skew.warn
+        |___ tree_id_map
+        |___ tree_<id>_<suffix>   # suffix: basic, pi, si, pisi
+                 |___ tree.sdf
+                 |___ tree.skw
+                 |___ tree.leaf
+                 |___ DomainRpt/subtree_*
+\end{lstlisting}
+临时文件在 \texttt{.apache/clkskw}。关闭 \texttt{DomainRpt}：\gsr{CLOCKTREE\_DOMAIN\_SPLIT\_REPORT 0}。
+
+\paragraph{Skew 分析模式与配置文件覆盖关系}
+\begin{itemize}
+  \item \textbf{Basic}：\cmd{perform clockskew -config <f> -mode basic} 覆盖配置文件中 \gsr{POWER\_INTEGRITY 1}
+  \item \textbf{仅 SI}：\gsr{SIGNAL\_INTEGRITY 1} + SPEF 含耦合电容 + \texttt{-mode basic}，同样覆盖 \gsr{POWER\_INTEGRITY 1}
+  \item \textbf{仅 PI}：\texttt{-mode dynamic}（默认）或 \texttt{-mode static}，覆盖 \gsr{POWER\_INTEGRITY 0}
+  \item \textbf{并发 PI+SI}：\texttt{-mode [static|dynamic]} 且 \gsr{SIGNAL\_INTEGRITY 1}，覆盖 \gsr{POWER\_INTEGRITY 0}
+\end{itemize}
+
+\paragraph{\gsr{PWL\_WAVEFORM}}
+波形测量点（相对 Vdd 分数，升序），最多 10 点；延迟在 M 点，slew 在 L 与 H 之间。默认：0.1、L:0.3、M:0.5、H:0.7、0.9。
+
+
+\section{时钟树分析配置文件参考}
+\subsection*{Clock Tree Analysis Configuration File Reference}
+
+时序分析配置文件可定制运行环境。关键字按功能组织：时钟树分析、输入数据、抖动分析、信号波形、仿真控制、Spice 元件、多任务控制、约束设置、应用类型选择、RedHawk 数据使用、报告格式。
+
+\subsection{时钟树分析关键字}
+\subsubsection*{Clock Tree Analysis Keywords}
+
+\paragraph{\gsr{CLOCK_SOURCES}}
+指定 skew/jitter 分析的时钟树根：
+\begin{lstlisting}
+CLOCK_SOURCES { <clock_root1> <clock_root2> ... }
+CLOCK_SOURCES <clock_root>   # 单根简化语法
+\end{lstlisting}
+
+\paragraph{\gsr{CLOCK_PATHS}}
+按根与叶配对指定分析路径：
+\begin{lstlisting}
+CLOCK_PATHS {
+    ROOT <clock_root_1> -leafs {<leaf_1> <leaf_2> ... }
+    ...
+}
+\end{lstlisting}
+
+\paragraph{\gsr{COMMON_CLOCK_SIMULATION}}
+对 \gsr{CLOCK_SOURCES} 中所有根做公共仿真以加速：\texttt{[0 | 1]}。
+
+\paragraph{\gsr{CLOCKTREE_BYPASS_UNDEFINED_GRAY_CELL}}
+缺少 Spice 网表的「未定义」灰单元仍继续时钟追踪：\texttt{[0 | 1]}。
+
+\paragraph{\gsr{CLOCK_TREE_MAX_LEVEL}}
+限制仿真时钟树层数（pipe clean 测试用）。
+
+\paragraph{\gsr{LEAF_INST_PINS}}
+指定从时钟源停止追踪的 instance pin：
+\begin{lstlisting}
+LEAF_INST_PINS { <leaf_pin1> ... }
+\end{lstlisting}
+
+\subsection{输入数据设置关键字}
+\subsubsection*{Input Data Settings}
+
+\paragraph{\gsr{CLK_INST_FILE}} / \gsr{CLOCK_INST_FILE}
+用户指定应仿真的时钟 instance 列表文件。格式含 Root、Period、Freq、InstName、CellName、InstType 等注释与实例行。
+
+\paragraph{\gsr{SPICE_NETLIST}}
+一个或多个 Spice 单元网表文件。
+
+\paragraph{\gsr{SPICE_SUBCKT_DIR}}
+Spice 单元网表目录路径。
+
+\paragraph{\gsr{STA_CONST_READ}}
+设为 0 不读取 STA 文件中 CONST 行。
+
+\subsection{抖动分析关键字}
+\subsubsection*{Jitter Analysis}
+
+\paragraph{\gsr{CYCLE_SELECTION}}
+自动抖动周期选择准则或关闭：
+\begin{lstlisting}
+CYCLE_SELECTION [ DISABLE | WORST_C2C_JITTER_CYCLE |
+    WORST_PERIOD_JITTER_CYCLE | WORST_MIN_PERIOD_JITTER_CYCLE |
+    WORST_MAX_PERIOD_JITTER_CYCLE ]
+\end{lstlisting}
+
+\paragraph{\gsr{DYNAMIC_SIMULATION_CYCLES}}
+列出或范围指定仿真周期：\texttt{<cycle1> <cycle2> ...} 或 \texttt{<cycle1> : <cycleN>}。
+
+\paragraph{\gsr{JITTER_CUTOFF_FREQ}}
+抖动分析最低时钟频率（MHz），默认 4\,MHz，用于剔除低频域加速。
+
+\paragraph{\gsr{JITTER_FAST_MODE}}
+快速抖动仿真：1 = eff DvD PWL；2 = 多周期有效 VDD；默认 0。
+
+\paragraph{\gsr{TIMING_WINDOW_OVERLAP_RATIO_THRESHOLD}}
+SI 抖动分析中按 TW 重叠比例选攻击者（0--1.0）。重叠比 = 重叠时间 / 较小 TW 的 On 周期。例：攻击者 TW 2--10、受害者 8--20，重叠 8--10 为 2，最大重叠 min(8,12)=8，比例 0.25。
+
+\subsection{信号波形关键字}
+\subsubsection*{Signal Waveforms}
+
+\gsr{FALL_SLEW}、\gsr{FALL_SLEW_AGRS}、\gsr{RISE_SLEW}、\gsr{RISE_SLEW_AGRS}——转换时间（ns），默认 0.05\,ns。
+
+\gsr{PWL_WAVEFORM}——波形测量点（相对 Vdd 分数，升序），最多 10 点；延迟在 M 点，slew 在 L 与 H 点之间。默认 0.1、L:0.3、M:0.5、H:0.7、0.9。
+
+\subsection{仿真控制关键字}
+\subsubsection*{Simulation Controls}
+
+\gsr{SPICE_SIMULATOR}——\texttt{[ NSpice | HSpice | Eldo ]}。
+
+\gsr{SETTLE_TIME}——仿真数据过渡时间间隔（ns）。
+
+\gsr{SPICE_TIME_STEP}——瞬态步进（ns），默认 0.01。
+
+\gsr{SPICE_PROBE_USE}——输出 .probe 与 *.ta0 波形，默认 0。
+
+\gsr{SPICE_FILE_BACKUP}——写出各次 Spice deck，默认 0。
+
+\gsr{GROUP_CLUSTERING}——聚类抖动仿真：\texttt{[ ENABLE | DISABLE ]}，默认 DISABLE。
+
+\gsr{GROUP_CLUSTERING_DEPTH}——每簇最大逻辑层数，默认 3。
+
+\gsr{SIMULATION_REDO_MAX}——PWL 对齐最大迭代次数，默认 10。
+
+\gsr{DEVICE_MODEL_LIBRARY}、\gsr{INCLUDE}——Spice 器件模型路径（可多次，带工艺角如 TT/FF/SS）。
+
+\gsr{OPTION}——Spice 仿真选项。
+
+\subsection{Spice 元件关键字}
+\subsubsection*{Spice Elements}
+
+\gsr{SPF_COUPLE_CAP_MULTIPLIER}、\gsr{COUPLE_CAP_MULTIPLIER}、\gsr{CAP_MULTIPLIER}、\gsr{RES_MULTIPLIER}——全局倍乘，默认 1。
+
+\gsr{COUPLING_CAP_RATIO_THRESHOLD}——攻击者耦合电容占受害者总电容比例阈值，默认 0.05。
+
+\gsr{COUPLING_WINDOW_MARGIN}——受害者 TW 扩展检查重叠（以 rise time 倍数），默认 1.0。
+
+\gsr{CAP_LOAD_UNIT}——\gsr{DEFINE_DESIGN_CONSTRAINTS} 中 \cmd{set_load} 电容单位，默认 ff。
+
+\gsr{SPEF_CAPACITANCE}、\gsr{SPEF_RESISTANCE}——缺失 SPEF 数据的默认电容（ff）与电阻（$\Omega$），默认 0.001。
+
+\subsection{多任务控制关键字}
+\subsubsection*{Multi-task Controls}
+
+\gsr{NUM_TASKS}——并行任务数，默认依 CPU 核数。
+
+\gsr{MAX_TASKS}——最大并行任务上限。
+
+\gsr{LSF_JOB_COUNT}——LSF 农场作业数（与 \gsr{NUM_TASKS} 配合）。
+
+\gsr{TIMER}——作业状态检查间隔（秒），默认 60。
+
+\subsection{约束设置关键字}
+\subsubsection*{Constraint Settings}
+
+\gsr{DEFINE_DESIGN_CONSTRAINTS}——\cmd{set_load}、\cmd{set_resistance}、\cmd{set_clock_divider}、\cmd{set_clock_leaf}、\cmd{exclude_clock_leaf} 等设计约束。
+
+\gsr{DEFINE_CASE_ANALYSIS}——\texttt{pgvolt}、\texttt{clock\_jitter\_worst/best} 等，降低串扰悲观度。
+
+\gsr{EXTEND_CYCLE_SELECTION}——\texttt{[-1 | 0 | 1]} 管理非连续周期选择。
+
+\gsr{DDR_DIFFERENTIAL_JITTER}——DDR 边到边抖动 Write/Read 路径定义。
+
+\subsection{应用类型选择关键字}
+\subsubsection*{Application Type Selection}
+
+\gsr{POWER_INTEGITY}、\gsr{SIGNAL_INTEGITY}——开启 PI/SI 分析模式。
+
+\gsr{JITTER_ENABLE}——RedHawk 抖动感知流程。
+
+\gsr{CLOCKTREE_DOMAIN_SPLIT_REPORT}——是否生成 DomainRpt 子树报告。
+
+\subsection{RedHawk 数据使用关键字}
+\subsubsection*{RedHawk Data Usage}
+
+\gsr{STA_SWITCH_TIME_READ}——DvD 波形缺 switch time 时从 STA 读取。
+
+\gsr{SETTLE_TIME_RATIO}——按时钟周期比例设 SETTLE\_TIME，默认 0.75。
+
+\gsr{LEF2SPICE_PIN_MAPPING}——LEF 与 Spice pin 名映射。
+
+\gsr{SPICE_CELL_TOKEN_RENAME}——子电路端口名重命名（如 gnd$\rightarrow$vss）。
+
+\subsection{报告格式关键字}
+\subsubsection*{Report Formats}
+
+\gsr{CLOCKTREE_DOMAIN_SPLIT_REPORT}——是否按时钟域拆分子树报告写入 \texttt{DomainRpt/}，默认 1。设为 0 关闭额外子树输出。
+
+\gsr{JITTER_REPORT_FORMAT}——抖动报告详细程度控制。
+
+\gsr{SKEW_REPORT_FORMAT}——skew 报告格式控制。
+
+\gsr{WAVEFORM_OUTPUT}——是否写出 Spice 探针波形文件（\texttt{*.ta0}），配合 \gsr{SPICE_PROBE_USE}。
+
+\gsr{DOMAIN_RPT_ENABLE}——等效于 \gsr{CLOCKTREE_DOMAIN_SPLIT_REPORT} 的遗留别名。
+\subsection{配置关键字语法全集补充}
+\subsubsection*{Supplemental Configuration Keyword Syntax}
+
+\paragraph{\gsr{CYCLE\_SELECTION}（GSR 与配置文件）}
+\begin{lstlisting}
+CYCLE_SELECTION [ DISABLE | WORST_C2C_JITTER_CYCLE |
+    WORST_PERIOD_JITTER_CYCLE | WORST_MIN_PERIOD_JITTER_CYCLE |
+    WORST_MAX_PERIOD_JITTER_CYCLE | WORST_JITTER_CYCLE ]
+\end{lstlisting}
+\gsr{WORST\_JITTER\_CYCLE}：同时选取最差周期抖动与 cycle-to-cycle 分析周期。\gsr{IGNORE\_JITTER\_FASTSIM 1}：用功耗 histogram 替代纯仿真周期选择（默认 0）。
+
+\paragraph{\gsr{JITTER\_CUTOFF\_FREQ}}
+最低仿真时钟频率（MHz），默认 4\,MHz，用于剔除低频域加速。
+
+\paragraph{\gsr{JITTER\_FAST\_MODE}}
+\texttt{[0 | 1 | 2]}：0 关闭；1 有效 DvD PWL 快速模式；2 多周期有效 VDD。
+
+\paragraph{\gsr{FALL\_SLEW} / \gsr{RISE\_SLEW} / \gsr{*_SLEW\_AGRS}}
+转换时间（ns），须 $>0$ 且 $\le 1.0$\,ns；默认 0.05\,ns。超出范围报错退出。
+
+\paragraph{\gsr{SPICE\_SIMULATOR}}
+\texttt{[ NSpice | HSpice | Eldo ]}；可执行文件须在 PATH 中。
+
+\paragraph{\gsr{SPICE\_TIME\_STEP}}
+瞬态步进（ns），默认 0.01。
+
+\paragraph{\gsr{SPICE\_PROBE\_USE} / \gsr{SPICE\_FILE\_BACKUP}}
+\texttt{SPICE\_PROBE\_USE 1} 写出 \texttt{.probe} 与 \texttt{*.ta0}；\texttt{SPICE\_FILE\_BACKUP 1} 保留各次 Spice deck。
+
+\paragraph{\gsr{CAP\_MULTIPLIER} / \gsr{RES\_MULTIPLIER} / \gsr{COUPLE\_CAP\_MULTIPLIER}}
+全局电容/电阻/耦合电容倍乘，默认 1。
+
+\paragraph{\gsr{NUM\_TASKS} / \gsr{MAX\_TASKS} / \gsr{LSF\_JOB\_COUNT}}
+并行任务控制；\gsr{TIMER} 为作业状态检查间隔（秒，默认 60）。
+
+\paragraph{\gsr{JITTER\_REPORT\_FORMAT} / \gsr{SKEW\_REPORT\_FORMAT}}
+控制抖动/skew 报告详细程度。
+
+\paragraph{\gsr{WAVEFORM\_OUTPUT}}
+配合 \gsr{SPICE\_PROBE\_USE} 写出波形文件。
+
+\paragraph{分析模式总结}
+\begin{table}[htbp]
+\centering
+\caption{时钟树分析四种模式}
+\begin{tabular}{@{}lll@{}}
+\toprule
+模式 & 配置 & 说明 \\
+\midrule
+Basic & 理想电压，无耦合 & 与 PrimeTime 比对；多 Vdd 支持 \\
+仅 SI & \gsr{SIGNAL\_INTEGRITY 1}，SPEF 含 $C_c$ & 无 DvD \\
+仅 PI & \gsr{POWER\_INTEGRITY 1}，DvD 波形 & 无 $C_c$ \\
+PI+SI & 两者均为 1 & 并发分析 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\subsection{PJX Sign-Off 批处理完整示例}
+\subsubsection*{Complete Batch Sign-Off Example}
+
+\begin{lstlisting}
+import gsr design_dynamic.gsr
+setup design
+import apl cell.current
+import apl -c cell.cdev
+perform pwrcalc
+perform extraction -power -ground -c
+setup pad -power -r 0.01 -c 0.5
+setup pad -ground -r 0.01 -c 0.5
+setup wirebond -power -r 0.245 -l 1420 -c 5
+setup wirebond -ground -r 0.245 -l 1420 -c 5
+setup package -r 0.002 -l 100 -c 5
+perform jitter_cycle_select -type WORST_JITTER_CYCLE -vcd
+perform analysis -vcd
+perform jitter -config psi.jitter_config -mode waveform_pg
+show jitter period rise
+show jitter c2c fall
+export db post_jitter.db
+\end{lstlisting}
+
+\paragraph{Jitter Bottleneck 参数与按钮}
+排序列：No、Max/Min Delay、Delay Diff、DS Leaf Jitter、P/C-C Jitter (R/F)、Level、Leaf \#、Pin Name。按钮：Reset to Default Order、Go To Location、Up/Down、Previous/Next 1000。
+
+\paragraph{抖动色阶图 TCL}
+\begin{lstlisting}
+show jitter period rise
+show jitter period fall
+show jitter c2c rise
+show jitter c2c fall
+\end{lstlisting}
+通过 View $\rightarrow$ Clock Jitter Map 亦可选择 Rise/Fall Period 或 C-to-C Jitter；Set Color Range 显示颜色与最大抖动百分比关系。
+
+\subsection{Skew 摘要报告列说明}
+Clock Root、Leaf Num、Inst Num、Skew R/F（最长与最短上升/下降插入延迟差，ps）、Max/Min Delay R/F（根到叶最大/最小延迟，ps）。
+
+\paragraph{时序分析应用回顾}
+False Violation Filter、Design Margin Adjustment、Methodology Calibration、Case Analysis for Stress Test 与 Silicon Correlation 等应用场景见本章引言「时序分析应用」各段；SPICE 级 RedHawk 结果可作为单元级工具虚假违例过滤的 golden reference。
+
+\begin{seeAlsoBox}
+抖动与 skew 配置文件关键字完整列表见原书 8-201 起「Clock Tree Analysis Configuration File Reference」；GSR \gsr{JITTER_ENABLE}、\gsr{CYCLE_SELECTION} 见动态分析章节。
+\end{seeAlsoBox}
+
+\paragraph{perform jitter 模式说明}
+\texttt{waveform\_pg} 使用 RedHawk 完整 P/G 波形；\texttt{effVDD} 使用多周期有效 Vdd 简化；\texttt{eff\_pg} 使用有效 P/G 电压。批处理模式每次仅可指定单个 \texttt{clk\_src} 与 \texttt{leaf\_inst\_pin}。
+

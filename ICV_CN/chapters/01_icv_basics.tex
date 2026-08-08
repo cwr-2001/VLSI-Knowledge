@@ -1,0 +1,553 @@
+% 第 1 章 IC Validator Basics（前半：设计流程 + 命令行选项）
+% 后半（Compiler Directives 起）由 scripts/ch1_part2.tex 合并
+\bichapter{IC Validator 基础}{IC Validator Basics}
+\label{chap:basics}
+
+本章简要概述 IC Validator 物理验证工具，并介绍 IC Validator 命令行选项与分布式处理。
+
+IC Validator 工具基础包括以下各节：
+\begin{itemize}
+  \item 在设计流程中使用 IC Validator 工具
+  \item IC Validator 命令行选项
+  \item 编译器指令（Compiler Directives）
+  \item 退出码（Exit Codes）
+  \item 内联函数（Inlined Functions）
+  \item 分布式处理（Distributed Processing）
+  \item Runset 缓存（Runset Caching）
+  \item 在 Runset 缓存下使用命令行选项
+  \item 层映射（Layer Mapping）
+  \item 使用 PXL Runset 加密
+\end{itemize}
+
+% ============================================================
+\section{在设计流程中使用 IC Validator 工具}
+\subsection*{Using the IC Validator Tool in Your Design Flow}
+
+所有 IC Validator 运行均基于您的 IC Validator runset 执行。可通过命令行执行、借助 VUE 的交互式执行，或从其他 Synopsys 工具（如 StarRC、IC Compiler）中启动 IC Validator。加载 IC Validator 前须设置两个环境变量：
+\begin{itemize}
+  \item 将 \cmd{ICV\_HOME\_DIR} 设为 IC Validator 安装目录
+  \item 将 \cmd{PATH} 设为包含 \cmd{\$ICV\_HOME\_DIR/bin}
+\end{itemize}
+
+要在设计流程中成功运行 IC Validator：
+\begin{itemize}
+  \item 创建并调试 runset 文件。runset 通常包含：
+  \begin{itemize}
+    \item 版图数据库相关信息
+    \item 通用选项
+    \item 层赋值（layer assignments）
+    \item 数据库检查（如 snap、grid 检查）
+    \item 设计规则检查（DRC）、电气规则检查（ERC）、fill 图案，或版图与原理图对照（LVS）
+  \end{itemize}
+  \item 对版图数据库运行 IC Validator DRC 与 ERC，对照设计规则文档验证设计。
+  \item 使用 IC Validator 错误文件或 VUE 审查并调试 DRC/ERC 结果。
+  \item 运行 fill-pattern 生成（含对所填层的基本 DRC 检查）。
+  \item 运行 IC Validator LVS。
+  \item 使用错误文件或 VUE 审查并调试 LVS 结果。
+\end{itemize}
+
+\begin{seeAlsoBox}
+参见附录~A「IC Validator 体系结构」。
+\end{seeAlsoBox}
+
+\subsection{在 IC Compiler 中运行 IC Validator}
+\subsubsection*{Running the IC Validator Tool Within the IC Compiler Tool}
+
+可在 IC Compiler 内部运行 IC Validator，该流程称为 In-Design 物理验证。相关 IC Compiler 命令包括：
+\begin{itemize}
+  \item \cmd{signoff\_drc}：使用晶圆厂认证的 IC Validator DRC runset 执行 DRC。
+  \item \cmd{signoff\_autofix\_drc}：自动 DRC 修复。流程中 IC Validator 会：
+  \begin{itemize}
+    \item 执行签核级 DRC；
+    \item 生成 route guidance，协助路由器做针对性修复；
+    \item 验证路由器完成的修复。
+  \end{itemize}
+  \item \cmd{signoff\_metal\_fill}：以基于图案（foundry-qualified metal-fill runset）或基于 track（技术文件信息）的模式插入金属与 via fill；fill 图形写入 Milkyway 设计的 FILL view。
+  \item \cmd{signoff\_fix\_isolated\_via}：自动修复孤立 via。
+  \item \cmd{report\_metal\_density}：计算金属密度与密度梯度并标注到设计上。
+\end{itemize}
+
+\begin{noteBox}
+在 IC Compiler 中使用前，须确认 IC Validator 能正确解析并运行该 runset。
+\end{noteBox}
+
+\begin{seeAlsoBox}
+详见 SolvNetPlus 上的 \textit{IC Compiler Implementation User Guide}，或 IC Compiler man 页。
+\end{seeAlsoBox}
+
+\subsection{在 IC Compiler II 中运行 IC Validator}
+\subsubsection*{Running the IC Validator Tool Within the IC Compiler II Tool}
+
+可在 IC Compiler II 内部运行 IC Validator（In-Design 物理验证）。相关命令包括：
+\begin{itemize}
+  \item \cmd{signoff\_check\_drc}：使用晶圆厂认证的 IC Validator DRC runset 执行 DRC。
+  \item \cmd{signoff\_fix\_drc}：自动 DRC 修复（签核 DRC、生成 route guidance、验证修复）。
+  \item \cmd{signoff\_create\_metal\_fill}：图案模式或 track 模式插入金属/via fill；fill 写入 ICC2 输入设计的 design view。
+  \item \cmd{signoff\_fix\_isolated\_via}：自动修复孤立 via。
+\end{itemize}
+
+\begin{noteBox}
+在 IC Compiler II 中使用前，须确认 IC Validator 能正确解析并运行该 runset。
+\end{noteBox}
+
+\begin{seeAlsoBox}
+详见 SolvNetPlus 上的 \textit{IC Compiler II Implementation User Guide}，或 ICC2 man 页。
+\end{seeAlsoBox}
+
+\subsection{与 StarRC 寄生参数提取配合}
+\subsubsection*{Running the IC Validator Tool With StarRC Parasitic Extraction}
+
+可在 IC Validator runset 中用下列函数生成供 StarRC 使用的数据：
+\begin{itemize}
+  \item 寄生提取（PEX）层映射函数：
+  \begin{itemize}
+    \item \cmd{pex\_conducting\_layer\_map()}
+    \item \cmd{pex\_via\_layer\_map()}
+    \item \cmd{pex\_marker\_layer\_map()}
+    \item \cmd{pex\_remove\_layer\_map()}
+    \item \cmd{pex\_viewonly\_layer\_map()}
+    \item \cmd{pex\_ignore\_cap\_layer\_map()}
+  \end{itemize}
+  这些函数将 IC Validator 的 \cmd{polygon\_layer} 对象映射到 StarRC \cmd{TCAD\_GRD\_FILE} 层，以生成层映射文件。
+  \item 生成连通版图数据库及映射文件：\cmd{pex\_generate\_results()}
+\end{itemize}
+
+表~\ref{tab:icv-starrc-lvs} 列出了 IC Validator–StarRC 流程中不支持的 LVS 设置（应设为 \cmd{false}）。
+
+\begin{table}[htbp]
+\centering
+\caption{IC Validator–StarRC 流程中不支持的 LVS 设置}
+\label{tab:icv-starrc-lvs}
+\begin{tabularx}{\textwidth}{@{}Xcc@{}}
+\toprule
+不支持的设置 & 参数默认值 & 建议设置 \\
+\midrule
+\cmd{compare(memory\_array\_compare=true)} & true & false \\
+\cmd{merge\_series(multiple\_paths=true)} & false & false \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{seeAlsoBox}
+PEX 函数的详细语法与用法见 \textit{IC Validator Reference Manual}。
+\end{seeAlsoBox}
+
+\subsection{从 Custom Compiler 平台运行}
+\subsubsection*{Running the IC Validator Tool From the Custom Compiler Platform}
+
+可从 Custom Compiler 的 Verification 菜单或命令行运行 IC Validator 的 DRC 与 LVS。更多信息见 SolvNetPlus 上的 Custom Compiler 文档。
+
+\subsubsection{设置并运行 DRC}
+\paragraph*{Setting Up and Running DRC}
+
+在 Custom Compiler 中：
+\begin{enumerate}
+  \item 在 Layout 窗口选择 \textbf{Verification $>$ DRC $>$ Setup and Run}。
+  \item 选择 IC Validator 并指定所需运行参数。
+  \item 点击 \textbf{Apply} 或 \textbf{OK} 运行。
+\end{enumerate}
+
+\begin{noteBox}
+勾选 \textbf{View Output} 可打开 Custom Compiler Text Viewer，以标签页查看 runset、结果、错误与运行日志。
+\end{noteBox}
+
+若参数已在 Setup and Run 中设好，可选 \textbf{Verification $>$ DRC $>$ Run}。
+
+启动 VUE 调试：
+\begin{itemize}
+  \item 运行后：\textbf{Verification $>$ DRC $>$ Debug}
+  \item 若 Setup 未设为 ICV：先执行 \cmd{db::setPrefValue xtDRCTool -value icv}，再选 Debug
+\end{itemize}
+
+打开 Text Viewer（访问 runset、\cmd{cell.RESULTS}、\cmd{cell.LAYOUT\_ERRORS}、\cmd{stdout.drc.log}）：
+\textbf{Verification $>$ DRC $>$ View Output}。
+
+\subsubsection{设置并运行 LVS}
+\paragraph*{Setting Up and Running LVS}
+
+\begin{enumerate}
+  \item 在 Layout 或 Schematic 窗口选择 \textbf{Verification $>$ LVS $>$ Setup and Run}。
+  \item 选择 IC Validator 并指定参数。
+  \item 点击 \textbf{Apply} 或 \textbf{OK}。
+\end{enumerate}
+
+\begin{noteBox}
+勾选 \textbf{View Output} 可在 Text Viewer 中查看 runset、结果、错误与日志。
+\end{noteBox}
+
+参数已设好时选 \textbf{Verification $>$ LVS $>$ Run}。
+
+VUE：\textbf{Verification $>$ LVS $>$ Debug}；若 Setup 未设为 ICV，先 \cmd{db::setPrefValue xtLVSTool -value icv}。
+
+Text Viewer（runset、\cmd{cell.RESULTS}、\cmd{cell.LAYOUT\_ERRORS}、\cmd{cell.LVS\_ERRORS}、\cmd{stdout.lvs.log}）：
+\textbf{Verification $>$ LVS $>$ View Output}。
+
+% ============================================================
+\section{IC Validator 命令行选项}
+\subsection*{IC Validator Command-Line Options}
+
+命令行语法为：
+\begin{lstlisting}
+icv [command-line-options] [runsetfile]
+\end{lstlisting}
+
+其中 \cmd{runsetfile} 是用 PXL 编写的指令集，告知 IC Validator 如何执行检查。多数情况下需要 runset；例外包括比较两个网表，或向运行中的作业添加/移除主机等。
+
+选项按用途分为：Common、Host Configuration、Runset Configuration、DRC、LVS/PERC、Explorer、Input Database、Output、Debug、Optimization Controls、Licensing、General。
+
+\subsection{常用（Common）}
+\subsubsection*{Common}
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash\ttfamily}p{0.28\textwidth} p{0.64\textwidth}@{}}
+\caption{IC Validator 常用命令行选项}\label{tab:icv-cli-common}\\
+\toprule
+\textbf{\textrm{选项}} & \textbf{\textrm{说明}} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{\textrm{选项}} & \textbf{\textrm{说明}} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+runsetfile & IC Validator runset。 \\
+-c cell & 覆盖 \cmd{library()} 的 \cmd{cell} 参数，以及 \cmd{compare()} 的 \cmd{layout\_top\_cell}。用 \cmd{-c "*"} 时可在未指定顶层 cell 的情况下对 OASIS/GDSII 运行：工具在库中查找顶层 cell；若有多个候选则取第一个并在 summary 中告警。勿在下列情形使用 \cmd{-c "*"}：含 \cmd{compare()} 的 LVS runset；在 ASSIGN 段结束前调用 \cmd{get\_top\_cell()}；与 \cmd{-ndg}/\cmd{-C} 合用；设置了 \cmd{incremental\_options()} 的 \cmd{select\_window}/\cmd{exclude\_window}；非 GDSII/OASIS 数据库。 \\
+-f format & 覆盖 \cmd{library()} 中的库格式（GDSII、Milkyway、NDM、OASIS 或 OpenAccess）。 \\
+-vue & 生成 VUE 输出；也可在 \cmd{error\_options()} 中将 \cmd{create\_vue\_output} 设为 \cmd{true}。 \\
+\end{longtable}
+
+\subsection{主机配置（Host Configuration）}
+\subsubsection*{Host Configuration}
+
+用于指定主机、CPU、内存与磁盘用法。
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash\ttfamily}p{0.32\textwidth} p{0.60\textwidth}@{}}
+\caption{IC Validator 主机配置命令行选项}\label{tab:icv-cli-host}\\
+\toprule
+\textbf{\textrm{选项}} & \textbf{\textrm{说明}} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{\textrm{选项}} & \textbf{\textrm{说明}} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+-host\_init \ldots & 在单机或多机上启动作业。形式：\cmd{hostname}（用满 CPU）、\cmd{number\_of\_cpus}（本机）、\cmd{hostname:n}、\cmd{LSF}/\cmd{SGE}/\cmd{NB}（从对应环境自动取主机与 CPU）。可多次指定，如 \cmd{-host\_init hosta:8 hostb:8}。详见「指定主机名与 CPU 数」。 \\
+-host\_disk & 为 \cmd{-host\_init}/\cmd{-host\_add} 指定的主机指定本地 group 目录。本地盘写满后改用 \cmd{run\_details} 的网络路径。默认 \cmd{write\_vue\_info} 不使用该目录；可设环境变量 \cmd{\_ICV\_NI\_USE\_HOST\_DISK} 覆盖。 \\
+-host\_login & 登录远程主机以启动分布式进程；默认 \cmd{rsh}。例：\cmd{icv -host\_login ssh}。\cmd{-host\_init/-host\_add LSF|SGE|NB} 会覆盖默认，但显式 \cmd{-host\_login} 优先。 \\
+-host\_memory M|G|T & 通过重调度与线程化尽量维持目标内存；不能用于降低单条命令内存。上限为机器物理内存。未指定时不设内存目标；\cmd{-host\_add} 不继承主作业内存设置。 \\
+-host\_add \ldots & 向已运行作业添加主机；用法同 \cmd{-host\_init}。默认单次仅支持单主机 grid 请求。 \\
+-host\_remove list & 从作业中移除所列主机并关闭相关进程（经预留系统获取的主机可释放）。 \\
+-host\_thread\_mode & \cmd{SMT}：使用 SMT CPU；或 \cmd{<value>}（0--100）：专用于线程化的 CPU 百分比。两者同时给出时先评估 SMT。 \\
+-host\_elastic\_cpu\_shutoff & 运行中作业的最大核数，默认 2000。 \\
+-host\_elastic cmd & 自动增删主机；\cmd{cmd} 须能调用 \cmd{icv -host\_add}。可在启动时或对运行中作业指定。 \\
+-i name & 覆盖 \cmd{library()} 的 \cmd{library\_name}/\cmd{merge\_libraries}。多个 \cmd{-i} 时第一个替换主库名，后续构成 merge 库；格式同主库，无层映射。 \\
+-container & 在容器中运行 IC Validator。见 Synopsys Containers / Installation Guide。 \\
+-filecache & 将部分文件存于内存以减少磁盘占用。 \\
+\end{longtable}
+
+\subsection{Runset 配置}
+\subsubsection*{Runset Configuration}
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash\ttfamily}p{0.28\textwidth} p{0.64\textwidth}@{}}
+\caption{IC Validator Runset 配置命令行选项}\label{tab:icv-cli-runset}\\
+\toprule
+\textbf{\textrm{选项}} & \textbf{\textrm{说明}} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{\textrm{选项}} & \textbf{\textrm{说明}} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+-D name[=value] & 定义符号名，可选值，默认 1。传字符串时注意 shell 勿剥掉引号，或写入 clf。 \\
+-U name & 取消先前由 \cmd{-D} 定义的符号名。 \\
+-I directory & 预处理器 include 目录；每次一个路径，可多次指定，顺序有关。先搜当前目录再搜 include。非安装目录下须用绝对路径。 \\
+-clf file & 从文本文件加入命令行选项（自左向右替换）。文件内容不经 shell 做通配/续行处理；以 \cmd{\$} 开头的变量会按环境变量展开。可多次指定。 \\
+-append\_runset & 将额外 runset 文件追加到主 runset 末尾。 \\
+-runset\_config file & 指定配置文件以更改 options/compare 相关函数：options 类函数视作插在 options 末与 assigns 起之间；compare 相关视作插在 \cmd{compare()} 之前（\cmd{compare()} 本身由配置内容修改）。一般不支持变量。 \\
+-cache-only & 仅为 runset 在本地缓存目录生成缓存文件，不经引擎运行。 \\
+-ece & 向 shell 报告额外错误码。见「退出码」。 \\
+-norscache & 禁用 runset 缓存。 \\
+\end{longtable}
+
+\subsection{DRC 相关选项}
+\subsubsection*{DRC}
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash\ttfamily}p{0.30\textwidth} p{0.62\textwidth}@{}}
+\caption{IC Validator DRC 命令行选项}\label{tab:icv-cli-drc}\\
+\toprule
+\textbf{\textrm{选项}} & \textbf{\textrm{说明}} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{\textrm{选项}} & \textbf{\textrm{说明}} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+-svc / -uvc comment & 按 violation comment 选择/抑制。 \\
+-svn / -uvn name & 按 violation name 选择/抑制。 \\
+-sfn / -ufn function & 按函数名选择/抑制。参数可含 \cmd{*} 与 \cmd{[ ]} 范围；含通配须加引号。各类别最终取「选中且未抑制」的交集；缺省选择但有抑制则选其余；两者皆无则全选。最终为空则报错退出。 \\
+-smu & 将 comment/name/function 三类匹配列表改为并集（默认交集）。 \\
+-bct option & 阻断指定命令输出的前向数据流：\cmd{extent}/\cmd{connect}/\cmd{both}/\cmd{none}（默认）。须与 \cmd{-il} 或 \cmd{-iln} 合用；所选命令本身不被阻断。 \\
+-il "layers" & 按层名定义按层增量运行的增量层；引号内空格分隔。匹配 ASSIGN 中 assign 的 name（或左侧赋值名）。未找到任一指定层则报错退出。 \\
+-iln "\ldots" & 按层号（及 datatype）定义增量层，支持范围与逗号语法。 \\
+-dv\_trace\_error\_nets & 自动启用 delta voltage net tracing（在 runset 末插入调用；若已有则忽略）。 \\
+-idrc\_f / -idrc\_i / -idrc\_c & 自动增量 DRC：基线版图格式、路径、顶层 cell。 \\
+\end{longtable}
+
+\subsection{LVS / PERC 相关选项}
+\subsubsection*{LVS / PERC}
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash\ttfamily}p{0.34\textwidth} p{0.58\textwidth}@{}}
+\caption{IC Validator LVS/PERC 命令行选项}\label{tab:icv-cli-lvs}\\
+\toprule
+\textbf{\textrm{选项}} & \textbf{\textrm{说明}} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{\textrm{选项}} & \textbf{\textrm{说明}} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+-s schematic & 覆盖 \cmd{schematic()} 的 \cmd{schematic\_file}（不覆盖 library file）；须同时用 \cmd{-sf}。 \\
+-sdn device\_names & 仅运行设备名匹配的 device 命令。 \\
+-sf SPICE|VERILOG|ICV & 覆盖原理图网表格式。 \\
+-stc cell & 覆盖原理图顶层 cell（\cmd{compare()}/\cmd{schematic()}）。 \\
+-C & 仅在已有原理图网表与先前生成的版图网表间做比较（不做 DRC/提取）。用于数据未变仅改 compare 设置时重跑。 \\
+-ex & 仅做器件提取，不调用 \cmd{compare()}。 \\
+-ndc & 仅做 EERC 网表域检查：复用已有网表，禁用 polygon/device/compare。 \\
+-nvn & 无 runset 的网表对网表（NVN）流程；命令行上的 runset 不被读取。 \\
+-check\_all\_properties & Compare 自动检查所有已提取属性（忽略 \cmd{check\_property[\_off]()}）。 \\
+-disable\_compare\_device\_settings & 忽略部分或全部 compare device 设置（\cmd{FILTER|MERGE|SHORT|ALL}）。 \\
+-nvn\_netlist\_mode & NVN 模式：\cmd{LVL}（均按 layout 名）或 \cmd{SVS}（均按 schematic 名）。 \\
+-create\_lvs\_short\_output & 创建 VUE 并生成 LVS Short Finder 输出；可限条数或 \cmd{ALL}，默认 200。输出在 \cmd{./run\_details/short\_out\_db}。 \\
+-define\_empty\_cell\_as\_device & 空 cell（X-card）忽略（默认）或识别为 GENDEV（\cmd{NONE|BOTH}）。 \\
+-dhe true|false & 启用/禁用双层次器件提取，覆盖 runset 中 \cmd{init\_device\_matrix(dual\_hierarchy\_extraction=)}。 \\
+-dvp LVS|ALL & 提取全部属性（默认）或仅 LVS compare 所用属性。 \\
+-use\_alternate\_starrc & 在用户指定与默认内嵌 StarRC 版本间切换。 \\
+-e file & 将文件中的 \cmd{equiv\_options()}/\cmd{lvs\_black\_box\_options()} 并入 runset（可累积）。 \\
+-gse true|false & 启用/禁用系统生成的 equivalence cell 配对。 \\
+-inter\_die & 对 2.5D/3D 设计启用 inter-die LVS。 \\
+-ln / -lnf & 覆盖 \cmd{read\_layout\_netlist()} 的文件名/格式（须成对使用）。 \\
+-lvs\_property\_epsilon & 浮点属性比较的 epsilon（如 $10^{-5}/10^{-6}$）。 \\
+-nwl wire\_log\_file & 提供 wireLog 以指导短路解析，覆盖 NetTran 自动生成文件。 \\
+-starrc\_cores n & 自动启动 StarRC 时使用的核数。 \\
+-udn device\_names & 不运行设备名匹配的 device 命令。 \\
+-vueshort [n|ALL] & 提取指定数量或全部 short，默认 200。 \\
+-zn & 压缩由 \cmd{netlist()}/\cmd{write\_spice()} 等及 \cmd{compare()} 生成的网表。 \\
+\end{longtable}
+
+\subsection{Explorer 相关选项}
+\subsubsection*{Explorer}
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash\ttfamily}p{0.36\textwidth} p{0.56\textwidth}@{}}
+\caption{IC Validator Explorer 命令行选项}\label{tab:icv-cli-explorer}\\
+\toprule
+\textbf{\textrm{选项}} & \textbf{\textrm{说明}} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{\textrm{选项}} & \textbf{\textrm{说明}} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+-explorer mode & Explorer：\cmd{standalone}、\cmd{auto[:tier]} 或 \cmd{tiers[:tier]}。见第~6~章。 \\
+-explorer\_lvs & 运行 Explorer LVS。见第~7~章。 \\
+-explorer\_lvs\_layers & 指定检查层：\cmd{METAL|ALL|user\_custom\_cell\_list}。 \\
+-explorer\_lvs\_cells & 指定检查 cell：\cmd{AUTO|ALL}。 \\
+-explorer\_lvs\_checks & \cmd{SHORTS} 或 \cmd{ALL}（含 LVS compare）。 \\
+-explorer\_lvs\_preserve\_cells & 保留不被删除/黑盒的 cell。 \\
+-explorer\_lvs\_preserve\_cell\_file & 同上，文件输入（每行一个 cell）。 \\
+-explorer\_lvs\_preserve\_hierarchy\_cells & 保留 equiv\_cells 及其子 equiv\_cells。 \\
+-explorer\_lvs\_preserve\_hierarchy\_cells\_file & 同上，文件输入。 \\
+-explorer\_script & tier~0/1 完成后用于添加资源的脚本。 \\
+-explorer\_tiers\_file & 自定义 Explorer DRC tiers 文件。 \\
+\end{longtable}
+
+\subsection{输入数据库选项}
+\subsubsection*{Input Database}
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash\ttfamily}p{0.32\textwidth} p{0.60\textwidth}@{}}
+\caption{IC Validator 输入数据库命令行选项}\label{tab:icv-cli-input}\\
+\toprule
+\textbf{\textrm{选项}} & \textbf{\textrm{说明}} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{\textrm{选项}} & \textbf{\textrm{说明}} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+-64 & 启用 64~位坐标支持（Elite 许可）。见「对 64 位坐标的支持」。 \\
+-add\_shape\_file & 替换/追加 \cmd{library()} 的 \cmd{add\_shape\_files} 多边形文件列表（可多次）。 \\
+-lf file & 指定层映射文件（runset 层号 $\mapsto$ 库层号）。见「层映射」。 \\
+-m factor & 覆盖 \cmd{library()} 中的 magnification。 \\
+-ml filename & 插入 \cmd{format\_merge\_library\_options()}（覆盖 runset 中同类调用）。 \\
+-p library\_path & 覆盖 \cmd{library()} 的库路径。 \\
+-rsi "info,..." & 报告输入库信息（仅 GDSII/OASIS）；覆盖 \cmd{run\_options()} 中对应设置。 \\
+-small\_cell & 强制 small cell 模式以尽快运行小设计；过大则报错退出。 \\
+-sub\_cell & 在大型 OASIS 中仅跑小子单元，避免读全库。 \\
+-milkyway\_version & 打印当前版本支持的 Milkyway schema。 \\
+-mw\_default\_layers & 定义若已着色仍按未着色映射的 MW 层号。 \\
+-ndm\_version & 打印支持的 NDM schema。 \\
+-ndm\_default\_layers & 类似 ICC2 \cmd{write\_gds -write\_default\_layers}：着色层亦作 default 层再读一次。 \\
+-ndm\_design\_label & 输入 NDM 库的 design label。 \\
+-ndm\_exclude\_layers & 排除的 NDM 技术层名（逗号分隔，支持通配）。 \\
+-ndm\_layer\_map\_format & \cmd{icc2|icc\_default|icc\_extended}；Milkyway 格式层映射文件时须指定。 \\
+-ndm\_multiple\_rules\_per\_layer & NDM 层映射映射到文件中所有目标。 \\
+-ndm\_shape\_use\_for\_pg\_mesh & 映射为 \cmd{pg\_mesh} 的 shape use 列表；默认 \texttt{"ring stripe"}。 \\
+-oa\_version & 打印 OpenAccess 动态库版本。 \\
+-oa\_cell\_map & 覆盖 \cmd{openaccess\_options()} 的 cell 映射文件。 \\
+-oa\_color\_mapping & OA 颜色层映射策略：\cmd{ignore|strict|full|compatibility|lockOnly}。 \\
+-oa\_dm6 & 使用兼容 DM6 插件的 OA 共享库（默认）。 \\
+-oa\_layer\_map & 覆盖 OA 层映射文件。 \\
+-oa\_object\_map & 覆盖 object 映射文件。 \\
+-oa\_lib\_defs & 覆盖 OA library definition 文件。 \\
+-oa\_view & 覆盖 view 名。 \\
+\end{longtable}
+
+\subsection{输出选项}
+\subsubsection*{Output}
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash\ttfamily}p{0.28\textwidth} p{0.64\textwidth}@{}}
+\caption{IC Validator 输出命令行选项}\label{tab:icv-cli-output}\\
+\toprule
+\textbf{\textrm{选项}} & \textbf{\textrm{说明}} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{\textrm{选项}} & \textbf{\textrm{说明}} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+-g group\_path & 覆盖 \cmd{run\_options} 的 group 路径；不可为 \cmd{.}；多次时取最后一次。须对所有主机可见。 \\
+-rd path & 覆盖 \cmd{run\_details} 路径；不可为 \cmd{.}。 \\
+-w path & 重定义当前工作目录。 \\
+-email dashboard & 每当 \cmd{icv.log} 进度更新时通过 ICV Dashboard 发邮件。 \\
+-progress\_script & 进度更新时运行指定脚本。 \\
+-cpydb name path & 追加错误分类数据库。 \\
+-elpc n|ERROR\_LIMIT\_MAX & 每条检查的错误上限，默认 100。 \\
+-slpc true|false & 启用/禁用每检查停止上限，覆盖 \cmd{error\_options(stop\_check\_at\_error\_limit=)}。 \\
+-ep prefix & 覆盖 write 函数中错误 cell 名的前缀。 \\
+-hm & 生成 violation heat map（必要时触发与 \cmd{error\_limit\_per\_check} 相同整数的 sampling）。 \\
+-hm\_cell cell\_name & 另对匹配的 cell（及顶层）生成 heat map；须同时提供 \cmd{-hm}。若 cell 因性能优化被 explode 则不生成。 \\
+-ned & 覆盖 \cmd{error\_options()} 的 \cmd{report\_error\_details}：不向 LAYOUT\_ERRORS/TOP\_LAYOUT\_ERRORS 写违例细节（仍存 PYDB，文件仅写摘要）。 \\
+-errdm\_file file & 将运行中发现的全部违例写入可供 Fusion Compiler error browser 导入的文件。 \\
+-errdm\_hierarchy & 写 FC 错误时下层 cell 错误的处理：\cmd{INST}（默认，各错误一例映射到顶层）或 \cmd{TOP}（仅顶层违例）。 \\
+-errdm\_resolution & FC 错误文件分辨率（微米）；当 NDM 设计分辨率非默认 0.0001 时必需。 \\
+\end{longtable}
+
+\subsection{调试选项（Debug）}
+\subsubsection*{Debug}
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash\ttfamily}p{0.30\textwidth} p{0.62\textwidth}@{}}
+\caption{IC Validator 调试命令行选项}\label{tab:icv-cli-debug}\\
+\toprule
+\textbf{\textrm{选项}} & \textbf{\textrm{说明}} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{\textrm{选项}} & \textbf{\textrm{说明}} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+-cpp outputfile & 读入 runset，写出经预处理器完全展开的版本后立即退出（宏/include 展开，注释去除，加密段保留）。 \\
+-pcr output\_file & 写出经编译检查、函数内联与循环展开后的 PXL；可用 violation 选择、run-only 或 \cmd{-il}/\cmd{-iln} 剪裁。 \\
+-ro & 启用 run-only 处理。见「仅运行执行」。 \\
+-rofl file:line & 按文件与行号选择 run-only 命令。 \\
+-verbose & 运行中向屏幕打印各命令输出（同 summary 信息，但按处理顺序而非 runset 顺序）。默认值 3。 \\
+-vfn name|ALL & 在 summary（及 \cmd{-verbose} 时屏幕）报告指定或全部函数的求值参数。 \\
+-layer\_debugger & 无需 VUE 即存储 layer debugger 输出；同时启用 VUE 输出，且按 comment/name/function/run-only 的并集做选择。 \\
+-debug & 使用 IC Validator PXL Debugger。 \\
+-debug\_source file & 调试器命令文件。见附录~D。 \\
+\end{longtable}
+
+\subsection{优化控制}
+\subsubsection*{Optimization Controls}
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash\ttfamily}p{0.30\textwidth} p{0.62\textwidth}@{}}
+\caption{IC Validator 优化控制命令行选项}\label{tab:icv-cli-opt}\\
+\toprule
+\textbf{\textrm{选项}} & \textbf{\textrm{说明}} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{\textrm{选项}} & \textbf{\textrm{说明}} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+-ndg & 精简流程：跳过部分编译、依赖生成与依赖优化；不能分布式，函数在单机顺序执行。适合小 cell。调用内联 runset 函数的用户函数须带 \cmd{inline}；不可与双层次提取合用。 \\
+-nro & 关闭 runset 优化。 \\
+-pec KEEP|EXPLODE & 覆盖 \cmd{error\_options()} 的 \cmd{partially\_exploded\_cells}。 \\
+-prune\_assign & 仅读取/创建所需 runset 层。见「层剪枝」。 \\
+-rfc & 减少后端 fill 压缩中的 fill cell 创建。 \\
+-prioritize\_file\_line & 按文件与行号优先调度。 \\
+-prioritize\_violation\_comment & 按 violation comment 优先调度。 \\
+\end{longtable}
+
+\subsection{许可选项}
+\subsubsection*{Licensing}
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash\ttfamily}p{0.32\textwidth} p{0.60\textwidth}@{}}
+\caption{IC Validator 许可命令行选项}\label{tab:icv-cli-lic}\\
+\toprule
+\textbf{\textrm{选项}} & \textbf{\textrm{说明}} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{\textrm{选项}} & \textbf{\textrm{说明}} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+-lic\_token2023 & 强制基于 token 的许可方案。 \\
+-lic\_apex & 强制 Apex 许可。 \\
+-lic\_base & 强制 Base 许可。 \\
+-lic\_elite & 强制 Elite 许可。 \\
+-license\_mode & 多核许可不足时行为：\cmd{run\_available|run\_and\_add|exit|exit\_and\_retry}，默认 \cmd{run\_and\_add}。 \\
+-license\_wait\_duration & 等待许可的最长时间，默认 0（单位 \cmd{d|h|m|s}）。 \\
+-keys key(s) & 控制环境变量访问的密钥（逗号分隔、无空格）。 \\
+-nlc & 关闭许可缓存。 \\
+\end{longtable}
+
+\subsection{通用选项}
+\subsubsection*{General}
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash\ttfamily}p{0.28\textwidth} p{0.64\textwidth}@{}}
+\caption{IC Validator 通用命令行选项}\label{tab:icv-cli-gen}\\
+\toprule
+\textbf{\textrm{选项}} & \textbf{\textrm{说明}} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{\textrm{选项}} & \textbf{\textrm{说明}} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+-exit & 终止运行中的进程并给出部分结果；允许工具先清理。RESULTS 等文件会带退出横幅。 \\
+-copilot & 执行 Knowledge Assistant System。 \\
+-time\_limit hours & 到达用户指定时限后带部分结果退出。 \\
+-usage & 显示用法信息并退出。 \\
+-flat & 启用扁平化运行，等效于在 runset 中加入 \cmd{hierarchy\_options(flatten=\{"*"\})}。 \\
+-recipe & 从 recipe 文件加入 recipe，格式如 \cmd{-recipe "/path/to/recipe:recipe name"}。 \\
+-V & 打印程序版本。 \\
+-Version & 打印各组件及 Synopsys 软件库版本号。 \\
+\end{longtable}
+
+\begin{seeAlsoBox}
+命令行选项与后文「编译器指令」「Runset 缓存」「层映射」等交叉引用；完整细节亦见原书 Table~2--13。
+\end{seeAlsoBox}
+
+% ---- 第 1 章后半（Compiler Directives 至章末）----
+\input{scripts/ch1_part2}

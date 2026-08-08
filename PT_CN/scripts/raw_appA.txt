@@ -1,0 +1,818 @@
+                                                                                        Feedback
+
+
+
+
+A
+Deprecated Features
+     The following features are currently deprecated and will be obsoleted in a future release:
+     •   HyperScale Distributed Analysis
+     •   Legacy Path-Based SMVA
+
+
+HyperScale Distributed Analysis
+     The documentation sections for this feature are:
+     •   From Full-Chip Flat to HyperScale Distributed Analysis
+     •   Flat-Like Top-Level Reporting Using Restored Sessions
+     •   From Distributed Analysis to Block-Level Analysis
+     •   MIM Merging in Distributed HyperScale Analysis
+     •   HyperScale Attributes
+
+
+     From Full-Chip Flat to HyperScale Distributed Analysis
+     If you have an existing script that performs full-chip flat analysis, you can easily reuse the
+     same script to perform HyperScale hierarchical analysis. You only need to add a few lines
+     to enable hierarchical analysis and specify the hosts.
+     The PrimeTime tool automatically runs a separate analysis for each lower-level block,
+     generates a HyperScale model of each block, and runs a top-level analysis using the
+     generated models. This method is called HyperScale distributed analysis.
+     Here is an example. The lines in boldface are added to the full-chip flat analysis script.
+     # Enable hierarchical analysis
+     set_app_var hier_enable_distributed_analysis true
+
+     # Set working directory for analysis data
+     set_app_var hier_distributed_working_directory $nfs_dir
+
+     # Optional: override default distributed hierarchical partitioning
+     set_hier_config ...
+
+
+PrimeTime® User Guide                                                                             1291
+T-2022.03
+                                                                                           Feedback
+Appendix A: Deprecated Features
+HyperScale Distributed Analysis
+
+
+
+     # Specify hosts for distributed analysis
+     set_host_options -num_processes $nProc1 -max_cores $mCore1 \
+      -submit_command "..."
+     set_host_options -num_processes $nProc2 -max_cores $mCore2 \
+      -submit_command "..."
+     ...
+     start_hosts
+
+     # Run full-chip flat analysis script
+         read_verilog blk_A.v
+         read_verilog blk_B.v
+         read_verilog top.v
+         link_design TOP
+         ...
+         update_timing
+         ...
+
+     # Flat-like reporting from top level
+     report_timing -path_type full_clock_expanded \
+      -from IN1 -to U2/reg78 ...
+
+     When hierarchical analysis is enabled (when the hier_enable_distributed_analysis
+     or hier_enable_analysis variable is set to true), one PrimeTime-ADV license is
+     required for each 32 cores requested for analysis. You need to set up the hosts and set
+     the hierarchical configuration before design linking. The tool automatically assigns the
+     lower-level blocks for execution on the available hosts.
+     The block-level Verilog netlist and parasitic data are not needed for any blocks (or sub-
+     blocks inside) represented as HyperScale block models. However, if your existing script
+     performs top-level full-flat timing analysis by reading in all the top-level and block-level full
+     Verilog netlists and parasitics, you can still keep your original script. There is no need to
+     remove the commands that read in the block-level Verilog and parasitics.
+     After you enable the distributed analysis flow (set hier_enable_distributed_analysis
+     true) and properly set the HyperScale configuration (use set_hier_config), the tool
+     automatically links with the HyperScale model data and does not link the full block-
+     level Verilog, even if read. It also automatically loads the reduced parasitics from the
+     HyperScale data and skips reading the full block-level parasitics, even if directed to do so
+     by the script.
+     However, to further improve the runtime and memory usage, you can remove the
+     commands in the script that read in the block-level Verilog.
+     Default Partitioning for Distributed Analysis
+     By default, the distributed analysis method puts each block at the top level into its own
+     partition, as shown in the following example.
+
+
+
+
+PrimeTime® User Guide                                                                             1292
+T-2022.03
+                                                                                     Feedback
+Appendix A: Deprecated Features
+HyperScale Distributed Analysis
+
+
+Figure 458      Default Partitioning in Distributed Analysis
+
+         Top                                                           HyperScale analysis:
+                        blkB                                           1 top-level run
+                                                         blkD          6 lower-level runs
+          blkA               U2           blkC
+             U1         blkB
+                             U3
+                                            U5
+                        blkB
+                                                                U6
+                             U4                                           blkD
+
+                                                                            blkE
+                                                                blkC
+         blkA
+                      blkB        blkB           blkB
+                         U2          U3             U4
+
+
+
+     Overriding the Default Partitioning in Distributed Analysis
+     To override the default partitioning, use the set_hier_config command. For example,
+     set_hier_config \
+       -enable_mim \               # Merge context for MIM blocks
+       -exclude {U1} \             # Keep U1 (blkA) with top level
+       -split {U6}                 # Split U6 (blkD) one level down
+
+     The following diagram shows the resulting changes to the design partitioning.
+
+
+
+
+PrimeTime® User Guide                                                                         1293
+T-2022.03
+                                                                                      Feedback
+Appendix A: Deprecated Features
+HyperScale Distributed Analysis
+
+
+Figure 459      User-Directed Distributed Analysis Partitioning Example 1
+
+        Top                                                             HyperScale analysis:
+                       blkB                                             1 top-level run
+                          U2                       blkD                 3 lower-level runs
+         blkA                        blkC
+             U1        blkB                          blkE
+                          U3                           U6/U7
+                                        U5                                  blkE
+                       blkB
+                                                          U6
+                          U4
+
+
+       MIM blocks:
+       merged constraints            blkC
+                                                   set_hier_config \
+                                                    -exclude {U1} \
+                       blkB                         -enable_mim \
+                                                    -split {U6}
+
+
+
+     To assign only certain large blocks for separate analysis and keep all other blocks at the
+     top level, use the set_hier_config command with the -partitions option. For example,
+     set_hier_config \
+       -partitions {U5 U6}            # Analyze only U5 and U6 as separate blocks
+
+     The following diagram shows the resulting changes to the design partitioning.
+
+
+
+
+PrimeTime® User Guide                                                                          1294
+T-2022.03
+                                                                                    Feedback
+Appendix A: Deprecated Features
+HyperScale Distributed Analysis
+
+
+Figure 460      User-Directed Partitioning Example 2
+
+        Top                                                          HyperScale analysis:
+                      blkB                                           1 top-level run
+                                                  blkD               2 lower-level runs
+         blkA             U2         blkC
+             U1       blkB
+                                                                          blkD
+                          U3
+                                       U5
+                      blkB                                                   blkE
+                                                         U6
+                          U4
+
+
+                                     blkC
+                                                  set_hier_config \
+                                                   -partitions {U5 U6}
+
+
+
+
+     You cannot use the -partitions option with the -exclude or -split option. However,
+     you can use the -partitions option with the -enable_mim option to selectively partition a
+     subset of the multiply instantiated modules, as shown in the following example.
+
+Figure 461      User-Directed Partitioning Example 3
+
+        Top                                                          HyperScale analysis:
+                      blkB                                           1 top-level run
+                                                  blkD               3 lower-level runs
+         blkA             U2         blkC
+             U1       blkB
+                                                                          blkD
+                          U3
+                                       U5
+                      blkB                                                   blkE
+                                                         U6
+                          U4
+
+
+       MIM blocks:
+       merged constraints            blkC
+                                                  set_hier_config \
+                                                   -enable_mim \
+                      blkB                         -partitions {U3 U4 U5 U6}
+
+
+
+
+PrimeTime® User Guide                                                                       1295
+T-2022.03
+                                                                                        Feedback
+Appendix A: Deprecated Features
+HyperScale Distributed Analysis
+
+
+     Host Resource Affinity
+     You can explicitly assign larger blocks to the hosts with more CPU and memory resources
+     by using the set_host_options and set_hier_config commands. For example, the
+     following commands define the host resources and analyze block instances P1, P2, and
+     P3 as HyperScale blocks using the specified resources.
+     set_host_options -name RA -num_processes 1 -max_cores 2 ... host1
+     set_host_options -name RB -num_processes 1 -max_cores 1 ... host2
+     set_host_options -name RC -num_processes 1 -max_cores 1 ... host3
+     start_hosts
+     report_host_usage -verbose
+      ...
+     set_hier_config -partitions {P1 P2} -affinity {RA RB} ...
+     set_hier_config -partitions {P3} -affinity {RC} ...
+      ...
+
+     The tool assigns partitions P1 and P2 for analysis on resources RA and RB, and partition
+     P3 for analysis on resource RC. The larger of partition P1 or P2 (based on number of
+     cells) is analyzed on the larger of resources RA and RB (based on allocated memory).
+     Attribute Access in Lower-Level Blocks
+     In distributed analysis, when you query timing attributes of objects in lower-level blocks,
+     the response can take some time because the attributes are not immediately available
+     from the top level. For faster response, you can gather the attribute data in a cache.
+     For example, the following script efficiently gathers and uses slack attribute data from
+     hierarchical pins:
+     cache_distributed_attribute_data -class pin \
+       -attributes {min_rise_slack max_rise_slack}
+
+     set mypins [get_pins -hierarchical *]
+     foreach_in_collection pin $mypins {
+       set slack1 [get_attribute $mypins min_rise_slack]
+       set slack2 [get_attribute $mypins max_rise_slack]
+       ...
+     }
+
+     To remove the cached attribute data:
+     purge_distributed_attribute_data -class pin \
+       -attributes {min_rise_slack max_rise_slack}
+
+     Distributed Analysis Top-Only Analysis Flow
+     The top-only distributed analysis flow reduces compute resource usage when you are
+     interested in timing results only for the top level. To choose this flow:
+     pt_shell> set_hier_config -enable_top_only_flow ...
+
+
+
+
+PrimeTime® User Guide                                                                           1296
+T-2022.03
+                                                                                       Feedback
+Appendix A: Deprecated Features
+HyperScale Distributed Analysis
+
+
+     In this flow, HyperScale distributed analysis works only on the top-level part of the design.
+     Timing reports are available only for “active objects,” which are the ports, cells, nets,
+     and pins of the top design. To find out whether an object is active, query its is_active
+     attribute from the distributed analysis manager:
+     pt_shell> get_attribute [get_pins U123/ZN] is_active
+     true
+
+     In the top-only distributed analysis flow, the tool releases compute resources for block
+     partitions after a timing update, which prevents further timing updates. To retain the
+     compute resources after timing updates in the top-only mode, set the following variable:
+     pt_shell> set hier_enable_release_resources_in_top_only_flow false
+
+
+     Flat-Like Top-Level Reporting Using Restored Sessions
+     If you have already analyzed the block-level and top-level timing in HyperScale analysis
+     sessions, you can restore the sessions into a new top-level session and report timing
+     paths from that level, including timing paths that cross hierarchical boundaries. You can do
+     this without incurring the cost of another top-level analysis.
+     For example, suppose that you previously ran separate HyperScale analyses for blkA,
+     blkB, and the top level:
+     ---------------------------------
+     # Analysis session for block blkA
+     ...
+     read_context $topDir
+     ...
+     save_session $blkAsession
+
+     ---------------------------------
+     # Analysis session for block blkB
+     ...
+     read_context $topDir
+     ...
+     save_session $blkBsession
+
+     ---------------------------------
+     # Analysis session for top level
+     ...
+     save_session $topSession
+
+     To restore these sessions and generate timing reports from the top level, do the following:
+     ...
+     set_app_var hier_enable_analysis true
+
+     # Read existing HyperScale session data
+     set_hier_config -session -block blkA -path $blkAsession
+
+
+
+PrimeTime® User Guide                                                                         1297
+T-2022.03
+                                                                                      Feedback
+Appendix A: Deprecated Features
+HyperScale Distributed Analysis
+
+
+     set_hier_config -session -block blkB -path $blkBsession
+     set_hier_config -session -top -path $topSession
+
+     # Generate full-chip timing report and noise report
+     report_timing -path_type full_clock_expanded -from IN1 -to BLKA/reg2 ...
+     report_noise ...
+     report_constraint ...
+     report_analysis_coverage ...
+     report_qor ...
+
+     After you restore the block-level and top-level sessions, timing reporting works the same
+     as in a HyperScale distributed analysis session.
+
+
+     From Distributed Analysis to Block-Level Analysis
+     The HyperScale distributed analysis method automatically runs block-level analysis for
+     each block in the background. After you run a HyperScale distributed analysis, you can
+     easily rerun block-level analysis using the automatically saved block-level session data.
+     For example, suppose that you have already ran a distributed analysis:
+     set_app_var hier_enable_distributed_analysis true
+     set_app_var hier_distributed_working_directory $nfs_dir
+     set_host_options -num_processes $nProc1 -max_cores $mCore1 \
+      -submit_command "..."
+     set_host_options -num_processes $nProc2 -max_cores $mCore2 \
+      -submit_command "..."
+     ...
+     start_hosts
+
+     # Run full-chip flat analysis script
+         read_verilog ...
+         ...
+         update_timing
+         ...
+     save_session $DH_Session
+
+     When you save the distributed analysis session, the tool saves the top-level and block-
+     level data into separate subdirectories. In a new PrimeTime session, you can restore just
+     the session data for one block or just the top level, and separately reanalyze that part of
+     the design.
+     For example,
+     -----------------------------------------
+     # Restore separate session for block blkA
+     set_app_var hier_enable_analysis true
+     restore_session $DH_Session/blkA
+     report_timing ...
+
+
+
+
+PrimeTime® User Guide                                                                        1298
+T-2022.03
+                                                                                     Feedback
+Appendix A: Deprecated Features
+HyperScale Distributed Analysis
+
+
+     -----------------------------------------
+     # Restore separate session for block blkB
+     set_app_var hier_enable_analysis true
+     restore_session $DH_Session/blkB
+     report_timing ...
+
+     -----------------------------------------
+     # Restore separate session for top level
+     set_app_var hier_enable_analysis true
+     restore_session $DH_Session/top
+     report_timing ...
+
+     By default, the restore_session command restores all partitions of the original session.
+     To save time and memory, you can selectively restore only the HyperScale partitions of
+     interest by using the -partitions option of the restore_session command.
+     By default, a restored distributed analysis session uses the same host option settings as
+     the original session, as defined by the original set_host_options commands. However,
+     you can override the original host settings by running the set_host_options command
+     with new settings before the restore_session command. For example,
+     set_host_options -num_processes 2 -max_cores 4 myCore3 ...
+     restore_session -partitions {P2} my_session_dir
+
+     Any usage of the set_host_options command in the current session invalidates all host
+     option settings of the original session.
+
+
+     MIM Merging in Distributed HyperScale Analysis
+     In the full-chip distributed analysis flow, you can perform MIM merging by using the
+     set_hier_config command with the -enable_mim option, as shown in the following
+     example.
+
+
+
+
+PrimeTime® User Guide                                                                       1299
+T-2022.03
+                                                                                         Feedback
+Appendix A: Deprecated Features
+HyperScale Distributed Analysis
+
+
+Figure 462      MIM Merging for All Instances of a Block
+
+                                      set_hier_config -enable_mim
+        Top
+                      blkB
+                                      read_parasitics \
+         blkA            U2            -path {U2 U3 U4} blkB.spef
+
+             U1       blkB                    -or-
+                         U3           read_parasitics \
+                                        -path [all_instances -hierarchy blkB] blkB.spef
+                      blkB
+                         U4                                HyperScale analysis:
+                                       blkB
+                                                           1 top-level run
+                                                           1 lower-level run
+
+
+
+     If the hierarchical context for one block of a MIM set is very different from the rest, you
+     might want to analyze that block with the top level. In that case, you explicitly specify the
+     partitioning by using the set_hier_config command with the -partitions option, as
+     shown in the following example.
+
+Figure 463      MIM Merging for Some Instances of a Block
+
+                                      set_hier_config -enable_mim -partitions {U3 U4}
+        Top
+                      blkB
+                                      read_parasitics \
+         blkA            U2            -path {U2 U3 U4} blkB.spef
+
+             U1       blkB                    -or-
+                         U3           read_parasitics \
+                                        -path [all_instances -hierarchy blkB] blkB.spef
+                      blkB
+                         U4                                HyperScale analysis:
+                                       blkB
+                                                           1 top-level run
+                                                           1 lower-level run
+
+
+
+     In this example, reading parasitics into instance U2 is not required, but to prevent possible
+     errors in a full MIM merging configuration, You should read the parasitics into all instances
+     of a MIM block.
+
+
+
+
+PrimeTime® User Guide                                                                          1300
+T-2022.03
+                                                                                            Feedback
+Appendix A: Deprecated Features
+Legacy Path-Based SMVA
+
+
+
+     HyperScale Attributes
+     Table 78         Cell Object HyperScale Attributes
+
+Cell attribute                 Description
+
+is_active (boolean)            Returns true if the cell is considered an active object in
+                               HyperScale top-only distributed analysis (set_hier_config
+                               -enable_top_only_flow).
+
+
+
+     Table 79         Pin Object HyperScale Attributes
+
+Pin attribute                     Description
+
+is_active (boolean)               Returns true if the pin is considered an active object in
+                                  HyperScale top-only distributed analysis (set_hier_config
+                                  -enable_top_only_flow).
+
+
+
+     Table 80         Port Object HyperScale Attributes
+
+Port attribute                 Description
+
+is_active (boolean)            Returns true if the port is considered an active object in
+                               HyperScale top-only distributed analysis (set_hier_config
+                               -enable_top_only_flow).
+
+
+
+
+Legacy Path-Based SMVA
+     Note:
+         This is the original documentation for the legacy path-based-only SMVA feature,
+         used when the timing_cross_voltage_domain_analysis_mode variable is
+         set to legacy.
+         The current SMVA functionality, documented at SMVA Graph-Based
+         Simultaneous Multivoltage Analysis, supports both PBA and GBA analysis.
+     In multivoltage designs, some timing paths can cross from one power domain to another.
+     When the power domains can operate at multiple supply voltages, PrimeTime needs
+     to consider the worst possible combination of operating voltages for a given path. To
+     ensure that all potential timing violations are detected, the default analysis considers the
+     worst supply voltage for each cell in the timing path. However, this analysis is pessimistic
+     because cells belonging to the same domain cannot operate at different supply voltages at
+     the same time.
+
+
+
+PrimeTime® User Guide                                                                            1301
+T-2022.03
+                                                                                         Feedback
+Appendix A: Deprecated Features
+Legacy Path-Based SMVA
+
+
+     In Figure 464, the timing path from U1/CK to U7/D spans two power domains, P1 and P2.
+     Each domain can operate at either of two voltages, low and high. The delay of each cell is
+     shown next to the cell. The red and blue values represent the delays at the low and high
+     supply voltages, respectively.
+
+Figure 464     Timing Path Through Two Power Domains
+
+          Domain P1 low / high voltage                                  Domain P2 low / high voltage
+                                       3/1
+                                                     3/2                       7/6
+                                   D        Q                                             D        Q
+
+                                                                        timing path
+
+                                       U1                                                     U7
+                        2/1
+                        U2
+                                            4/1                                8/5
+
+                                             U3
+
+
+             slack = (earliest required time) – (latest arrival time)
+                   = ( 1 + 5 ) – ( 2 + 3 + 3 + 7)
+                   = –9
+
+
+     For a setup check, the default analysis considers the longest delays along the data path
+     and shortest delays along the clock path. Therefore, it uses the worst-case delay values
+     shown circled in the figure. The results are pessimistic because, for example, cell U2
+     cannot operate at the low voltage while cell U3 operates at the high voltage. These two
+     cells belong to the same power domain, so they must both operate at either the low or
+     high voltage at any given time.
+     If timing violations are found in this analysis, you could reduce this pessimism by analyzing
+     the design multiple times using every possible combination of fixed supply voltages, for
+     example, with V1/V2 set to low/low, low/high, high/low, and high/high. However, a large
+     number of power domains results in a very large number of voltage combinations. The
+     cost of so many analysis runs can be prohibitive.
+     Simultaneous multivoltage analysis (SMVA) eliminates cross-domain voltage pessimism
+     in a single path-based analysis run, with minimal runtime overhead. Using this strategy,
+     PrimeTime considers the effect of all combinations of low and high voltages for the
+     domains crossed by each path. It does this only for the cross-domain paths, using only
+
+
+
+PrimeTime® User Guide                                                                          1302
+T-2022.03
+                                                                                      Feedback
+Appendix A: Deprecated Features
+Legacy Path-Based SMVA
+
+
+     the allowed combinations of supply voltages for the domains as defined by the UPF
+     commands.
+     Figure 465 shows the path setup timing calculation using simultaneous multivoltage
+     analysis. During path-based analysis, PrimeTime considers the contribution to the setup
+     slack from power domains P1 and P2 separately, and it considers the both the high and
+     low supply voltages for each domain, but without mixing high and low within a given
+     domain.
+
+Figure 465     Simultaneous Multivoltage Slack Calculation
+
+          Domain P1 low / high voltage                             Domain P2 low / high voltage
+                                      3/1
+                                                  3/2                      7/6
+                                  D         Q                                           D        Q
+
+                                                                   Timing path
+
+                                       U1                                                   U7
+                       2/1
+                       U2
+                                            4/1                            8/5
+
+                                            U3
+
+
+             slack = (worst slack contribution from P1)     + (worst slack contribution from P2)
+                   = min [ {4 – (2+3+3)} or {1 – (1+1+2)} ] + min [ {8–7} or {5–6} ]
+                   = min [ –4 or –3]                        + min [ +1 or –1]
+                   = –4 + –1
+                   = –5
+
+
+     In this example, the worst-case slack is found to be –5 rather than the pessimistic value –
+     9 calculated earlier by conventional worst-case timing analysis. The worst combination of
+     supply voltages is low for P1 and high for P2. Note that simultaneous multivoltage analysis
+     is done only during path-based analysis because the worst-case combination of supply
+     voltages can vary from one path to another.
+     To perform simultaneous multivoltage analysis during path-based analysis, set the
+     timing_enable_cross_voltage_domain_analysis variable to true. The default is
+     false, which results in conventional worst-case timing analysis.
+
+     If the variable is set to true, during the next timing update, PrimeTime identifies paths
+     that traverse multiple power domains and subsequently limits the reporting to only those
+
+
+PrimeTime® User Guide                                                                        1303
+T-2022.03
+                                                                                       Feedback
+Appendix A: Deprecated Features
+Legacy Path-Based SMVA
+
+
+     paths. If a path-based analysis is then performed by using the -pba_mode path option of
+     the report_timing command, PrimeTime performs an efficient path-based recalculation
+     of the cross-domain paths. This analysis finds the worst-case voltage, as defined by the
+     set_voltage command and UPF commands, for each domain crossed by each path,
+     while eliminating the pessimism that occurs in standard on-chip variation analysis.
+     During simultaneous multivoltage analysis, the tool performs the following functions:
+     •   Identifies and ignores paths that cross power domains before the CRPR common point,
+         as shown in Figure 466
+
+   Figure 466    Analyzing Only Paths Affected by Domain Crossings
+                                      Analyzed path      Ignored path
+
+                  VDD1                     VDD2
+                          D       Q                          D   Q            D    Q
+
+
+
+
+     •   Identifies reconvergent clock paths, as shown in Figure 467
+
+   Figure 467    Clock Path Reconverges
+                  VDD1
+                              VDD2
+
+
+
+
+                                                      VDD2
+
+
+
+
+PrimeTime® User Guide                                                                        1304
+T-2022.03
+                                                                                      Feedback
+Appendix A: Deprecated Features
+Legacy Path-Based SMVA
+
+
+     •   Improves pessimism reduction for sequential clock networks when the path crosses
+         power domains, as shown in Figure 468
+
+   Figure 468    Sequential Clock Network Crosses Power Domains
+                  VDD1
+                              VDD2
+
+
+
+
+     Simultaneous Multivoltage Analysis Usage Flow
+     During simultaneous multivoltage analysis, by default, the delay of each cell at each
+     voltage level is determined by the existing multivoltage delay calculation methodology of
+     PrimeTime. You get the most accurate results by using CCS libraries with library scaling
+     groups invoked with the define_scaling_lib_group command. If these models are not
+     available, PrimeTime uses the available NLDM models.
+     Simultaneous multivoltage analysis is intended to analyze and report only the timing paths
+     that cross power domain boundaries. Before you use this feature, it is suggested that
+     you follow your usual methodology for fixing within-domain timing paths. During these
+     runs, you can ignore any cross-domain timing paths. After this is complete, execute the
+     simultaneous multivoltage analysis run to comprehensively analyze the cross-domain
+     paths.
+     When libraries with multivoltage characterization data are available, this is the typical
+     usage flow for simultaneous multivoltage analysis of cross-domain paths, after all within-
+     domain violations have been fixed:
+     set search_path
+     set link_path "* mylib_1V.db"
+     read_verilog ...
+     link_design
+     read_parasitics
+     load_upf ...
+     read_sdc ... #includes set_voltage commands
+
+     # Derate margins not including variation due to voltage level settings
+     set_timing_derate -early 0.92
+     set_timing_derate -late 1.08
+     define_scaling_lib_group "mylib_1V.db mylib_0.8V.db \
+                               mylib_1.2V.db mylib 1.4V.db"
+
+     # Invoke accurate multivoltage analysis for cross-domain paths
+     set timing_enable_cross_voltage_domain_analysis true
+
+
+
+PrimeTime® User Guide                                                                       1305
+T-2022.03
+                                                                                      Feedback
+Appendix A: Deprecated Features
+Legacy Path-Based SMVA
+
+
+     # Conservative cross-domain-only timing report
+     report_timing ...
+     # Path-based cross-domain timing report with reduced pessimism
+     report_timing -pba_mode path ...
+
+
+     Analysis Using Cross-Domain Derating
+     If you do not have any reliable library characterization information with respect to
+     voltage variation, you can use cross-domain derating to analyze the effect of different
+     supply voltages. To do this, specify a derating factor adjustment value with the
+     set_cross_voltage_domain_analysis_guardband command. For example:
+     pt_shell> set_cross_voltage_domain_analysis_guardband -late 0.1
+
+     This derating is added to any ordinary derating specified with the set_timing_derate
+     command and advanced on-chip variation (AOCV) analysis invoked with the
+     timing_aocvm_enable_analysis variable. In this example, if the regular late derating
+     factor set by the set_timing_derate command is 1.05, an additional late guard band
+     of 0.1 makes the final late derating factor 1.05 + 0.1 = 1.15. The derating factor of 1.15
+     models the combined timing variation due to on-chip variation effects and varying voltage
+     for timing paths that cross power domains.
+     The additional guard band of 0.1 is intended to model the timing effects of supply
+     voltage variation in the absence of library characterization data for this voltage
+     variation. If you have multivoltage library characterization data, you do not need the
+     set_cross_voltage_domain_analysis_guardband command. However, PrimeTime still
+     accepts the command and applies additional derating if cross-domain analysis is enabled.
+     When you do not have multivoltage library characterization data, this is the typical usage
+     flow for simultaneous multivoltage analysis of cross-domain paths using derating, after all
+     within-domain violations have been fixed:
+     set search_path
+     set link_path
+     read_verilog ...
+     link_design
+     read_parasitics
+     load_upf ...
+     read_sdc #includes set_voltage commands
+
+     # Example margins, not including V_OCV
+     set_timing_derate -early 0.92
+     set_timing_derate -late 1.08
+
+     # Invoke accurate multivoltage analysis for cross-domain paths
+     set timing_enable_cross_voltage_domain_analysis true
+
+     # Specify derating for voltage supply settings, +/- 10%
+     set_cross_voltage_domain_analysis_guardband -early 0.9
+
+
+
+PrimeTime® User Guide                                                                          1306
+T-2022.03
+                                                                     Feedback
+Appendix A: Deprecated Features
+Legacy Path-Based SMVA
+
+
+     set_cross_voltage_domain_analysis_guardband -late 1.1
+
+     # Conservative cross-domain-only timing report with low-high derating
+     report_timing ...
+     # Path-based cross-domain timing report with reduced pessimism
+     report_timing -pba_mode path ...
+
+
+
+
+PrimeTime® User Guide                                                        1307
+T-2022.03
+

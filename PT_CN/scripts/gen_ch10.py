@@ -1,0 +1,420 @@
+# -*- coding: utf-8 -*-
+"""Generate 10_delay_calculation.tex — Chapter 10 Delay Calculation."""
+from pathlib import Path
+import re
+
+from pt_tex_utils import count_cjk, write_tex
+
+OUT = Path(__file__).resolve().parent.parent / "chapters" / "10_delay_calculation.tex"
+
+TEXT = r"""% 第 10 章 Delay Calculation
+\bichapter{延时计算}{Delay Calculation}
+\label{chap:delay}
+
+为准确高效地进行延时计算，PrimeTime 可用模型表示 net 上的驱动器、RC 网络与电容负载。理想模型在驱动器输出与各接收器输入产生与 SPICE 仿真相同的延时与 slew。关于延时计算的不同模型与分析模式，见：
+\begin{itemize}
+  \item 延时计算概述
+  \item 非线性延时模型
+  \item 复合电流源时序模型
+  \item 跨库电压与温度缩放
+  \item 波形传播
+  \item 表征触发电平
+  \item 快速多驱动延时分析
+  \item 并行驱动器缩减
+  \item 多输入开关分析
+  \item 单位延时分析
+\end{itemize}
+
+% ============================================================
+\section{延时计算概述}
+\subsection*{Overview of Delay Calculation}
+
+静态时序分析要求 PrimeTime 准确计算每条时序路径各级的延时与 slew（转换时间）。一级包含驱动单元、单元输出处反标的 RC 网络及网络负载 pin 的电容负载。目标是在给定驱动器输入 slew 或波形下，以最少运行时间计算驱动器输出与网络负载 pin 的响应并得到准确结果。
+
+为准确高效地进行级延时计算，PrimeTime 用模型表示驱动器、RC 网络与电容负载。理想模型在驱动器输出与各接收器输入产生与 SPICE 完全相同的延时与 slew。
+
+\figplaceholder{Figure 104: Models used to calculate stage delays and slews}{用于计算级延时与 slew 的模型}{fig:dc-models}
+
+驱动器模型旨在复现驱动单元底层晶体管电路在任意 RC 网络、给定输入 slew 下的响应。降阶网络模型是完整反标网络的简化表示，响应特性接近原网络；PrimeTime 用 Arnoldi 降阶法创建。接收器模型表示单元输入 pin 的复杂输入电容特性，包括上升/下降跳变、slew、接收器输出负载、单元状态及电压温度条件。
+
+指定 RC 延时计算的驱动器与接收器模型类型，将 \cmd{rc\_driver\_model\_mode} 与 \cmd{rc\_receiver\_model\_mode} 设为：
+\begin{itemize}
+  \item \texttt{basic}：使用库中基本非线性延时模型（NLDM）
+  \item \texttt{advanced}（默认）：使用更先进的复合电流源（CCS）时序模型（若库中有 CCS 数据）；否则用 NLDM
+\end{itemize}
+
+高级 CCS 时序模型有多项优势，包括解决 RC-009 警告（驱动电阻远小于网络对地阻抗）。CCS 也更善于处理 Miller 效应、动态 IR 压降与多电压分析。
+
+% ============================================================
+\section{非线性延时模型}
+\subsection*{Nonlinear Delay Models}
+
+非线性延时模型（NLDM）是表示路径级驱动器与接收器的较早、成熟方法。驱动模型使用串联电阻的线性电压斜坡（Thevenin 模型），电阻平滑斜坡使驱动波形接近实际驱动 RC 网络的曲率。
+
+\figplaceholder{Figure 105: NLDM driver and receiver models}{NLDM 驱动器与接收器模型}{fig:nldm}
+
+驱动模型三参数：驱动电阻 $R_d$、斜坡起始时间 $t_z$、斜坡持续时间 $\Delta t$。PrimeTime 为每个门时序弧（如 U1/A 到 U1/Z）及每个方向（如上升沿）构建不同简化驱动模型。
+
+当驱动电阻远小于网络对地阻抗时，平滑效果减弱，可能降低 RC 延时计算精度；此时 PrimeTime 调整驱动电阻并发出 RC-009 警告。
+
+NLDM 接收器模型为表示接收器输入负载电容的电容。不同条件（上升/下降、最小/最大分析）可有不同电容值，但单次时序检查仅用一个电容值，不能准确建模 Miller 效应。
+
+\begin{noteBox}
+Miller 效应是晶体管端子间电压变化导致的有效电容变化。
+\end{noteBox}
+
+% ============================================================
+\section{复合电流源时序模型}
+\subsection*{Composite Current Source Timing Models}
+
+随着更小纳米工艺，发展了复合电流源（CCS）时序建模以应对深亚微米效应。驱动模型使用时变电流源，能准确处理高阻抗 net 及其他非单调行为。
+
+\figplaceholder{Figure 106: CCS timing driver and receiver models}{CCS 时序驱动器与接收器模型}{fig:ccs}
+
+CCS 接收器模型用两个电容（C1、C2）而非单一集总电容。第一个电容用作达到输入延时阈值前的负载；波形达到阈值后动态切换到第二个电容。C1C2 模型在 Miller 效应存在时更好地近似负载效应。
+
+不同输入信号可影响接收器输入电容。库中用条件 pin 模型描述。若库中有条件 pin 接收器模型，PrimeTime 考虑所有接收器模型并为分析选择已使能 pin 与弧模型中最坏者。
+
+PrimeTime 中 CCS 时序分析需要详细寄生。使用详细寄生进行延时计算时，库信息优先级（高到低）：
+\begin{enumerate}
+  \item CCS 驱动器与接收器模型（若均可用）
+  \item CCS 驱动器模型 + 接收单元集总 pin 电容
+  \item NLDM 延时/转换表 + 接收单元 pin 电容（CCS 接收器模型仅与 CCS 驱动器模型联用）
+\end{enumerate}
+
+时序更新后，用 \cmd{report\_delay\_calculation} 确认是否使用 CCS（\opt{-from}/\opt{-to} 或 \opt{-of\_objects}）。示例输出显示 Advanced driver-modeling / Advanced receiver-modeling。
+
+\subsection{Pin 电容报告}
+\subsubsection*{Pin Capacitance Reporting}
+
+CCS 时序建模含驱动器与接收器模型。输入电容随输入信号跳变变化，CCS 接收器用 C1、C2 建模跳变前后输入电容以保证精度。C1、C2 通常为输入 slew 与输出负载的函数，可能大于由 CCS 接收器模型导出的库 pin 电容。
+
+默认用 CCS 接收器模型信息计算负载 pin 的 pin 电容行为，用于最大电容违例检查，确保 RC-011 报告的所有负载外推均可由 \cmd{report\_constraint} 报告。实际总电容为连线电容与各 pin 的 $\max(C1,C2)$ 之和。
+
+反映此行为的命令：\cmd{report\_attribute}、\cmd{report\_constraint -min\_capacitance/-max\_capacitance}、\cmd{report\_delay\_calculation}、\cmd{report\_net}、\cmd{report\_timing -capacitance}。属性：\texttt{total\_ccs\_capacitance\_max\_fall/rise}、\texttt{total\_ccs\_capacitance\_min\_fall/rise}。
+
+由 \cmd{report\_capacitance\_use\_ccs\_receiver\_model} 控制（默认 \texttt{true}）。设为 \texttt{false} 则用先前库导出的集总 pin 电容报告方法。
+
+\begin{noteBox}
+PrimeTime、IC Compiler、Design Compiler 的电容报告可能不一致。PrimePower 中 \cmd{report\_delay\_calculation} 与 \cmd{report\_power\_calculation} 显示的电容可能不匹配。
+\end{noteBox}
+
+\subsection{表征设计规则约束的指南}
+\subsubsection*{Guidelines for Characterizing Design Rule Constraints}
+
+\cmd{max\_transition} 通常在库单元输入/输出 pin 上。输入 pin 的值不应超过 NLDM 与 CCS 驱动器及 \texttt{receiver\_capacitance2} 表中的最大 slew 索引；取 NLDM 与 CCS 表最大 slew 索引的较低值，参考相关输入 pin 的上升/下降弧（弧级与 pin 级表均考虑）。
+
+\cmd{max\_capacitance} 通常在输出 pin 上。值不应超过 NLDM/CCS 驱动器及 \texttt{receiver\_capacitance1/2} 表的最大负载索引；取较低值，参考到相关输出 pin 的上升/下降弧。
+
+\subsection{解决 CCS 外推警告（RC-011）}
+\subsubsection*{Resolving the CCS Extrapolation Warning Message (RC-011)}
+
+驱动器或接收器负载外推过大可能导致不准确结果，工具在 slew/负载小于库最小索引或大于最大索引时发出 RC-011。
+\begin{itemize}
+  \item 小于最小索引：在库中增加小的首个 slew/负载索引。
+  \item 大于最大索引：若库遵循上述指南，通过 \cmd{report\_constraint} 修复 \cmd{max\_transition}/\cmd{max\_capacitance} 违例；将 \cmd{report\_capacitance\_use\_ccs\_receiver\_model} 设为 \texttt{true} 以确保 RC-011 中所有 \cmd{max\_capacitance} 违例均被 \cmd{report\_constraint} 报告。
+\end{itemize}
+
+库不合规时，RC-011 很重要，需处理设计规则约束。
+
+默认 CCS 外推在最大索引上方 10\%、最小索引 80\% 处裁剪。扩大外推范围：
+\begin{lstlisting}
+pt_shell> set_app_var rc_ccs_extrapolation_range_compatibility false
+\end{lstlisting}
+则在最大索引上方 50\%、最小索引下方 50\% 处裁剪，减少 RC-011。
+
+% ============================================================
+\section{跨库电压与温度缩放}
+\subsection*{Cross-Library Voltage and Temperature Scaling}
+
+PrimeTime 通过在不同电压/温度 corner 表征的库之间插值数据进行电压与温度缩放，使分析电压/温度可与 corner 库不同。缩放数据包括 CCS 时序驱动器/接收器模型、CCS 噪声、时序与设计规则约束、PrimePower 功耗数据、NLDM 延时与 slew 等。缩放减少多电压设计所需库数量与表征工作量。
+
+库组（library groups）指定多库间缩放关系：
+\begin{lstlisting}
+pt_shell> define_scaling_lib_group \
+          {lib_0.9V.db lib_1.05V.db lib_1.3V.db}
+\end{lstlisting}
+
+库组中库数量不限；可多次定义多组，但每个库最多属于一组。报告用 \cmd{report\_lib\_groups}；点对点延时计算（含缩放所用库）用 \cmd{report\_delay\_calculation}。
+
+精确匹配流：
+\begin{lstlisting}
+pt_shell> define_scaling_lib_group -exact_match_only \
+          {lib_0.9V.db lib_1.0V.db lib_1.1V.db}
+\end{lstlisting}
+工作条件须精确匹配某一库，库间不缩放。
+
+下列命令调用库缩放与精确匹配：\cmd{set\_operating\_conditions}、\cmd{set\_voltage}、\cmd{set\_temperature}、\cmd{set\_rail\_voltage}。
+
+\subsection{多 rail 电平转换器单元的缩放}
+\subsubsection*{Scaling for Multirail Level Shifter Cells}
+
+PrimeTime 可对多 rail 单元（如电平转换器）缩放，连接不同电源域的驱动与负载 pin。准确多 rail 缩放支持多变量（多 rail 电压与温度）依赖分析。
+
+默认对时序、噪声与功耗分析使能多 rail 缩放；当缩放库组中有足够库支持所需 rail 数时自动应用。
+
+设置步骤：
+\begin{enumerate}
+  \item 用 \cmd{define\_scaling\_lib\_group} 建立缩放库组（单 rail 与双 rail 电平转换器分别建组）。
+  \item 将需多维缩放的单元放入不同库并归入不同缩放组（双 rail 电平转换器 on-the-grid 电压与温度缩放至少需 8 个库；单 rail 单元可放一库，4 个库即可做电压与温度缩放）。
+  \item 用 \cmd{set\_voltage}、\cmd{set\_rail\_voltage}、\cmd{set\_operating\_conditions}、\cmd{set\_temperature} 设置实例工作条件。
+  \item \cmd{report\_lib\_groups -scaling -show \{voltage temp process\}} 报告库组。
+\end{enumerate}
+
+\subsection{电压缩放流中的时序降额缩放}
+\subsubsection*{Scaling Timing Derates in Voltage Scaling Flows}
+
+电压缩放流中，对缩放组内库单元应用 \cmd{set\_timing\_derate} 时，工具可按实例电压计算缩放降额：
+\begin{lstlisting}
+define_scaling_lib_group {lib_1.1V.db lib_1.0V.db lib_0.9V.db}
+set_timing_derate -late [get_lib_cell lib_1.1V/INV1] 1.07
+set_timing_derate -late [get_lib_cell lib_1.0V/INV1] 1.10
+set_timing_derate -late [get_lib_cell lib_0.9V/INV1] 1.15
+\end{lstlisting}
+
+使能电压缩放降额：
+\begin{lstlisting}
+pt_shell> set_app_var \
+  timing_enable_derate_scaling_for_library_cells_compatibility false
+pt_shell> set_app_var \
+  timing_enable_derate_scaling_interpolation_for_library_cells true
+\end{lstlisting}
+
+效果：对 \cmd{set\_timing\_derate} 与 \cmd{read\_ocvm} 表降额均缩放；电压精确匹配某缩放库时用该库降额；否则用邻近库完全插值降额；多 rail 单元用邻近库最坏（非插值）降额。两功能默认均禁用。
+
+若在一缩放库上设置库单元降额，应在其他缩放库上对同库单元也设置，否则某些电压条件下可能“缺失”降额，工具按对象范围优先级列表使用下一降额设置。
+
+\subsection{从多 rail 缩放库组排除 Rail}
+\subsubsection*{Excluding Rails From Multirail Scaling Library Groups}
+
+\cmd{define\_scaling\_lib\_group} 的 \opt{-excluded\_rail\_names} 允许忽略指定库电压 rail，在验证缩放组形成与缩放计算时忽略这些 rail，将 N 维多 rail 缩放降为更低维。
+
+示例：两库无法建 2-D 组（至少需三库），但忽略 VDD2 可建 1-D 组：
+\begin{lstlisting}
+define_scaling_lib_group { \
+    slow__VDD1_1.0__VDD2_1.5.db \
+    slow__VDD1_2.0__VDD2_1.6.db \
+  } \
+  -excluded_rail_names {VDD2}
+\end{lstlisting}
+
+慎用，会禁用 normally 应用的一致性检查与缩放算法，影响组内所有单元。要对特定库单元排除 rail，用 \cmd{set\_disable\_pg\_pins}。
+
+% ============================================================
+\section{波形传播}
+\subsection*{Waveform Propagation}
+
+16 nm 及更小几何中，长尾效应与接收器 Miller 效应等波形效应显著。忽略这些效应会在设计波形与库表征波形偏差大时导致延时计算不准。
+
+使能高级波形传播，在延时计算中结合 CCS 时序与 CCS 噪声模型。支持基于图与基于路径的分析；库需含 NLDM、CCS 时序、CCS 噪声及归一化驱动波形。
+
+使能：\cmd{delay\_calc\_waveform\_analysis\_mode} 设为 \texttt{full\_design}。有必需库数据的弧均提高精度；否则标准延时计算。
+
+setup/hold 约束分析中使用波形传播：\cmd{delay\_calc\_waveform\_analysis\_constraint\_arcs\_compatibility} 设为 \texttt{false}。默认 \texttt{true} 时约束分析仅用 NLDM 查表。
+
+% ============================================================
+\section{表征触发电平}
+\subsection*{Characterization Trip Points}
+
+设计表征触发电平（波形测量阈值）影响 PrimeTime 计算的延时与转换时间。确定顺序：
+\begin{enumerate}
+  \item 库 pin 上定义的阈值（覆盖同名库级阈值）
+  \item 无 pin 阈值但有库级阈值时用库级
+  \item 均无时用主库（link path 第一库）阈值
+  \item 均无则转换时间用 rail 电压 20\%/80\%，延时用 50\%
+  \item 阈值无效（如 0\%/100\%）则转换时间用 5\%/95\%，延时用 50\%
+\end{enumerate}
+
+图 107、108 示 slew 与延时触发电平。默认 slew 为 rail 电压 20\% 到 80\%（或反向）的时间；单元延时为输入到输出均达 50\% 的时间差。
+
+\figplaceholder{Figure 107: Slew transition points}{Slew 转换点}{fig:dc-slew}
+\figplaceholder{Figure 108: Input/output transition points}{输入/输出转换点}{fig:dc-delay}
+
+用 \cmd{report\_lib} 检查库中阈值；用 \cmd{report\_delay\_calculation -thresholds} 检查特定弧所用阈值。
+
+% ============================================================
+\section{快速多驱动延时分析}
+\subsection*{Fast Multidrive Delay Analysis}
+
+大设计中反标寄生后，大规模多驱动网络的 RC 延时计算运行时间可能很长，瓶颈主要在负载 pin 延时与 slew 测量的跳变时间计算。
+
+对同质驱动器（输入 skew、slew、工作条件相似）的大规模多驱动网络，快速多驱动计算模式显著缩短运行时间：将所有驱动器节点用电阻网络短接，在第一个驱动器节点用单一驱动器模型做所有波形计算，驱动强度放大至等效于全部原驱动器，再将单驱动器结果复制到所有驱动器（延时、slew、驱动器模型参数、有效电容）。
+
+不启用快速多驱动分析的最大驱动器数为 9；10 个及以上并行驱动器触发该模式，并产生 RC-010 警告（报告驱动器数、负载数、输入 slew/skew 分布、驱动器库弧与工作条件匹配情况）。
+
+精度在驱动器库弧相同、工作条件/输入 slew/skew 相同、网络阻抗相同时最佳（常见于 mesh 网络）。输入 skew 差异应相对网络延时较小。更高精度可用外部工具计算并反标到网络。
+
+另见「并行驱动器缩减」「缩减时钟 Mesh/Spine 网络的 SDF」。
+
+% ============================================================
+\section{并行驱动器缩减}
+\subsection*{Parallel Driver Reduction}
+
+时钟通常需驱动大量负载，故常缓冲以降低时钟 skew。大时钟网络可能大量并行驱动器，以 mesh 或 spine 模式分布信号。
+
+若设计有 1000 个并行驱动器驱动 1000 个负载，PrimeTime 需跟踪百万条驱动器-负载时序弧，消耗大量 CPU 与内存。为使能更好性能，PrimeTime 可减少需分析的时序弧数：使能并行驱动器缩减后，在网络中选择一个驱动器仅分析经该驱动器的弧。
+
+\figplaceholder{Figure 109: Parallel driver reduction}{并行驱动器缩减}{fig:pdr}
+
+\subsection{调用并行驱动器缩减}
+\subsubsection*{Invoking Parallel Driver Reduction}
+
+将 \cmd{timing\_reduce\_multi\_drive\_net\_arcs} 设为 \texttt{true}（默认禁用）。链接设计时检查多驱动 net；若驱动器$\times$负载数超过 \cmd{timing\_reduce\_multi\_drive\_net\_arcs\_threshold}（默认 10000），则缩减该 net 驱动器的时序弧。
+
+缩减条件（均满足）：
+\begin{itemize}
+  \item 驱动器-负载组合数 $>$ 阈值
+  \item 驱动单元为非时序库单元（非触发器/锁存器/层次）
+  \item 所有驱动器为同一库单元实例
+  \item 所有驱动器连接相同输入与输出 net
+\end{itemize}
+
+要恢复原始网络或以不同阈值缩减，须重新链接设计。
+
+\subsection{使用缩减后的驱动器}
+\subsubsection*{Working With Reduced Drivers}
+
+布局完成且有详细寄生数据时，无法将数据反标到缩减网络。要准确结果，用 SPICE 等外部仿真器获取网络详细延时，再将时钟 latency 与转换时间反标到各时序单元时钟 pin，同时仍让 PrimeTime 将缩减网络视为理想零延时。此法准确且高效（时钟网络时序只需分析一次）。
+
+用 \cmd{read\_sdf} 反标时，缩减弧上的反标被忽略，产生 PTE-048 消息，可用 \cmd{suppress\_message PTE-048} 抑制。
+
+\cmd{write\_sdf} 不为缩减网络生成互连延时。并行驱动器缩减仅影响 PrimeTime 分析的时序弧，不影响网表，故不影响 \cmd{write\_changes} 输出。大规模多驱动网络的 RC 延时计算见「快速多驱动延时分析」。
+
+% ============================================================
+\section{多输入开关分析}
+\subsection*{Multi-Input Switching Analysis}
+
+表征组合逻辑门输入到输出延时时，表征工具通常一次只考虑一个输入跳变。多输入同时跳变时延时可能不同。多输入开关（MIS）分析可提高此情形精度，需要 PrimeTime-ADV 许可证。
+
+4 输入 NAND 门：单输入变低其余为高（Case A）与四输入同时变低（Case B）均可触发输出低到高；Case B 四管并联上拉，A1 到 Z 延时更短。
+
+\figplaceholder{Figure 110: Multi-Input Switching Example: 4-Input NAND Gate}{多输入开关示例：4 输入 NAND 门}{fig:mis-nand4}
+
+库中仅有单输入开关延时。同时开关可出现在存储译码器等电路；NAND 在 hold 检查路径上，同时开关使真实延时更短，hold 检查偏乐观，MIS 可计入。输出高到低时 MIS 使延时更长，影响 setup，但 setup 关键路径通常较长，单门延时增加影响可忽略；hold 关键路径通常较短，故 MIS 仅用于最小延时（hold）检查。
+
+\subsection{多输入开关分析模式}
+\subsubsection*{Multi-Input Switching Analysis Modes}
+
+三种模式：\texttt{lib\_cell}、\texttt{lib\_arc}、\texttt{advanced}。
+
+\textbf{库单元用户定义系数（lib\_cell）}：用 \cmd{set\_multi\_input\_switching\_coefficient} 在库单元上定义延时缩放系数：
+\begin{lstlisting}
+pt_shell> set_multi_input_switching_coefficient \
+            [get_lib_cell lib1/NAND4gx] -rise -delay 0.683
+\end{lstlisting}
+用 HSPICE 等仿真确定各组合单元与各输出跳变的正确调整因子。
+
+\textbf{库时序弧用户定义系数（lib\_arc）}：在单个库单元时序弧上定义系数，可在库或脚本中提供，支持更细粒度（含开关 pin 组）：
+\begin{lstlisting}
+cell("AND4X1") {
+  pin(Z) {
+    timing() {
+      related_pin : A1;
+      when : "A2&!B1&!B2";
+      mis_factor_rise : 0.85;
+      mis_pin_set_rise : "A1 A2";
+      ...
+\end{lstlisting}
+需要 PrimeTime-ADV-PLUS 许可证。
+
+\textbf{高级多输入开关分析（advanced）}：分析库数据与实际 pin slew、到达、负载、波形自动估计 MIS 效应，无需用户系数，但需 CCS 时序、弧级 CCS 噪声模型及全部 when 条件表征。表 18 列出支持的库单元类型（AND/OR/NAND/NOR/AO*/AOI*/OA*/OAI* 等 2--4 输入组合）。多输出单元若逻辑功能合格且与其他输出无共享输入 pin 则合格。不合格单元可用另两种模式的用户系数。
+
+高级模式需要 PrimeTime-ADV-PLUS 许可证。
+
+\subsection{定义库时序弧系数}
+\subsubsection*{Defining Library Timing Arc Coefficients}
+
+系数属性：\texttt{mis\_factor\_rise/fall}、\texttt{mis\_pin\_set\_rise/fall}（非标准 Liberty，须在库顶声明为 user attribute）。在 timing() 组中按需定义。跳变 fewer pin 时按「到达窗口重叠检查」计算中间因子。
+
+同一弧可有 rise/fall 不同 pin 集与系数。多 pin 集用 ``+'' 分隔。MIS 分析中 PrimeTime 保守假定 when 条件可表示跳变前后侧 pin 值；属性须在加载库前用 \cmd{define\_user\_attribute -import} 声明。库中无属性时可用 Tcl 脚本用 \cmd{set\_user\_attribute} 与 \cmd{get\_lib\_timing\_arcs} 设置；复杂单元可用 \cmd{get\_lib\_timing\_arcs -filter}。
+
+\subsection{配置多输入开关分析}
+\subsubsection*{Configuring Multi-Input Switching Analysis}
+
+\begin{enumerate}
+  \item \cmd{si\_enable\_multi\_input\_switching\_analysis true}
+  \item \cmd{si\_multi\_input\_switching\_analysis\_mode \{advanced lib\_arc lib\_cell\}} 指定模式及优先级
+  \item lib\_cell 模式：\cmd{set\_multi\_input\_switching\_coefficient}；可选 \cmd{report\_multi\_input\_switching\_coefficient}
+  \item lib\_arc 模式：加载库前 \cmd{define\_user\_attribute -import} 四个 MIS 属性；或链接后 \texttt{source lib\_arc\_coefficients.tcl}
+  \item advanced 模式：可选 \cmd{report\_multi\_input\_switching\_lib\_cells}
+\end{enumerate}
+
+\subsection{多输入开关分析示例}
+\subsubsection*{Multi-Input Switching Analysis Example}
+
+\begin{lstlisting}
+set search_path {. my_lib.db}
+set link_path {my_lib.db}
+read_verilog design.v
+link_design
+read_parasitics design.spef
+source design.sdc
+set_app_var si_enable_multi_input_switching_analysis true
+set_app_var si_multi_input_switching_analysis_mode {lib_cell}
+set_multi_input_switching_coefficient \
+ [get_lib_cell lib1/NAND4gx] -rise -delay 0.683
+report_multi_input_switching_coefficient
+update_timing -full
+report_timing -delay_type min -input_pins
+report_delay_calculation -min -from Inst1/A -to Inst1/Z
+\end{lstlisting}
+
+工具在 NAND4gx 各实例输出上升且多输入可同时跳变时，将库延时乘以 0.683--1.0 之间的因子，得到更短的最小输入到输出延时。
+
+\subsection{到达窗口重叠检查}
+\subsubsection*{Arrival Window Overlap Checking}
+
+默认考虑多输入的信号跳变到达窗口。考虑 A1 到 Z 时，若其他输入到达窗口与 A1 重叠，应用完整 MIS 因子；无重叠则因子 1.0；部分重叠则中间因子（反比例模型）。
+
+\figplaceholder{Figure 111: Arrival Windows for Multi-Input Switching Analysis}{多输入开关分析的到达窗口}{fig:mis-window}
+
+可禁用到达窗口分析，在同一时钟周期内多输入可跳变时始终应用完整 MIS 因子（更悲观、更快）：
+\begin{lstlisting}
+set_app_var si_enable_multi_input_switching_analysis true
+set_app_var si_enable_multi_input_switching_timing_window_filter false
+\end{lstlisting}
+
+\subsection{在 MIS 分析中包含或排除特定单元}
+\subsubsection*{Including or Excluding Specific Cells in MIS Analysis}
+
+\cmd{set\_multi\_input\_switching\_analysis} 可包含或排除特定单元/库单元：\opt{-include\_only}、\opt{-exclude\_only}、\opt{-analysis\_mode}、\opt{-reset}。对象列表可为叶单元或库单元。
+
+\subsection{缩放工具计算的高级 MIS 降额}
+\subsubsection*{Scaling the Tool-Computed Advanced MIS Derates}
+
+\cmd{set\_advanced\_multi\_input\_switching\_factor} 缩放工具计算的高级 MIS 延时系数：\opt{-scale\_factor}（0--1）、\opt{-all}、\opt{-inverse}、\opt{-reset}、对象列表。默认因子与加速值相乘以放松调整；1 保持、0 完全移除、中间值部分放松。带 \opt{-inverse} 时因子直接乘 MIS 调整后单元延时以加强加速。
+
+% ============================================================
+\section{单位延时分析}
+\subsection*{Unit Delay Analysis}
+
+流程测试与约束验证时通常关注警告/错误消息而非数值时序结果。PrimeTime 提供单位延时计算模式：每个单元延时、net 延时、pin 转换、耦合 net delta 延时与转换均计算为 1.0 库单位。
+
+示例 \cmd{report\_timing} 输出中各级 Incr 多为 1.0。此功能提高运行时间，不影响内存。
+
+使能：
+\begin{lstlisting}
+pt_shell> set_app_var timing_enable_unit_delay true
+\end{lstlisting}
+
+若使用 CRPR、SI、AOCVM、POCV、高级锁存器分析，应禁用：
+\begin{lstlisting}
+pt_shell> set_app_var timing_remove_clock_reconvergence_pessimism false
+pt_shell> set_app_var si_enable_analysis false
+pt_shell> set_app_var timing_aocvm_enable_analysis false
+pt_shell> set_app_var timing_pocvm_enable_analysis false
+pt_shell> set_app_var timing_enable_through_paths false
+\end{lstlisting}
+"""
+
+
+def main() -> None:
+    size = write_tex(OUT, [TEXT])
+    cjk = count_cjk(TEXT)
+    lines = len(TEXT.splitlines())
+    print(f"Wrote {OUT}")
+    print(f"Size: {size:,} bytes, {lines} lines, CJK={cjk:,}")
+
+
+if __name__ == "__main__":
+    main()

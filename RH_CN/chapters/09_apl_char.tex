@@ -1,0 +1,1697 @@
+﻿% 第 9 章 使用 Apache Power Library 进行表征（原书 9-213 … 9-283）
+\bichapter{使用 Apache Power Library 进行表征}{Characterization Using Apache Power Library}
+\label{chap:apl}
+
+\section{引言}
+\subsection*{Introduction}
+
+Apache Power Library（APL）程序用于表征单元，在多种条件下为所需单元集生成精确的开关电流波形（剖面）、输出状态相关去耦电容（固有 decap）、等效电源电路电阻（ESR，Effective Series Resistance）、开关延迟与漏电流等数据。这些数据是 RedHawk 精确动态分析所必需的。
+
+APL 有三种基本模式：
+\begin{itemize}
+  \item 快速库检查模式（fast library checking）
+  \item 与设计无关的全库表征模式（design-independent full library characterization）
+  \item 设计相关表征模式（design-dependent），针对特定设计条件以达到 sign-off 质量
+\end{itemize}
+
+APL 一般流程如图~\ref{fig:apl-flow} 所示。
+
+\figplaceholder{Figure 9-1}{单元表征的 APL 数据流}
+
+每种 APL 模式为每个单元在选定的输出电容负载、转换时间（slew）与 Vdd 值下生成一组「样本」开关波形。快速库检查模式仅生成一个样本——每个单元在一个 Vdd、Cload 与 slew 条件下的一组波形。APL-DI 表征为覆盖各单元预期使用范围，生成多种 Vdd 与 Cload/slew 组合的开关电流剖面。设计相关表征生成针对特定设计条件的波形样本，样本数较少但比设计无关表征更准确。有意 decap 单元（含低压设计中的 header/footer 开关）需分别运行 APL 进行表征。
+
+\section{APL 表征概述}
+\subsection*{Overview of APL Characterization}
+
+\subsection{单元检查与表征类型}
+\subsubsection*{Types of Cell Checking and Characterization}
+
+RedHawk 提供多种单元检查与表征类型，取决于所需分析范围、精度与速度：
+\begin{itemize}
+  \item 运行前样本完整性检查（Pre-run Sample Integrity Checking）
+  \item 快速库检查（Fast Library Checking）
+  \item 库或设计无关（APL-DI）表征
+  \item 设计相关（APL-DD）表征
+\end{itemize}
+
+\subsubsection{运行前样本完整性检查}
+为检查转换时间（slew）、Cload 与 Vdd 等输入样本数据完整性，APL 检查 \texttt{*.lib} 等工具数据，筛除可能破坏 APL 结果并显著降低计算速度的超范围数据。在启动快速库检查或 APL-DI 前执行样本检查。用于设置 transition time、Cload、Vdd 超范围限值的 APL 配置文件关键字包括：\texttt{WARN\_SLEW\_CHECK}、\texttt{ERROR\_SLEW\_CHECK}、\texttt{WARN\_CLOAD\_CHECK}、\texttt{ERROR\_CLOAD\_CHECK}、\texttt{WARN\_VDD\_CHECK}、\texttt{ERROR\_VDD\_CHECK}、\texttt{MIN\_VDD\_CHECK}。
+
+\subsubsection{快速库检查}
+快速库检查模式在每个库单元的一个 corner 条件下对 Spice 网表、器件模型、LEF/DEF 与 Synopsys LIB 文件进行错误检查，验证基本库数据完整性。建议作为表征前第一步，但此步骤不执行实际表征。约 2000 单元库在台式机上典型运行时间为数小时。
+
+\subsubsection{库（APL-DI）与设计相关（APL-DD）表征}
+除存储器外，全部表征功能可通过 UNIX 命令行 \texttt{apldi} 在单机或多机上运行，包括全库（DI，默认）与设计相关（DD）表征。存储器表征使用 \texttt{sim2iprof}（附录 E）与 ACE 工具（本节「ACE Decap 与 ESR 表征」）。库表征时 \texttt{apldi} 从 \texttt{*.lib} 读取单元库数据，基于单元延迟与负载表生成代表性样本，在本地或多机（通过多作业管理软件）上运行，为每个指定工艺 corner 生成特性。
+
+\textbf{适用性：}库表征（设计无关）在整个单元库上、通常在真实设计开始前执行。APL-DI 从输入 slew、输出电容负载与 Vdd 值矩阵中为每单元选取代表性开关条件并运行表征，提取动态开关电流、开关延迟、固有器件电容与漏电流。设计相关表征从 SPEF 与 STA 数据对设计中的单元执行，所有与输入 slew、输出 Cload、Vdd 的开关关系均针对该设计。
+
+\textbf{精度：}APL-DI 通常在无设计时在全库上运行，具体工作条件未知，精度低于 APL-DD；但 APL-DI 结果通常与 DD 相差在 10\% 以内。
+
+\textbf{运行时间：}APL-DI 在全库上运行一次；APL-DD 每个新设计运行一次。DI 运行时间依库规模与计算资源可为一天到一周（例如 2000 单元库在 10 机 LSF 农场约 3 天）。DD 运行时间强烈依赖单元数与样本数。因需表征的单元/样本数量大，建议使用批处理农场（LSF 或 SunGrid）或多 CPU 本地机。
+
+\subsection{仿真器支持}
+\subsubsection*{Simulator Support}
+
+默认 APL 使用内部 NSPICE 仿真器进行表征（已验证 Spice 精度），也支持通过配置关键字 \texttt{APL\_HSPICE <binary\_path>} 直接使用 HSPICE，以及 \texttt{APL\_ELDO <binary\_path>} 使用 ELDO。
+
+\subsection{表征功能}
+\subsubsection*{Characterization Functions}
+
+从表征角度看，设计元件分三类，流程处理略有不同：
+\begin{itemize}
+  \item 标准库单元、I/O 单元与定制 IP
+  \item 有意去耦电容单元
+  \item 存储器
+\end{itemize}
+
+完整运行表征需三类信息：
+\begin{itemize}
+  \item 开关条件下的电流波形，以及延迟与 slew 数据
+  \item 标称电压 On/Off 条件下固有器件 decap、漏电流与 ESR
+  \item 有意 decap 值的分段线性电压函数，以及电源门控应用上电条件下库单元性能
+\end{itemize}
+
+对库或设计的完整元件集进行表征，需运行以下 Apache 表征程序（各含适当 corner 数以满足精度）：
+\begin{enumerate}
+  \item 标准库单元、I/O 与除存储器外定制 IP 的开关电流、延迟与 slew：\texttt{apldi}
+  \item 上述单元的固有 decap、ESR 与漏电流：\texttt{apldi -c}
+  \item 有意 decap 单元的固有 decap、ESR 与漏电流：\texttt{apldi -p}
+  \item 存储器：\texttt{sim2iprof} 获开关电流/延迟/slew，ACE 获 decap/ESR/漏电流；或更快地用 \texttt{avm} 基于数据手册表征存储器
+  \item 电源门控等低功耗设计的上电周期：\texttt{apldi -w} 获有意 decap 与标准/I/O/定制 IP 的分段线性电压关系及开关电流、延迟、slew
+  \item 低功耗 header/footer 开关：\texttt{aplsw}
+\end{enumerate}
+
+Apache 单元表征软件汇总见表~\ref{tab:apache-char}。
+
+\begin{table}[htbp]
+\centering
+\caption{Apache 表征软件}
+\label{tab:apache-char}
+\small
+\begin{tabular}{p{2.2cm}p{9.5cm}}
+\toprule
+\textbf{程序} & \textbf{说明} \\
+\midrule
+\texttt{apldi} & 对全部库单元表征（单机/多机并行）。生成基于波形的 Vdd/Vss 开关电流剖面、等效电源串联电阻、漏电流与固有 decap。DD 模式下针对特定设计条件表征。 \\
+\texttt{apldi -c} & 除存储器外全部库/I/O/定制 IP 的固有 decap、ESR、漏电流 \\
+\texttt{apldi -p} & 有意 decap 单元的固有 decap、ESR、漏电流 \\
+\texttt{aplsw} & 电源门控低功耗设计中 header/footer 开关的表征数据 \\
+\texttt{apldi -w} & 标准单元低功耗表征：固有 decap、漏电流、ESR 的分段线性函数 \\
+\texttt{sim2iprof} + \texttt{ACE} & 定制单元、I/O、存储器与 IP 宏。波形电流剖面、ESR、漏电流、固有 decap \\
+\texttt{avm} & 基于数据手册的快速存储器/IP Vdd/Vss 电流剖面与器件 decap \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{多机批处理管理}
+\subsubsection*{Multiple Machine Batch Management}
+
+并行 APL 表征作业需在网内安装 Platform LSF 或 Sun Grid，使程序可被所有计算机器访问。使用 Platform LSF 或 Sun Grid 时设置相应命令与环境，例如：
+\begin{lstlisting}
+# Platform LSF:
+% source /appls/lsf/conf/cshrc.lsf
+# Sun Grid:
+% source /appls/sge/default/common/settings.csh
+\end{lstlisting}
+
+所有参与机器的工作目录须可读可写。运行 \texttt{apldi} 前须定义环境变量 \texttt{APACHEROOT}，例如：
+\begin{lstlisting}
+setenv APACHEROOT /install_dir/apacheda/<RedHawk_release>
+\end{lstlisting}
+批提交语法见「从 UNIX Shell 运行 APL 表征」。
+
+\subsection{APL 支持的平台}
+\subsubsection*{Platforms Supported}
+
+APL 当前支持五种平台：
+\begin{enumerate}
+  \item \texttt{ix86-ent3-32b} — 32 位 RedHat Enterprise 3
+  \item \texttt{opt-ent3-64b} — 64 位 Opteron RedHat Enterprise 3.x
+  \item \texttt{ix86-ent3-32b} — 32 位 CentOS 4
+  \item \texttt{opt-ent3-64b} — 64 位 CentOS 4
+  \item \texttt{sparc-sol8-64b} — 64 位 Solaris 8.x
+\end{enumerate}
+
+\subsection{APL 工作目录}
+\subsubsection*{APL Working Directory}
+
+表征期间 APL 需要临时目录存放 Spice 网表与仿真结果等中间文件，默认 \texttt{.apache/APL}。可用配置文件关键字 \texttt{TMP\_DIR} 更改。须确保临时目录有足够磁盘空间，尤其当需包含大量 Spice 子电路网表时。例如约 500 单元库建议至少 500\,MB 可用空间。
+
+
+\section{单元表征数据准备}
+\subsection*{Cell Characterization Data Preparation}
+
+\subsection{数据要求}
+\subsubsection*{Data Requirements}
+
+标准单元 APL 表征所需数据见本节。表征用向量由 APL 自动生成。运行 APL 前需要：
+\begin{itemize}
+  \item \texttt{*.lib} 文件——单元库数据（功能、pin 定义、状态表）。库 APL 表征必需。
+  \item P/G arc 定义——多 Vdd/Vss pin 单元须定义 P/G arc 以进行基于 arc 的 decap 表征。APL-DI 若 .lib 含 \texttt{related\_power/ground\_pin} 可自动解释；否则须在定制 .lib 中定义：
+\begin{lstlisting}
+pin(D) {
+    direction : input;
+    related_power_pin : VDD;
+    related_ground_pin : VSS;
+}
+\end{lstlisting}
+  APLDI 读取 \texttt{related\_power\_pin} 与 \texttt{related\_ground\_pin} 得到 VDD 到 VSS 的 P/G arc。定制 lib 与 .lib 间 P/G arc 重叠时优先级：a) 定制 lib 单元级；b) LIB 单元级；c) 定制 lib 文件级。DD 表征需要 RedHawk 生成的 \texttt{.apache/apache.pgarc}，APL 自动搜索。
+  \item Spice 子电路文件——每单元 HSpice 兼容网表；可多文件；pin 顺序可不同；VDD/GND 常未在库中定义，APL 自动匹配缺失 P/G pin。
+  \item Spice 器件模型文件——HSpice 兼容；可多文件/条目；各 corner 模型。
+  \item Spice 到 LEF pin 映射——处理 SPICE 与 LEF 中 P/G pin 不同名。APL 输出 LEF P/G pin，内部用 Spice pin。关键字 \texttt{SPICE2LEF\_PIN\_MAPPING} 适用于开关电流、CDEV、PWCAP。仅允许：1 LEF pin $\leftrightarrow$ 1 Spice pin；或多个 LEF pin $\leftrightarrow$ 1 Spice pin。未给映射时 LEF 与 Spice 中 P/G pin 名须相同。
+\begin{lstlisting}
+SPICE2LEF_PIN_MAPPING {
+    Vdd_spice   Vdd_lef
+    Vss_spice   gnd_lef
+}
+\end{lstlisting}
+  \item APL 配置文件——通常 \texttt{apldi.config} 或 \texttt{apl.config}，指定上述文件及温度、理想电源电压、P/G 节点名、缩放因子等。
+  \item 单元列表文件——DD 表征（未做库 APL）或定制单元表征时需要。
+  \item 输入向量文件——定制单元表征专用（见「定制单元表征数据准备」）。
+\end{itemize}
+
+\begin{noteBox}
+单元表征用的负载电容来自 GSR 中定义的 SPEF/DSPF；否则使用 Steiner 树近似。slew 来自 GSR 中 PrimeTime 数据；否则使用 GSR 默认 slew。
+\end{noteBox}
+
+\subsection{APL 配置文件说明}
+\subsubsection*{APL Configuration File Description}
+
+配置文件包含表征所需信息，关键字分为：所有 APL 运行必需；仅库 APL（DI）必需；可选。
+
+\subsubsection{必需的 APL 配置文件关键字}
+以下关键字为单元表征必需（节选主要项，语法与示例保留英文关键字）：
+
+\textbf{APL\_RUN\_MODE}——DD 或 DI，默认 DI。若无 \texttt{DESIGN\_CORNER} 定义，即使指定 DI 也为 DD。
+\begin{lstlisting}
+APL_RUN_MODE [ DD | DI ]
+APL_RUN_MODE DI
+\end{lstlisting}
+
+\textbf{DC}——表征期间为特定 pin 指定 DC 电压。
+\begin{lstlisting}
+DC <pinName> <voltage_value>
+DC VSSV 0
+\end{lstlisting}
+
+\textbf{DEVICE\_MODEL\_LIBRARY}——SPICE 器件模型库，须全路径，可多次定义，corner 如 TT/FF/SS。
+\begin{lstlisting}
+DEVICE_MODEL_LIBRARY <SPICE_model_lib_path> <process_corner>
+DEVICE_MODEL_LIBRARY /home/design/13um.lib TT
+\end{lstlisting}
+
+\textbf{INCLUDE}——模型或其他参数文件，直接传给 NSPICE INCLUDE。
+\begin{lstlisting}
+INCLUDE <SPICE_device_model_filePath> ...
+INCLUDE /home/design/spice.models
+\end{lstlisting}
+
+\textbf{PROCESS}——MSDF 流程要求 \texttt{<cell>.current} 提供 corner 名。WC=SS=slow，BC=FF=fast，TC=TT=typical。若指定 \texttt{DESIGN\_CORNER}，\texttt{PROCESS} 应为其子关键字。
+\begin{lstlisting}
+PROCESS [ FF | TT | SS | BC | TC | WC ]
+PROCESS FF
+\end{lstlisting}
+
+\textbf{REDHAWK\_WORKING\_DIRECTORY}——RedHawk 工作目录（DD 模式必需），APL 从此读取 STA/SPEF 等设计数据。
+\begin{lstlisting}
+REDHAWK_WORKING_DIRECTORY <path>
+\end{lstlisting}
+
+\textbf{SIZE\_SCALE}——MOSFET L/W 缩放因子；Spice 网表尺寸为 $\mu$m 时设为 1。
+\begin{lstlisting}
+SIZE_SCALE <scale_factor>
+\end{lstlisting}
+
+\textbf{SPICE\_NETLIST}——一个或多个 Spice 子电路文件（全路径）。
+\begin{lstlisting}
+SPICE_NETLIST <file1> <file2> ...
+\end{lstlisting}
+
+\textbf{SWEEP\_TEMPERATURE}——热漏电流表征的温度列表（配合 \texttt{apldi -c}）。
+\begin{lstlisting}
+SWEEP_TEMPERATURE { <T1> <T2> ... }
+\end{lstlisting}
+
+\textbf{TEMP}——表征温度（$^\circ$C）。
+\begin{lstlisting}
+TEMP <temperature>
+\end{lstlisting}
+
+\textbf{VDD}——标称电源电压（V）。
+\begin{lstlisting}
+VDD <voltage>
+\end{lstlisting}
+
+\textbf{VDD\_VALUES}——多 Vdd 表征电压列表。
+\begin{lstlisting}
+VDD_VALUES { <v1> <v2> ... }
+\end{lstlisting}
+
+\textbf{VDD\_PIN\_NAME}/\textbf{GND\_PIN\_NAME}——Spice 网表中电源/地 pin 名（默认 VDD/GND）。
+\begin{lstlisting}
+VDD_PIN_NAME <name>
+GND_PIN_NAME <name>
+\end{lstlisting}
+\subsubsection{仅库 APL（DI）必需关键字——详述}
+
+\kw{APL_RUN_PASS} / \kw{APL_RUN_FAIL}：电流表征时转储 Spice 网表与输出波形。
+\begin{lstlisting}
+APL_RUN_PASS [ NONE | DECK | ALL ]
+APL_RUN_FAIL [ NONE | DECK | ALL ]
+\end{lstlisting}
+
+\kw{CUSTOM_LIBS_FILE}：无 LEF 时用手工定制 LIB 定义 Vdd/Vss pin；APL-DI 将 pin 写入 \texttt{adsLib.output}。
+\begin{lstlisting}
+CUSTOM_LIBS_FILE { <.lib_file> }
+\end{lstlisting}
+
+\kw{DESIGN_CORNER}：每个工艺 corner（温度+电压+模型）生成一套特性；可含 \texttt{LIB_ENTRY}、\texttt{SUBCKT}、\texttt{LIB_FILES}、\texttt{CUSTOM_LIBS_FILE}、\texttt{LIBS_DIRECTORY} 等。
+\begin{lstlisting}
+DESIGN_CORNER {
+    TT_25 { TEMP 25 PROCESS TT VDD 1.0 MODEL /nfs/apl1/model TT }
+    FF_125 { TEMP 125 PROCESS FF VDD 1.1 MODEL /nfs/apl1/model FF
+             LIB_FILES lib_dir1 lib_dir2/clkGen_fast.lib }
+}
+\end{lstlisting}
+
+\kw{LEF_FILES}：多 P/G pin 的 LEF 定义；APL 分别捕获各电源/地 pin 的电流与电容剖面。
+\begin{lstlisting}
+LEF_FILES { design_data/lef/cella.lef design_data/lef/cellb.lef }
+\end{lstlisting}
+无 LEF 时在定制 LIB 中定义：
+\begin{lstlisting}
+cell CELLA {
+    pin VDDIN { type vdd }
+    pin VDD   { type vdd }
+    pin VSS   { type gnd }
+}
+\end{lstlisting}
+
+\kw{LIB_FILES}：Synopsys \texttt{*.lib} 或定制 P/G arc；目录则纳入全部文件；\texttt{CUSTOM} 标记 P/G arc 文件。
+\begin{lstlisting}
+LIB_FILES {
+    libs/special/custom.lib CUSTOM
+    libs/typical
+    libs/memory/mem.lib
+}
+\end{lstlisting}
+P/G arc 文件格式：\texttt{pgarc \{ <vdd> <vss> ... \}}。
+
+\paragraph{大 cdev 值处理}
+APLDI 对特殊单元放宽 cdev 上限会改变 ESC。导入与工具链须：
+\begin{enumerate}
+  \item \texttt{aplchk}/\texttt{aplreader}/\texttt{aplmerge} 加 \texttt{-icheck}
+  \item APL 运行勿用 \texttt{-o <outfile>}，配置勿设 \texttt{MERGE_RESULT 1}
+  \item RedHawk 导入设 GSR \texttt{IGNORE_APL_CHECK 1}
+\end{enumerate}
+
+\subsubsection{可选 APL 配置文件关键字}
+以下逐项说明主要可选关键字（命令名保持英文）：
+
+\subsubsection{\gsr{APL_AFS}}
+\paragraph*{APL_AFS}
+
+指定 apldi 表征使用的 AFS 仿真器路径。
+
+\textbf{语法：}
+\begin{lstlisting}
+APL_AFS <path_to_afs_simulator>
+\end{lstlisting}
+
+\subsubsection{\gsr{APL_ELDO}}
+\paragraph*{APL_ELDO}
+
+使用 ELDO 代替默认 NSPICE 进行开关电流及 cdev/pwcdev/switch 表征；须给出 ELDO 可执行文件全路径。
+
+\textbf{语法：}
+\begin{lstlisting}
+APL_ELDO <full_path_to_binary>
+\end{lstlisting}
+
+\textbf{示例：}
+\begin{lstlisting}
+APL_ELDO abc/sim/eldo
+\end{lstlisting}
+
+\subsubsection{\gsr{APL_ELDO_WDB}}
+\paragraph*{APL_ELDO_WDB}
+
+APL 原生支持 ELDO 语法；设为 1 时启用 WDB-only 接口模式（默认 0）。
+
+\textbf{语法：}
+\begin{lstlisting}
+APL_ELDO_WDB [ 0 | 1 ]
+\end{lstlisting}
+
+\subsubsection{\gsr{APL_FORMAT_CORRECTION}}
+\paragraph*{APL_FORMAT_CORRECTION}
+
+设为 1 时，aplcop 根据翻转率自动识别并修正错误单元类型（默认类型为翻转率为 2 的 Gate）。默认 0。
+
+\textbf{语法：}
+\begin{lstlisting}
+APL_FORMAT_CORRECTION [0|1]
+\end{lstlisting}
+
+\subsubsection{\gsr{APL_HSPICE}}
+\paragraph*{APL_HSPICE}
+
+使用 HSPICE 代替默认 NSPICE；须指定二进制路径。
+
+\textbf{语法：}
+\begin{lstlisting}
+APL_HSPICE <path_to_binary>
+\end{lstlisting}
+
+\textbf{示例：}
+\begin{lstlisting}
+APL_HSPICE abc/sim/hspice
+\end{lstlisting}
+
+\subsubsection{\gsr{APL_HSPICE_ENCRYPT}}
+\paragraph*{APL_HSPICE_ENCRYPT}
+
+指定内部 HSpice deck 加密用的 metaencryptor 路径。
+
+\textbf{语法：}
+\begin{lstlisting}
+APL_HSPICE_ENCRYPT <path_to_metaencryptor>
+\end{lstlisting}
+
+\subsubsection{\gsr{APL_SPECTRE}}
+\paragraph*{APL_SPECTRE}
+
+使用 Spectre 代替默认 NSPICE；须指定二进制路径。
+
+\textbf{语法：}
+\begin{lstlisting}
+APL_SPECTRE <path_to_binary>
+\end{lstlisting}
+
+\subsubsection{\gsr{APL_RESULT_DIRECTORY}}
+\paragraph*{APL_RESULT_DIRECTORY}
+
+为单单元结果指定目录结构：电流 \texttt{<corner>/CURRENT/<cell>.spiprof}，decap \texttt{<corner>/CAP/<cell>.cdev}，pwcap \texttt{<corner>/PWC/<cell>.pwcdev}，及对应带时间戳的 log。默认 \texttt{APLDD\_<time>/} 或 \texttt{APLDI\_<time>/}。
+
+\textbf{语法：}
+\begin{lstlisting}
+APL_RESULT_DIRECTORY <APL_dir_name>
+\end{lstlisting}
+
+\textbf{示例：}
+\begin{lstlisting}
+APL_RESULT_DIRECTORY Apl-out-ABC
+\end{lstlisting}
+
+\subsubsection{\gsr{APL_SAMPLE_MODE}}
+\paragraph*{APL_SAMPLE_MODE}
+
+按所需精度选择表征类型；样本数由库中电压/负载/slew 范围自动决定。默认 DEFAULT（原 APLDI\_SAMPLE）。
+
+\textbf{语法：}
+\begin{lstlisting}
+APL_SAMPLE_MODE [ FAST_CHECK | DEFAULT ]
+\end{lstlisting}
+
+\textbf{示例：}
+\begin{lstlisting}
+APL_SAMPLE_MODE FAST_CHECK
+\end{lstlisting}
+
+\begin{noteBox}
+FAST\_CHECK：每单元单样本完整性检查；DEFAULT：多样本全表征。
+\end{noteBox}
+
+\subsubsection{\gsr{APL_TAIL_REDUCTION}}
+\paragraph*{APL_TAIL_REDUCTION}
+
+等时间步波形尾部削减：0 关闭；1 原始算法；\texttt{moderate} 改进算法（配合 \texttt{EXTRACTION\_METHOD pwl}）。
+
+\textbf{语法：}
+\begin{lstlisting}
+APL_TAIL_REDUCTION [ 0 | 1 | moderate ]
+\end{lstlisting}
+
+\subsubsection{\gsr{APL_TECH_LEVEL}}
+\paragraph*{APL_TECH_LEVEL}
+
+设为 1 时用 PWL 输入波形表征，加速并约减半磁盘占用；支持定制向量流程。仅 NSpice/HSpice。
+
+\textbf{语法：}
+\begin{lstlisting}
+APL_TECH_LEVEL [ 0 | 1 ]
+\end{lstlisting}
+
+\subsubsection{\gsr{APL_VOLTAGES}}
+\paragraph*{APL_VOLTAGES}
+
+DI 库中以标称电压分数指定表征电压点；须升序或降序。若未指定 $\ge 1.15\times$ 标称的点，APL 自动补充。默认：\texttt{4 1.15 1.0 0.9 0.75}。
+
+\textbf{语法：}
+\begin{lstlisting}
+APL_VOLTAGES <Num> <fraction1> ...
+\end{lstlisting}
+
+\textbf{示例：}
+\begin{lstlisting}
+APL_VOLTAGES 4 0.8 0.9 1.0 1.2
+\end{lstlisting}
+
+\subsubsection{\gsr{CDEV_AC_OPEN_INPUT}}
+\paragraph*{CDEV_AC_OPEN_INPUT}
+
+设为 1 时 cdev 表征排除所有输入 pin 电容（默认 0）。
+
+\textbf{语法：}
+\begin{lstlisting}
+CDEV_AC_OPEN_INPUT [ 0 | 1 ]
+\end{lstlisting}
+
+\subsubsection{\gsr{CELL_PROPERTY_FILE}}
+\paragraph*{CELL_PROPERTY_FILE}
+
+按 pin 指定输出负载的文件。
+
+\textbf{语法：}
+\begin{lstlisting}
+cell <name> { pin <pin> { load <F> } ... }
+\end{lstlisting}
+
+\textbf{示例：}
+\begin{lstlisting}
+CELL_PROPERTY_FILE <filename>
+\end{lstlisting}
+
+\subsubsection{\gsr{CONVERT_CCS_CAP}}
+\paragraph*{CONVERT_CCS_CAP}
+
+将含 intrinsic\_parasitic ESC/ESR/漏电流的 CCS 库转为 APL cdev（默认 0）。用户须确认 CCS 与 APLCAP 中 ESC/ESR 含义一致。
+
+\textbf{语法：}
+\begin{lstlisting}
+CONVERT_CCS_CAP [0 |1]
+\end{lstlisting}
+
+\subsubsection{\gsr{DC_TABLE_THRESHOLD}}
+\paragraph*{DC_TABLE_THRESHOLD}
+
+LDO dc 表在细步长 Spice dc 仿真时减少数据点。
+
+\textbf{语法：}
+\begin{lstlisting}
+DC_TABLE_THRESHOLD <slope_threshold>
+\end{lstlisting}
+
+\textbf{示例：}
+\begin{lstlisting}
+DC_TABLE_THRESHOLD 0.08
+\end{lstlisting}
+
+\subsubsection{\gsr{DEBUG}}
+\paragraph*{DEBUG}
+
+调试标志：保存中间与错误文件。
+
+\textbf{语法：}
+\begin{lstlisting}
+DEBUG [ 0 | 1 ]
+\end{lstlisting}
+
+\subsubsection{\gsr{ELDO_VECTOR_MODE}}
+\paragraph*{ELDO_VECTOR_MODE}
+
+0：ELDO 向量按 HSpice 语义（时间点为初值，默认）；1：ELDO 原生（时间点为终值）。
+
+\textbf{语法：}
+\begin{lstlisting}
+ELDO_VECTOR_MODE [0 | 1]
+\end{lstlisting}
+
+\subsubsection{\gsr{EXTRACTION_METHOD}}
+\paragraph*{EXTRACTION_METHOD}
+
+波形提取：\texttt{pwl} 分段线性，文件更小且精度接近 Spice；默认等时间步。
+
+\textbf{语法：}
+\begin{lstlisting}
+EXTRACTION_METHOD [ 0 | pwl ]
+\end{lstlisting}
+
+\subsubsection{\gsr{FAST_CHECKING}}
+\paragraph*{FAST_CHECKING}
+
+设为 1 时每单元单样本数据检查，等同 \texttt{apldi -fc} 或 GSR \texttt{APLDI\_SAMPLE\_MODE fast\_check}。
+
+\textbf{语法：}
+\begin{lstlisting}
+FAST_CHECKING [ 1 | 0 ]
+\end{lstlisting}
+
+\subsubsection{\gsr{GZIP_RESULT}}
+\paragraph*{GZIP_RESULT}
+
+压缩电流输出文件。
+
+\textbf{语法：}
+\begin{lstlisting}
+GZIP_RESULT [ 0 | 1 ]
+\end{lstlisting}
+
+\subsubsection{\gsr{IGNORE_DC_CHECK}}
+\paragraph*{IGNORE_DC_CHECK}
+
+忽略用户 DC 偏置的输入 pin 检查，允许同一配置覆盖有/无 DC pin 的单元。
+
+\textbf{语法：}
+\begin{lstlisting}
+IGNORE_DC_CHECK [ 0 | 1 ]
+\end{lstlisting}
+
+\subsubsection{\gsr{IGNORE_NETLIST_CHECK}}
+\paragraph*{IGNORE_NETLIST_CHECK}
+
+P/G pin 预检查：0 检查配置与网表 pin 名一致；默认 1 跳过。
+
+\textbf{语法：}
+\begin{lstlisting}
+IGNORE_NETLIST_CHECK [ 1 | 0 ]
+\end{lstlisting}
+
+\subsubsection{\gsr{IGNORE_RESET_PIN}}
+\paragraph*{IGNORE_RESET_PIN}
+
+Set/Reset pin 在网表中缺失时 Warning 继续（默认 Error）。
+
+\textbf{语法：}
+\begin{lstlisting}
+IGNORE_RESET_PIN [ 0 | 1 ]
+\end{lstlisting}
+
+\subsubsection{\gsr{IGNORE_UPF_PGARC}}
+\paragraph*{IGNORE_UPF_PGARC}
+
+UPF lib 无 P/G pin 时用定制 lib 定义 pg arc。
+
+\textbf{语法：}
+\begin{lstlisting}
+IGNORE_UPF_PGARC [ 0 | 1 ]
+\end{lstlisting}
+
+\subsubsection{\gsr{INCREMENTAL_APL}}
+\paragraph*{INCREMENTAL_APL}
+
+增量表征：仅重跑失败或新增单元（须设 \texttt{APL\_RESULT\_DIRECTORY}）。
+
+\textbf{语法：}
+\begin{lstlisting}
+INCREMENTAL_APL [ 0 | 1 ]
+\end{lstlisting}
+
+\subsubsection{\gsr{INPUT_TYPE}}
+\paragraph*{INPUT_TYPE}
+
+输入激励波形：0 单段 ramp（默认）；2 ramp+RC；3 5 段 PWL+RC；4 50 段 PWL（推荐）。
+
+\textbf{语法：}
+\begin{lstlisting}
+INPUT_TYPE [ 0 | 2 | 3 | 4 ]
+\end{lstlisting}
+
+\subsubsection{\gsr{LEAKAGE_DEVICE_MODEL_LIBRARY}}
+\paragraph*{LEAKAGE_DEVICE_MODEL_LIBRARY}
+
+漏电流表征单独器件模型库。
+
+\textbf{语法：}
+\begin{lstlisting}
+LEAKAGE_DEVICE_MODEL_LIBRARY <file> ?<corner>?
+\end{lstlisting}
+
+\subsubsection{\gsr{LEAK_HIGH_TO_MID_RATIO_LIMIT}}
+\paragraph*{LEAK_HIGH_TO_MID_RATIO_LIMIT}
+
+pwcap 漏电流比：最高 Vdd(1.1x) 与中点(0.5x) 之比低于阈值则不记入 log。
+
+\textbf{语法：}
+\begin{lstlisting}
+LEAK_HIGH_TO_MID_RATIO_LIMIT <ratio>
+\end{lstlisting}
+
+\subsubsection{\gsr{LEAK_HIGH_TO_LOW_RATIO_LIMIT}}
+\paragraph*{LEAK_HIGH_TO_LOW_RATIO_LIMIT}
+
+pwcap 漏电流比：最高 Vdd 与最低(0.1x) 之比。
+
+\textbf{语法：}
+\begin{lstlisting}
+LEAK_HIGH_TO_LOW_RATIO_LIMIT <ratio>
+\end{lstlisting}
+
+\subsubsection{\gsr{LSF_JOBID_QUERY}}
+\paragraph*{LSF_JOBID_QUERY}
+
+1：从作业提交返回消息取 LSF job ID；0：从 LSF 主机查询（默认，网络负担更大）。
+
+\textbf{语法：}
+\begin{lstlisting}
+LSF_JOBID_QUERY [0 | 1]
+\end{lstlisting}
+
+\subsubsection{\gsr{MIN_LOAD_SAMPLE}}
+\paragraph*{MIN_LOAD_SAMPLE}
+
+表征 Cload 下限（F），可覆盖 WARN/ERROR\_CLOAD\_CHECK。
+
+\textbf{语法：}
+\begin{lstlisting}
+MIN_LOAD_SAMPLE <load_Farads>
+\end{lstlisting}
+
+\textbf{示例：}
+\begin{lstlisting}
+MIN_LOAD_SAMPLE 10e-15
+\end{lstlisting}
+
+\subsubsection{\gsr{MAX_LOAD_SAMPLE}}
+\paragraph*{MAX_LOAD_SAMPLE}
+
+表征 Cload 上限（F）。
+
+\textbf{语法：}
+\begin{lstlisting}
+MAX_LOAD_SAMPLE <load_Farads>
+\end{lstlisting}
+
+\textbf{示例：}
+\begin{lstlisting}
+MAX_LOAD_SAMPLE 500e-15
+\end{lstlisting}
+
+\subsubsection{\gsr{MIN_SLEW_SAMPLE}}
+\paragraph*{MIN_SLEW_SAMPLE}
+
+表征 transition time 下限（s）。
+
+\textbf{语法：}
+\begin{lstlisting}
+MIN_SLEW_SAMPLE <trans_time-sec>
+\end{lstlisting}
+
+\textbf{示例：}
+\begin{lstlisting}
+MIN_SLEW_SAMPLE 10e-12
+\end{lstlisting}
+
+\subsubsection{\gsr{MAX_SLEW_SAMPLE}}
+\paragraph*{MAX_SLEW_SAMPLE}
+
+表征 transition time 上限（s）。
+
+\textbf{语法：}
+\begin{lstlisting}
+MAX_SLEW_SAMPLE <trans_time-sec>
+\end{lstlisting}
+
+\textbf{示例：}
+\begin{lstlisting}
+MAX_SLEW_SAMPLE 500e-12
+\end{lstlisting}
+
+\subsubsection{\gsr{MEMORYFILE}}
+\paragraph*{MEMORYFILE}
+
+存储器或定制单元输入向量文件路径（同 INPVECFILE）。
+
+\textbf{语法：}
+\begin{lstlisting}
+[ MEMORYFILE | INPVECFILE ] </path>
+\end{lstlisting}
+
+\textbf{示例：}
+\begin{lstlisting}
+MEMORYFILE /nfs/apl1/memfile
+\end{lstlisting}
+
+\subsubsection{\gsr{MERGE_RESULT}}
+\paragraph*{MERGE_RESULT}
+
+设为 1 将结果合并为运行目录单文件；亦在 \texttt{apldi -o} 时合并。仅建议 DD 或单 corner DI。
+
+\textbf{语法：}
+\begin{lstlisting}
+MERGE_RESULT [ 0 | 1 ]
+\end{lstlisting}
+
+\subsubsection{\gsr{MULTI_CORE}}
+\paragraph*{MULTI_CORE}
+
+本地多 CPU 并行提交作业数（默认 1，即开启）。
+
+\textbf{语法：}
+\begin{lstlisting}
+MULTI_CORE [ 0 | 1 ]
+\end{lstlisting}
+
+\subsubsection{\gsr{MULTI_NOMINAL}}
+\paragraph*{MULTI_NOMINAL}
+
+多标称电压 cdev/漏电流：在每个电压点捕获漏电流。
+
+\textbf{语法：}
+\begin{lstlisting}
+MULTI_NOMINAL [ 0 | 1 ]
+\end{lstlisting}
+
+\subsubsection{\gsr{MULTI_NOMINAL_VOLTAGES_METHOD}}
+\paragraph*{MULTI_NOMINAL_VOLTAGES_METHOD}
+
+0：仅用 .LIB 第一个标称电压做 derating；1：使用全部标称电压及其 derating 组合。
+
+\textbf{语法：}
+\begin{lstlisting}
+MULTI_NOMINAL_VOLTAGES_METHOD [ 0 | 1 ]
+\end{lstlisting}
+
+\subsubsection{\gsr{MULTI_SPICE}}
+\paragraph*{MULTI_SPICE}
+
+分层网表按 Vdd 拆分 Spice deck 与向量 VIH（默认关以缩短单机时间）。
+
+\textbf{语法：}
+\begin{lstlisting}
+MULTI_SPICE [ 0 | 1 ]
+\end{lstlisting}
+
+\subsubsection{\gsr{OPENPIN}}
+\paragraph*{OPENPIN}
+
+为未连接 pin 接大电阻到地以便表征。
+
+\textbf{语法：}
+\begin{lstlisting}
+OPENPIN <pinA> <pinB> ...
+\end{lstlisting}
+
+\textbf{示例：}
+\begin{lstlisting}
+OPENPIN ABCpin3A MNOpin14BC
+\end{lstlisting}
+
+\subsubsection{\gsr{OPTION}}
+\paragraph*{OPTION}
+
+Spice 仿真选项，可多次或块形式。
+
+\textbf{语法：}
+\begin{lstlisting}
+OPTION <Spice option>
+\end{lstlisting}
+
+\textbf{示例：}
+\begin{lstlisting}
+OPTION mode=turbo
+\end{lstlisting}
+
+\subsubsection{\gsr{OUTPUT_STATE_CHECK}}
+\paragraph*{OUTPUT_STATE_CHECK}
+
+改进基于 STATE\_TABLE 的 cdev HIGH/LOW 状态识别。
+
+\textbf{语法：}
+\begin{lstlisting}
+OUTPUT_STATE_CHECK [ 0 | 1 ]
+\end{lstlisting}
+
+\subsubsection{\gsr{PIN_LIST}}
+\paragraph*{PIN_LIST}
+
+pin 与 tie pin 连接关系。
+
+\textbf{语法：}
+\begin{lstlisting}
+PIN_LIST { <pin> <tie_pin> ... }
+\end{lstlisting}
+
+\textbf{示例：}
+\begin{lstlisting}
+PIN_LIST { A1 VDD1 }
+\end{lstlisting}
+
+\subsubsection{\gsr{PRIMARY_GND_PIN}}
+\paragraph*{PRIMARY_GND_PIN}
+
+多 rail 时输出负载所接主地 pin（可为 Spice 地网名）。
+
+\textbf{语法：}
+\begin{lstlisting}
+PRIMARY_GND_PIN <name>
+\end{lstlisting}
+
+\textbf{示例：}
+\begin{lstlisting}
+PRIMARY_GND_PIN VSS0
+\end{lstlisting}
+
+\subsubsection{\gsr{PRIMARY_VDD_PIN}}
+\paragraph*{PRIMARY_VDD_PIN}
+
+多 rail 时输出负载所接主电源 pin。
+
+\textbf{语法：}
+\begin{lstlisting}
+PRIMARY_VDD_PIN <name>
+\end{lstlisting}
+
+\subsubsection{\gsr{PWCAP_MULTI_SPICE}}
+\paragraph*{PWCAP_MULTI_SPICE}
+
+pwcap 多 Vdd Spice 并行数（仅多核，非 LSF）。
+
+\textbf{语法：}
+\begin{lstlisting}
+PWCAP_MULTI_SPICE <parallel run count>
+\end{lstlisting}
+
+\subsubsection{\gsr{RUN_TIME_LIMIT}}
+\paragraph*{RUN_TIME_LIMIT}
+
+LSF/SGE 进程时间上限（小时），到期后继续处理。
+
+\textbf{语法：}
+\begin{lstlisting}
+RUN_TIME_LIMIT <limit_hrs>
+\end{lstlisting}
+
+\subsubsection{\gsr{SAMPLE_SPLIT}}
+\paragraph*{SAMPLE_SPLIT}
+
+按样本分发作业：0 全不用；1 全用；未设则按网表大小自动。多 corner 不支持。
+
+\textbf{语法：}
+\begin{lstlisting}
+SAMPLE_SPLIT [ 0 | 1 ]
+\end{lstlisting}
+
+\subsubsection{\gsr{SCANMODE}}
+\paragraph*{SCANMODE}
+
+扫描链单元表征开关（默认 0）。
+
+\textbf{语法：}
+\begin{lstlisting}
+SCANMODE [ 0 | 1 ]
+\end{lstlisting}
+
+\subsubsection{\gsr{SCAN_OUTPUT_LOAD}}
+\paragraph*{SCAN_OUTPUT_LOAD}
+
+为 scan pin 附加恒定负载。
+
+\textbf{语法：}
+\begin{lstlisting}
+SCAN_OUTPUT_LOAD <load>
+\end{lstlisting}
+
+\subsubsection{\gsr{SIM_TIME_SCALE}}
+\paragraph*{SIM_TIME_SCALE}
+
+缩放 cdev/漏电流瞬态脉冲宽度与 tstop 以加速（cdev 默认 1.0；热漏电流默认 0.1）。
+
+\textbf{语法：}
+\begin{lstlisting}
+SIM_TIME_SCALE <value>
+\end{lstlisting}
+
+\subsubsection{\gsr{SIMULATION_COMMAND}}
+\paragraph*{SIMULATION_COMMAND}
+
+自定义 LSF 作业提交包装；\$input\_file 必需，\$output\_file 可选。
+
+\textbf{语法：}
+\begin{lstlisting}
+SIMULATION_COMMAND <sim_command>
+\end{lstlisting}
+
+\subsubsection{\gsr{SIMULATOR_COMMAND_OPTION}}
+\paragraph*{SIMULATOR_COMMAND_OPTION}
+
+附加到 Spice 命令行的用户选项。
+
+\textbf{语法：}
+\begin{lstlisting}
+SIMULATOR_COMMAND_OPTION <option>
+\end{lstlisting}
+
+\subsubsection{\gsr{SMOOTH_PWC_LEAK}}
+\paragraph*{SMOOTH_PWC_LEAK}
+
+平滑 pwcap 低电压样本漏电流毛刺。
+
+\textbf{语法：}
+\begin{lstlisting}
+SMOOTH_PWC_LEAK [ 1 | 0 ]
+\end{lstlisting}
+
+\subsubsection{\gsr{SPICE_SUBCKT_DIR}}
+\paragraph*{SPICE_SUBCKT_DIR}
+
+每单元独立子电路文件目录（与 SPICE\_NETLIST 互斥，先指定者生效）。文件名 \texttt{<cell>.<ext>}。
+
+\textbf{语法：}
+\begin{lstlisting}
+SPICE_SUBCKT_DIR <directory>
+\end{lstlisting}
+
+\textbf{示例：}
+\begin{lstlisting}
+SPICE_SUBCKT_DIR ./spice_netlists
+\end{lstlisting}
+
+\subsubsection{\gsr{SPICE2LEF_PIN_MAPPING}}
+\paragraph*{SPICE2LEF_PIN_MAPPING}
+
+Spice 与 LEF P/G pin 名映射；支持开关电流、CDEV、PWCAP。
+
+\textbf{语法：}
+\begin{lstlisting}
+SPICE2LEF_PIN_MAPPING { <spice> <lef> ... }
+\end{lstlisting}
+
+\subsubsection{\gsr{SUPPRESS_INTERNAL_OPTION}}
+\paragraph*{SUPPRESS_INTERNAL_OPTION}
+
+不自动添加收敛相关 Spice 选项（如 method=gear）。
+
+\textbf{语法：}
+\begin{lstlisting}
+SUPPRESS_INTERNAL_OPTION [ 0 | 1 ]
+\end{lstlisting}
+
+\subsubsection{\gsr{SWEEPSOURCE}}
+\paragraph*{SWEEPSOURCE}
+
+低功耗 header/footer 扫电压的电源或地 pin 名；默认可由 PRIMARY\_VDD/GND\_PIN 或 Vdd 决定。
+
+\textbf{语法：}
+\begin{lstlisting}
+SWEEPSOURCE [<power_pin> | <gnd_pin>]
+\end{lstlisting}
+
+\textbf{示例：}
+\begin{lstlisting}
+SWEEPSOURCE vdd1
+\end{lstlisting}
+
+\subsubsection{\gsr{SWEEPVALUE}}
+\paragraph*{SWEEPVALUE}
+
+替代默认 11 点有效电压（0.1--1.1$\times V_{eff}$）的自定义列表。
+
+\textbf{语法：}
+\begin{lstlisting}
+SWEEPVALUE <v1> <v2> ...
+\end{lstlisting}
+
+\textbf{示例：}
+\begin{lstlisting}
+SWEEPSOURCE vdd
+SWEEPVALUE 1.0 0.9 0.8 0.7
+\end{lstlisting}
+
+\subsubsection{\gsr{SWITCH_PRE_DRIVER}}
+\paragraph*{SWITCH_PRE_DRIVER}
+
+用 APLSW 表征开关预驱动器 ESR/ESC；DC 须使 header 输出 1、footer 输出 0。
+
+\textbf{语法：}
+\begin{lstlisting}
+SWITCH_PRE_DRIVER { VDD_PIN_NAME ... DC <pin> <V> }
+\end{lstlisting}
+
+\subsubsection{\gsr{TAIL_CUT_OPTION}}
+\paragraph*{TAIL_CUT_OPTION}
+
+按时间截断尾部电流，\texttt{-p} 保峰值。
+
+\textbf{语法：}
+\begin{lstlisting}
+TAIL_CUT_OPTION -p -tl <ps>
+\end{lstlisting}
+
+\textbf{示例：}
+\begin{lstlisting}
+TAIL_CUT_OPTION -p -tl 500
+\end{lstlisting}
+
+\subsubsection{\gsr{TMP_DIR}}
+\paragraph*{TMP_DIR}
+
+临时文件目录。
+
+\textbf{语法：}
+\begin{lstlisting}
+TMP_DIR <path>
+\end{lstlisting}
+
+\textbf{示例：}
+\begin{lstlisting}
+TMP_DIR /home/tmp
+\end{lstlisting}
+
+\subsubsection{\gsr{WARN_CLOAD_CHECK}}
+\paragraph*{WARN_CLOAD_CHECK}
+
+预检查 .lib Cload（pF）：S/M/I=标准/存储器/I/O，默认 Warning 5/50/50。
+
+\textbf{语法：}
+\begin{lstlisting}
+WARN_CLOAD_CHECK { S <val> M <val> I <val> }
+\end{lstlisting}
+
+\subsubsection{\gsr{ERROR_CLOAD_CHECK}}
+\paragraph*{ERROR_CLOAD_CHECK}
+
+Cload 错误阈值，默认 S/M/I=50/500/500。
+
+\textbf{语法：}
+\begin{lstlisting}
+ERROR_CLOAD_CHECK { S <val> M <val> I <val> }
+\end{lstlisting}
+
+\subsubsection{\gsr{WARN_SLEW_CHECK}}
+\paragraph*{WARN_SLEW_CHECK}
+
+预检查 .lib slew（ns），默认 S/M/I=5/10/10。
+
+\textbf{语法：}
+\begin{lstlisting}
+WARN_SLEW_CHECK { S <val> M <val> I <val> }
+\end{lstlisting}
+
+\subsubsection{\gsr{ERROR_SLEW_CHECK}}
+\paragraph*{ERROR_SLEW_CHECK}
+
+slew 错误阈值。
+
+\textbf{语法：}
+\begin{lstlisting}
+ERROR_SLEW_CHECK { S <val> M <val> I <val> }
+\end{lstlisting}
+
+\subsubsection{\gsr{WARN_VDD_CHECK}}
+\paragraph*{WARN_VDD_CHECK}
+
+标称 Vdd Warning 阈值（默认 >5V）。
+
+\textbf{语法：}
+\begin{lstlisting}
+WARN_VDD_CHECK <Vdd_warn_val>
+\end{lstlisting}
+
+\subsubsection{\gsr{ERROR_VDD_CHECK}}
+\paragraph*{ERROR_VDD_CHECK}
+
+标称 Vdd 过高错误（默认 >10V）。
+
+\textbf{语法：}
+\begin{lstlisting}
+ERROR_VDD_CHECK <Vdd_high_error_val>
+\end{lstlisting}
+
+\subsubsection{\gsr{MIN_VDD_CHECK}}
+\paragraph*{MIN_VDD_CHECK}
+
+标称 Vdd 过低错误（默认 <0.5V）。
+
+\textbf{语法：}
+\begin{lstlisting}
+MIN_VDD_CHECK <Vdd_low_error_val>
+\end{lstlisting}
+
+\subsubsection{并行运行关键字}
+Platform LSF 或 Sun Grid 可选下列关键字：
+
+\subsubsection{\gsr{BATCH_QUEUING_COMMAND}}
+\paragraph*{BATCH_QUEUING_COMMAND}
+
+批队列命令；LSF 默认 \texttt{bsub}，Sun Grid 默认 \texttt{qsub}。
+
+\textbf{语法：}
+\begin{lstlisting}
+BATCH_QUEUING_COMMAND <command>
+\end{lstlisting}
+
+\textbf{示例：}
+\begin{lstlisting}
+BATCH_QUEUING_COMMAND qsub
+\end{lstlisting}
+
+\subsubsection{\gsr{BATCH_QUEUING_OPTIONS}}
+\paragraph*{BATCH_QUEUING_OPTIONS}
+
+LSF/SGE 特有选项；文件中仅允许一行且选项须连续。
+
+\textbf{语法：}
+\begin{lstlisting}
+BATCH_QUEUING_OPTIONS <options>
+\end{lstlisting}
+
+\textbf{示例：}
+\begin{lstlisting}
+BATCH_QUEUING_OPTIONS -P mary -cwd -b y
+\end{lstlisting}
+
+\subsubsection{\gsr{EXEC_PATH}}
+\paragraph*{EXEC_PATH}
+
+LSF 或 Sun Grid 二进制路径。
+
+\textbf{语法：}
+\begin{lstlisting}
+EXEC_PATH <path>
+\end{lstlisting}
+
+\subsubsection{\gsr{GRID_TYPE}}
+\paragraph*{GRID_TYPE}
+
+并行平台：\texttt{LSF}（默认）或 \texttt{SUN\_GRID}。
+
+\textbf{语法：}
+\begin{lstlisting}
+GRID_TYPE <LSF | SUN_GRID>
+\end{lstlisting}
+
+\subsubsection{\gsr{JOB_COUNT}}
+\paragraph*{JOB_COUNT}
+
+并行作业数（LSF 默认 10；Sun Grid 最大 100）。
+
+\textbf{语法：}
+\begin{lstlisting}
+JOB_COUNT <n>
+\end{lstlisting}
+
+\subsubsection{\gsr{LSF_JOB_COUNT}}
+\paragraph*{LSF_JOB_COUNT}
+
+同 JOB\_COUNT（LSF 专用别名）。
+
+\textbf{语法：}
+\begin{lstlisting}
+LSF_JOB_COUNT <n>
+\end{lstlisting}
+
+\subsubsection{\gsr{LSF_ARRAY_SUBMIT_LIMIT}}
+\paragraph*{LSF_ARRAY_SUBMIT_LIMIT}
+
+LSF job array 提交上限（默认 1000）。
+
+\textbf{语法：}
+\begin{lstlisting}
+LSF_ARRAY_SUBMIT_LIMIT <n>
+\end{lstlisting}
+
+\subsubsection{\gsr{LSF_JOB_TIME_OUT}}
+\paragraph*{LSF_JOB_TIME_OUT}
+
+挂起作业杀死并重提交前等待时间（默认 1 小时）。
+
+\textbf{语法：}
+\begin{lstlisting}
+LSF_JOB_TIME_OUT <hours>
+\end{lstlisting}
+
+\subsubsection{\gsr{LSF_SUBMIT_MODE}}
+\paragraph*{LSF_SUBMIT_MODE}
+
+1=bsub；2=LSF API；3=array 提交（须 \texttt{-j 1}）。
+
+\textbf{语法：}
+\begin{lstlisting}
+LSF_SUBMIT_MODE [ 1 | 2 | 3 ]
+\end{lstlisting}
+
+\subsubsection{\gsr{QUEUE}}
+\paragraph*{QUEUE}
+
+指定队列名。
+
+\textbf{语法：}
+\begin{lstlisting}
+QUEUE <queue name> ...
+\end{lstlisting}
+
+\textbf{示例：}
+\begin{lstlisting}
+QUEUE short
+\end{lstlisting}
+
+\subsubsection{\gsr{TIMER}}
+\paragraph*{TIMER}
+
+作业状态轮询间隔（秒，默认 60）。
+
+\textbf{语法：}
+\begin{lstlisting}
+TIMER <seconds>
+\end{lstlisting}
+
+\textbf{示例：}
+\begin{lstlisting}
+TIMER 10
+\end{lstlisting}
+
+运行 \texttt{apldi} 或 \texttt{avm} 前在 csh 中：\texttt{setenv APACHEROOT <path\_to\_redhawk\_release\_directory>}。
+
+\section{定制单元表征数据准备}
+\subsection*{Custom Cell Characterization Data Preparation}
+
+APL 可表征组合逻辑与时序等定制单元，须用户指定表征向量。除标准单元数据外，每个待表征单元须有一个向量文件；配置中须含 \kw{VECTOR_DIR}（全路径）。
+
+\kw{VECTOR_DIR} 指定输入向量目录：
+\begin{lstlisting}
+VECTOR_DIR /home/design/input_vectors
+\end{lstlisting}
+
+\subsection{输入向量文件}
+\subsubsection*{Input Vector Files}
+
+APL-DI 由 \texttt{libreader} 创建向量；APL-DD 由 RedHawk 调用 \texttt{libreader}。定制单元须手工创建 \texttt{<cell_name>.inv}。
+
+向量文件指定：输入向量；决定延迟的时序 arc 相关 pin；固有 decap 与漏电流的输入偏置。
+
+\paragraph{DC 偏置}
+\begin{lstlisting}
+param <bias_level> <value>
+dc <pin1> <bias_level>
+\end{lstlisting}
+偏置名须与配置中 Vdd/Vss pin 名一致；注意与 APL 配置电压一致。
+
+\paragraph{主输入输出}
+\begin{lstlisting}
+active_input <input_pin1> <input_pin2> ...
+active_output <output_pin>
+\end{lstlisting}
+
+\paragraph{向量块}
+\begin{lstlisting}
+vector {
+    vname <input1> <input2> ...
+    tunit ps
+    vih [ <Vdd_name> | <VIH_value> ]
+    <time_step> <state_pin1><state_pin2>... ?<state_name>?
+}
+\end{lstlisting}
+\texttt{time\_step} 为 APL 单位时间步倍数（非实际 ns）；0 步用于初始化。向量状态值之间\textbf{无空格}。\texttt{MULTI\_SPICE 1} 时 \texttt{vih} 可为标称 Vdd 名，VIH 按电压百分比缩放。
+
+\subsubsection{组合逻辑多向量示例}
+五输入组合门示例（\texttt{a,b} 与 \texttt{e} 不同电源域）：
+\begin{lstlisting}
+dc c vdd
+dc d 0
+active_input a
+active_output y
+vector {
+    vname a b
+    tunit ps
+    vih Vdd1
+    0 10
+    1 01
+    5 10
+}
+vector {
+    vname e
+    tunit ps
+    vih Vdd2
+    0 1
+    1 0
+    5 1
+}
+\end{lstlisting}
+时间步含义：步 0 时 A=1,B=0；步 1 时 A=0,B=1；步 5 时 A=1,B=0——确保输出 0$\rightarrow$1 与 1$\rightarrow$0 均被捕获。
+
+\figplaceholder{Figure 9-2}{两输入组合门的信号剖面}
+
+\subsubsection{时序单元向量示例}
+须捕获 TRAN01、TRAN10、TRAN11（触发沿输出不翻转）、TRAN00（非触发沿）：
+\begin{lstlisting}
+dc scen 0
+dc scin 0
+active_input clock
+active_output nq
+vector {
+    vname clock d
+    tunit ns
+    vih 1.2
+    0 00
+    2 10
+    4 01
+    6 11 tran10
+    8 01
+    10 11
+    12 01
+    14 10 tran01
+    16 00 tran00
+    18 10 tran11
+    20 00
+}
+\end{lstlisting}
+
+\figplaceholder{Figure 9-3}{时序单元的信号剖面}
+
+图~\ref{fig:apl-seq-prof} 中 \texttt{0->0} 为非触发时钟沿，\texttt{1->1} 为触发沿且输出保持。
+
+\begin{noteBox}
+所有 \texttt{<cell\_name-n>.inv} 须位于 \kw{VECTOR_DIR} 指定目录。
+\end{noteBox}
+
+
+\section{运行单元表征}
+\subsection*{Running Cell Characterization}
+
+\subsection{库（DI）APL 运行设置}
+\begin{enumerate}
+  \item 按「APL 配置文件说明」准备配置文件。
+  \item 运行 APL-DI 获开关电流剖面、高/低态器件电容与电阻、全库漏电流。
+\end{enumerate}
+
+\subsection{设计相关（DD）APL 运行设置}
+\begin{enumerate}
+  \item 准备 RedHawk GSR（附录 C）。
+  \item GUI \texttt{APL -> Setup} 或 TCL \texttt{setup apl -dir <dir\_name>}，生成 \texttt{apache.apl}、\texttt{adsLib.output}（在 \texttt{<dir>/.apache}），并创建模板：\texttt{apl.custom.config}、\texttt{apl.io.config}、\texttt{apl.memory.config}、\texttt{apl.std.config} 及单元列表。
+  \item 准备配置文件。
+  \item 运行 APL-DD。
+  \item 低功耗设计：额外运行 header/footer 与 decap（pwcap），见「低功耗设计表征」。
+\end{enumerate}
+
+\subsection{增强型设计无关表征}
+GSR \kw{APL_DID} 设为 1 时，RedHawk 自动为 APL-DI 覆盖不足的实例生成额外设计相关样本。APL-DI 在 \texttt{APLDI\_[yyyymmdd]/corner[n]/CURRENT/PACKAGE} 打包 Spice 与配置。已生成 DI 库可用：
+\begin{lstlisting}
+aplgenpkg -d APLDI_[yyyymmdd] -c <apldi_config>
+\end{lstlisting}
+导入须用目录格式：\texttt{import apl APLDI/APLDI\_20070310/corner1/CURRENT}（非单一 \texttt{*.current}）。
+
+\subsection{从 UNIX Shell 运行 APL 表征}
+\begin{lstlisting}
+% apldi [-c] [-w] [-sw] [ -l <cell_file> | -p <decap_file> ]
+      ? -o <output_file>? ? -s [1|2]? ?-j [1|2]? ?-v? ?-fc ? <apl_config_file>
+\end{lstlisting}
+
+\begin{itemize}
+  \item \texttt{-c}：decap 表征；\texttt{-w}：pwcap；\texttt{-sw}：开关 decap
+  \item \texttt{-l}：单元列表；\texttt{-o}：输出（勿用 \texttt{.spiprof/.spcurrent/.cdev/.pwcdev} 作扩展名）
+  \item \texttt{-p}：有意 decap 列表（不与 \texttt{-c} 同用）
+  \item \texttt{-s 1|2}（仅 DI）：1=仅生成样本；2=不生成样本直接表征（DD 常用）
+  \item \texttt{-j 1|2}：多机（1=bsub，2=LSF API；SunGrid 亦用 \texttt{-j}）
+  \item \texttt{-v}：详细；\texttt{-fc}：快速库检查
+\end{itemize}
+
+许可证等待：\texttt{setenv APACHEDA\_LICENSE\_WAIT <xxx:unit sec>}。
+
+\subsection{多 Vdd/Vss Decap 单元}
+\begin{lstlisting}
+DECAP_VDD_PIN { VDD 1.2 VDDPST 3.3 }
+CUSTOM_LIBS_FILE { <custom.lib> }
+\end{lstlisting}
+多 Vdd/Vss decap 的 P/G arc 须在 \texttt{pgarc.lib} 手工定义：
+\begin{lstlisting}
+cell decap234 {
+    pgarc { VDD VSS  VDDPST VSSPST }
+}
+\end{lstlisting}
+
+\subsection{APL 调用示例}
+DD：
+\begin{lstlisting}
+% apldi -s 2 -l cell_list2 apl.config
+% apldi -j 2 -s 2 -l cell_list2 apl.config
+% apldi -l cell_list1 -c apldi.config
+% apldi -p decap_cell_list6 apl.config
+\end{lstlisting}
+Decap 列表每行 \texttt{<cell\_name>}。
+
+DI：
+\begin{lstlisting}
+% apldi -j 2 apldi.config
+% apldi -j 2 -c -l cell_list_dc apldi.config
+% apldi -j 2 -w cell_list_pw apldi.config
+\end{lstlisting}
+
+\subsection{低功耗设计表征}
+Header 扫 Vdd 从近零到 Vdd；Footer 扫 Vss 从近 Vdd 到零。\kw{SWEEPSOURCE}、\kw{SWEEPVALUE}、\kw{PRIMARY_VDD_PIN}/\kw{PRIMARY_GND_PIN}。
+\begin{lstlisting}
+% apldi -w [ -l <cell_list> | -p <decap_list> ] [-o <output>] <apl_config>
+aplsw [-c] [-d] [-o <output_file>] <sw_config_list.conf>
+\end{lstlisting}
+结果用 GSR \kw{PIECEWISE_CAP_FILE} 导入。详见第~\ref{chap:lp}~章。
+
+\section{APL 中的多作业管理}
+\subsection*{Multi-Job Management in APL}
+
+APL 在 LSF 9.x 使用 Job array，数组内作业共享 job ID。
+\begin{enumerate}
+  \item 配置：
+\begin{lstlisting}
+GRID_TYPE lsf
+BATCH_QUEUING_COMMAND bsub
+LSF_SUBMIT_MODE 3
+BATCH_QUEUING_OPTIONS -J shortjob
+\end{lstlisting}
+  \item 须 \texttt{-j 1}；例：\texttt{\$APACHEROOT/bin/apldi2 -l list -j 1 apl.current.config}
+  \item APL 用自有机制监控作业，不再查询 LSF 守护进程。
+\end{enumerate}
+LSF 9.x 默认 array 大小 1000；\kw{SAMPLE_SPLIT} 模式下 array 须大于作业数。
+
+\section{输出文件}
+\subsection*{Output Files}
+
+\subsection{整体流程文件}
+\textbf{进程日志}（\texttt{adsRpt/Log/}）：\texttt{apl.current.log.<time>}、\texttt{apl.cap.log.<time>}、\texttt{apl.pwcap.log.<time>}。
+
+\textbf{错误/警告}（\texttt{adsRpt/Error/}、\texttt{Warn/}）：\texttt{apl.current.err|warn.<time>} 等；\texttt{adsRpt/} 顶层软链接到最新结果。
+
+\textbf{状态：}\texttt{aplstat <apl\_config>} 写 \texttt{aplstat.log}，汇总成功/失败/待处理及原因。
+
+\subsection{结果文件}
+\textbf{APL-DI：}\texttt{/<corner>.current}、\texttt{/<corner>.cdev}、\texttt{/<corner>.pwcdev}。
+
+\textbf{APL-DD：}\texttt{/<cell>.spcurrent}（节点上限 10 亿）、\texttt{/<cell>.cdev}、\texttt{/<cell>.pwcdev}。
+
+\subsection{单单元表征文件}
+默认 \texttt{APLDI\_<time>/} 或 \texttt{APLDD\_<time>/}；\kw{APL_RESULT_DIRECTORY} 可改。结构：\texttt{corner*/CURRENT|CAP|PWCAP/<cell>.spiprof|cdev|pwcdev} 及 \texttt{.<time>.log}。
+
+\subsection{APL 结果检查与处理}
+\begin{lstlisting}
+aplchk <input_file/dir> ?-v? ?-l <list_file>? ?-w <output_file>?
+    ?-c? ?-pwc <pwcdev_file>? ?-conf <APL_config>? ?-spice <apl config>?
+\end{lstlisting}
+失败列表：\texttt{adsRpt/aplchk.log}。
+
+\paragraph{检查限值（全局或 \kw{CELL_CHECK_LIMITS} 按单元）}
+\begin{longtable}{@{}p{0.35\textwidth}p{0.58\textwidth}@{}}
+\toprule
+\textbf{关键字} & \textbf{说明（默认）} \\
+\midrule
+\endhead
+\kw{IMAX_STDCELL_WARN} & 峰值电流 Warning（100000\,uA） \\
+\kw{ITAIL_STDCELL_WARN} & 尾部电流 Warning \\
+\kw{SLEWMAX_STDCELL_WARN} & 最大 slew（3e6\,ps） \\
+\kw{DELAYMAX_STDCELL_WARN} & 最大延迟 \\
+\kw{FIREMAX_STDCELL_WARN} & FIRE 指标 \\
+\kw{CMAX_STDCELL_WARN} & 最大电容（1000\,pF） \\
+\kw{RMAX_STDCELL_WARN} & 最大电阻 \\
+\kw{LEAKMAX_STDCELL_WARN/ERROR} & 漏电流 \\
+\kw{PWC_VDD_MAX_WARN} & pwcap 最大 Vdd（5\,V） \\
+\kw{*_MEMORY_*} 系列 & 存储器对应限值（峰值默认 1e6\,uA） \\
+\bottomrule
+\end{longtable}
+
+\texttt{aplchk -c <cell>.cdev} 输出 c0/c1、r0/r1、leak0/leak1 直方图。
+
+\subsection{无 APL 数据或样本的单元报告}
+\begin{itemize}
+  \item 无电流：\texttt{adsRpt/apache.inst.libCurrent}
+  \item 无 decap：\texttt{apache.refCell.noAplCap}
+  \item 无电压相关 decap：\texttt{apache.refCell.noAplPwcap}
+  \item 有 APLDI 无样本：\texttt{apache.refcell.noAplSample}（Warning ITG-022）
+\end{itemize}
+
+\section{在 RedHawk 中导入与合并表征数据文件}
+\subsection*{Importing and Merging Characterization Data Files in RedHawk}
+
+\subsection{导入 APL 文件}
+推荐 GSR \kw{APL_FILES}：
+\begin{lstlisting}
+APL_FILES {
+    <APL_binary>    current
+    <APL_binary>    cdev
+    <Avm.conf>      avm
+    <AVM_binary>    current_avm
+    <APL binary>    pwcap
+}
+\end{lstlisting}
+或 \texttt{import apl <file>}；\texttt{import apl} 与 \texttt{import apl -c} 可累积。\texttt{APL\_FILES} 优先支持目录与多类型。命令文件有 \texttt{import apl} 时 GSR \texttt{APL\_FILES} 被忽略。
+
+导入错误：默认忽略 model/Vdd/温度差异；\texttt{gsr set ignore\_apl\_check 1} 忽略全部；或 GUI \texttt{APL -> Import}。
+
+\subsection{合并 APL 结果文件}
+\begin{lstlisting}
+aplmerge [-c] [-pwc] [-rep] [-l <cell_list>] [-im] [-t] [-o <output>]
+    [-avm] [-ilimit] [<file1> ...] [<directory>] [-fl <list_file>]
+    [-multi_pvt_merge <file1> <file2>]
+\end{lstlisting}
+\texttt{-rep}：用 file2 同名单元替换 file1；\texttt{-l} 列表格式 \texttt{<path>/<cellname>}；\texttt{-avm} 忽略 AVM 头差异；\texttt{aplmerge -o <cell>.current *.spiprof} 支持通配符。
+
+\section{aplccs（CCS2APL）库表征}
+\subsection*{aplccs (CCS2APL) Library Characterization}
+
+\texttt{aplccs} 将 CCS 库转为 APL 开关电流格式。优势：对 RedHawk 透明；运行前可生成 DI 库；转换极快；时序为硬值。
+
+标准单元：支持对角稀疏 cload 表；多 \texttt{nom\_voltage} 合并须 slew 归一化/温度/pg\_pins/states/samples 一致；C00/C11 \texttt{\_toggle} 扩展样本（同 slew 波形相同）。存储器/I/O/定制：C-load 无关状态默认 1\,fF；支持多输出。
+
+\begin{lstlisting}
+aplccs [-o <output_file>] -mstate_cells <cell_list> -conf <aplccs_config> [-skip_ps]
+\end{lstlisting}
+默认 \texttt{ccs.current}；\texttt{-skip\_ps} 跳过 \texttt{.apache/apache.pslib}。
+
+\subsection{APLCCS 配置文件}
+\begin{itemize}
+  \item \kw{LIB_FILES}/\kw{LIBS_DIRECTORY}/\kw{LIBS_FILE}
+  \item \kw{RETRY_VECTORLESS [0|1]}：向量失败时用随机向量（默认向量同 APL）
+  \item \kw{IGNORE_CELLS \{ <cell> ... \}}：跳过格式异常单元
+\end{itemize}
+
+\subsection{直接导入 CCS Lib}
+\kw{LIB_USE_CCS} 1：RedHawk 流程透明转换。\kw{CCS_OVERRIDE_APL} 1：CCS 优先于 APL（须 \kw{LIB_USE_CCS} 1）。\kw{CONVERT_CCS_CAP}：CCS intrinsic 转 cdev。
+
+\section{I/O 单元表征}
+\subsection*{I/O Cell Characterization}
+
+I/O 可向内核注入显著噪声（尤其共享 VSS），应纳入动态分析。须表征 core 与 I/O 全部 Vdd/Vss pin 电流。
+
+\subsection{I/O 单元表征流程}
+\begin{enumerate}
+  \item I/O Vdd（在 SPICE \texttt{.subckt}，非 .lib）：\texttt{dc <io\_vdd\_pin> <value>}
+  \item 开路监测：\texttt{openpin <open\_pins>}
+  \item 参数：\texttt{param vddo=1.5}、\texttt{dc VDDQ15 vddo}
+  \item 激励：\texttt{active\_input clk}（差分 I/O 勿用自动）；或 \texttt{VECTOR \{ VNAME ... TUNIT VIH SLOPE ... \}}
+  \item 负载：\texttt{OUTPUT <out\_pin> <load\_subckt>}，子电路在 \texttt{.inpvec} 或 include 中定义。
+\end{enumerate}
+
+板级负载示例子电路：
+\begin{lstlisting}
+.subckt pkg_board_load chip_node
+X1 chip_node bga_node pkg_load
+X2 bga_node far_end_node board_load
+.ends
+\end{lstlisting}
+
+\subsection{I/O 附加关键字（可选）}
+\kw{TSTEP}/\kw{TSTOP} 瞬态步长与停止时间；\kw{OP} decap dump 时间；\kw{tranXX} 开关窗口（向量行末优先级更高）；\kw{ioprobe <VDD> <+|-> <VSS> <-|+>} 探测极性。
+
+\begin{noteBox}
+I/O 单元仅考虑一个代表性样本。最精确：\texttt{sim2iprof}+ACE；更快：AVM。
+\end{noteBox}
+
+\section{存储器与 IP 表征}
+\subsection*{Memory and IP Characterization}
+
+\begin{itemize}
+  \item \textbf{精确：}\texttt{sim2iprof}（开关电流）+ ACE（ESR、电容、漏电流）
+  \item \textbf{快速：}AVM 数据手册表征（三角/梯形电流、ESR、电容、漏电流）
+\end{itemize}
+
+\subsection{Sim2iprof 开关电流表征}
+见附录 E「sim2iprof」。
+
+\subsection{ACE Decap 与 ESR 表征}
+ACE 用追踪算法找 P/G 网络，Spice 表征 MOSFET 栅电容，输出 APL 格式电容、ESR、漏电流；可用 DSPF（\texttt{*|NET}、\texttt{*|I}）追踪 R。大单元（约 50 万 MOSFET）Linux 上约 1 分钟。
+
+\paragraph{Tied-off 器件识别为 decap}
+\begin{itemize}
+  \item NMOS：源/栅接地、漏接电源；或漏/栅接地、源接电源
+  \item PMOS：源/栅接电源、漏接地；或漏/栅接电源、源接地
+  \item 接信号：电流置零，不作 decap
+\end{itemize}
+
+\paragraph{ACE 配置文件}
+\textbf{必需：}\kw{External_power_net}、\kw{External_ground_net}、\kw{Subckt}、\kw{Modelfile}（或 \kw{Include}）、\kw{VddValue}。
+
+\textbf{主要可选：}\kw{Ace_HSpice}/\kw{Ace_Eldo}/\kw{Ace_Spectre}；\kw{ACE_OPTION}；\kw{DECAP_SUBCKT}；\kw{Internal_Power_Net}/\kw{VP_PAIRING}；\kw{K_GROUND_CAP}/\kw{K_FLOAT_CAP}（默认 0.5）；\kw{Leakage_i}（\texttt{-pwc} 必需）；\kw{METAL_RESISTOR}/\kw{METAL_RESISTOR_FILE}；\kw{MOS_Report}；\kw{NOMINAL_VDD}；\kw{NMOS/PMOS_Model_Name}；\kw{Primary_Power_Net}/\kw{Primary_Ground_Net}；\kw{SIGCAP_FACTOR}；\kw{SIGNAL_PARASITIC_C}；\kw{SweepValue}（\texttt{-pwc}，默认 11 点 10\%--110\% Vdd）；\kw{Switch_Subckt}；\kw{Temperature}；\kw{TOGGLE_RATE_ASSIGNMENT}；\kw{VP_Mapping}；\kw{VTH_FACTOR}；\kw{WRAPSUB}；\kw{XMOS_INST_PARAM}；\kw{FLIP_WELL}；\kw{FINFET_UNIT_WIDTH} 等。
+
+\begin{lstlisting}
+ace [-d] [-o <output_file>] [-toggle_rate <On_fraction>] [-pwc] <cellname>.smin
+\end{lstlisting}
+输出：\texttt{<cell>.mcap}、\texttt{<cell>.ace.mmx}、\texttt{<cell>.ace.decap}。
+
+\subsection{AVM 数据手册表征}
+无存储器 APL 时 RedHawk 可生成 \texttt{adsRpt/avm.conf}。\kw{LIB2AVM}：0 关；1 双三角；2 梯形；3/4 负载相关三角/梯形。
+
+\begin{lstlisting}
+lib2avm <lib2avm_config_filename> -l <cell_list>
+avm <avm_configuration_file>
+\end{lstlisting}
+
+配置示例：
+\begin{lstlisting}
+Cell1 {
+    MEMORY_TYPE RegFile
+    EQUIV_GATE_COUNT 6663
+    Cload 2f
+    VDD_PIN VDDPR VDDP
+    GND_PIN VSS
+    C_decap { VDDPR VSS 11.002f ... }
+    VDD 1.08 1.08 { ck2q_delay 1537p; tr_q 30.194p; Cpd_read {...} }
+}
+\end{lstlisting}
+
+关键字段：\kw{CHARACTERIZATION_MODE}（\texttt{accurate}/\texttt{ultra\_accurate}/\texttt{PWL}）；\kw{PROCESS}；\kw{C_decap}/\kw{Cpd_read|write|standby}；\kw{Peak_I_*}、\kw{CHARGE_RATIO}（默认 0.7）；\kw{DATAVERSION}；多状态 \kw{CUSTOM_STATE_FILE}、\kw{STATE_BOOLEAN}。
+
+输出：\texttt{vmemory.current}、\texttt{vmemory.cdev}；\texttt{avm.log}/\texttt{avm.warning}/\texttt{avm.error}。
+
+\section{APL 问题排查}
+\subsection*{Troubleshooting APL Problems}
+
+\subsection{检查配置文件}
+\begin{itemize}
+  \item 必需关键字、Vdd 与 GSR、温度与 .lib/Tech 一致？
+  \item Vdd/Gnd pin 名与 Spice 一致？尺寸单位：非 $\mu$m 时设 \kw{SIZE_SCALE}（如 \texttt{1e-6}）。
+\end{itemize}
+
+\subsection{常见问题}
+\begin{itemize}
+  \item \texttt{.apache/adsLib.output} 缺向量——LIB 缺 function/state table
+  \item Spice 网表/模型缺失、参数/scale/不支持 card
+  \item tie-off、天线二极管误表征；decap 未用 \texttt{-p}；复杂单元缺向量
+  \item 向量未引起输出边沿；\kw{TMP_DIR} 磁盘不足；\texttt{DEBUG 1}、\texttt{-v}、\texttt{-d} 查 \texttt{.apache/APL/<cell>.sp}
+  \item NSpice 孤立节点：\kw{OPTION} \texttt{gshunt=1e-9}
+\end{itemize}
+
+\section{APL 配置文件示例}
+\subsection*{Sample APL Configuration File}
+
+\begin{lstlisting}
+APL_RUN_MODE DI
+LIB_FILES {
+    /nfs/apl1/user_data/lib/IO.lib
+    /nfs/apl1/user_data/lib/ANALOG.lib
+}
+DESIGN_CORNER {
+    { TEMP 25  PROCESS TT  VDD 1.0  MODEL /nfs/apl1/model TT }
+    { TEMP 125 PROCESS FF VDD 1.1  MODEL /nfs/apl1/model FF }
+}
+GRID_TYPE LSF
+BATCH_QUEUING_COMMAND bsub
+BATCH_QUEUING_OPTIONS -r -R select [type==any]
+EXEC_PATH /appls/lsf/6.0/linux2.4-glibc2.3-x86/bin
+LSF_SUBMIT_MODE 1
+JOB_COUNT 20
+SPICE_SUBCKT { /nfs/apl1/user_data/spice/subckt/spice.lib }
+INCLUDE { /nfs/apl1/model/model.typ }
+WORKING_DIR /nfs/apl1/apldi_test
+SIZE_SCALE 1
+VDD 1.5
+VDD_PIN_NAME VDD
+GND_PIN_NAME GND1
+TMP_DIR /nfs/apl1/apldi_test/temp
+\end{lstlisting}

@@ -1,0 +1,666 @@
+% 第 16 章 Pattern Matching
+\bichapter{图案匹配}{Pattern Matching}
+\label{chap:pmatch}
+
+本章介绍 IC Validator 图案匹配（pattern matching）。图案匹配相关函数的详细说明见 \textit{IC Validator Reference Manual}。
+
+IC Validator 图案匹配功能按下列各节说明：
+\begin{itemize}
+  \item 概述
+  \item 使用图案匹配流程
+  \item 创建图案库
+  \item 查看与锁定图案库
+  \item 检查版图
+  \item 在 IC Compiler 工具中检测并修复热点
+\end{itemize}
+
+% ============================================================
+\section{概述}
+\subsection*{Overview}
+
+IC Validator 图案匹配比较两种几何构型（图案），以判定它们是否匹配。在图案匹配过程中，将来自设计版图的目标图案（target pattern）与来自既有图案库的参考图案（reference pattern）进行比对，以判定图案是否匹配。图~\ref{fig:pm-flow} 示意该步骤。
+
+参考图案表示任意无法制造的几何形状组合（例如光刻热点），或难以用标准 DRC 规则准确解释的构型（例如复杂的二维几何度量）。参考图案通过稳健的验证与确认技术预先识别，并在匹配前被精确指定并加入图案库。
+
+图案匹配作为基于 DRC 的流程，其优势在于远快于基于仿真的光刻检测——后者计算代价极高且耗时。因此，图案匹配能以更经济的方式在设计流程早期识别光刻或工艺引入的热点，并使实时验证与修复成为可能。
+
+\figplaceholder{Figure 105: Pattern Matching Flow}{图案匹配流程}{fig:pm-flow}
+
+% ============================================================
+\section{使用图案匹配流程}
+\subsection*{Using the Pattern Matching Flow}
+
+要使用图案匹配流程，需以设计图案层（design pattern layers）与位置标记层（location marker layers）的形式提供一组源图案。这些层可在制造现场识别为良率损害源（yield detractors），也可在无晶圆厂公司用于方法论检查。图~\ref{fig:pm-flowchart} 给出用于图案库创建与图案匹配的顶层 IC Validator 图案匹配流程。
+
+\figplaceholder{Figure 106: Pattern Matching Flowchart}{图案匹配流程图}{fig:pm-flowchart}
+
+在图案库创建期间，从源图案提取图案信息并写入图案库。图案匹配步骤调用该图案库作为参考，以识别输入设计版图中相同或相似的图案。
+
+\cmd{pattern\_learn()} 函数创建图案库。\cmd{pattern\_match()} 函数执行图案匹配。全部图案匹配函数的摘要见 \textit{IC Validator Reference Manual} 第~1~章「Tables of Runset Functions」。
+
+% ============================================================
+\section{创建图案库}
+\subsection*{Creating the Pattern Library}
+
+本节给出使用 \cmd{pattern\_learn()} 函数创建图案库的流程示例。
+
+\subsection{准备输入版图}
+\subsubsection*{Preparing the Input Layout}
+
+以 GDSII 或 OASIS 格式捕获的源图案，通过图案定义过程登记到图案库；该过程包含用于精确描述图案的规范。
+
+\subsubsection{必需输入}
+\paragraph*{Required Input}
+
+创建图案库需要三项用户定义输入。这些输入是输入版图的一部分，或在调用 \cmd{pattern\_learn()} 之前由 runset 操作生成。图~\ref{fig:pm-required-input} 给出必需输入示例。
+
+\begin{itemize}
+  \item \textbf{图案层（Pattern layers）。}指定图案包含单层或多层图案层，例如由金属层与通孔层组成的图案。
+  \item \textbf{图案标记（Pattern marker）。}指定放置在每个源图案上的矩形多边形，用于标记关注位置，例如 pinch/bridge 位置或 DRC 违例。图案匹配时输出该图案标记，以报告图案库与设计之间的匹配。
+  \item \textbf{图案范围（Pattern extent）。}指定图案的包围区域。该区域内的图案层被处理并登记到图案库。图案范围也可通过 \cmd{pattern\_learn()} 函数的 \cmd{ambit\_mode} 与 \cmd{match\_ambit} 参数生成。
+\end{itemize}
+
+\figplaceholder{Figure 107: Required Input for Creating a Pattern Library}{创建图案库的必需输入}{fig:pm-required-input}
+
+\subsubsection{可选输入}
+\paragraph*{Optional Input}
+
+图案定义可能还需提供下列规范。图~\ref{fig:pm-optional-input} 给出可选输入示例。
+
+\begin{itemize}
+  \item \textbf{边容差层（Edge tolerance layers）。}指定一组多边形层，定义每个图案层边所允许的边放置变化。
+  \item \textbf{忽略区域层（Ignore region layers）。}包含一个或多个直线多边形（rectilinear polygons），定义源图案上从匹配过程中排除的区域。
+  \item \textbf{可选图案标记层（Optional pattern marker layers）。}包含可附着到图案、并在某些图案匹配后操作中取回的多边形。例如，可为某一特定图案的用户定义修复指导（fix guidance）。
+  \item \textbf{图案文本 ID 层（Pattern text ID layer）。}包含源图案的文本 ID。若未提供文本 ID 层，则使用工具生成的文本 ID。
+  \item \textbf{图案文本属性层（Pattern text property layers）。}包含为源图案定义的文本信息，例如图案 ID、图案类型或最小 CD。在图案库创建时将这些属性附着到图案，并在图案匹配后操作中使用 \cmd{select\_marker\_by\_double\_property()} 与 \cmd{select\_marker\_by\_string\_property()} 函数取回。
+\end{itemize}
+
+\figplaceholder{Figure 108: Optional Input for Creating a Pattern Library}{创建图案库的可选输入}{fig:pm-optional-input}
+
+\subsubsection{附加图案规范}
+\paragraph*{Additional Pattern Specifications}
+
+在图案库创建期间可能还需设置附加图案规范，例如：
+\begin{itemize}
+  \item \textbf{图案模糊度（Pattern fuzziness）。}指定图案匹配模式。可选择精确匹配（exact）或模糊匹配（fuzzy）。图案模糊度基于边，并可分别按边与全局指定。
+  \item \textbf{图案反射与旋转（Pattern reflection and rotation）。}指定当图案取向与原始形状不同时，是否仍报告为匹配。
+  \item \textbf{图案类型（Pattern type）。}指定源图案是一维还是二维图案。不支持混合图案类型。
+\end{itemize}
+
+\begin{seeAlsoBox}
+关于 \cmd{pattern\_learn()} 函数的更多信息，见 \textit{IC Validator Reference Manual}。
+\end{seeAlsoBox}
+
+\subsection{创建图案库示例}
+\subsubsection*{Example of Creating a Pattern Library}
+
+创建标准 DRC runset 文件以创建图案库。该 runset 必须包含下列各部分：
+\begin{itemize}
+  \item 版图数据库相关设置
+  \item 通用选项
+  \item 使用 \cmd{pattern\_options()} 函数定义图案库路径
+  \item 层赋值
+  \item 使用 \cmd{pattern\_learn()} 函数创建图案库
+\end{itemize}
+
+用于创建图案库的图案匹配 runset 按下列步骤描述：
+
+\begin{enumerate}
+  \item \textbf{runset 开头}
+\begin{lstlisting}[style=pxl]
+#include <icv.rh>
+\end{lstlisting}
+
+  \item \textbf{用户定义环境变量}
+
+  runset 中的环境变量为可选，可自定义。
+
+  图案库创建定义了两个环境变量。\cmd{PATTERN\_LIB\_PATH} 环境变量指定图案库的保存位置；\cmd{PM\_LIB\_NAME} 环境变量指定图案库名称。例如：
+\begin{lstlisting}[style=pxl]
+#pragma envvar default PM_LIB_PATH "/pattern_library"
+#pragma envvar default PM_LIB_NAME "MET"
+\end{lstlisting}
+
+  \item \textbf{版图数据库规范}
+
+  \cmd{library()} 函数定义设计库，在 runset 中为必需：
+\begin{lstlisting}[style=pxl]
+library (
+        format       = GDSII,
+        library_name = "TOP.gds",
+        cell         = "TOP"
+);
+\end{lstlisting}
+
+  可使用 IC Validator 命令行选项覆盖 \cmd{library()} 函数中指定的参数。例如，用 \opt{-i} 覆盖 \cmd{library\_name} 指定的库名，或用 \opt{-f} 覆盖 \cmd{format} 指定的库格式。更多信息见本用户指南「IC Validator 基础」章中「IC Validator 命令行选项」一节。
+
+  \item \textbf{通用选项}
+
+  在 \cmd{error\_options()} 函数中将 \cmd{error\_limit\_per\_check} 设为 \cmd{ERROR\_LIMIT\_MAX}，以存储并报告 \cmd{pattern\_learn()} 与 \cmd{pattern\_match()} 函数报告的全部违例，直至工具定义的最大上限。默认值为 100。
+\begin{lstlisting}[style=pxl]
+error_options (
+      error_limit_per_check = ERROR_LIMIT_MAX
+      );
+\end{lstlisting}
+
+  将 \cmd{error\_limit\_per\_check} 设为 \cmd{ERROR\_LIMIT\_MAX} 或其他极高值，在错误数量极大时可能导致性能下降与磁盘占用增加，因此不推荐。
+
+  \item \textbf{调用 \cmd{pattern\_options()} 定义图案库路径}
+
+  \cmd{pattern\_options()} 函数为 \cmd{pattern\_learn()} 与 \cmd{pattern\_match()} 定义图案库路径。\cmd{pattern\_options()} 在 runset 中只能调用一次。更多信息见 \textit{IC Validator Reference Manual} 的 Runset Functions 各章。
+\begin{lstlisting}[style=pxl]
+pattern_options (
+      pattern_library_path = $PM_LIB_PATH
+      );
+\end{lstlisting}
+
+\begin{noteBox}
+\cmd{pattern\_library\_path} 参数指定的图案库路径必须在图案库创建之前已存在，否则会发生运行时错误。
+\end{noteBox}
+
+  \item \textbf{层赋值}
+\begin{lstlisting}[style=pxl]
+metal : polygon_layer = assign ( {{3,0}} );
+pattern_marker : polygon_layer = assign ( {{4,0}, {5,0}} );
+pattern_text_id : text_layer = assign_text( {{6,0}} );
+error_list : list of write_error_map_s = {};
+\end{lstlisting}
+
+  \item \textbf{调用 \cmd{pattern\_learn()} 创建图案库}
+  \begin{itemize}
+    \item \textbf{定义图案库创建参数。}
+
+    runset 的这一可选部分提供对 \cmd{pattern\_learn()} 任意参数取值列表的访问。关于 \cmd{pattern\_learn()} 参数取值的更多信息，见 \textit{IC Validator Reference Manual} 中该函数的说明。
+\begin{lstlisting}[style=pxl]
+match_ambit : ambit_values_s = {0.2,0.2,0.2,0.2};
+ambit_mode : pattern_ambit_mode_e = PM_MARKER_CENTER;
+pattern_fuzziness : pattern_fuzzy_e = PM_EDGE_UNIFORM;
+uniform_fuzzy_size : double = 0.004;
+pattern_reflect : boolean = true;
+pattern_rotate : boolean = true;
+\end{lstlisting}
+
+    \item \textbf{图案库创建}
+
+    调用 \cmd{pattern\_learn()} 创建图案库。可在 runset 中多次调用该函数。下列示例调用 \cmd{pattern\_learn()}，以边均匀匹配模式创建单图案层库。图案范围为 $0.4 \times 0.4\,\mu\mathrm{m}$，由工具从图案标记中心、以 $0.2\,\mu\mathrm{m}$ 的 \cmd{match\_ambit} 生成。
+\begin{lstlisting}[style=pxl]
+tmp_violation @= {
+    @"pattern_learn result";
+    pattern_learn (
+        pattern_library_name = $PM_LIB_NAME,
+        pattern_layers = {metal},
+        pattern_marker = pattern_marker,
+        pattern_text_id = pattern_text_id,
+        match_ambit = match_ambit,
+        ambit_mode = ambit_mode,
+        pattern_fuzziness = pattern_fuzziness,
+        uniform_fuzzy_size = uniform_fuzzy_size,
+        pattern_reflect = pattern_reflect,
+        pattern_rotate = pattern_rotate
+        );
+}
+\end{lstlisting}
+
+    生成以 \cmd{PM\_LIB\_NAME} 环境变量命名的图案库目录，并保存在 \cmd{PM\_LIB\_PATH} 环境变量定义的路径下。
+
+    \cmd{pattern\_learn()} 的错误输出存储为 \texttt{pattern\_learn result}。关于该错误输出的更多信息，见「检查图案库创建输出」。
+  \end{itemize}
+
+  \item \textbf{输出版图数据库}
+
+  在此可选部分，可将 \cmd{pattern\_learn()} 的输出写入 GDSII 或 OASIS 文件。
+\begin{lstlisting}[style=pxl]
+//DEBUG output only
+error_list.push_back({tmp_violation,{0,0}});
+output_lib=gds_library("out.gds");
+write_gds(
+        output_library=output_lib,
+        errors=error_list
+        );
+\end{lstlisting}
+\end{enumerate}
+
+\subsection{检查图案库创建输出}
+\subsubsection*{Examining the Output of Pattern Library Creation}
+
+IC Validator runset 为图案库创建产生的输出文件包括图案库，以及与执行 DRC 时相同的一组文件。更多细节见本用户指南「输出文件」章。
+
+\begin{itemize}
+  \item \textbf{错误输出}
+
+  DRC 运行完成后，IC Validator 工具创建 \cmd{cell.LAYOUT\_ERRORS} 文件。对于图案库创建，该文件用作图案创建统计的快速摘要，而非违例报告。
+
+  下列 \texttt{TOP.LAYOUT\_ERRORS} 文件报告 \texttt{ERROR} 结果：
+\begin{lstlisting}[style=shell]
+                         LAYOUT ERRORS RESULTS: ERRORS
+
+                  ##### #### ####     ### ####      ###
+                  #     #   # #   # #    # #    # #
+                  #### #### #### #       # ####     ###
+                  #     # # # # #        # # #          #
+                  ##### #   # #   # ### #       # ####
+======================================================================
+Library name:    ../../testcase/hotspot_clips.oas
+Structure name: TOP
+Generated by:    IC Validator RHEL64 Release I-2013.12.SP1.4010 2014/
+01/09
+                       ERROR SUMMARY
+Runset name: icv runset.rs
+User name: juser
+Time started: 2016/03/02 07:35:12AM
+Time ended: 2016/03/02 07:35:51AM
+
+Called as: icv runset.rs
+pattern_learn result
+   pattern_learn ................................ 6 violations found.
+
+pattern_learn result/Invalid input: first pattern
+layer has no corner within the pattern extent
+   pattern_learn ................................ 1 violation found.
+
+pattern_learn result:pattern_1
+   pattern_learn ................................ 4 violations found.
+
+pattern_learn result:pattern_5
+    pattern_learn ................................ 2 violations found.
+\end{lstlisting}
+
+  在该报告中，\cmd{pattern\_learn()} 处理了六个源图案。其中两个识别为 \texttt{pattern\_5}，四个识别为 \texttt{pattern\_1}。因此，图案库捕获了两个唯一图案。
+
+  \cmd{pattern\_learn()} 还将一个图案识别为无效二维图案，因为其在图案范围内没有角点。因此，无法将其加入二维图案库。图案库创建后应检查 \cmd{cell.LAYOUT\_ERRORS} 文件，以确定是否存在无效图案。
+
+  \item \textbf{图案库}
+
+  可在 \cmd{pattern\_options()} 函数的 \cmd{pattern\_library\_path} 参数所定义的同一图案库路径下存储多个图案库。图案匹配时可调用一个或多个图案库。
+
+  \cmd{pattern\_learn()} 将图案信息写入二进制 \cmd{pattern.dat} 文件，并在 \cmd{pattern\_library\_path} 参数定义的同一目录中输出日志文件。
+
+  例~\ref{ex:pm-lib-log} 给出为图案库 \texttt{MET} 生成的日志文件。
+\end{itemize}
+
+\begin{lstlisting}[style=shell,caption={日志文件},label={ex:pm-lib-log}]
+[Tue Nov 5 15:19:22 2013]: Created pattern library.
+version= 1.0
+dbu=0.000500
+learn_version=3
+num_pattern_layers=1
+num_optional_marker_layers=0
+ambit_mode=PM_MARKER_CENTER
+match_ambit.left=0.200000
+match_ambit.bottom=0.200000
+match_ambit.right=0.200000
+match_ambit.top=0.200000
+pattern_fuzziness=PM_EDGE_UNIFORM
+pattern_grouping=PM_NONE
+uniform_fuzzy_size=0.005000
+edge_jog_size=0.000000
+has_user_anchor=false
+has_pattern_extent_layer=false
+ignore_extra_polygons=false
+pattern_type=PM_TWO_DIMENSIONAL
+pattern_length=PM_GE
+viewable=true
+writable=true
+
+[Tue Nov 5 15:19:22 2013]: Learned new pattern(s).
+Registered 2 new unique pattern(s); total # of unique pattern(s)=2.
+Created reflected/rotated pattern(s); total # of pattern(s)=16.
+Derived 16 index pattern(s) using ambit = (0.195000, 0.195000,
+  0.195000, 0.195000).
+viewable=true; writable=true.
+\end{lstlisting}
+
+在日志文件开头，可看到首次生成该图案库时所应用的参数及其对应值。向既有图案库添加新图案时，必须使用同一组参数与取值，否则会发生错误。
+
+在日志文件末尾，可看到每次 \cmd{pattern\_learn()} 调用所登记的唯一图案数量。
+
+日志文件最后一行表明该图案库可写，即可以向其中添加新图案。若该图案库可查看（viewable），则可转换为 GDSII 或 OASIS 格式以便查看。
+
+% ============================================================
+\section{查看与锁定图案库}
+\subsection*{Viewing and Locking a Pattern Library}
+
+图案库以二进制格式存储。要查看其内容，需将其转换为 GDSII 或 OASIS 文件。
+
+转换需要 \cmd{pattern\_library\_read()} 函数。如何将图案库转换为 GDSII 文件的示例，见 \textit{IC Validator Reference Manual} 的 Runset Functions 章。
+
+默认情况下，图案库可查看且可写。\cmd{pattern\_library\_lock()} 函数为图案库添加读写保护；锁定后，既不能由 \cmd{pattern\_learn()} 添加新图案，也不能由 \cmd{pattern\_library\_read()} 转换为图形格式文件。下列行会追加到已锁定图案库的既有日志文件：\texttt{viewable=false; writable=false}。
+
+随后将锁定的图案库交付给最终用户。如何锁定图案库的示例，见 \textit{IC Validator Reference Manual} 第~3~章「Runset Functions: J - Z」。
+
+也可以使用位于 IC Validator \texttt{contrib} 目录中的 \cmd{pdb\_utility.pl} 脚本，在不执行 runset 的情况下完成 \cmd{pattern\_library\_read()} 与 \cmd{pattern\_library\_lock()} 的功能：
+\begin{lstlisting}[style=shell]
+Usage: pdb_utility.pl <pdb_lib_path> <pdb_lib_name> -read/-lock
+ [output_name]
+
+Options:
+<pdb_path>.............pattern library path
+<pdb_name>.............pattern library name
+-read..................converting a pattern library to a graphical
+ output.
+-lock..................adds the write and view protection to a pattern
+ library.
+<output_name>..........optional, specifies the graphical output file
+ name, [default:pdb_view.gds]
+\end{lstlisting}
+
+下列示例将位于 \texttt{/test/pattern\_lib} 目录的 \texttt{met} 图案库转换为输出 GDSII 文件 \texttt{hs.gds}：
+\begin{lstlisting}[style=shell]
+ICV_INSTALL_DIRECTORY/contrib/pdb_utility.pl /test/pattern_lib met -read
+ hs.gds
+\end{lstlisting}
+
+% ============================================================
+\section{检查版图}
+\subsection*{Checking a Layout}
+
+本节给出使用 \cmd{pattern\_match()} 函数的图案匹配流程示例。
+
+\subsection{图案匹配 Runset 示例}
+\subsubsection*{Runset Example of Pattern Matching}
+
+创建标准 DRC runset 文件，使 IC Validator 工具对设计版图执行图案匹配。runset 文件必须包含下列各部分：
+\begin{itemize}
+  \item 版图数据库相关设置
+  \item 通用选项
+  \item 使用 \cmd{pattern\_options()} 函数定义图案库路径
+  \item 层赋值
+  \item 使用 \cmd{pattern\_match()} 函数执行图案匹配
+\end{itemize}
+
+采用图案匹配流程的 runset 具有下列组成部分：
+
+\begin{enumerate}
+  \item \textbf{runset 开头}
+
+  在 runset 开头包含 \cmd{icv.rh}：
+\begin{lstlisting}[style=pxl]
+#include <icv.rh>
+\end{lstlisting}
+
+  \item \textbf{用户定义环境变量}
+
+  runset 中的环境变量为可选，可自定义。
+\begin{lstlisting}[style=pxl]
+#pragma envvar default PM_LIB_PATH "/pattern_library"
+#pragma envvar default PM_LIB_NAME "MET"
+#pragma envvar default PM_TOP_MET "10"
+\end{lstlisting}
+
+  \item \textbf{版图数据库相关设置}
+
+  \cmd{library()} 函数定义图案匹配检查所用的设计库。
+\begin{lstlisting}[style=pxl]
+library (
+        format       = GDSII,
+        library_name = "TOP.gds",
+        cell         = "TOP"
+);
+\end{lstlisting}
+
+  若使用 Milkyway 库，将 \cmd{format} 设为 \cmd{MILKYWAY}，并将 \cmd{library\_path} 指定为 Milkyway 库的父目录。
+
+  \item \textbf{通用选项}
+
+  要将 \cmd{pattern\_match()} 函数生成的全部违例存储并报告至工具定义的最大上限，在 \cmd{error\_options()} 函数中将 \cmd{error\_limit\_per\_check} 设为 \cmd{ERROR\_LIMIT\_MAX}。默认值为 100。
+\begin{lstlisting}[style=pxl]
+error_options (
+         error_limit_per_check = ERROR_LIMIT_MAX
+       );
+\end{lstlisting}
+
+  将 \cmd{error\_limit\_per\_check} 设为 \cmd{ERROR\_LIMIT\_MAX} 或其他极高值，在错误数量极大时可能导致性能下降与磁盘占用增加，因此不推荐。
+
+  \item \textbf{调用 \cmd{pattern\_options()} 定义图案库路径}
+\begin{lstlisting}[style=pxl]
+pattern_options (
+   pattern_library_path = $PM_LIB_PATH
+);
+\end{lstlisting}
+
+  \cmd{pattern\_options()} 定义图案库路径，且在 runset 中只能调用一次。该函数指定访问单个或多个图案库所需的路径。
+
+  \item \textbf{层赋值}
+\begin{lstlisting}[style=pxl]
+MET1 : polygon_layer = assign ( {{15,0}} );
+MET2 : polygon_layer = assign ( {{17,0}} );
+MET3 : polygon_layer = assign ( {{19,0}} );
+MET4 : polygon_layer = assign ( {{21,0}} );
+MET5 : polygon_layer = assign ( {{23,0}} );
+MET6 : polygon_layer = assign ( {{25,0}} );
+MET7 : polygon_layer = assign ( {{27,0}} );
+MET8 : polygon_layer = assign ( {{29,0}} );
+MET9 : polygon_layer = assign ( {{31,0}} );
+MET10 : polygon_layer = assign ( {{33,0}} );
+
+metal_layer_list : list of polygon_layer = {MET1, MET2, MET3, MET4,
+ MET5, MET6, MET7, MET8, MET9, MET10};
+metal_error_list : list of write_error_map_s = {};
+\end{lstlisting}
+
+  本例中，\texttt{MET1} 至 \texttt{MET10} 被赋值并接受图案匹配检查。
+
+  \item \textbf{调用 \cmd{pattern\_match()} 执行图案匹配}
+
+  必须调用 \cmd{pattern\_match()} 以执行图案匹配。该函数可在 runset 中多次调用。下列示例显示 \cmd{pattern\_match()} 对 \texttt{TOP.gds} 文件的金属层执行图案匹配。
+\begin{lstlisting}[style=pxl]
+for(i = 0 to strtoi($PM_TOP_MET)-1) {
+    layer_index : integer = i + 1;
+
+    tmp_violation @= {
+        @"METAL"+layer_index+" PM RESULT: ";
+        pattern_match (
+            pattern_library_name = $PM_LIB_NAME,
+            pattern_layers = {metal_layer_list[i]}
+              );
+    }
+    out_layer_index = layer_index;
+    metal_error_list.push_back({tmp_violation,
+{out_layer_index,0}});
+}
+\end{lstlisting}
+
+  \item \textbf{输出版图数据库}
+
+  可选地将 \cmd{pattern\_match()} 的输出写入 GDSII 或 OASIS 文件。
+\begin{lstlisting}[style=pxl]
+output_lib=gds_library("out.gds");
+write_gds(
+        output_library=output_lib,
+        errors=metal_error_list
+        );
+\end{lstlisting}
+\end{enumerate}
+
+\subsection{检查图案匹配输出}
+\subsubsection*{Examining Pattern Matching Output}
+
+DRC 运行完成后，IC Validator 工具创建 \cmd{cell.LAYOUT\_ERRORS} 错误文件。文件开头说明本次运行为 \texttt{CLEAN} 或存在 \texttt{ERRORS}。
+
+在图案匹配中，\texttt{ERRORS} 结果表示识别出一个或多个匹配图案；\texttt{CLEAN} 结果表示未找到匹配图案。
+
+下列 \texttt{TOP.LAYOUT\_ERRORS} 文件报告违例（匹配）：
+\begin{lstlisting}[style=shell]
+                   LAYOUT ERRORS RESULTS: ERRORS
+                   ##### #### ####      ### ####      ###
+                   #     #    # #   # #    # #    # #
+                   #### #### #### #        # ####     ###
+                   #     # # # # #         # # #          #
+                   ##### #    # #   # ### #       # ####
+===================================================================
+Library name:     ./test.gds
+Structure name: TOP
+Generated by:     IC Validator RHEL64 Release H-2013.06.SP2.4035 2013/08/
+28
+                           ERROR SUMMARY
+METAL2 PM RESULT:
+   pattern_match ..............................873 violations found.
+
+METAL3 PM RESULT:
+   pattern_match ...............................69 violations found.
+
+METAL4 PM RESULT:
+   pattern_match ................................2 violations found.
+
+                         ERROR DETAILS
+--------------------------------------------------------------------
+METAL2 PM RESULT:
+-------------------------------------------------------------------
+/match.rs:38:pattern_match
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+Structure (lower left x, y ) (upper right x, y ) Pattern     Orientation
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+TOP   (8.1600, 528.2500)   (8.4000, 528.7200)   pattern_78 R90
+TOP   (2.1400, 528.6700)   (2.3800, 529.1400)   pattern_57 R90
+TOP   (100.1450, 529.3000) (100.3850, 529.7700) pattern_107 R90FX
+TOP   (100.1450, 529.2300) (100.3850, 529.7000) pattern_108 R90
+TOP   (107.9800, 531.7500) (108.2200, 532.2200) pattern_80 R0
+TOP   (83.7900, 534.7600) (84.0300, 535.2300) pattern_7     R180
+TOP   (86.0000, 534.8300) (86.2400, 535.3000) pattern_94 R90FY
+TOP   (87.6800, 540.2900) (87.9200, 540.7600) pattern_78 R90
+……
+\end{lstlisting}
+
+错误摘要部分包含 \cmd{pattern\_match()} 在每个金属层上产生的匹配图案数量。错误详情部分列出每个匹配图案的图案标记坐标与图案 ID。
+
+可像查看其他 DRC 违例一样，在 VUE 中审阅图案匹配结果。
+
+\subsection{图案匹配后操作}
+\subsubsection*{Post Pattern-Matching Operations}
+
+在图案匹配后处理中，使用下列函数按属性选择匹配图案，或取回某些图案的可选图案标记，以供后续 DRC 操作：
+\begin{itemize}
+  \item \cmd{marker\_merge()}。将标记层合并到多边形层。标记层本身不合并；只能由若干 IC Validator runset 函数处理。必须将标记层转换为多边形层，才能由其他 DRC 函数处理。
+  \item \cmd{optional\_pattern\_markers()}。取回附着到某图案的全部可选图案标记。可选图案标记层为多边形层。
+  \item \cmd{select\_marker\_by\_string\_property()}。按指定的字符串属性取回图案标记。
+  \item \cmd{select\_marker\_by\_double\_property()}。按指定的双精度属性取回图案标记。
+  \item \cmd{milkyway\_route\_directives()}。将用户定义的修复指导传递给布线器，用于热点修复。
+  \item \cmd{drc\_features\_marker()}。输出标记层。
+\end{itemize}
+
+\begin{seeAlsoBox}
+各函数的示例见 \textit{IC Validator Reference Manual}。
+\end{seeAlsoBox}
+
+% ============================================================
+\section{在 IC Compiler 工具中检测并修复热点}
+\subsection*{Detecting and Repairing Hotspots Within the IC Compiler Tool}
+
+为满足先进工艺节点的可制造性设计（DFM）要求，IC Validator 工具在实现环境中提供 In-Design DFM 技术。该物理验证方法可在 IC Compiler 工具内尽早检测并修复 DRC 违例，且对物理与时序影响可忽略。关于 Automatic DRC Repair（ADR）流程的更多信息，见 Synopsys 白皮书 \textit{In-Design Physical Verification - Automatic DRC Repair (ADR)}。
+
+ADR 流程在设计实现期间使用 IC Validator 图案匹配实现 In-Design 热点检测与纠正。用法模型与 DRC 类似：可使用经晶圆厂认证的 DFM 包（含图案库与匹配 runset），或使用自有的良率损害源图案库，在设计中搜索潜在制造相关热点，并对所有错误执行自动修复与再验证，从而提升设计的整体可制造性。
+
+在 IC Compiler 工具内运行 IC Validator 图案匹配时，使用与执行签核 DRC 检查相同的一组 IC Compiler 命令。使用 \cmd{signoff\_drc} 命令进行图案匹配，使用 \cmd{signoff\_autofix\_drc} 命令自动修复由 \cmd{signoff\_drc} 检测到的违例（热点）。详细命令语法与用法见 SolvNetPlus 上的 \textit{IC Compiler Implementation User Guide}，或 IC Compiler man pages。
+
+下列各节说明如何使用 IC Compiler 工具中的签核 DRC 命令检测并纠正热点（不适用于 IC Compiler II 工具）。
+
+\subsection{设置物理签核选项}
+\subsubsection*{Setting Up the Physical Signoff Options}
+
+在使用 \cmd{signoff\_drc} 与 \cmd{signoff\_autofix\_drc} 命令运行图案匹配之前，先设置适用于这些命令的物理签核选项。
+
+\begin{seeAlsoBox}
+更多信息见 \textit{IC Compiler Implementation User Guide} 中「Performing Signoff Design Rule Checking」一节。
+\end{seeAlsoBox}
+
+\subsection{运行图案匹配以检测热点}
+\subsubsection*{Running Pattern Matching for Hotspot Detection}
+
+使用 \cmd{signoff\_drc} 命令对布线层执行热点检测。
+
+\begin{seeAlsoBox}
+更多信息见 \textit{IC Compiler Implementation User Guide} 中「Performing Signoff Design Rule Checking」一节。
+\end{seeAlsoBox}
+
+\subsection{自动修复热点图案}
+\subsubsection*{Automatically Fixing Hotspot Patterns}
+
+使用 \cmd{signoff\_autofix\_drc} 命令自动修复检测到的热点。
+
+\begin{seeAlsoBox}
+更多信息见 \textit{IC Compiler Implementation User Guide} 中「Performing Signoff Design Rule Checking」一节。
+\end{seeAlsoBox}
+
+\subsection{使用用户定义修复指导修复热点}
+\subsubsection*{Repairing Hotspots With User-Defined Fix Guidance}
+
+除默认 ADR 纠正外，IC Validator 工具还支持实现用户定义修复指导。在图案匹配流程中实现修复指导的步骤为：
+
+\begin{enumerate}
+  \item 在图案库创建期间，将修复指导指定为可选图案标记。单个图案可有多个指导。
+
+  图~\ref{fig:pm-fix-guidance} 所示图案给出单个用户定义修复指导：在 L 形多边形末端添加矩形。
+
+\figplaceholder{Figure 109: User-Defined Fix Guidance}{用户定义修复指导}{fig:pm-fix-guidance}
+
+\begin{lstlisting}[style=pxl,caption={在图案库创建时附着修复指导},label={ex:pm-attach-fix}]
+//Layer Assignment
+metal : polygon_layer = assign ( {{3,0}} );
+pattern_marker : polygon_layer = assign ( {{1,0}} );
+pattern_extent : polygon_layer = assign ( {{2,0}} );
+pattern_add : polygon_layer = assign ( {{4,0}} );
+optional_markers: list of polygon_layer =
+ {pattern_extent,pattern_marker,pattern_add};
+
+//Create Pattern Library
+pattern_learn (
+                 pattern_library_name = "met",
+                 pattern_layers = {metal},
+                 pattern_marker = marker_layer,
+                 optional_pattern_markers = optional_markers,
+                 pattern_text_id = text_layer,
+                 pattern_extent = pattern_extent,
+                 pattern_fuzziness = PM_EXACT,
+                 pattern_reflect = true,
+                 pattern_rotate = true
+                 );
+\end{lstlisting}
+
+  \item 在图案匹配后取回并传递修复指导。
+
+  使用 \cmd{optional\_markers()} 函数取回修复指导，并使用 \cmd{milkyway\_route\_directives()} 函数将修复指导传递给布线器。
+
+\begin{lstlisting}[style=pxl,caption={取回并传递修复指导},label={ex:pm-pass-fix}]
+//Output hotspot marker layer
+hotspot_marker = pattern_match (
+            pattern_library_name = "met",
+            pattern_layers = {metal_layer_list[i]});
+
+//Retrieve all the optional pattern marker layers defined in step 1
+optional_markers = optional_pattern_markers("met", hotspot_marker);
+
+//Retrieve the add shape layer
+pattern_add = optional_markers[2];
+
+//Pass fixing guidance to IC Compiler
+milkyway_route_directives(
+                  display_marker = optional_markers[1],
+                  group_marker = optional_markers[0],
+                  error_layers = { {optional_markers[1]} },
+                  route_directives = { {pattern_add, dummy_sub} } );
+\end{lstlisting}
+
+  \item 在 IC Compiler 工具内运行 ADR，以进行热点检测与修复。
+
+  编写 IC Compiler TCL 脚本，在 \cmd{icc\_shell} 中执行 ADR，或使用 IC Compiler GUI 执行命令。
+
+\begin{lstlisting}[style=shell,caption={IC Compiler TCL 脚本},label={ex:pm-icc-tcl}]
+open_mw_lib ./design
+copy_mw_cel -from eco_route_routeopt -to pm_flow_add
+open_mw_cel pm_flow_add
+
+set_physical_signoff_options -exec icv -drc_runset {/runset/ \
+match_add.rs}
+signoff_drc -run_dir {./signoff_drc_run} -ignore_child_cell_errors
+
+signoff_autofix_drc -run_dir {./signoff_autofix_drc_run} \
+ -init_drc_error_db signoff_drc_run
+
+save_mw_cel -as pm_flow_add
+close_mw_cel
+\end{lstlisting}
+\end{enumerate}
+
+IC Compiler 工具按定义顺序从用户定义修复指导开始。在图~\ref{fig:pm-hotspot-correction} 中，分别可见 \texttt{pattern\_122} 由用户定义指导与默认 ADR 流程纠正的结果。
+
+\figplaceholder{Figure 110: Example of Hotspot Correction}{热点纠正示例}{fig:pm-hotspot-correction}

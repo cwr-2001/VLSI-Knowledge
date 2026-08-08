@@ -1,0 +1,732 @@
+% 附录 B Design Example
+\bichapter{设计示例}{Design Example}
+\label{app:example}
+
+优化设计可能涉及对设计中不同层次与组件使用不同的 compile 策略。
+本附录给出使用多种 compile 策略的设计示例。前面各章详细说明如何实现每种 compile 策略。
+注意：本附录所用设计示例不代表真实应用。
+
+本附录包括以下节：
+\begin{itemize}
+  \item 设计描述
+  \item Setup 文件
+  \item 默认约束文件
+  \item Read 脚本
+  \item Compile 脚本
+\end{itemize}
+
+可在 \texttt{\$SYNOPSYS/doc/syn/guidelines} 访问这些节所述文件，其中 \texttt{\$SYNOPSYS} 为安装目录路径。
+
+% ============================================================
+\section{设计描述}
+\subsection*{Design Description}
+
+该设计示例说明如何用常用 \cmd{de\_shell} 命令的子集约束设计，以及如何用脚本实现各种 compile 策略。
+
+该设计使用同步 RTL 与带时钟 D 触发器的组合逻辑。
+
+图~\ref{fig:ex-block} 给出设计示例的框图。顶层设计包含七个模块：\texttt{Adder16}、\texttt{CascadeMod}、\texttt{Comparator}、\texttt{Multiply8x8}、\texttt{Multiply16x16}、\texttt{MuxMod} 与 \texttt{PathSegment}。
+
+\figplaceholder{Figure 92: Block Diagram for the Design Example}{设计示例框图}{fig:ex-block}
+
+图~\ref{fig:ex-hier} 给出设计示例的层次。
+
+\figplaceholder{Figure 93: Hierarchy for the Design Example}{设计示例层次}{fig:ex-hier}
+
+顶层模块及其优化所用的 compile 策略为：
+\begin{description}[style=nextline,leftmargin=3cm,font=\ttfamily]
+  \item[Adder16]
+        使用已寄存输出以简化约束。由于端点是寄存器的数据引脚，无需在输出端口上设置输出延时。
+  \item[CascadeMod]
+        使用层次 compile 策略。该设计的 compile 脚本在 compile 前于顶层（\texttt{CascadeMod}）设置约束。\\
+        \texttt{CascadeMod} 设计两次实例化 \texttt{Adder8} 设计。脚本对 \texttt{Comparator} 模块使用 compile-once-don't-touch 方法。
+  \item[Comparator]
+        是组合块。该设计的 compile 脚本使用虚时钟概念，以说明在设计中使用虚时钟。\\
+        \texttt{ChipLevel} 设计两次实例化 \texttt{Comparator}。compile 脚本（针对 \texttt{CascadeMod}）使用 compile-once-don't-touch 方法解析多重实例。
+  \item[Multiply8x8]
+        说明用于优化设计的基本时序与面积约束。
+  \item[Multiply16x16]
+        在 compile 前 ungroup DesignWare 部件。Ungroup 层次模块可能有助于获得更好综合结果。
+        该模块的 compile 脚本在模块主端口上定义两周期路径。
+  \item[MuxMod]
+        是组合块。该设计的脚本使用虚时钟概念。
+  \item[PathSegment]
+        在模块内使用路径分段。脚本对模块内两周期路径使用 \cmd{set\_multicycle\_path} 命令，并用 \cmd{group} 命令创建新的层次级别。
+\end{description}
+
+示例~\ref{ex:chiplevel} 至示例~\ref{ex:pathseg-v} 给出 \texttt{ChipLevel} 设计的 Verilog 源代码。
+
+\begin{lstlisting}[caption={ChipLevel.v},label=ex:chiplevel]
+/* Date: May 11, 1995 */
+/* Example Circuit for Baseline Methodology for Synthesis */
+/* Design does not show any real-life application but rather
+   it is used to illustrate the commands used in the Reference
+   Methodology */
+
+module ChipLevel (data16_a, data16_b, data16_c, data16_d, clk, cin, din_a,
+                  din_b, sel, rst, start, mux_out, cout1, cout2, s1, s2, op,
+                  comp_out1, comp_out2, m32_out, regout);
+
+   input [15:0] data16_a, data16_b, data16_c, data16_d;
+   input [7:0] din_a, din_b;
+   input [1:0] sel;
+   input clk, cin, rst, start;
+   input s1, s2, op;
+   output [15:0] mux_out, regout;
+   output [31:0] m32_out;
+   output cout1, cout2, comp_out1, comp_out2;
+
+   wire [15:0] ad16_sout, ad8_sout, m16_out, cnt;
+
+Adder16 u1 (.ain(data16_a), .bin(data16_b), .cin(cin), .cout(cout1),
+            .sout(ad16_sout), .clk(clk));
+
+CascadeMod u2 (.data1(data16_a), .data2(data16_b), .cin(cin), .s(ad8_sout),
+               .cout(cout2), .clk(clk), .comp_out(comp_out1), .cnt(cnt),
+               .rst(rst), .start(start) );
+
+Comparator u3 (.ain(ad16_sout), .bin(ad8_sout), .cp_out(comp_out2));
+
+Multiply8x8 u4 (.op1(din_a), .op2(din_b), .res(m16_out), .clk(clk));
+
+Multiply16x16 u5 (.op1(data16_a), .op2(data16_b), .res(m32_out), .clk(clk));
+
+MuxMod  u6 (.Y_IN(mux_out), .MUX_CNT(sel), .D(ad16_sout), .R(ad8_sout),
+            .F(m16_out), .UPC(cnt));
+
+PathSegment u7 (.R1(data16_a), .R2(data16_b), .R3(data16_c), .R4(data16_d),
+                .S2(s2), .S1(s1), .OP(op), .REGOUT(regout), .clk(clk));
+endmodule
+\end{lstlisting}
+
+\begin{lstlisting}[caption={Adder16.v},label=ex:adder16-v]
+module Adder16 (ain, bin, cin, sout, cout, clk);
+/* 16-Bit Adder Module */
+output [15:0] sout;
+output cout;
+input [15:0] ain, bin;
+input cin, clk;
+
+wire [15:0] sout_tmp, ain, bin;
+wire cout_tmp;
+reg [15:0] sout, ain_tmp, bin_tmp;
+reg cout, cin_tmp;
+
+always @(posedge clk) begin
+   cout = cout_tmp;
+   sout = sout_tmp;
+   ain_tmp = ain;
+   bin_tmp = bin;
+   cin_tmp = cin;
+end
+   assign {cout_tmp,sout_tmp} = ain_tmp + bin_tmp + cin_tmp;
+endmodule
+\end{lstlisting}
+
+\begin{lstlisting}[caption={CascadeMod.v},label=ex:cascademod-v]
+module CascadeMod (data1, data2, s, clk, cin, cout, comp_out, cnt, rst, start)
+;
+input [15:0] data1, data2;
+output [15:0] s, cnt;
+input clk, cin, rst, start;
+output cout, comp_out;
+wire co;
+
+Adder8 u10 (.ain(data1[7:0]), .bin(data2[7:0]), .cin(cin), .clk(clk),
+.sout(s[7:0]), .cout(co));
+Adder8 u11 (.ain(data1[15:8]), .bin(data2[15:8]), .cin(co), .clk(clk),
+.sout(s[15:8]), .cout(cout));
+Comparator u12 (.ain(s), .bin(cnt), .cp_out(comp_out));
+
+Counter u13 (.count(cnt), .start(start), .clk(clk), .rst(rst));
+endmodule
+\end{lstlisting}
+
+\begin{lstlisting}[caption={Adder8.v},label=ex:adder8-v]
+module Adder8 (ain, bin, cin, sout, cout, clk);
+/* 8-Bit Adder Module */
+output [7:0] sout;
+output cout;
+input [7:0] ain, bin;
+input cin, clk;
+
+wire [7:0] sout_tmp, ain, bin;
+wire cout_tmp;
+reg [7:0] sout, ain_tmp, bin_tmp;
+reg cout, cin_tmp;
+
+always @(posedge clk) begin
+   cout = cout_tmp;
+   sout = sout_tmp;
+   ain_tmp = ain;
+   bin_tmp = bin;
+   cin_tmp = cin;
+end
+   assign {cout_tmp,sout_tmp} = ain_tmp + bin_tmp + cin_tmp;
+endmodule
+\end{lstlisting}
+
+\begin{lstlisting}[caption={Counter.v},label=ex:counter-v]
+module Counter (count, start, clk, rst);
+/* Counter module */
+  input clk;
+  input rst;
+  input start;
+  output [15:0] count;
+
+  wire clk;
+  reg [15:0] count_N;
+  reg [15:0] count;
+
+  always @ (posedge clk or posedge rst)
+    begin : counter_S
+      if (rst) begin
+        count = 0; // reset logic for the block
+        end
+      else begin
+        count = count_N; // set specified registers of the block
+        end
+    end
+
+  always @ (count or start)
+    begin : counter_C
+      count_N = count; // initialize outputs of the block
+      if (start) count_N = 1; // user specified logic for the block
+      else count_N = count + 1;
+    end
+endmodule
+\end{lstlisting}
+
+\begin{lstlisting}[caption={Comparator.v},label=ex:comp-v]
+module Comparator (cp_out, ain, bin);
+/* Comparator for 2 integer values */
+output cp_out;
+input [15:0] ain, bin;
+   assign cp_out = ain < bin;
+endmodule
+\end{lstlisting}
+
+\begin{lstlisting}[caption={Multiply8x8.v},label=ex:mult8-v]
+module Multiply8x8 (op1, op2, res, clk);
+/* 8-Bit multiplier */
+input [7:0] op1, op2;
+output [15:0] res;
+input clk;
+
+wire [15:0] res_tmp;
+reg [15:0] res;
+
+always @(posedge clk) begin
+   res = res_tmp;
+end
+assign res_tmp = op1 * op2;
+endmodule
+\end{lstlisting}
+
+\begin{lstlisting}[caption={Multiply16x16.v},label=ex:mult16-v]
+module Multiply16x16 (op1, op2, res, clk);
+/* 16-Bit multiplier */
+input [15:0] op1, op2;
+output [31:0] res;
+input clk;
+
+wire [31:0] res_tmp;
+reg [31:0] res;
+
+always @(posedge clk) begin
+   res = res_tmp;
+end
+assign res_tmp = op1 * op2;
+endmodule
+\end{lstlisting}
+
+\begin{lstlisting}[caption={def\_macro.v},label=ex:defmacro]
+`define DATA 2'b00
+`define REG 2'b01
+`define STACKIN 2'b10
+`define UPCOUT 2'b11
+\end{lstlisting}
+
+\begin{lstlisting}[caption={MuxMod.v},label=ex:muxmod-v]
+module  MuxMod (Y_IN, MUX_CNT, D, R, F, UPC);
+`include "def_macro.v"
+   output [15:0] Y_IN;
+   input [ 1:0] MUX_CNT;
+   input [15:0] D, F, R, UPC;
+
+   reg [15:0] Y_IN;
+
+always @ ( MUX_CNT or D or R or F or UPC ) begin
+   case ( MUX_CNT )
+      `DATA :
+         Y_IN = D ;
+      `REG :
+         Y_IN = R ;
+      `STACKIN :
+         Y_IN = F ;
+      `UPCOUT :
+         Y_IN = UPC;
+   endcase
+end
+
+endmodule
+\end{lstlisting}
+
+\begin{lstlisting}[caption={PathSegment.v},label=ex:pathseg-v]
+module PathSegment (R1, R2, R3, R4, S2, S1, OP, REGOUT, clk);
+/* Example for path segmentation */
+input [15:0] R1, R2, R3, R4;
+input S2, S1, clk;
+input OP;
+output [15:0] REGOUT;
+
+reg [15:0] ADATA, BDATA;
+reg [15:0] REGOUT;
+reg MODE;
+
+wire [15:0] product ;
+
+always @(posedge clk)
+begin : selector_block
+   case(S1)
+            1'b0: ADATA <= R1;
+            1'b1: ADATA <= R2;
+            default: ADATA <= 16'bx;
+   endcase
+   case(S2)
+            1'b0: BDATA <= R3;
+            1'b1: BDATA <= R4;
+            default: ADATA <= 16'bx;
+   endcase
+end
+
+/* Only Lower Byte gets multiplied */
+// instantiate DW02_mult
+DW02_mult #(8,8) U100 (.A(ADATA[7:0]), .B(BDATA[7:0]), .TC(1'b0),
+.PRODUCT(product));
+
+always @(posedge clk)
+begin : alu_block
+   case (OP)
+      1'b0 : begin
+                REGOUT <= ADATA + BDATA;
+             end
+      1'b1 : begin
+                 REGOUT <= product;
+             end
+      default : REGOUT <= 16'bx;
+   endcase
+end
+
+endmodule
+\end{lstlisting}
+
+% ============================================================
+\section{Setup 文件}
+\subsection*{Setup File}
+
+运行设计示例时，将示例~\ref{ex:setup} 中的项目专用 setup 文件复制到项目工作目录。
+该 setup 文件以 Tcl 子集编写，可用于 dctcl 命令语言。
+
+\begin{lstlisting}[caption={.synopsys\_dc.setup 文件},label=ex:setup]
+# Define the target technology library, symbol library,
+# and link libraries
+set_app_var target_library lsi_10k.db
+set_app_var link_library [concat $target_library "*"]
+set_app_var search_path [concat $search_path ./src]
+set_app_var designer "Your Name"
+set company "Synopsys, Inc."
+# Define path directories for file locations
+set_app_var source_path "./src/"
+set_app_var script_path "./scr/"
+set_app_var log_path "./log/"
+set_app_var ddc_path "./ddc/"
+set_app_var db_path "./db/"
+set_app_var netlist_path "./netlist/"
+\end{lstlisting}
+
+更多信息亦见 \textit{Using Tcl With Synopsys Tools} 文档。
+
+\begin{seeAlsoBox}
+Setup 文件
+\end{seeAlsoBox}
+
+% ============================================================
+\section{默认约束文件}
+\subsection*{Default Constraints File}
+
+示例~\ref{ex:defaults-con} 所示文件定义设计的默认约束。在后续脚本中，DC Explorer 对每个模块先读取该文件。
+若某模块的脚本包含额外约束或与默认约束文件中不同的约束值，DC Explorer 使用该模块专用约束。
+
+\begin{lstlisting}[caption={defaults.con},label=ex:defaults-con]
+# Define system clock period
+set_app_var clk_period 20
+
+# Create real clock if clock port is found
+if {[sizeof_collection [get_ports clk]] > 0} {
+   set_app_var clk_name clk
+   create_clock -period $clk_period clk
+}
+
+# Create virtual clock if clock port is not found
+if {[sizeof_collection [get_ports clk]] == 0} {
+   set_app_var clk_name vclk
+   create_clock -period $clk_period -name vclk
+}
+
+# Apply default drive strengths and typical loads
+# for I/O ports
+set_load 1.5 [all_outputs]
+set_driving_cell -lib_cell IV [all_inputs]
+
+# If real clock, set infinite drive strength
+if {[sizeof_collection [get_ports clk]] > 0} {
+   set_drive 0 clk
+}
+
+# Apply default timing constraints for modules
+set_input_delay 1.2 [all_inputs] -clock $clk_name
+set_output_delay 1.5 [all_outputs] -clock $clk_name
+set_clock_uncertainty -setup 0.45 $clk_name
+
+# Set operating conditions
+set_operating_conditions WCCOM
+\end{lstlisting}
+
+% ============================================================
+\section{Read 脚本}
+\subsection*{Read Script}
+
+示例~\ref{ex:read-tcl} 给出用于读入 \texttt{ChipLevel} 设计的 dctcl 脚本。
+
+\texttt{read.tcl} 脚本将指定 Verilog 文件中的设计信息读入内存。
+
+\begin{lstlisting}[caption={read.tcl},label=ex:read-tcl]
+read_file -format verilog ChipLevel.v
+read_file -format verilog Adder16.v
+read_file -format verilog CascadeMod.v
+read_file -format verilog Adder8.v
+read_file -format verilog Counter.v
+read_file -format verilog Comparator.v
+read_file -format verilog Multiply8x8.v
+read_file -format verilog Multiply16x16.v
+read_file -format verilog MuxMod.v
+read_file -format verilog PathSegment.v
+\end{lstlisting}
+
+% ============================================================
+\section{Compile 脚本}
+\subsection*{Compile Scripts}
+
+示例~\ref{ex:run-tcl} 至示例~\ref{ex:report-tcl} 给出用于 compile \texttt{ChipLevel} 设计的 dctcl 脚本。
+
+每个模块的 compile 脚本以该模块命名以便识别。
+初始 dctcl 脚本文件具有 \texttt{.tcl} 后缀；由 \cmd{write\_script} 命令生成的脚本具有 \texttt{.wtcl} 后缀。
+
+\begin{lstlisting}[caption={run.tcl},label=ex:run-tcl]
+# Initial compile with estimated constraints
+source "${script_path}initial_compile.tcl"
+
+current_design ChipLevel
+write_file -format ddc -hierarchy \
+   -output "${ddc_path}ChipLevel_init.ddc"
+
+# Characterize and write_script for all modules
+source "${script_path}characterize.tcl"
+
+# Recompile all modules using write_script constraints
+remove_design -all
+source "${script_path}recompile.tcl"
+
+current_design ChipLevel
+write_file -format ddc -hierarchy \
+   -output"${ddc_path}ChipLevel_final.ddc"
+\end{lstlisting}
+
+\begin{lstlisting}[caption={initial\_compile.tcl},label=ex:init-compile]
+# Initial compile with estimated constraints
+source "${script_path}read.tcl"
+
+current_design ChipLevel
+source "${script_path}defaults.con"
+
+source "${script_path}adder16.tcl"
+source "${script_path}cascademod.tcl"
+source "${script_path}comp16.tcl"
+source "${script_path}mult8.tcl"
+source "${script_path}mult16.tcl"
+source "${script_path}muxmod.tcl"
+source "${script_path}pathseg.tcl"
+\end{lstlisting}
+
+\begin{lstlisting}[caption={adder16.tcl},label=ex:adder16-tcl]
+# Script file for constraining Adder16
+set_app_var rpt_file "adder16.rpt"
+set_app_var design "adder16"
+
+current_design Adder16
+source "${script_path}defaults.con"
+
+# Define design environment
+set_load 2.2 sout
+set_load 1.5 cout
+set_driving_cell -lib_cell FD1 [all_inputs]
+set_drive 0 $clk_name
+
+# Define design constraints
+set_input_delay 1.35 -clock $clk_name {ain bin}
+set_input_delay 3.5 -clock $clk_name cin
+
+compile_exploration
+
+write_file -format ddc -hierarchy -output "${ddc_path}${design}.ddc"
+
+source "${script_path}report.tcl"
+\end{lstlisting}
+
+\begin{lstlisting}[caption={cascademod.tcl},label=ex:cascademod-tcl]
+# Script file for constraining CascadeMod
+# Constraints are set at this level and then a
+# hierarchical compile approach is used
+
+set_app_var rpt_file "cascademod.rpt"
+set_app_var design "cascademod"
+
+current_design CascadeMod
+source "${script_path}defaults.con"
+
+# Define design environment
+set_load 2.5 [all_outputs]
+set_driving_cell -lib_cell FD1 [all_inputs]
+set_drive 0 $clk_name
+
+# Define design constraints
+set_input_delay 1.35 -clock $clk_name {data1 data2}
+set_input_delay 3.5 -clock $clk_name cin
+set_input_delay 4.5 -clock $clk_name {rst start}
+set_output_delay 5.5 -clock $clk_name comp_out
+
+# Use compile-once, dont_touch approach for Comparator
+set_dont_touch u12
+
+compile_exploration
+
+write_file -format ddc -hierarchy -output "${ddc_path}${design}.ddc"
+
+source "${script_path}report.tcl"
+\end{lstlisting}
+
+\begin{lstlisting}[caption={comp16.tcl},label=ex:comp16-tcl]
+# Script file for constraining Comparator
+set_app_var rpt_file "comp16.rpt"
+set_app_var design "comp16"
+
+current_design Comparator
+source "${script_path}defaults.con"
+
+# Define design environment
+set_load 2.5 cp_out
+set_driving_cell -lib_cell FD1 [all_inputs]
+
+# Define design constraints
+set_input_delay 1.35 -clock $clk_name {ain bin}
+set_output_delay 5.1 -clock $clk_name {cp_out}
+
+compile_exploration
+
+write_file -format ddc -hierarchy -output "${ddc_path}${design}.ddc"
+
+source "${script_path}report.tcl"
+\end{lstlisting}
+
+\begin{lstlisting}[caption={mult8.tcl},label=ex:mult8-tcl]
+# Script file for constraining Multiply8x8
+set_app_var rpt_file "mult8.rpt"
+set_app_var design "mult8"
+
+current_design Multiply8x8
+source "${script_path}defaults.con"
+
+# Define design environment
+set_load 2.2 res
+set_driving_cell -lib_cell FD1P [all_inputs]
+set_drive 0 $clk_name
+
+# Define design constraints
+set_input_delay 1.35 -clock $clk_name {op1 op2}
+
+compile_exploration
+
+write_file -format ddc -hierarchy -output "${ddc_path}${design}.ddc"
+
+source "${script_path}report.tcl"
+\end{lstlisting}
+
+\begin{lstlisting}[caption={mult16.tcl},label=ex:mult16-tcl]
+# Script file for constraining Multiply16x16
+set_app_var rpt_file "mult16.rpt"
+set_app_var design "mult16"
+
+current_design Multiply16x16
+source "${script_path}defaults.con"
+
+# Define design environment
+set_load 2.2 res
+set_driving_cell -lib_cell FD1 [all_inputs]
+set_drive 0 $clk_name
+
+# Define design constraints
+set_input_delay 1.35 -clock $clk_name {op1 op2}
+
+# Define multicycle path for multiplier
+set_multicycle_path 2 -from [all_inputs] \
+   -to [all_registers -data_pins -edge_triggered]
+
+# Ungroup DesignWare parts
+set_app_var designware_cells [get_cells \
+   -filter "@is_oper==true"]
+if {[sizeof_collection $designware_cells] > 0} {
+   set_ungroup $designware_cells true
+}
+
+compile_exploration
+
+write_file -format ddc -hierarchy -output "${ddc_path}${design}.ddc"
+
+source "${script_path}report.tcl"
+report_timing_requirements -ignored \
+   >> "${log_path}${rpt_file}"
+\end{lstlisting}
+
+\begin{lstlisting}[caption={muxmod.tcl},label=ex:muxmod-tcl]
+# Script file for constraining MuxMod
+set_app_var rpt_file "muxmod.rpt"
+set_app_var design "muxmod"
+
+current_design MuxMod
+source "${script_path}defaults.con"
+
+# Define design environment
+set_load 2.2 Y_IN
+set_driving_cell -lib_cell FD1 [all_inputs]
+
+# Define design constraints
+set_input_delay 1.35 -clock $clk_name {D R F UPC}
+set_input_delay 2.35 -clock $clk_name MUX_CNT
+set_output_delay 5.1 -clock $clk_name {Y_IN}
+
+compile_exploration
+
+write_file -format ddc -hierarchy -output "${ddc_path}${design}.ddc"
+
+source "${script_path}report.tcl"
+\end{lstlisting}
+
+\begin{lstlisting}[caption={pathseg.tcl},label=ex:pathseg-tcl]
+# Script file for constraining path_segment
+set_app_var rpt_file "pathseg.rpt"
+set_app_var design "pathseg"
+
+current_design PathSegment
+source "${script_path}defaults.con"
+
+# Define design environment
+set_load 2.5 [all_outputs]
+set_driving_cell -lib_cell FD1 [all_inputs]
+set_drive 0 $clk_name
+
+# Define design rules
+set_max_fanout 6 {S1 S2}
+
+# Define design constraints
+set_input_delay 2.2 -clock $clk_name {R1 R2}
+set_input_delay 2.2 -clock $clk_name {R3 R4}
+set_input_delay 5 -clock $clk_name {S2 S1 OP}
+
+# Perform path segmentation for multiplier
+group -design mult -cell mult U100
+set_input_delay 10 -clock $clk_name mult/product*
+set_output_delay 5 -clock $clk_name mult/product*
+set_multicycle_path 2 -to mult/product*
+
+compile_exploration
+
+write_file -format ddc -hierarchy -output "${ddc_path}${design}.ddc"
+
+source "${script_path}report.tcl"
+report_timing_requirements -ignored \
+   >> "${log_path}${rpt_file}"
+\end{lstlisting}
+
+\begin{lstlisting}[caption={recompile.tcl},label=ex:recompile]
+source "${script_path}read.tcl"
+
+current_design ChipLevel
+source "${script_path}defaults.con"
+
+source "${script_path}adder16.wtcl"
+compile_exploration
+write_file -format ddc -hierarchy -output "${ddc_path}adder16_wtcl.ddc"
+set_app_var rpt_file adder16_wtcl.rpt
+source "${script_path}report.tcl"
+
+source "${script_path}cascademod.wtcl"
+dont_touch u12
+compile_exploration
+write_file -format ddc -hierarchy \
+   -output "${ddc_path}cascademod_wtcl.ddc"
+set_app_var rpt_file cascade_wtcl.rpt
+source "${script_path}report.tcl"
+source "${script_path}comp16.wtcl"
+compile_exploration
+write_file -format ddc -hierarchy -output "${ddc_path}comp16_wtcl.ddc"
+set_app_var rpt_file comp16_wtcl.rpt
+source "${script_path}report.tcl"
+
+source "${script_path}mult8.wtcl"
+compile_exploration
+write_file -format ddc -hierarchy -output "${ddc_path}mult8_wtcl.ddc"
+set_app_var rpt_file mult8_wtcl.rpt
+source "${script_path}report.tcl"
+
+source "${script_path}mult16.wtcl"
+compile_exploration
+write_file -format ddc -hierarchy -output "${ddc_path}mult16_wtcl.ddc"
+set_app_var rpt_file mult16_wtcl.rpt
+source "${script_path}report.tcl"
+report_timing_requirements -ignored \
+  >> "${log_path}${rpt_file}"
+
+source "${script_path}muxmod.wtcl"
+compile_exploration
+write_file -format ddc -hierarchy -output "${ddc_path}muxmod_wtcl.ddc"
+set_app_var rpt_file muxmod_wtcl.rpt
+source "${script_path}report.tcl"
+
+source "${script_path}pathseg.wtcl"
+compile_exploration
+write_file -format ddc -hierarchy -output "${ddc_path}pathseg_wtcl.ddc"
+set_app_var rpt_file pathseg_wtcl.rpt
+source "${script_path}report.tcl"
+report_timing_requirements -ignored \
+  >> "${log_path}${rpt_file}"
+\end{lstlisting}
+
+\begin{lstlisting}[caption={report.tcl},label=ex:report-tcl]
+# This script file creates reports for all modules
+set_app_var maxpaths 15
+
+check_design > "${log_path}${rpt_file}"
+report_area >> "${log_path}${rpt_file}"
+report_design >> "${log_path}${rpt_file}"
+report_cell >> "${log_path}${rpt_file}"
+report_reference >> "${log_path}${rpt_file}"
+report_port -verbose >> "${log_path}${rpt_file}"
+report_net >> "${log_path}${rpt_file}"
+report_constraint -all_violators -verbose \
+   >> "${log_path}${rpt_file}"
+report_timing -path_type end >> "${log_path}${rpt_file}"
+report_timing -max_paths $maxpaths \
+   >> "${log_path}${rpt_file}"
+report_qor >> "${log_path}${rpt_file}"
+\end{lstlisting}

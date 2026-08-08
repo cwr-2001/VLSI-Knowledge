@@ -1,0 +1,624 @@
+# -*- coding: utf-8 -*-
+"""Generate 06_constraining.tex with proper UTF-8 encoding."""
+from pathlib import Path
+
+chunks = []
+
+chunks.append(r"""% 第 6 章 Constraining the Design
+\bichapter{约束设计}{Constraining the Design}
+\label{chap:constrain}
+
+要了解如何约束设计的输入与输出，请参阅：
+\begin{itemize}
+  \item 时序约束
+  \item 输入延迟
+  \item 输出延迟
+  \item 输入端口驱动特性
+  \item 端口电容
+  \item 线负载模型
+  \item 转换时间传播
+  \item 设计规则约束
+  \item 理想网络
+  \item 检查约束
+\end{itemize}
+
+% ============================================================
+\section{时序约束}
+\subsection*{Timing Constraints}
+
+开始时序分析之前，需要为设计指定时序约束。时序约束（也称 timing assertion）限制信号到达器件输入或在器件输出保持有效的允许时间范围。
+
+\figplaceholder{Figure 23: Design-level timing constraints}{设计级时序约束}{fig:design-level-constraints}
+
+图中展示了数据到达时间（data arrival times）与数据要求时间（data required times）的关系。\cmd{create\_clock} 定义时钟；\cmd{set\_input\_delay} 与 \cmd{set\_output\_delay} 分别约束输入与输出端口相对于时钟边沿的延迟。
+
+% ============================================================
+\section{输入延迟}
+\subsection*{Input Delays}
+
+要在设计输入处进行约束检查，工具需要输入信号到达时间的信息。要指定通向输入端口的外部路径时序，使用 \cmd{set\_input\_delay} 命令。工具利用该信息检查输入端口及其传递扇出（transitive fanout）中的时序违例。使用该命令可指定从时钟边沿到指定输入端口信号到达的最小与最大延迟量。
+
+对端口应用 \cmd{set\_drive} 或 \cmd{set\_driving\_cell} 命令会使端口具有 cell delay，即外部驱动单元 load-dependent 延迟。为避免该延迟被重复计入，应估算驱动单元的 load-dependent 延迟，再从该端口输入延迟中减去该量。
+
+输入延迟应等于从源触发器时钟引脚到驱动单元输出引脚的路径长度，减去驱动单元 delay 的 load-dependent 部分。下图展示从 L1 时钟端口到 IN1 端口的外部路径。
+
+\figplaceholder{Figure 24: Two-phase clocking example for setting port delays}{设置端口延迟的双相时钟示例}{fig:two-phase-port-delays}
+
+使用 \cmd{set\_input\_delay} 时，可指定延迟值是否包含 network latency 或 source latency。
+
+\textbf{示例 1}：若从 L1 时钟端口到 IN1（减去驱动单元 load-dependent 延迟）的延迟为 4.5，则：
+\begin{lstlisting}
+pt_shell> set_input_delay 4.5 -clock PHI1 {IN1}
+\end{lstlisting}
+
+\textbf{示例 2}：若多条来自不同时钟或边沿的路径到达同一端口，使用 \opt{-add\_delay} 选项分别指定。若省略 \opt{-add\_delay}，现有数据将被移除。例如：
+\begin{lstlisting}
+pt_shell> set_input_delay 2.3 -clock PHI2 -add_delay {IN1}
+\end{lstlisting}
+
+若延迟源为电平敏感锁存器，使用 \opt{-level\_sensitive} 选项，使 PrimeTime 能确定从该端口出发路径的正确单周期时序约束。使用 \opt{-clock\_fall} 表示负电平敏感锁存器；否则 \opt{-level\_sensitive} 隐含正电平敏感锁存器。
+
+查看端口输入延迟，使用 \cmd{report\_port -input\_delay}。移除 \cmd{set\_input\_delay} 设置的端口或引脚输入延迟信息，使用 \cmd{remove\_input\_delay}。默认移除 \texttt{port\_pin\_list} 选项中的所有输入延迟信息。
+
+\subsection{输入端口同时作为时钟与数据}
+\subsubsection*{Using Input Ports Simultaneously for Clock and Data}
+
+PrimeTime 允许输入端口同时作为时钟端口与数据端口。可用 \texttt{timing\_simultaneous\_clock\_data\_port\_compatibility} 变量启用或禁用该行为。
+
+当该变量为 \texttt{false}（默认）时，同时行为被启用，可用 \cmd{set\_input\_delay} 相对于时钟定义输入端口时序要求。此时：
+\begin{itemize}
+  \item 若 \cmd{set\_input\_delay} 相对于同一端口定义的时钟，且该端口有 data sink，命令被忽略并发出错误消息——同一端口信号不能同时作为相对于时钟的数据和时钟本身。
+  \item 若 \cmd{set\_input\_delay} 相对于不同端口定义的时钟，且端口有 data sink，输入延迟被设置并控制从该端口相对于时钟发射的数据边沿。
+  \item 无论数据端口位置如何，若时钟端口未扇出到 data sink，时钟端口上的输入延迟被忽略并发出错误消息。
+\end{itemize}
+
+将 \texttt{timing\_simultaneous\_clock\_data\_port\_compatibility} 设为 \texttt{true} 时，同时行为被禁用，\cmd{set\_input\_delay} 定义相对于时钟的到达时间。此时若输入端口上定义了时钟，PrimeTime 将该端口仅视为时钟端口，并对发射的数据边沿施加限制，且阻止相对于另一时钟设置输入延迟。
+
+要控制输入端口上定义时钟的 clock source latency，必须使用 \cmd{set\_clock\_latency} 命令。
+
+% ============================================================
+\section{输出延迟}
+\subsection*{Output Delays}
+
+要在设计输出处进行约束检查，工具需要输出时序要求的信息。要指定输出端口到寄存器的延迟，使用 \cmd{set\_output\_delay} 命令。
+
+使用该命令可指定输出端口与从该端口捕获数据的外部时序器件之间的最小与最大延迟量，从而确定信号在输出端口必须可用的时间，以满足外部时序元件的 setup 与 hold 要求：
+\begin{itemize}
+  \item Maximum\_output\_delay = 到寄存器 data pin 的最长路径长度 + 寄存器 setup\_time
+  \item Minimum\_output\_delay = 到寄存器 data pin 的最短路径长度 $-$ hold\_time
+\end{itemize}
+
+\figplaceholder{Figure 25: Two-phase clocking example for setting port delays}{设置端口延迟的双相时钟示例（输出）}{fig:two-phase-output-delays}
+
+上例中，以下命令为 OUT1 端口设置相对于 PHI1 时钟上升沿 4.3 的输出延迟：
+\begin{lstlisting}
+pt_shell> set_output_delay 4.3 -clock PHI1 {OUT1}
+\end{lstlisting}
+
+查看端口关联的输出延迟，使用 \cmd{report\_port -output\_delay}。通过 \cmd{set\_output\_delay} 设置的输出端口或引脚输出延迟，使用 \cmd{remove\_output\_delay} 移除。默认移除列表中每个对象的所有输出延迟。可用 \opt{-clock}、\opt{-clock\_fall}、\opt{-min}、\opt{-max}、\opt{-rise} 或 \opt{-fall} 限制移除范围。
+
+""")
+
+chunks.append(r"""% ============================================================
+\section{输入端口驱动特性}
+\subsection*{Drive Characteristics at Input Ports}
+
+要准确计时设计，需定义驱动每个输入端口的外部单元驱动能力。PrimeTime 利用该信息计算端口 load-dependent cell delay，并产生准确的 transition time，用于计算后续逻辑级的 cell delay 与 transition time。
+
+\figplaceholder{Figure 26: Driving cells}{驱动单元}{fig:driving-cells}
+
+\cmd{set\_driving\_cell} 命令可指定驱动单元的库 cell arc，使时序计算在电容变化时仍保持准确。该命令使端口 transition time 按指定库单元驱动该端口的方式计算。
+
+对于精度较低的计算，可使用 \cmd{set\_drive} 或 \cmd{set\_input\_transition} 命令。最近的 drive 命令优先。若先对端口执行 \cmd{set\_drive}，再对同一端口使用 \cmd{set\_driving\_cell}，\cmd{set\_drive} 的信息将被移除。
+
+\subsection{设置端口驱动单元}
+\subsubsection*{Setting the Port Driving Cell}
+
+\cmd{set\_driving\_cell} 命令指示 PrimeTime 按指定库单元实例计算延迟，端口 delay 仅含 load-dependent 部分。端口 transition time 也按该库单元驱动网络的方式计算。\cmd{set\_driving\_cell} 设置的端口 delay 利用该库单元的实际 delay model（非线性或线性）。对有驱动单元或 drive resistance 的端口，指定输入延迟时不应包含端口 load-dependent delay。
+
+显示端口 transition 或 drive 能力信息，使用 \cmd{report\_port -drive}。\cmd{set\_driving\_cell} 可用 \opt{-input\_transition\_rise} 或 \opt{-input\_transition\_fall} 指定驱动单元输入的上升与下降 transition time。未指定输入 transition 时，默认为 0。
+
+\subsection{设置端口驱动电阻}
+\subsubsection*{Setting the Port Drive Resistance}
+
+\cmd{set\_drive} 命令为当前设计输入与 inout 端口定义外部驱动强度或电阻。存在 wire load model 时，端口报告的 transition time 与 delay 等于 $R_{\mathrm{driver}} \times C_{\mathrm{total}}$。PrimeTime 在计算后续逻辑级 delay 时使用该 transition time。
+
+当输入端口驱动能力无法用逻辑库中的单元表征时，可用 \cmd{set\_drive} 在设计顶层端口设置 drive resistance。但该命令对非线性 delay model 不如 \cmd{set\_driving\_cell} 准确。\cmd{set\_drive} 适用于无法指定库单元的情况（例如驱动为未建模为 Synopsys 库单元的自定义模块）。
+
+\subsection{设置固定端口转换时间}
+\subsubsection*{Setting a Fixed Port Transition Time}
+
+\cmd{set\_input\_transition} 命令为输入端口定义固定 transition time。端口 cell delay 为零。PrimeTime 仅在计算端口驱动逻辑 delay 时使用指定 transition time。
+
+固定 transition time 适用于：
+\begin{itemize}
+  \item 将设计与仅支持 input transition time 的其他工具进行时序对比；
+  \item 定义芯片顶层端口 transition——存在大外部驱动与大外部电容时，transition time 相对独立于当前设计中的电容。
+\end{itemize}
+
+\subsection{显示驱动信息}
+\subsubsection*{Displaying Drive Information}
+
+显示驱动信息，使用 \cmd{report\_port -drive}。
+
+\subsection{从端口移除驱动信息}
+\subsubsection*{Removing Drive Information From Ports}
+
+从端口移除驱动信息，使用以下命令：
+
+\begin{table}[htbp]
+\centering
+\caption{移除驱动信息的命令}
+\begin{tabular}{@{}ll@{}}
+\toprule
+命令 & 说明 \\
+\midrule
+\cmd{remove\_driving\_cell} & 从指定端口移除 driving cell 信息 \\
+\cmd{reset\_design} & 移除 drive 数据及所有用户指定数据（如时钟、输入/输出延迟） \\
+\cmd{set\_drive 0.0} & 移除 drive resistance \\
+\cmd{set\_input\_transition 0.0} & 移除 input transition \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ============================================================
+\section{端口电容}
+\subsection*{Port Capacitance}
+
+要准确计时设计，需用 \cmd{set\_load} 命令描述连到顶层端口网络的 external load capacitance，包括 pin 与 wire capacitance。
+
+\figplaceholder{Figure 27: Output load}{输出负载}{fig:output-load}
+
+\textbf{示例 1}：指定端口 external pin capacitance：
+\begin{lstlisting}
+pt_shell> set_load -pin_load 3.5 {IN1 OUT1 OUT2}
+\end{lstlisting}
+
+还需考虑端口外部的 wire capacitance。对于 prelayout，指定 external wire load model 与 external fanout 点数（见「手动设置线负载模型」）。
+
+\textbf{示例 2}：对于 postlayout，将 external annotated wire capacitance 指定为端口 wire capacitance：
+\begin{lstlisting}
+pt_shell> set_load -wire_load 5.0 {OUT3}
+\end{lstlisting}
+
+移除端口电容值，使用 \cmd{remove\_capacitance} 命令。
+
+""")
+
+chunks.append(r"""% ============================================================
+\section{线负载模型}
+\subsection*{Wire Load Models}
+
+要准确计算 net delay，PrimeTime 需要互连 wire 寄生负载信息。布局布线完成前，PrimeTime 使用逻辑库提供的 wire load model 估算这些负载。逻辑库供应商提供统计 wire load model，根据网络上 fanout pin 数量估算 wire load。可手动或自动设置 wire load model。
+
+\subsection{手动设置线负载模型}
+\subsubsection*{Setting Wire Load Models Manually}
+
+手动在设计、实例、cell 列表或端口列表上设置命名 wire load model，使用 \cmd{set\_wire\_load\_model} 命令。
+
+例如，设计层次为：
+\begin{verbatim}
+TOP
+  MID (instance u1)
+    BOTTOM (instance u5)
+  MID (instance u2)
+    BOTTOM (instance u5)
+\end{verbatim}
+
+在 BOTTOM 实例上设置 10x10 model、MID 实例上设置 20x20 model、顶层网络上设置 30x30 model：
+\begin{lstlisting}
+pt_shell> set_wire_load_mode enclosed
+pt_shell> set_wire_load_model -name 10x10 [all_instances BOTTOM]
+pt_shell> set_wire_load_model -name 20x20 [all_instances MID]
+pt_shell> set_wire_load_model -name 30x30
+\end{lstlisting}
+
+要捕获连到端口网络的外部部分，可设置 external wire load model 与 fanout 点数。例如对当前设计端口 Z：
+\begin{lstlisting}
+pt_shell> set_wire_load_model -name 70x70 [get_ports Z]
+pt_shell> set_port_fanout_number 3 Z
+\end{lstlisting}
+
+PrimeTime 假设端口 Z fanout 为 3，使用 70x70 wire load model 计算 delay。
+
+查看当前设计或实例的 wire load model 设置，使用 \cmd{report\_wire\_load}。查看端口 wire load 信息，使用 \cmd{report\_port -wire\_load}。移除用户指定的 wire load model 信息，使用 \cmd{remove\_wire\_load\_model}。
+
+\subsection{自动线负载模型选择}
+\subsubsection*{Automatic Wire Load Model Selection}
+
+更新设计时序信息时，PrimeTime 可自动设置 wire load。若未为设计或模块指定 wire load model，PrimeTime 根据 wire load selection group（若已指定）自动选择 model。
+
+若未应用 wire load model 或 selection group，但库定义了 \texttt{default\_wire\_load} model，PrimeTime 将库定义 model 应用于设计。否则 wire resistance、capacitance、length 与 area 均为 0。
+
+自动 wire load 选择由 selection group 控制，将 cell 模块尺寸映射到 wire load model。若在顶层设计或主逻辑库定义了 \texttt{default\_wire\_load\_selection\_group}，PrimeTime 自动启用 wire load 选择。
+
+启用 wire load 选择时，根据模块 cell area 自动为大于最小 cell area 的层次模块选择 wire load。设置自动 wire load 选择的最小模块尺寸：
+\begin{lstlisting}
+pt_shell> set_wire_load_min_block_size size
+\end{lstlisting}
+其中 \texttt{size} 为库 cell area 单位的最小模块尺寸，须 $\geq 0$。
+
+\texttt{auto\_wire\_load\_selection} 环境变量控制自动 wire load 选择，默认为 \texttt{true}。禁用：
+\begin{lstlisting}
+pt_shell> set auto_wire_load_selection false
+\end{lstlisting}
+
+移除 wire load selection group 设置，使用 \cmd{remove\_wire\_load\_selection\_group}。
+
+\subsection{设置线负载模式}
+\subsubsection*{Setting the Wire Load Mode}
+
+当前 wire load mode（由 \cmd{set\_wire\_load\_mode} 设置）决定设计层次各层使用的 wire load model。三种模式：\texttt{top}、\texttt{enclosed}、\texttt{segmented}。
+
+若顶层设计 mode 为 \texttt{top}，顶层 wire load model 用于计算设计内所有层次所有网络的 wire capacitance。若顶层设计 mode 为 \texttt{enclosed} 或 \texttt{segmented}，层次 cell 上的 wire load model 用于计算这些模块内网络的 wire capacitance、resistance 与 area。
+
+\texttt{enclosed} 模式下，PrimeTime 使用完全包围网络的层次 cell 的 wire load model 确定 net 值。\texttt{segmented} 模式下，PrimeTime 分别确定网络各层次段的值，再求和得到总 net 值。
+
+未指定 mode 时，使用主逻辑库的 \texttt{default\_wire\_load\_mode}。\texttt{enclosed} 模式通常最准确，但 ASIC 供应商可能推荐特定 mode。
+
+将当前设计 wire load mode 设为 \texttt{enclosed}：
+\begin{lstlisting}
+pt_shell> set_wire_load_mode enclosed
+\end{lstlisting}
+
+\figplaceholder{Figure 28: Design example for wire load mode settings}{线负载模式设置的设计示例}{fig:wire-load-mode-example}
+
+\begin{table}[htbp]
+\centering
+\caption{线负载模型应用示例（Table 11）}
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+Wire load 设置 & Wire load model & 适用的网络 \\
+\midrule
+top & Big & 所有网络 \\
+enclosed & Big & n3, U1/n2, U2/n4, U2/U1/n5 \\
+enclosed & Medium & U1/n1 \\
+enclosed & Small & U2/U1/n6 \\
+segmented & Big & n3 \\
+segmented & Medium & U1/n1, U1/n2, U2/n4 \\
+segmented & Small & U2/U1/n5, U2/U1/n6 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{报告线负载模型}
+\subsubsection*{Reporting Wire Load Models}
+
+从 PrimeTime 获取 wire load 报告：
+\begin{itemize}
+  \item \cmd{report\_wire\_load}
+  \item \cmd{report\_port -wire\_load}
+\end{itemize}
+
+% ============================================================
+\section{转换时间传播}
+\subsection*{Slew Propagation}
+
+在多条 timing arc 汇合的引脚处，PrimeTime 计算每条驱动 arc 的 slew，再选择引脚上最差 slew 值沿路径传播。注意所选 slew 可能并非来自对最差路径有贡献的输入，因此 merge pin 计算的 delay 可能偏悲观。
+
+\figplaceholder{Figure 29: Maximum slew propagation}{最大转换时间传播}{fig:max-slew-propagation}
+
+最小 slew 传播类似最大 slew 传播——PrimeTime 根据 merge 点最佳 delay 的输入选择最小 slew。
+
+""")
+
+chunks.append(r"""% ============================================================
+\section{设计规则约束}
+\subsection*{Design Rule Constraints}
+
+PrimeTime 检查库或 PrimeTime 命令定义的设计规则约束违例，包括：
+\begin{itemize}
+  \item transition time 最大限制
+  \item capacitance 最大与最小限制
+  \item fanout 最大限制
+\end{itemize}
+
+报告设计规则约束违例，使用 \cmd{report\_constraint} 命令。
+
+\subsection{最大转换时间}
+\subsubsection*{Maximum Transition Time}
+
+PrimeTime 中最大 transition time 的处理方式与 slew 类似。本节先讨论阈值与 derating 语境下的 slew，再扩展到最大 transition time。
+
+可用 Liberty table 中的浮点数表示 SPICE 波形。SPICE 波形以 10--90 测量时，transition time 为 10\,ps；线性化波形以 0--100 阈值测量为 12.5\,ps；以 30--70 阈值表示为 5\,ps。
+
+\figplaceholder{Figure 30: SPICE waveform}{SPICE 波形}{fig:spice-waveform}
+
+SPICE 波形在 Liberty table 或 PrimeTime 报告中可表示为：
+\begin{itemize}
+  \item A：10\,ps slew threshold 10--90，slew derating 1.0
+  \item B：12.5\,ps slew threshold 10--90，slew derating 0.8
+  \item C：5\,ps slew threshold 10--90，derating 2.0
+\end{itemize}
+
+注意库中 slew threshold 始终是 SPICE 测量所用阈值。
+
+\subsection{库中多阈值与 Derating 值}
+\subsubsection*{Multiple Threshold and Derating Values in Libraries}
+
+Liberty 允许任意 slew threshold 以最小化 slew 线性化误差。当库间（或同库不同 pin 间）slew 信息交互时，需转换到共同基准。
+
+设库 L1 阈值 TL1--TH1、derate SD1；L2 阈值 TL2--TH2、derate SD2。S1 为 L1 本地阈值与 derate 下的 slew；S2 为 L2 本地阈值与 derate 下的 slew。等价 slew S2\_1（S2 以 L1 derate/threshold 表示）：
+\[
+S2\_1 = S2 \times \frac{SD2}{(TH2 - TL2)} \times \frac{(TH1 - TL1)}{SD1}
+\]
+S1 与 S2\_1 可直接比较；S1 与 S2 不可。存在详细 RC 时，slew 在相应 threshold 与 derate 语境下正确计算。
+
+\subsection{指定最大转换时间约束}
+\subsubsection*{Specifying the Maximum Transition Constraint}
+
+最大 transition 约束可来自用户输入、库与库 pin。用户指定的最大 transition 约束以 PrimeTime 主库 derate 与 slew threshold 表示。
+
+\cmd{set\_max\_transition} 为指定 pin、port、design 或 clock 设置 transition time 上限。指定于 clock 时，该 clock domain 内 pin 受约束。在 clock domain 内，可进一步限制仅 clock path 或 data path，以及仅上升或下降 transition。
+
+默认约束检查时，采用 design、pin、port、clock（若 pin/port 在该 clock domain）或库上最严格的约束。多条 clock 发射同一路径时亦然。
+
+要改变默认行为，将 \texttt{timing\_enable\_max\_slew\_precedence} 设为 \texttt{true}。此时约束设置位置决定优先级（与约束值大小无关）：
+\begin{enumerate}
+  \item Pin 或 port 级
+  \item 库派生约束
+  \item Clock 或 design 级
+\end{enumerate}
+
+\cmd{set\_max\_transition} 在指定对象上放置 \texttt{max\_transition} 属性（设计规则约束）。PrimeTime 中 slew 与最大 transition 约束属性以各 pin 或库的本地 threshold 与 derate 报告。对全局 derating 最大 transition 值，设置 \texttt{timing\_max\_transition\_derate} 变量。
+
+\textbf{示例 1}：对 OUT* 端口设置最大 transition 限制 2.0：
+\begin{lstlisting}
+pt_shell> set_max_transition 2.0 [get_ports "OUT*"]
+\end{lstlisting}
+
+\textbf{示例 2}：对当前设计设置默认最大 transition 限制 5.0：
+\begin{lstlisting}
+pt_shell> set_max_transition 5.0 [current_design]
+\end{lstlisting}
+
+\textbf{示例 3}：对 CLK1 clock domain 所有 pin 的 data path 上升 transition 设置最大 transition 限制 4.0：
+\begin{lstlisting}
+pt_shell> set_max_transition 4.0 [get_clocks CLK1] -data_path -rise
+\end{lstlisting}
+
+\subsection{评估最大转换时间约束}
+\subsubsection*{Evaluating the Maximum Transition Constraint}
+
+查看最大 transition 约束评估，使用 \cmd{report\_constraint -max\_transition}。PrimeTime 以 cell instance pin 的 threshold 与 derate 报告所有约束与 slew，违例按绝对值排序。
+
+也可用 \cmd{report\_object\_list} 选项仅报告指定 port 或 pin 的最大 capacitance 与最大 transition 约束计算。
+
+查看端口最大 transition 限制：\cmd{report\_port -design\_rule}。查看当前设计默认最大 transition：\cmd{report\_design}。撤销最大 transition 限制：\cmd{remove\_max\_transition}。
+
+\subsection{最小电容}
+\subsubsection*{Minimum Capacitance}
+
+对指定端口或整个设计指定最小 capacitance 限制，运行 \cmd{set\_min\_capacitance}。端口 capacitance 限制应用于连到该端口的网络；design 级限制为设计中所有网络的默认 capacitance 限制。
+
+\cmd{set\_min\_capacitance} 在指定对象上应用 \texttt{min\_capacitance} 属性。Capacitance 约束检查仅适用于 output pin。约束检查时采用最严格约束。
+
+\begin{lstlisting}
+pt_shell> set_min_capacitance 0.2 [get_ports "OUT*"]
+pt_shell> set_min_capacitance 0.1 [current_design]
+\end{lstlisting}
+
+\subsection{最大电容}
+\subsubsection*{Maximum Capacitance}
+
+指定最大 capacitance 限制，运行 \cmd{set\_max\_capacitance}。可在 pin 或 clock 上额外指定最大 capacitance 限制。指定于 clock 时，该 clock domain 内 pin 受约束，可进一步限制仅 clock path 或 data path，以及仅上升或下降 capacitance。
+
+\cmd{set\_max\_capacitance} 应用 \texttt{max\_capacitance} 属性。Capacitance 约束检查仅适用于 output pin。对 \texttt{max\_capacitance} 值应用全局 derating，设置 \texttt{timing\_max\_capacitance\_derate} 变量。
+
+\figplaceholder{Figure 31: Restrict constraints}{限制约束范围}{fig:restrict-constraints}
+
+若对象为 clock 列表，可用 \opt{-clock\_path}、\opt{-data\_path}、\opt{-rise} 或 \opt{-fall} 进一步限制约束范围。若 pin(port) 受 design、library、clock（及 port）上不同最大 capacitance 约束，最严格约束优先。slack 为最严格约束与 pin(port) 总 capacitance 之差。该特性适用于 generated clock。
+
+\subsection{基于频率的最大电容检查}
+\subsubsection*{Frequency-Based Maximum Capacitance Checks}
+
+库可包含 lookup table，为每个 driver pin 指定基于频率的 \texttt{max\_capacitance} 值。Pin 频率为到达该 pin 所有时钟的最大频率。
+
+默认情况下，若 lookup table 可用，工具考虑其中的 \texttt{max\_capacitance} 值。DRC 检查、\cmd{report\_constraint}、ETM 生成与 ECO 修复使用以下最小值：
+\begin{itemize}
+  \item 库 lookup table 中的 \texttt{max\_capacitance} 值
+  \item 库 cell \texttt{max\_capacitance} 值
+  \item pin、port、clock 与 design 级所有用户指定的 \texttt{max\_capacitance} 值
+\end{itemize}
+
+完全忽略 lookup table 中的 \texttt{max\_capacitance}，将 \texttt{timing\_enable\_library\_max\_cap\_lookup\_table} 设为 \texttt{false}。
+
+使 lookup table 的 \texttt{max\_capacitance} 优先于库 cell 值，将 \texttt{timing\_library\_max\_cap\_from\_lookup\_table} 设为 \texttt{true}。
+
+\subsection{含 Case Analysis 的最大电容检查}
+\subsubsection*{Maximum Capacitance Checking With Case Analysis}
+
+默认情况下，不对 constant propagation 路径上的 pin 执行最大 capacitance 检查。要启用，将 \texttt{timing\_enable\_max\_capacitance\_set\_case\_analysis} 设为 \texttt{true}。
+
+\subsection{最大扇出负载}
+\subsubsection*{Maximum Fanout Load}
+
+\cmd{set\_max\_fanout} 为指定 output port 或 design 设置最大 fanout load，在指定对象上设置 \texttt{max\_fanout} 属性。端口级限制应用于连到该端口的网络；design 级为设计中所有网络的默认最大值。冲突时采用更严格值。库 cell pin 可有 \texttt{max\_fanout} 值，PrimeTime 采用用户设置与库指定中更严格的限制。
+
+\begin{lstlisting}
+pt_shell> set_max_fanout 2.0 [get_ports "IN*"]
+pt_shell> set_max_fanout 5.0 [current_design]
+\end{lstlisting}
+
+\subsection{输出端口扇出负载值}
+\subsubsection*{Fanout Load Values for Output Ports}
+
+网络的 fanout load 为连到该网络 input pin 与 output port 的 \texttt{fanout\_load} 属性之和。Output pin 可有最大 fanout 限制（库中定义或通过 \cmd{set\_max\_fanout} 设置）。默认端口 fanout load 为 0.0。\cmd{set\_fanout\_load} 为当前设计 output port 指定预期 fanout load：
+\begin{lstlisting}
+pt_shell> set_fanout_load 3.0 "OUT*"
+\end{lstlisting}
+
+\begin{seeAlsoBox}
+更多信息见 \textit{Synopsys Timing Constraints and Optimization User Guide}。
+\end{seeAlsoBox}
+
+""")
+
+chunks.append(r"""% ============================================================
+\section{理想网络}
+\subsection*{Ideal Networks}
+
+PrimeTime 允许创建 ideal network，其上不检查设计规则约束。在 pre-layout 设计阶段，可能希望忽略 fanout 与 capacitance 较大的未优化网络，专注于其他来源的违例。使用 ideal network 可减少运行时间，因为 PrimeTime 使用「理想时序」而非内部计算时序，类似 ideal clock network，但也可应用于 data network。
+
+Ideal network——相连的 port、pin、net 与 cell 集合——免于时序更新与设计规则约束修复，即忽略 \texttt{max\_capacitance}、\texttt{max\_fanout} 与 \texttt{max\_transition} 检查。指定 ideal network 源后，其中包含的 pin、port、net 与 cell 被视为 ideal 对象，需由用户或 ideal propagation 标记。
+
+\subsection{传播理想网络属性}
+\subsubsection*{Propagating Ideal Network Properties}
+
+指定 ideal network 源对象（port、leaf-level pin）后，源对象传递扇出中的 net、cell 与 pin 可被视为 ideal。传播规则：
+\begin{itemize}
+  \item Pin 标记为 ideal，若其为以下之一：
+  \begin{itemize}
+    \item \cmd{set\_ideal\_network} \texttt{object\_list} 中指定的 pin
+    \item Driver pin 及其 cell 为 ideal
+    \item Load pin 连到 ideal net
+  \end{itemize}
+  \item Net 标记为 ideal，若其所有 driving pin 均为 ideal
+  \item 组合逻辑 cell 标记为 ideal，若所有 input pin 均为 ideal，或连到 constant net 且所有其他 input pin 均为 ideal
+\end{itemize}
+
+\begin{noteBox}
+Ideal network propagation 可穿越组合逻辑 cell，但在时序 cell 处停止。
+\end{noteBox}
+
+PrimeTime 在时序更新时传播 ideal network，并在设计变更（如 ECO）后从 ideal 源对象重新传播。
+
+\subsection{使用理想网络}
+\subsubsection*{Using Ideal Networks}
+
+用 \cmd{set\_ideal\_network} 指定要设为 ideal 的网络，用 \texttt{object\_list} 指明 ideal network 源：
+\begin{lstlisting}
+pt_shell> set_ideal_network P1
+\end{lstlisting}
+
+使用 \opt{-no\_propagate} 限制传播范围，仅对与 ideal network 源电气相连的 net 与 pin 标记 ideal：
+\begin{lstlisting}
+pt_shell> set_ideal_network -no_propagate net1
+\end{lstlisting}
+
+移除 ideal network：\cmd{remove\_ideal\_network}。报告 ideal port、pin、net 或 cell：\cmd{report\_ideal\_network}。
+
+\subsection{使用理想延迟}
+\subsubsection*{Using Ideal Latency}
+
+默认 ideal network delay 为零。可用 \cmd{set\_ideal\_latency} 在 ideal network 的 pin 与 port 上指定 ideal latency，沿路径累积方式与 delay 值相同。注意 ideal latency 仅在对象为 ideal 时生效；否则 \cmd{report\_ideal\_network} 发出警告。用 \cmd{remove\_ideal\_latency} 移除。
+
+\subsection{使用理想转换时间}
+\subsubsection*{Using Ideal Transition}
+
+Ideal network 默认 transition time 为零。可用 \cmd{set\_ideal\_transition} 指定 ideal transition time。在对象上设置 ideal transition 后，该值沿 ideal network 传播到网络边界 pin，或直到遇到另一 ideal transition 值。仅在对象为 ideal 时生效。用 \cmd{remove\_ideal\_transition} 移除。
+
+\subsection{全时钟展开模式中的理想时钟报告}
+\subsubsection*{Reporting of Ideal Clocks in Full Clock Expanded Mode}
+
+默认情况下，\cmd{report\_timing -path\_type full\_clock\_expanded} 不在 ideal clock network 中显示 clock path，而显示 clock arrival 点 ideal clock latency 的单行。
+
+要了解 ideal clock network 的拓扑路径，设置：
+\begin{lstlisting}
+pt_shell> set_app_var timing_report_trace_ideal_clocks true
+\end{lstlisting}
+
+设置后，报告显示完整 ideal clock path 及沿路径的 incremental delay。在 clock arrival 点，报告施加调整以抵消 propagated delay 计算，得到 ideal clock edge 时间，再应用 ideal clock network delay。
+
+该选项同样控制 \cmd{report\_clock\_timing -verbose} 与 \cmd{report\_min\_pulse\_width -path\_type full\_clock\_expanded} 的路径报告。
+
+% ============================================================
+\section{检查约束}
+\subsection*{Checking the Constraints}
+
+开始完整分析前，宜检查设计特性与约束。错误约束的路径可能不出现在违例报告中，导致遗漏违例路径。
+
+\subsection{设计报告}
+\subsubsection*{Design Reports}
+
+完整时序分析前，可用下表命令检查设计；分析后这些命令也有助于调试违例。
+
+\begin{table}[htbp]
+\centering
+\caption{设计报告命令（Table 14）}
+\small
+\begin{tabularx}{\textwidth}{@{}l X@{}}
+\toprule
+命令 & 说明 \\
+\midrule
+\cmd{report\_bus} & 报告当前实例或设计中总线（pin 或 port）信息 \\
+\cmd{report\_cell} & 列出所用 cell 及库名、输入/输出名、网络连接、面积与属性 \\
+\cmd{report\_clock} & 报告设计中定义的时钟（名称、周期、上升/下降时间及 latency、uncertainty 等） \\
+\cmd{report\_design} & 列出设计属性（工作条件、wire load、设计规则、derating） \\
+\cmd{report\_disable\_timing} & 报告被禁用的 timing arc \\
+\cmd{report\_hierarchy} & 生成当前设计子模块与 leaf cell 层次列表 \\
+\cmd{report\_lib} & 报告指定库的时间/电容单位、wire load、工作条件、trip-point 阈值与 cell 名 \\
+\cmd{report\_net} & 列出网络及 fanin、fanout、电容、wire resistance、pin 数、属性与连接 \\
+\cmd{report\_path\_group} & 报告 path group \\
+\cmd{report\_port} & 列出端口及方向、pin 电容、wire 电容、输入/输出延迟、相关时钟、设计规则与 wire load \\
+\cmd{report\_reference} & 列出层次引用及参考名、单元面积、出现次数、总面积与属性 \\
+\cmd{report\_transitive\_fanin} & 报告指定 pin、port 或 net 的扇入逻辑 \\
+\cmd{report\_transitive\_fanout} & 报告指定 pin、port 或 net 的扇出逻辑 \\
+\cmd{report\_units} & 显示当前设计中电流、电容、电阻、时间与电压的测量单位 \\
+\cmd{report\_wire\_load} & 显示当前设计或指定 cell 上设置的 wire load model \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{使用 check\_timing 命令进行约束检查}
+\subsubsection*{Constraint Checking With the check\_timing Command}
+
+检查未定义时钟、未定义输入到达时间与未定义输出约束等问题，使用 \cmd{check\_timing}。该命令还提供与最小时钟间隔（主从时钟）、被忽略时序例外、组合反馈环与锁存器扇出相关的潜在问题信息。可通过添加约束（如 \cmd{create\_clock}、\cmd{set\_input\_delay}、\cmd{set\_output\_delay}）纠正未约束路径。
+
+典型 \cmd{check\_timing} 报告示例：
+\begin{lstlisting}
+pt_shell> check_timing
+Information: Checking 'no_clock'.
+Warning: There are 4 register clock pins with no clock.
+Information: Checking 'no_input_delay'.
+Information: Checking 'unconstrained_endpoints'.
+...
+\end{lstlisting}
+
+默认执行多种约束检查并发出摘要报告。详细报告使用 \opt{-verbose}。用 \opt{-include} 或 \opt{-exclude} 增减默认检查列表，或设置 \texttt{timing\_check\_defaults} 变量。所有检查类型见 man 页。
+
+\cmd{check\_timing} 报告的警告不一定表示真实设计问题。可用多种 report 命令获取设计特性与时序约束信息。
+
+\figplaceholder{Figure 32: Multiple clock fanin}{多时钟扇入}{fig:multi-clock-fanin}
+\figplaceholder{Figure 33: Self-looping latch}{自环锁存器}{fig:self-looping-latch}
+\figplaceholder{Figure 34: Latch fanout to another latch}{锁存器扇出到同时钟另一锁存器}{fig:latch-fanout}
+
+\begin{noteBox}
+若时序路径未约束，\cmd{check\_timing} 仅报告未约束 endpoint，不报告未约束 startpoint。类似地，对仅由 \cmd{set\_max\_delay}、\cmd{set\_min\_delay} 约束（而非 \cmd{set\_input\_delay} 与 \cmd{set\_output\_delay}）的路径，\cmd{check\_timing} 仅报告未约束 endpoint。
+\end{noteBox}
+
+\subsection{详细约束检查与调试}
+\subsubsection*{Detailed Constraint Checking and Debugging}
+
+报告错误约束或其他潜在问题，使用工具的详细约束检查与调试能力。该能力提供覆盖时钟、例外、case 与设计规则问题的预定义规则集，如被阻断的时序路径与缺失时钟定义。
+
+在 PrimeTime shell 中运行约束检查：
+\begin{enumerate}
+  \item（可选）在 \texttt{.synopsys\_gca.setup} 文件中指定约束检查设置。
+  \item 用 \cmd{current\_design} 指定当前设计：
+\begin{lstlisting}
+pt_shell> current_design top
+\end{lstlisting}
+  \item（可选）用 \texttt{gca\_setup\_file} 变量指定含用户定义违例豁免与自定义规则的规则文件：
+\begin{lstlisting}
+pt_shell> set_app_var gca_setup_file ./top_rules.tcl
+\end{lstlisting}
+  \item 用 \cmd{check\_constraints} 执行约束分析：
+\begin{lstlisting}
+pt_shell> check_constraints
+\end{lstlisting}
+  \item 对另一设计重复步骤 2--4，可指定不同规则文件。
+\end{enumerate}
+
+在 GUI 中查看约束检查结果：Constraints $>$ View Constraint Checking Results。
+
+\figplaceholder{Figure 35: Constraint Checking Results Displayed in the GUI}{GUI 中显示的约束检查结果}{fig:constraint-checking-gui}
+
+也可在独立约束检查 shell \texttt{ptc\_shell} 中执行约束分析。详见约束一致性章节。
+
+""")
+
+out = Path(r"d:\IC Design\VLSI\PT_CN\chapters\06_constraining.tex")
+out.write_text("\n".join(chunks), encoding="utf-8")
+print(f"Written {out} ({len(out.read_text(encoding='utf-8'))} bytes)")

@@ -1,0 +1,861 @@
+% 第 3 章 Setting Up the Libraries
+\bichapter{设置库}{Setting Up the Libraries}
+\label{chap:libs}
+
+DC Explorer 使用工艺库（technology libraries）、符号库（symbol libraries）以及综合/DesignWare 库来实现综合并以图形方式显示综合结果。
+必须正确设置库，DC Explorer 才能正确使用库数据。
+
+下列各节说明如何设置这些库并执行简单的库命令，以便 DC Explorer 正确使用库数据：
+\begin{itemize}
+  \item 库要求
+  \item 指定逻辑库
+  \item 指定物理库
+  \item 在网表或 DEF 文件中映射物理变体单元
+  \item 使用库
+  \item 目标库子集（Target Library Subsets）
+  \item 使用 TLUPlus 或 nxtgrd 文件进行 RC 估算
+  \item 对黑盒（black boxes）的支持
+\end{itemize}
+
+% ============================================================
+\section{库要求}
+\subsection*{Library Requirements}
+
+DC Explorer 使用下列库：
+\begin{itemize}
+  \item 逻辑库（Logic Libraries）
+  \item 符号库（Symbol Libraries）
+  \item DesignWare 库
+  \item 物理库（Physical Libraries）
+\end{itemize}
+
+\subsection{逻辑库}
+\subsubsection*{Logic Libraries}
+
+逻辑库由半导体厂商维护与发布，包含每个单元的特性与功能信息，例如单元名、引脚名、面积、延时弧与引脚负载。
+逻辑库还定义必须满足的条件，例如网络的最大 transition 时间；这些条件称为设计规则约束（design rule constraints）。
+此外，逻辑库为特定工艺指定工作条件与线负载模型（wire load models）。
+
+DC Explorer 支持使用非线性延时模型（NLDM）、复合电流源（CCS）模型（紧凑或非紧凑）或同时包含 NLDM 与 CCS 模型的逻辑库。
+工具根据逻辑库内容自动选择所用时序模型类型。若库同时包含 NLDM 与 CCS 模型，DC Explorer 使用 CCS 模型。
+在逻辑综合与布线前优化期间，工具可能不会使用全部可用 CCS 数据，以节省运行时间。
+
+DC Explorer 要求逻辑库为 \texttt{.db} 格式。多数情况下，半导体厂商会提供 \texttt{.db} 格式库。
+若仅提供库源码，请参阅 Library Compiler 文档以了解如何生成 \texttt{.db} 格式逻辑库。
+设置逻辑库见「指定逻辑库」。
+
+DC Explorer 将逻辑库用于下列目的：
+\begin{itemize}
+  \item \textbf{实现设计功能}\\
+        优化期间 DC Explorer 映射到的逻辑库称为目标库（target libraries）。
+        目标库包含用于生成网表的单元以及设计工作条件的定义。
+        用于编译或转换设计的目标库会成为该设计的本地链接库（local link libraries）。
+        DC Explorer 将此信息保存在设计的 \texttt{local\_link\_library} 属性中。
+
+  \item \textbf{解析单元引用}\\
+        DC Explorer 用于解析单元引用的逻辑库称为链接库（link libraries）。
+        链接库包含已映射网表中库单元与子设计的描述，也可包含设计文件。
+        链接库包括 \texttt{local\_link\_library} 属性中定义的本地链接库，以及 \varname{link\_library} 变量中指定的系统链接库。
+
+  \item \textbf{计算时序值与路径延时}\\
+        链接库定义用于计算时序值与路径延时的延时模型。有关各类延时模型，见 Library Compiler 文档。
+
+  \item \textbf{计算功耗}\\
+        有关功耗计算，见 \textit{Power Compiler User Guide}。
+\end{itemize}
+
+DC Explorer 将 \varname{link\_library} 变量中找到的第一个逻辑库作为主库（main library）。
+若其他库的度量单位与主库不同，DC Explorer 会将全部单位转换为主库中指定的单位。
+DC Explorer 从主库获取下列默认值与设置：
+\begin{itemize}
+  \item 单位定义
+  \item 工作条件
+  \item K 因子（K-factors）
+  \item 输入与输出电压
+  \item 时序范围（timing ranges）
+  \item RC slew trip points
+  \item 网络 transition 时间退化表（net transition time degradation tables）
+\end{itemize}
+
+逻辑库设置包含目标库与链接库：
+\begin{itemize}
+  \item \textbf{目标库}\\
+        映射期间，DC Explorer 从目标库中选择功能正确的门以构建电路，并使用厂商提供的这些门的时序数据计算电路时序。
+
+        要用 \varname{target\_library} 变量指定目标库。
+        应仅指定希望 DC Explorer 用于映射设计中标准单元（如组合逻辑与寄存器）的标准单元库。
+        不应指定任何 DesignWare 库或宏库（如 pad 或 memory）。
+
+  \item \textbf{链接库}\\
+        要使设计完整，设计中的全部单元实例必须链接到所引用的库组件与设计。该过程称为链接设计（linking the design）或解析引用（resolving references）。
+        为解析引用，DC Explorer 使用由下列变量与属性设置的链接库：
+        \begin{itemize}
+          \item 系统变量 \varname{link\_library} 列出 DC Explorer 用于解析引用的库与设计文件。\\
+                DC Explorer 从左到右搜索 \varname{link\_library} 中列出的文件，找到引用后即停止搜索。
+                在 \varname{link\_library} 中指定星号表示 DC Explorer 在内存中已加载的库中搜索引用。
+                例如，若将 \varname{link\_library} 设为 \texttt{\{"*" lsi\_10k.db\}}，工具先在内存中搜索，再在 \texttt{lsi\_10k} 库中搜索。
+
+          \item \texttt{local\_link\_library} 属性列出在链接过程中添加到 \varname{link\_library} 变量开头的设计文件与库。
+                解析引用时，DC Explorer 首先搜索该属性中的文件。可用 \cmd{set\_local\_link\_library} 命令设置此属性。
+
+          \item \varname{search\_path} 变量指定目录路径列表：当您仅指定不含路径的普通文件名时，工具用其查找逻辑库及其他文件。
+                它也设置在搜索链接库之后，DC Explorer 可继续搜索未解析引用的路径。
+        \end{itemize}
+\end{itemize}
+
+\subsection{符号库}
+\subsubsection*{Symbol Libraries}
+
+符号库由半导体厂商维护与发布，包含设计原理图中表示库单元的图形符号定义。
+生成设计原理图时，DC Explorer 将网表中的单元一对一映射到符号库中的单元。要查看设计原理图，使用 Design Vision。
+
+\subsection{DesignWare 库}
+\subsubsection*{DesignWare Libraries}
+
+DesignWare 库是可重用知识产权（IP）构建块或组件的集合，并紧密集成到 Synopsys 综合环境中。
+DesignWare 组件可用于实现许多内置 HDL 运算符（如 \texttt{+}、\texttt{-}、\texttt{*}、\texttt{<}、\texttt{>}、\texttt{<=}、\texttt{>=}）以及由 \texttt{if} 与 \texttt{case} 语句定义的运算。
+
+可用 DesignWare Developer 开发额外 DesignWare 库，也可从 Synopsys 或第三方许可 DesignWare 库。
+要使用已许可的 DesignWare 组件，需要相应组件的许可证密钥。
+
+\subsection{物理库}
+\subsubsection*{Physical Libraries}
+
+若要用 DC Explorer 生成可在 IC Compiler 设计规划中开始物理探索的早期网表，除逻辑库外还需指定物理库。
+使用 Milkyway 设计库来指定物理库，并以 Milkyway 格式保存设计。
+
+创建 Milkyway 设计库所需的输入包含 Milkyway 参考库与 Milkyway 工艺文件：
+\begin{itemize}
+  \item \textbf{Milkyway 参考库}\\
+        Milkyway 参考库包含标准单元与宏的物理表示。在 topographical 模式下，Milkyway 参考库使用 FRAM 抽象视图存储信息。
+        参考库还定义布局单位 tile（最小可布局实例的宽度与高度以及布线方向）。
+
+  \item \textbf{Milkyway 工艺文件}\\
+        Milkyway 工艺文件（\texttt{.tf}）包含布线设计所需的工艺专用信息。
+        若您的 Milkyway 库文件缺少布线层方向信息，DC Explorer 会自动推导。推导出的布线层方向保存在 \texttt{.ddc} 文件中。
+        可用 \cmd{set\_preferred\_routing\_direction} 命令覆盖推导的布线层方向。
+        要用 \cmd{report\_preferred\_routing\_direction} 报告全部布线方向。
+\end{itemize}
+
+更多信息见 \textit{Power Compiler User Guide}。
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 指定逻辑库
+  \item 指定物理库
+  \item 指定库搜索路径
+  \item 链接设计
+\end{itemize}
+\end{seeAlsoBox}
+
+% ============================================================
+\section{指定逻辑库}
+\subsection*{Specifying Logic Libraries}
+
+表~\ref{tab:lib-vars} 列出控制各类库读取的变量及典型文件名。用这些变量指定逻辑库与 DesignWare 库。
+
+\begin{table}[htbp]
+\centering
+\caption{库变量}
+\label{tab:lib-vars}
+\begin{tabularx}{\textwidth}{@{}l l l l@{}}
+\toprule
+\textbf{库类型} & \textbf{变量} & \textbf{默认} & \textbf{扩展名} \\
+\midrule
+目标库 & \varname{target\_library} & \texttt{"your\_library.db"} & \texttt{.db} \\
+链接库 & \varname{link\_library} & \texttt{"* your\_library.db"} & \texttt{.db} \\
+DesignWare 库 & \varname{synthetic\_library} & （无） & \texttt{.sldb} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+要设置对逻辑库的访问，必须指定目标库与链接库。
+
+在下列示例中，目标库是第一个链接库。为简化链接库定义，示例包含用户定义变量 \varname{additional\_link\_lib\_files}，用于 pad 与宏等库。
+\begin{lstlisting}
+de_shell> set_app_var target_library [list_of_standard_cell_libraries]
+de_shell> set_app_var synthetic_library [sldb_files_for_designware]
+de_shell> set additional_link_lib_files [additional_libraries]
+de_shell> set_app_var link_library [list * $target_library \
+   $additional_link_lib_files $synthetic_library]
+\end{lstlisting}
+
+若在进行工艺转换（technology translation），请将现有已映射门的标准单元库加入链接库，并将要转换到的标准单元库加入目标库。
+
+\subsection{指定 DesignWare 库}
+\subsubsection*{Specifying the DesignWare Libraries}
+
+无需指定实现内置 HDL 运算符的标准综合库 \texttt{standard.sldb}；DC Explorer 会自动使用该库。
+若使用额外 DesignWare 库，必须用 \varname{synthetic\_library} 变量（用于优化）与 \varname{link\_library} 变量（用于单元引用）指定这些库。
+例如，要使用 DesignWare minPower 组件，在 \varname{synthetic\_library} 的设置中包含 \texttt{dw\_minpower.sldb} 库。不会执行功耗优化。
+
+有关使用 DesignWare 库的更多信息，见 DesignWare 文档。
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 库要求
+  \item 指定最小时序库
+  \item 指定库搜索路径
+\end{itemize}
+\end{seeAlsoBox}
+
+\subsection{指定库搜索路径}
+\subsubsection*{Specifying a Library Search Path}
+
+可用完整路径或仅用文件名指定库位置。
+若仅指定文件名，DC Explorer 使用 \varname{search\_path} 变量中定义的搜索路径定位库文件。
+默认情况下，搜索路径包括当前工作目录与 \texttt{\$SYNOPSYS/libraries/syn}，其中 \texttt{\$SYNOPSYS} 为安装目录路径。
+DC Explorer 从 \varname{search\_path} 中最左侧目录开始查找库文件，并使用找到的第一个匹配库文件。
+
+例如，假设 \texttt{lib} 与 \texttt{vhdl} 目录中都有名为 \texttt{my\_lib.db} 的逻辑库。
+DC Explorer 使用 \texttt{lib} 目录中的 \texttt{my\_lib.db}，因为它先找到 \texttt{lib} 目录。
+\begin{lstlisting}
+de_shell> set_app_var search_path "lib vhdl default"
+\end{lstlisting}
+
+可用 \cmd{which} 命令按 DC Explorer 找到的顺序列出库文件。
+\begin{lstlisting}
+de_shell> which my_lib.db
+/usr/lib/my_lib.db, /usr/vhdl/my_lib.db
+\end{lstlisting}
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 库要求
+  \item 指定逻辑库
+\end{itemize}
+\end{seeAlsoBox}
+
+\subsection{指定最小时序库}
+\subsubsection*{Specifying Minimum Timing Libraries}
+
+若同时进行最小与最大时序分析，\varname{link\_library} 变量指定的逻辑库会同时用于最大与最小时序信息。
+要指定单独的最小时序库，使用 \cmd{set\_min\_library} 命令。
+该命令将最小时序库与 \varname{link\_library} 中指定的最大时序库关联。例如：
+\begin{lstlisting}
+de_shell> set_app_var link_library "* maxlib.db"
+de_shell> set_min_library maxlib.db -min_version minlib.db
+\end{lstlisting}
+
+要查明哪些库被设为最小与最大库，使用 \cmd{list\_libs} 命令。
+在生成的报告中，小写字母 \texttt{m} 出现在最小库旁，大写字母 \texttt{M} 出现在最大库旁。
+
+\begin{seeAlsoBox}
+库要求。
+\end{seeAlsoBox}
+
+% ============================================================
+\section{指定物理库}
+\subsection*{Specifying Physical Libraries}
+
+创建 Milkyway 设计库所需的输入为 Milkyway 参考库与 Milkyway 工艺文件。
+
+要创建 Milkyway 设计库：
+\begin{enumerate}
+  \item 定义电源与地网络。例如，设置下列变量：
+\begin{lstlisting}
+de_shell> set_app_var mw_power_net VDD
+de_shell> set_app_var mw_ground_net VSS
+de_shell> set_app_var mw_logic1_net VDD
+de_shell> set_app_var mw_logic0_net VSS
+de_shell> set_app_var mw_power_port VDD
+de_shell> set_app_var mw_ground_port VSS
+\end{lstlisting}
+        若不设置这些变量，执行 \cmd{write\_milkyway} 时不会建立电源与地连接；电源与地网络可能被转换为信号网络。
+
+  \item 用 \cmd{create\_mw\_lib} 命令创建 Milkyway 设计库。例如：
+\begin{lstlisting}
+de_shell> create_mw_lib -technology $mw_tech_file \
+   -mw_reference_library $mw_reference_library $mw_design_library_name
+\end{lstlisting}
+
+  \item 用 \cmd{open\_mw\_lib} 命令打开刚创建的 Milkyway 库。例如：
+\begin{lstlisting}
+de_shell> open_mw_lib $mw_design_library_name
+\end{lstlisting}
+
+  \item （可选）用 \cmd{set\_tlu\_plus\_files} 命令附加 TLUPlus 文件。例如：
+\begin{lstlisting}
+de_shell> set_tlu_plus_files -max_tluplus $max_tlu_file \
+   -min_tluplus $min_tlu_file -tech2itf_map $prs_map_file
+\end{lstlisting}
+
+  \item 在后续会话中，使用 \cmd{open\_mw\_lib} 打开 Milkyway 库。
+        若使用 TLUPlus 文件进行 RC 估算，用 \cmd{set\_tlu\_plus\_files} 附加这些文件。例如：
+\begin{lstlisting}
+de_shell> open_mw_lib $mw_design_library_name
+de_shell> set_tlu_plus_files -max_tluplus $max_tlu_file \
+   -min_tluplus $min_tlu_file -tech2itf_map $prs_map_file
+\end{lstlisting}
+\end{enumerate}
+
+还支持下列 Milkyway 库命令：\cmd{copy\_mw\_lib}、\cmd{close\_mw\_lib}、\cmd{report\_mw\_lib}、\cmd{current\_mw\_lib} 与 \cmd{check\_tlu\_plus\_files}。
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 库要求
+  \item 使用 Milkyway 数据库
+  \item 使用 TLUPlus 或 nxtgrd 文件进行 RC 估算
+\end{itemize}
+\end{seeAlsoBox}
+
+% ============================================================
+\section{在网表或 DEF 文件中映射物理变体单元}
+\subsection*{Mapping of Physical Variant Cells in Netlists or DEF Files}
+
+DC Explorer 可将网表或 DEF 文件中的物理变体单元（physical variant cells）映射到库中的主单元（master cell）。
+物理变体单元与主单元在掩模颜色或细小物理几何上不同。
+对先进工艺节点，这些单元的时序特性通常不变，因此主单元及其变体可使用同一 Liberty 模型。
+
+为高效管理库，需用 Liberty 语法中的 \texttt{physical\_variant\_cells} 属性定义主库单元的物理变体单元列表。
+读取包含物理变体单元的网表或 DEF 文件时，DC Explorer：
+\begin{itemize}
+  \item 通过搜索 \texttt{physical\_variant\_cells} 属性指定的列表来解析物理变体单元引用
+  \item 将物理变体单元映射到其主单元，并在整个设计流程中保留这些单元
+\end{itemize}
+
+要启用此功能，将 \varname{link\_allow\_physical\_variant\_cells} 变量设为 \texttt{true}。默认值为 \texttt{false}。
+
+% ============================================================
+\section{使用库}
+\subsection*{Working With the Libraries}
+
+可用简单库命令执行下列任务：
+\begin{itemize}
+  \item 加载库
+  \item 列出库
+  \item 报告库内容
+  \item 指定库对象
+  \item 从目标库中排除单元
+  \item 验证库一致性
+  \item 从内存中移除库
+  \item 保存库
+\end{itemize}
+
+\subsection{加载库}
+\subsubsection*{Loading Libraries}
+
+DC Explorer 使用二进制库（逻辑库为 \texttt{.db} 格式，符号库为 \texttt{.sdb} 格式），并在需要时自动加载。
+要手动加载二进制库，使用 \cmd{read\_file} 命令。例如：
+\begin{lstlisting}
+de_shell> read_file my_lib.db
+de_shell> read_file my_lib.sdb
+\end{lstlisting}
+
+若库不是适当的二进制格式，使用 \cmd{read\_lib} 命令编译库源。\cmd{read\_lib} 命令需要 Library-Compiler 许可证。
+
+\subsection{列出库}
+\subsubsection*{Listing Libraries}
+
+DC Explorer 按名称引用已加载到内存中的库。库源中的 \texttt{library} 语句定义库名。
+要用 \cmd{list\_libs} 命令列出内存中已加载库的名称。例如：
+\begin{lstlisting}
+de_shell> list_libs
+Logical Libraries:
+Library          File          Path
+-------          ----          ----
+my_lib           my_lib.db     /synopsys/libraries
+my_symbol_lib    my_lib.sdb    /synopsys/libraries
+\end{lstlisting}
+
+\subsection{报告库内容}
+\subsubsection*{Reporting Library Contents}
+
+要用 \cmd{report\_lib} 命令报告库内容。该命令报告下列信息：
+\begin{itemize}
+  \item 库单位
+  \item 工作条件
+  \item 单元（包括单元排除、偏好及其他属性）
+\end{itemize}
+
+\subsection{指定库对象}
+\subsubsection*{Specifying Library Objects}
+
+库对象是厂商专用单元及其引脚。指定库对象时使用下列命名约定：
+\begin{lstlisting}
+[file:]library/cell[/pin]
+\end{lstlisting}
+其中 \texttt{file} 为逻辑库文件名，\texttt{library} 为内存中已加载库的名称，\texttt{cell} 为库单元，\texttt{pin} 为单元引脚。
+若内存中加载了多个同名库，必须指定文件名。
+
+例如，要在 \texttt{my\_lib} 库的 AND4 单元上设置 \texttt{dont\_use} 属性，输入：
+\begin{lstlisting}
+de_shell> set_dont_use my_lib/AND4
+\end{lstlisting}
+
+要在 \texttt{my\_lib} 库 AND4 单元的 Z 引脚上设置 \texttt{disable\_timing} 属性，输入：
+\begin{lstlisting}
+de_shell> set_disable_timing [get_pins my_lib/AND4/Z]
+\end{lstlisting}
+
+\subsection{从目标库中排除单元}
+\subsubsection*{Excluding Cells From the Target Libraries}
+
+当 DC Explorer 将设计映射到逻辑库时，它从该库中选择库单元。
+要指定优化期间要从目标库排除的单元，使用 \cmd{set\_dont\_use} 命令。
+
+例如，要阻止 DC Explorer 使用 INV\_HD 高驱 inverter，输入：
+\begin{lstlisting}
+de_shell> set_dont_use MY_LIB/INV_HD
+\end{lstlisting}
+该命令仅影响当前加载到内存中的库副本，对磁盘上的版本无影响。
+但若保存库，排除会被保存，单元将被永久排除。
+
+要移除由 \cmd{set\_dont\_use} 设置的 \texttt{dont\_use} 属性，使用 \cmd{remove\_attribute} 命令。例如：
+\begin{lstlisting}
+de_shell> remove_attribute MY_LIB/INV_HD dont_use
+MY_LIB/INV_HD
+\end{lstlisting}
+
+\subsection{验证库一致性}
+\subsubsection*{Verifying Library Consistency}
+
+逻辑库与物理库之间的一致性对获得良好结果至关重要。在处理设计之前，请运行 \cmd{check\_library} 命令确保库一致。
+\begin{lstlisting}
+de_shell> check_library
+\end{lstlisting}
+
+默认情况下，\cmd{check\_library} 在 \varname{link\_library} 变量指定的逻辑库与当前 Milkyway 设计库中的物理库之间执行一致性检查。
+也可分别用 \opt{-logic\_library\_name} 或 \opt{-mw\_library\_name} 显式指定逻辑库或 Milkyway 参考库。
+若显式指定库，它们会覆盖默认库。
+
+可用 \cmd{set\_check\_library\_options} 命令为 \cmd{check\_library} 设置选项，以执行各类逻辑库与物理库检查，例如总线命名风格、各单元面积等。
+
+要查看已启用的库一致性检查，对 \cmd{report\_check\_library\_options} 指定 \opt{-logic\_vs\_physical} 选项。
+
+\subsection{从内存中移除库}
+\subsubsection*{Removing Libraries From Memory}
+
+要从 \cmd{de\_shell} 内存中移除库，使用 \cmd{remove\_design} 命令。
+若内存中加载了多个同名库，必须同时指定路径与库名。用 \cmd{list\_libs} 命令查看内存中每个库的路径。
+
+\subsection{保存库}
+\subsubsection*{Saving Libraries}
+
+\cmd{write\_lib} 命令以 Synopsys 数据库或 VHDL 格式保存（写入磁盘）已编译库。
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 库要求
+  \item 指定逻辑库
+  \item 指定库搜索路径
+\end{itemize}
+\end{seeAlsoBox}
+
+% ============================================================
+\section{目标库子集}
+\subsection*{Target Library Subsets}
+
+默认情况下，优化期间工具可从目标库中选择任意库单元。
+要将库单元限制为目标库的子集，或为特定设计块过滤目标库单元，使用 \cmd{set\_target\_library\_subset} 命令。
+例如，可在优化期间对某些设计块从目标库中排除特定双高度单元。
+
+使用 \cmd{set\_target\_library\_subset} 时请注意：
+\begin{itemize}
+  \item 子集限制仅适用于优化期间新建或映射的单元。除非工具在优化期间修改已映射单元，否则不影响已映射单元。
+  \item 命令将子集限制施加于指定设计及其层次中的子设计，但已设置不同子集限制的子设计除外。
+  \item 较低层次指定的子集覆盖较高层次指定的任何子集。
+  \item 由该命令设置的子设计不能被 \cmd{ungroup} 命令或工具的自动 ungroup 能力解除分组。
+  \item 子集限制仅适用于当前设计。
+\end{itemize}
+
+表~\ref{tab:tls-opts} 列出 \cmd{set\_target\_library\_subset} 的选项。
+
+\begin{table}[htbp]
+\centering
+\caption{\texttt{set\_target\_library\_subset} 选项}
+\label{tab:tls-opts}
+\begin{tabularx}{\textwidth}{@{}X l@{}}
+\toprule
+\textbf{目的} & \textbf{使用此选项} \\
+\midrule
+指定作为目标库子集、用于优化指定设计实例的库 & \texttt{library\_list} \\
+指定顶层设计实例、层次单元实例或两者作为设计。若两者都不指定，默认为 \opt{-top} & \opt{-top} $\vert$ \opt{-object\_list} \texttt{cells} \\
+在优化期间从目标库排除库单元 & \opt{-dont\_use} \texttt{lib\_cells} \\
+除 \texttt{library\_list} 中列出的单元外，再为指定块指定用于优化的库单元 & \opt{-use} \texttt{lib\_cells} \\
+将命令作用域限制为仅时钟路径中的单元 & \opt{-clock\_path} \\
+指定库子集仅用于指定设计 & \opt{-only\_here} \texttt{lib\_cells} \\
+指定要与所识别实例关联的 Milkyway 参考库路径 & \opt{-milkyway\_reflibs} \texttt{milkyway\_reflib\_paths} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+有关如何设置目标库子集，见「设置目标库子集限制」。
+
+\subsection{设置目标库子集限制}
+\subsubsection*{Setting Target Library Subset Restrictions}
+
+要用目标库子集限制设计块的优化，执行下列任务：
+\begin{itemize}
+  \item 指定目标库子集
+  \item 检查目标库子集
+  \item 报告目标库子集
+  \item 移除目标库子集
+\end{itemize}
+
+\subsubsection{指定目标库子集}
+\subsubsection*{Specifying Target Library Subsets}
+
+在设置目标库子集限制之前，必须先设置 \varname{target\_library} 变量，因为要用该变量中列出的库单元来设置限制。
+要在优化期间为特定设计块指定目标库子集或过滤目标库单元，使用 \cmd{set\_target\_library\_subset} 命令。
+
+例如，下列命令将目标库列表设为包含 \texttt{lib1.db} 与 \texttt{lib2.db}，并将块 \texttt{u1} 中使用的库单元限制为 \texttt{lib2.db} 中的单元：
+\begin{lstlisting}
+de_shell> set_app_var target_library "lib1.db lib2.db"
+de_shell> set_target_library_subset "lib2.db" \
+   -object_list [get_cells u1]
+\end{lstlisting}
+
+下列示例限制 INVX1、MUX1 与 NOR2 库单元，使其在优化期间用于时钟路径：
+\begin{lstlisting}
+de_shell> set_target_library_subset clocklib.db \
+   -clock_path -use [INVX1 MUX1 NOR2]
+\end{lstlisting}
+
+\subsubsection{检查目标库子集}
+\subsubsection*{Checking Target Library Subsets}
+
+要检查并显示由目标库子集引入的不一致设置，使用 \cmd{check\_target\_library\_subset} 或
+\cmd{check\_mv\_design -target\_library\_subset} 命令。
+这些命令检查目标库、目标库子集与工作条件之间的不一致设置。
+
+\cmd{check\_mv\_design -target\_library\_subset} 在设计中搜索任何不遵循子集规则的单元。
+工具将找到的单元报告为警告，因为它们可能在子集设置之前就已存在于设计中。
+可在优化前后运行该命令以识别问题并检查是否得到相同结果。运行该命令需要 Power-Optimization 许可证。
+
+\subsubsection{报告目标库子集}
+\subsubsection*{Reporting Target Library Subsets}
+
+要查明已为指定设计定义了哪些目标库子集，使用 \cmd{report\_target\_library\_subset} 命令。
+
+由 \cmd{report\_cell}、\cmd{report\_timing} 等报告命令生成的报告中，对由 \opt{-dont\_use} 或 \opt{-only\_here} 选项指定的单元会附加 \texttt{td} 属性。
+
+\subsubsection{移除目标库子集}
+\subsubsection*{Removing Target Library Subsets}
+
+要从设计或设计实例移除目标库子集限制，使用 \cmd{remove\_target\_library\_subset} 或 \cmd{reset\_design} 命令。
+
+\begin{seeAlsoBox}
+目标库子集（上文）。
+\end{seeAlsoBox}
+
+% ============================================================
+\section{使用 TLUPlus 或 nxtgrd 文件进行 RC 估算}
+\subsection*{Using TLUPlus or nxtgrd Files for RC Estimation}
+
+TLUPlus 文件包含电阻与电容查找表，并对超深亚微米（UDSM）工艺效应建模。
+若 TLUPlus 文件可用或已用于后端流程，应将其用于 RC 估算。
+作为 TLUPlus 文件的替代，可使用 nxtgrd 文件，以使 DC Explorer 与签核（signoff）工具的 RC 估算对齐。
+
+\subsection{使用 TLUPlus 文件}
+\subsubsection*{Using TLUPlus Files}
+
+TLUPlus 文件提供更准确的电容与电阻数据，从而改善与后端结果的相关性。
+
+用 \cmd{set\_tlu\_plus\_files} 命令指定 TLUPlus 文件。用 \opt{-tech2itf\_map} 选项指定映射文件，该文件在 Milkyway 工艺文件与工艺互连技术格式（ITF）文件之间映射层名。
+
+例如：
+\begin{lstlisting}
+de_shell> set_tlu_plus_files -max_tluplus $max_tlu_file \
+   -min_tluplus $min_tlu_file -tech2itf_map $prs_map_file
+\end{lstlisting}
+
+可用 \cmd{check\_tlu\_plus\_files} 命令检查 TLUPlus 设置。
+
+有关映射文件的更多信息，见 Milkyway 文档。要确认正在使用 TLUPlus 文件，请在编译日志中检查下列消息：
+\begin{lstlisting}
+Information: TLU Plus based RC computation is enabled. (RCEX-141)
+\end{lstlisting}
+
+可用 \cmd{extract\_rc} 命令执行 2.5D 抽取。该命令基于 Elmore 延时模型计算延时，并可更新网络上的回标（back-annotated）延时与电容数值。
+在网表被编辑后使用此命令。
+若已用 \cmd{set\_tlu\_plus\_files} 指定 TLUPlus 工艺文件，工具基于 TLUPlus 工艺执行抽取；否则使用物理库中的抽取参数执行抽取。
+用 \cmd{set\_extraction\_options} 指定影响抽取的参数，用 \cmd{report\_extraction\_options} 报告影响布线后抽取的参数。
+
+\subsection{使用 nxtgrd 文件}
+\subsubsection*{Using nxtgrd Files}
+
+nxtgrd 文件包含芯片制造工艺的参考寄生参数。
+使用从晶圆厂获得的 nxtgrd 文件是分析特定工艺技术寄生参数最准确的方式。
+也可用 StarRC 实用程序 \cmd{grdgenxo} 创建 nxtgrd 文件；\cmd{grdgenxo} 从以互连技术格式（ITF）编写的工艺描述文件生成 nxtgrd 文件。
+
+\begin{noteBox}
+使用 nxtgrd 文件可使综合与签核工具对齐，从而不再需要维护单独的 TLUPlus 文件。
+但必须使用 N-2017.12 或更高版本的 \cmd{grdgenxo} 工具生成 nxtgrd 文件。
+\end{noteBox}
+
+要用 \cmd{set\_tlu\_plus\_files} 命令为 RC 估算指定 nxtgrd 文件。
+如下例所示，该命令将 \texttt{NXTGRD\_file\_max.nxtgrd} 设为电阻与电容最大条件计算所用文件：
+\begin{lstlisting}
+de_shell> set_tlu_plus_files -max_tluplus NXTGRD_file_max.nxtgrd \
+   -tech2itf_map design.map
+\end{lstlisting}
+
+当用 \cmd{set\_tlu\_plus\_files} 为 5~nm 及更小工艺节点读取 nxtgrd 文件时，必须持有 DC-Synth-AdvGeo 许可证。
+若许可证不可用，工具发出错误消息。
+
+% ============================================================
+\section{对黑盒的支持}
+\subsection*{Support for Black Boxes}
+
+DC Explorer 支持带黑盒的综合。支持下列类型的黑盒：
+\begin{itemize}
+  \item \textbf{功能未知黑盒（functionally unknown black boxes）}\\
+        逻辑功能未知的单元。示例包括：
+        \begin{itemize}
+          \item 宏单元
+          \item 空层次单元或已黑盒化的模块
+          \item 未链接或未解析的单元
+        \end{itemize}
+
+  \item \textbf{逻辑黑盒（logical black boxes）}\\
+        未链接到逻辑库中单元的单元。此类黑盒归类于功能未知黑盒。示例包括：
+        \begin{itemize}
+          \item 空层次单元或已黑盒化的模块
+          \item 未链接或未解析的单元
+        \end{itemize}
+        可为逻辑黑盒单元定义时序，见「为黑盒创建快速时序模型」。
+
+  \item \textbf{物理黑盒（physical black boxes）}\\
+        没有物理表示的单元。示例包括：
+        \begin{itemize}
+          \item 空层次单元或已黑盒化的模块
+          \item 未链接或未解析的单元
+        \end{itemize}
+        可为物理黑盒单元定义物理尺寸。若物理库中没有某单元的物理表示，DC Explorer 会自动定义，见「定义物理尺寸」。
+\end{itemize}
+
+图~\ref{fig:blackbox-flow} 给出为黑盒单元定义时序与物理尺寸并综合设计的流程。
+
+\figplaceholder{Figure 3: Supported Black Box Flow}{支持的黑盒流程}{fig:blackbox-flow}
+
+可在 Design Vision 版图窗口中查看 floorplan 中的黑盒，以进行可视化检查。
+可通过 View Settings 面板上的选项控制活动版图视图中黑盒单元的可见性、选择与显示风格属性。
+默认情况下，黑盒可见且可被选择。
+
+更多信息另见 \textit{Design Vision User Guide}。
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 用于在黑盒中定义时序的命令
+  \item 自动创建物理库单元
+  \item 定义物理尺寸
+  \item 为黑盒创建快速时序模型
+\end{itemize}
+\end{seeAlsoBox}
+
+\subsection{自动创建物理库单元}
+\subsubsection*{Automatic Creation of Physical Library Cells}
+
+若物理库中没有某单元的物理表示，DC Explorer 会自动定义它。工具可为下列单元创建物理库单元：
+\begin{itemize}
+  \item 逻辑库单元（叶单元与宏）
+  \item 空层次单元或已黑盒化的模块
+  \item 未链接或未解析的单元
+  \item 未映射单元
+\end{itemize}
+
+创建物理库单元时，工具发出下列警告消息：
+\begin{lstlisting}
+Warning: Created physical library cell for logical library %s. (OPT-1413)
+\end{lstlisting}
+
+\subsection{定义物理尺寸}
+\subsubsection*{Defining Physical Dimensions}
+
+DC Explorer 允许您根据物理黑盒在被真实逻辑替换时所含对象的估算来设置其尺寸。
+也可定义用于估算黑盒尺寸的门等效面积计算的基本单位面积。
+下列各节讨论定义黑盒单元物理尺寸的这些策略：
+\begin{itemize}
+  \item 估算黑盒尺寸
+  \item 确定门等效面积
+\end{itemize}
+
+\subsubsection{估算黑盒尺寸}
+\subsubsection*{Estimating the Size of Black Boxes}
+
+要根据所含对象的估算为物理黑盒单元设置尺寸与形状，使用 \cmd{estimate\_fp\_black\_boxes} 命令。
+\begin{itemize}
+  \item 要用 \opt{-sm\_size} 选项设置宽度与高度：\\
+        下列示例估算名为 \texttt{alu1} 的黑盒，并将其指定为尺寸 $100\times100$、利用率 0.7 的软宏：
+\begin{lstlisting}
+de_shell> estimate_fp_black_boxes \
+   -sm_size {100 100} -sm_util 0.7 \
+   [get_cells "is_physical_black_box==true" alu1]
+\end{lstlisting}
+
+  \item 要用 \opt{-polygon} 选项创建直角多边形（rectilinear）黑盒：\\
+        下列示例估算名为 \texttt{alu1} 的黑盒，并将其指定为直角多边形软宏：
+\begin{lstlisting}
+de_shell> estimate_fp_black_boxes \
+   -polygon {{1723.645 1925.365} {1723.645 1722.415} \
+    {1803.595 1722.415} {1803.595 1530.535} \
+    {799.915 1530.535} {799.915 1925.365} \
+    {1723.645 1925.365}}\
+    [get_cells -filter "is_physical_black_box==true" alu1]
+\end{lstlisting}
+
+  \item 要用 \opt{-hard\_macros} 选项创建硬宏黑盒：\\
+        在下列示例中，名为 U1 的黑盒尺寸由硬宏 \texttt{ram16x128} 的尺寸估算：
+\begin{lstlisting}
+de_shell> estimate_fp_black_boxes -hard_macros ram16x128 U1
+\end{lstlisting}
+\end{itemize}
+
+\subsubsection{确定门等效面积}
+\subsubsection*{Determining the Gate Equivalent Area}
+
+DC Explorer 还允许您定义用于估算黑盒尺寸的门等效面积计算的基本单位面积。
+用 \cmd{set\_fp\_base\_gate} 命令指定库叶单元面积或用户指定单元面积作为门等效计算的基本单位面积。
+\begin{itemize}
+  \item 要用 \opt{-cell} 选项指定库中的门作为计算所用基本单位面积：
+\begin{lstlisting}
+de_shell> set_fp_base_gate -cell UNIT
+\end{lstlisting}
+        此例中，\texttt{UNIT} 指定用作门等效计算基本单位面积的库叶单元参考名。
+
+  \item 要用 \opt{-area} 选项以平方微米指定用作计算基本单位面积的单元面积：
+\begin{lstlisting}
+de_shell> set_fp_base_gate -area 10
+\end{lstlisting}
+        此例中，基本门面积设为 10 平方微米。
+\end{itemize}
+
+\subsection{为黑盒创建快速时序模型}
+\subsubsection*{Creating Quick Timing Models for Black Boxes}
+
+DC Explorer 允许您为逻辑黑盒单元定义时序。可创建逻辑库单元，并以快速时序模型（quick timing model）格式为新单元提供时序模型。
+快速时序模型是近似时序模型，在设计周期早期描述黑盒的粗略初始时序时很有用。
+通过指定模型端口、输入上的 setup/hold 约束、clock-to-output 路径延时以及 input-to-output 路径延时来创建黑盒的快速时序模型。
+也可指定输入端口上的负载与输出端口的驱动强度。
+DC Explorer 将时序模型保存为 \texttt{.db} 格式，随后可在综合期间使用。
+
+要为简单黑盒创建快速时序模型，按下列步骤操作：
+\begin{enumerate}
+  \item 用 \cmd{create\_qtm\_model} 命令创建新模型。
+\begin{lstlisting}
+de_shell> create_qtm_model BB
+\end{lstlisting}
+        \texttt{BB} 为模型名。
+
+  \item 指定逻辑信息，例如逻辑库名称、最大 transition 时间、最大电容以及线负载信息。
+\begin{lstlisting}
+de_shell> set_qtm_technology -library library_name
+de_shell> set_qtm_technology -max_transition trans_value
+de_shell> set_qtm_technology -max_capacitance cap_value
+\end{lstlisting}
+
+  \item 指定全局参数，例如 setup 与 hold 特性。
+\begin{lstlisting}
+de_shell> set_qtm_global_parameter -param setup -value setup_value
+de_shell> set_qtm_global_parameter -param hold -value hold_value
+de_shell> set_qtm_global_parameter -param clk_to_output \
+   -value cto_value
+\end{lstlisting}
+
+  \item 用 \cmd{create\_qtm\_port} 命令指定端口。
+\begin{lstlisting}
+de_shell> create_qtm_port -type input A
+de_shell> create_qtm_port -type input B
+de_shell> create_qtm_port -type output OP
+\end{lstlisting}
+
+  \item 用 \cmd{create\_qtm\_delay\_arc} 命令指定延时弧。
+\begin{lstlisting}
+de_shell> create_qtm_delay_arc -name A_OP_R -from A \
+   -from_edge rise -to OP -value 0.10 -to_edge rise
+de_shell> create_qtm_delay_arc -name A_OP_F -from A \
+   -from_edge fall -to OP -value 0.11 -to_edge fall
+de_shell> create_qtm_delay_arc -name B_OP_R -from B \
+   -from_edge rise -to OP -value 0.15 -to_edge rise
+de_shell> create_qtm_delay_arc -name B_OP_F -from B \
+   -from_edge fall -to OP -value 0.16 -to_edge fall
+\end{lstlisting}
+
+  \item （可选）生成报告，显示快速时序模型中已定义的参数、端口与时序弧。
+\begin{lstlisting}
+de_shell> report_qtm_model
+\end{lstlisting}
+
+  \item 用 \cmd{save\_qtm\_model} 命令保存快速时序模型：
+\begin{lstlisting}
+de_shell> save_qtm_model
+\end{lstlisting}
+
+  \item 用 \cmd{write\_qtm\_model} 命令写出快速时序模型的 \texttt{.db} 文件：
+\begin{lstlisting}
+de_shell> write_qtm_model -out_dir QTM
+\end{lstlisting}
+
+  \item 将 \texttt{.db} 文件加入 \varname{link\_library} 变量以加载快速时序模型：
+\begin{lstlisting}
+de_shell> lappend link_library "QTM/BB.db"
+\end{lstlisting}
+\end{enumerate}
+
+\begin{seeAlsoBox}
+用于在黑盒中定义时序的命令（下文）。
+\end{seeAlsoBox}
+
+\subsection{用于在黑盒中定义时序的命令}
+\subsubsection*{Commands for Defining Timing in Black Boxes}
+
+表~\ref{tab:qtm-cmds} 列出可用于为黑盒单元定义时序的快速时序模型命令。
+
+\begin{table}[htbp]
+\centering
+\caption{用于在黑盒单元中定义时序的命令}
+\label{tab:qtm-cmds}
+\begin{tabularx}{\textwidth}{@{}X l@{}}
+\toprule
+\textbf{目的} & \textbf{使用此命令} \\
+\midrule
+创建快速时序模型时钟 & \cmd{create\_qtm\_clock} \\
+定义 setup 与 hold 弧 & \cmd{create\_qtm\_constraint\_arc} \\
+为快速时序模型创建延时弧 & \cmd{create\_qtm\_delay\_arc} \\
+在快速时序模型描述中创建驱动类型 & \cmd{create\_qtm\_drive\_type} \\
+在快速时序模型中创建生成时钟 & \cmd{create\_qtm\_generated\_clock} \\
+为快速时序模型在时钟端口上创建插入延时 & \cmd{create\_qtm\_insertion\_delay} \\
+为快速时序模型描述创建负载类型 & \cmd{create\_qtm\_load\_type} \\
+开始定义快速时序模型 & \cmd{create\_qtm\_model} \\
+在快速时序模型中创建路径类型 & \cmd{create\_qtm\_path\_type} \\
+创建快速时序模型端口 & \cmd{create\_qtm\_port} \\
+报告当前快速时序模型的详细信息 & \cmd{report\_qtm\_model} \\
+保存快速时序模型 & \cmd{save\_qtm\_model} \\
+设置全局 setup、hold 或时钟参数 & \cmd{set\_qtm\_global\_parameter} \\
+在端口上设置驱动 & \cmd{set\_qtm\_port\_drive} \\
+在端口上设置负载 & \cmd{set\_qtm\_port\_load} \\
+设置各类工艺参数 & \cmd{set\_qtm\_technology} \\
+写出快速时序模型 \texttt{.db} 文件 & \cmd{write\_qtm\_model} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{seeAlsoBox}
+为黑盒创建快速时序模型（上文）。
+\end{seeAlsoBox}
+
+\subsection{识别黑盒}
+\subsubsection*{Identifying Black Boxes}
+
+DC Explorer 在黑盒上设置下列属性：
+\begin{itemize}
+  \item \texttt{is\_black\_box}\\
+        对 \cmd{get\_cells} 指定 \texttt{is\_black\_box} 属性时，DC Explorer 识别功能未知黑盒：
+\begin{lstlisting}
+de_shell> get_cells -hierarchical -filter "is_black_box==true"
+\end{lstlisting}
+
+  \item \texttt{is\_logical\_black\_box}\\
+        对 \cmd{get\_cells} 指定 \texttt{is\_logical\_black\_box} 属性时，DC Explorer 识别设计中的逻辑黑盒：
+\begin{lstlisting}
+de_shell> get_cells -hierarchical -filter "is_logical_black_box==true"
+\end{lstlisting}
+
+  \item \texttt{is\_physical\_black\_box}\\
+        对 \cmd{get\_cells} 指定 \texttt{is\_physical\_black\_box} 属性时，DC Explorer 识别设计中的物理黑盒：
+\begin{lstlisting}
+de_shell> get_cells -hierarchical \
+   -filter "is_physical_black_box==true"
+\end{lstlisting}
+\end{itemize}

@@ -1,0 +1,270 @@
+% 第 6 章 IC Validator Explorer DRC
+\bichapter{IC Validator Explorer DRC}{IC Validator Explorer DRC}
+\label{chap:expdrc}
+
+本章说明 IC Validator Explorer DRC 的功能。
+
+IC Validator Explorer DRC 包括以下各节：
+\begin{itemize}
+  \item IC Validator Explorer DRC 简介
+  \item Explorer DRC 模式类型
+  \item 配置 Explorer DRC
+  \item Explorer DRC 输出文件
+  \item 使用 Explorer DRC 调试
+  \item Explorer DRC 许可证
+\end{itemize}
+
+% ============================================================
+\section{IC Validator Explorer DRC 简介}
+\subsection*{Introduction to IC Validator Explorer DRC}
+
+在设计早期调试 DRC 违例可能既复杂又耗时。例如，复杂的 DRC 规则（多重图形、delta voltage 等）运行时间很长，而在仍存在其他更简单违例时，这些检查往往并无实际收益。
+可用一套基本设计检查来调试典型的早期设计问题：查找 cell 重叠、不当 fill、布线问题等并不需要复杂规则。IC Validator Explorer DRC 会从晶圆厂 runset 中自动确定这些基本规则，并额外加入方法学规则与调试能力，从而显著缩短周转时间（turnaround time）。
+此外，当某些设计层触发过多违例时，IC Validator Explorer DRC 会检测并取消选择相关的慢速规则。这种对检查的动态选择与执行，可比传统的完整 DRC 运行获得更快的周转时间。
+
+% ============================================================
+\section{Explorer DRC 模式类型}
+\subsection*{Types of Explorer DRC Modes}
+
+Explorer DRC 有三种模式：
+\begin{itemize}
+  \item Explorer DRC Standalone 模式\\
+  该模式运行从晶圆厂 runset 中自动选出的设计规则，以及 IC Validator 额外加入的方法学检查。\\
+  适用于存在违例、需要快速检查且计算资源有限的设计。
+
+  \item Explorer DRC Tiers 模式\\
+  Explorer DRC tiers 提供系统化框架，优先执行并报告高优先级检查。在 tiers 模式下，检查会完整执行，不以性能为主要取舍：所有规则按 tier 顺序选择并执行，直至指定的 tier。\\
+  使用该模式时，性能并非主要考虑因素。\\
+  部分 tier 保留给 Explorer 优先级规则与方法学检查；多数 tier 可由用户定制。更多信息见表~\ref{tab:explorer-tiers}。\\
+  Tiers 按所赋优先级依次执行。编号较小的 tier 优先级最高。位于 Tier~0 与 Tier~10 之间、尚未定义归属的检查，在 Tier~10 之后作为「All remaining rules」tier 执行。每个 tier 完成后，结果会在运行过程中更新。\\
+  \textbf{Tiers 模式运行示例}\\
+  在全部 Tiers 上运行 Explorer DRC auto 模式，并指定用户定义的 Tiers，使用 \cmd{-explorer\_tiers\_file mytier.txt}：
+\begin{lstlisting}
+% icv -explorer auto -explorer_tiers_file mytier.txt runsetfile
+\end{lstlisting}
+
+  \item Explorer DRC Auto 模式\\
+  与 tiers 模式类似，该模式同样使用 Explorer DRC tiers，但还具备停止慢速规则的能力。\\
+  在 auto 模式下，若发现存在违例的设计层，相关规则若其函数运行缓慢则会被停止。这样可利用较早 tier 的结果，阻止后续函数/规则运行过久（tier~0 与 tier~1 的规则绝不会被提前停止）。\\
+  该模式的性能取决于 DRC 错误数量。DRC 错误越多，auto 模式越可能取消选择规则并提前退出，从而加快周转。\\
+  当设计中的违例数量未知、并希望尽可能完成更多检查时，使用 auto 模式。若设计干净，auto 模式不会停止任何检查，并产生完整签核结果。
+\end{itemize}
+
+\subsection{执行 Explorer DRC}
+\subsubsection*{Executing Explorer DRC}
+
+要执行 Explorer DRC，在命令行设置：
+\begin{lstlisting}
+-explorer standalone|auto[:TierNumber]|tiers[:TierNumber]
+\end{lstlisting}
+其中 \cmd{TierNumber} 指定要执行到的最高 tier。将执行从最低到（含）\cmd{TierNumber} 的全部 tiers。若未指定 \cmd{TierNumber}，则所有检查均可作为执行候选。
+有关配置 IC Validator Explorer DRC 的更多信息，见下一节。
+
+\subsubsection{Explorer DRC 模式运行示例}
+\paragraph*{Examples of Running in Explorer DRC Mode}
+
+运行 Explorer DRC standalone 模式：
+\begin{lstlisting}
+% icv -explorer standalone runsetfile
+\end{lstlisting}
+
+运行 Explorer DRC auto 模式直至 Tier~4：
+\begin{lstlisting}
+% icv -explorer auto:4 runsetfile
+\end{lstlisting}
+
+表~\ref{tab:explorer-tiers} 给出不同 Explorer DRC tiers、预含检查以及可定制类别。
+
+\begin{longtable}{@{}p{0.08\textwidth} p{0.16\textwidth} p{0.14\textwidth} p{0.32\textwidth} p{0.20\textwidth}@{}}
+\caption{Explorer Tiers}\label{tab:explorer-tiers}\\
+\toprule
+\textbf{Tier} & \textbf{用户可否向该 tier 添加检查？} & \textbf{用户可否命名该 tier？} & \textbf{预含检查} & \textbf{可选检查} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Tier} & \textbf{用户可否向该 tier 添加检查？} & \textbf{用户可否命名该 tier？} & \textbf{预含检查} & \textbf{可选检查} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+0 & 否 & 否 & 方法学警告、fill overlap 诊断、优先级规则 & N/A \\
+1 & 是 & 否 & 无 & 优先级规则（用户指定） \\
+2 & 是 & 是 & 基于电压的诊断（集合~1） & 用户指定规则 \\
+3 & 是 & 是 & 基于电压的诊断（集合~2） & 用户指定规则 \\
+4--10 & 是 & 是 & 无 & 用户指定规则 \\
+N/A & N/A & N/A & 全部剩余规则（All remaining rules） & N/A \\
+\end{longtable}
+
+% ============================================================
+\section{配置 Explorer DRC}
+\subsection*{Configuring Explorer DRC}
+
+Explorer DRC 模式的命令行选项见表~\ref{tab:explorer-drc-cli}。
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash\ttfamily}p{0.36\textwidth} p{0.56\textwidth}@{}}
+\caption{Explorer DRC 模式命令行选项}\label{tab:explorer-drc-cli}\\
+\toprule
+\textbf{\textrm{选项}} & \textbf{\textrm{说明}} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{\textrm{选项}} & \textbf{\textrm{说明}} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+-explorer standalone\allowbreak|auto[:TierNumber]\allowbreak|tiers[:TierNumber]
+  & 以 standalone、auto 或 tiers 模式运行 Explorer。\cmd{TierNumber} 对 auto 与 tiers 模式可选，用于将运行限制到指定的 \cmd{TierNumber}；未指定时，所有 tiers 均为执行候选。 \\
+-explorer\_tiers\_file path\_to\_file
+  & 指定用于定制用户定义 tiers 并传入 Explorer DRC 运行的文件。该文件中可使用 \cmd{ADD\_RULES\_TO\_TIER} 与 \cmd{NAME\_TIER} 指令。 \\
+-explorer\_script path\_to\_file
+  & 指定在 Tier~0 与 Tier~1 完成后用于追加资源的文件。可先以较少资源启动 auto 运行，并在 Tier~0 与 Tier~1 完成后动态追加资源，以加快其余检查的周转。 \\
+\end{longtable}
+
+命令行选项 \cmd{-explorer\_tiers\_file} 指向可选的脚本文件，用于定制 tiers。该文件示例如下：
+\begin{lstlisting}[style=pxl]
+ADD_RULES_TO_TIER 1 "*.1:" "*G1*"
+ADD_RULES_TO_TIER 2 "*.S.*" "**DN*"
+NAME_TIER 4 "Handoff Rules"
+ADD_RULES_TO_TIER 4 "*delta*"
+ADD_RULES_TO_TIER 4 "*LU*"
+DISABLE_EXPLORER.OVERLAP
+\end{lstlisting}
+
+创建该文件时可使用下列指令：
+\begin{itemize}
+  \item \cmd{ADD\_RULES\_TO\_TIER TierNumber Rule comment \ldots{} Rule comment}\\
+  用于允许用户指定规则的 tiers。可按违例注释（violation comments）将规则加入各 tiers，支持字符串匹配。\\
+  规则按优先级升序加入各 tiers。若某规则已加入更高优先级的 tier，则不会再加入任何更低优先级的 tier；该规则与 Explorer tiers 文件中的书写顺序无关。\\
+  允许跳过或留空的 tiers。当 Explorer DRC 遇到空 tier 时，执行会移至下一优先级 tier。报告按 tier 优先级顺序给出。
+
+  \item \cmd{NAME\_TIER TierNumber TierName}\\
+  用于允许用户指定名称的 tiers。该名称用于向 \cmd{LAYOUT\_ERRORS} 文件、\cmd{RESULTS} 文件或 VUE 报告。\\
+  允许未命名的 tiers；报告时使用默认 Explorer tier 名称 \cmd{TierNumber}。
+
+  \item \cmd{DISABLE\_EXPLORER.DiagnosticName}\\
+  用于禁用 Explorer 专有诊断。支持的取值包括：
+  \begin{itemize}
+    \item \cmd{EXPLORER.OVERLAP}：禁用默认包含在 Tier~0 中的 fill overlap 诊断。
+    \item \cmd{EXPLORER.ASSIGN}：禁用默认包含在 Tier~0 中的基于 assign 层的优先级规则。
+    \item \cmd{EXPLORER.VOLTAGE}：禁用默认包含在 Tier~3 与 Tier~4 中的基于电压的诊断。
+  \end{itemize}
+\end{itemize}
+
+命令行选项 \cmd{-explorer\_script path\_to\_file} 在 Tier~0 与 Tier~1 检查均完成后运行。可以少于完成整次运行所需的资源启动 DRC auto 模式；若后续 tiers 需要更多资源，该选项可在基本检查之后追加资源。脚本文件示例如下：
+\begin{lstlisting}
+#!/bin/csh -f
+
+echo "Explorer Tier 0 and Tier 1 checks are done. Adding resources and
+running remaining Tiers"
+
+# Following command adds host "A" to ongoing run
+icv -rd run_details -host_add A
+\end{lstlisting}
+
+% ============================================================
+\section{Explorer DRC 输出文件}
+\subsection*{Explorer DRC Output Files}
+
+Explorer DRC 会创建与 IC Validator DRC 运行类似的 ASCII 文件。有关 DRC 运行文件的更多信息，见「输出文件」一章。
+在 \cmd{LAYOUT\_ERRORS} 与 \cmd{RESULTS} 文件中，Explorer 运行的错误按表~\ref{tab:explorer-err-cat} 分类。
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash\ttfamily}p{0.28\textwidth} p{0.64\textwidth}@{}}
+\caption{Explorer 错误分类}\label{tab:explorer-err-cat}\\
+\toprule
+\textbf{\textrm{类别}} & \textbf{\textrm{说明}} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{\textrm{类别}} & \textbf{\textrm{说明}} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\textrm{Methodology warnings}
+  & 指定旨在标记潜在设计或性能问题的 Explorer 方法学警告。 \\
+\textrm{Fill overlap diagnostic}
+  & 指定被诊断为 fill overlap 问题的 DRC 错误（runset 选定的 fill overlap 规则）。 \\
+\textrm{Priority rules}
+  & 指定来自 Explorer 优先级检查的 DRC 错误（runset 选定的基本规则）。该类别中某些规则可能带有 \cmd{EXPLORER} 前缀，表示该规则已相对原始 runset 被修改（更快版本）。原始 runset 版本会作为「All remaining rules」类别中的 DRC Errors 运行。 \\
+\textrm{Priority Rules (user-defined)}
+  & 指定来自用户定义优先级规则的 DRC 错误。 \\
+\textrm{Voltage dependent diagnostics}
+  & 指定标记多边形或 net 对象上基于 text 的电压冲突的 Explorer 方法学警告；亦包含游离电压 text 与电压检查。 \\
+\textrm{Explorer tier TierNumber}
+  & 指定来自未命名 tiers 的 DRC 错误。默认将这些错误归类在 Explorer tier、\cmd{TierNumber} 下。可用文件中的 \cmd{NAME\_TIER} 指令修改 tier 名称。 \\
+\textrm{All remaining rules}
+  & 指定来自归类为预定义或用户定义 tiers 之检查的可用 DRC 错误。 \\
+\end{longtable}
+
+除表~\ref{tab:explorer-err-cat} 中的错误分类外，DRC 错误还会按用户定义的类别名称分类（通过文件中的 \cmd{NAME\_TIER} 指令定义）。
+
+\begin{noteBox}
+错误类别取决于 Explorer 模式类型，以及该模式下所标记的诊断。
+\end{noteBox}
+
+\subsection{Explorer DRC RESULTS 文件}
+\subsubsection*{Explorer DRC Results File}
+
+Explorer DRC 创建 \cmd{RESULTS} 文件 \cmd{cell.RESULTS}。该文件提供运行结果，以及本次运行所用的 IC Validator 命令行选项。
+\cmd{RESULTS} 文件是分析 Explorer DRC 运行结果的起点。Results summary 部分按表~\ref{tab:explorer-err-cat} 的分类报告 DRC 错误统计，包括不同 Explorer 类别中的规则总数与违例总数。
+
+\subsection{Explorer DRC Errors 文件}
+\subsubsection*{Explorer DRC Errors File}
+
+Explorer DRC 创建 \cmd{LAYOUT\_ERRORS} 文件，提供运行期间标记的版图错误；这些错误按表~\ref{tab:explorer-err-cat} 分类。
+为使错误报告简洁，\cmd{LAYOUT\_ERRORS} 文件中会抑制错误坐标信息，等效于运行 \cmd{error\_options(report\_error\_details = false)}。信息仍保存在错误数据库（PYDB）中，但仅将违例摘要写入 \cmd{LAYOUT\_ERRORS} 文件。
+每个 tier/类别完成后即生成 \cmd{LAYOUT\_ERRORS} 文件，以便在 Explorer DRC 运行过程中查阅。\cmd{icv.log} 会在 tier/类别完成时指示，例如：
+\begin{lstlisting}
+ICV_Engine run is 5% complete. Elapsed Time=0:07:24
+All Priority Rules are finished! 19103703 violations were found.
+\end{lstlisting}
+
+\begin{noteBox}
+在将错误标记存入错误数据库（PYDB）时，Tier~0 与 Tier~1（Explorer 优先级检查与用户定义优先级检查）会强制施加 \cmd{error\_sampling\_per\_check} 参数所设限制（默认 100 万）。其他 tiers 的限制则基于 runset。有关 \cmd{error\_sampling\_per\_check} 参数的更多信息，见 \textit{IC Validator Reference Manual}。
+\end{noteBox}
+
+\subsection{Explorer DRC VUE 文件}
+\subsubsection*{Explorer DRC VUE File}
+
+IC Validator Explorer 创建 VUE 文件 \cmd{cell.vue}，用于查看 Explorer DRC 错误详情与 Heat Map。
+
+% ============================================================
+\section{使用 Explorer DRC 调试}
+\subsection*{Debugging With Explorer DRC}
+
+分析 Explorer DRC 运行时：
+\begin{enumerate}
+  \item 以 Explorer DRC 运行 IC Validator。
+  \item 审查 \cmd{RESULTS} 文件。
+  \begin{itemize}
+    \item 若结果干净，进入签核 DRC；若不干净，进入步骤~3。
+  \end{itemize}
+  \item 将 Explorer DRC 的 \cmd{.vue} 文件加载到 VUE，并将版图编辑器附着到 VUE。
+  \item 点击 \textbf{Heat Map} 选项卡开始调试。Error Heat Map 是用于可视化错误分布的图形界面。\\
+  Heat Maps 对 Explorer DRC 自动启用。更多信息见 \textit{IC Validator VUE User Guide} 中的「Introduction to the IC Validator Error Heat Map」一章。
+  \item 与 \cmd{RESULTS}、\cmd{LAYOUT\_ERRORS} 文件类似，Explorer DRC 错误默认按表~\ref{tab:explorer-err-cat} 分类。一般按以下顺序开始调试：方法学警告、诊断、预定义优先级规则、用户定义 tiers，最后到全部剩余规则。\\
+  此外，可在 Violation Category 窗口的菜单中选择 Clustered Errors 类别模式。该模式下相同错误会被聚类，从而可一次调试多条规则。有关 clustered errors 的更多信息，见 \textit{IC Validator VUE User Guide} 中的「Introduction to the IC Validator Error Heat Map」一章。
+  \item 从各自类别选定规则后，定位错误计数很高的区域（热图中的红色区域），并放大这些密集区域。
+  \item 在这些区域中探测热图与版图错误，分析高错误计数的根本原因。探测可包括：
+  \begin{itemize}
+    \item 放大区域
+    \item 高亮这些区域中的错误标记
+    \item 选择或取消选择特定规则
+  \end{itemize}
+  \item 重复步骤~6 与~7，直至穷尽所有类别/聚类。
+\end{enumerate}
+
+% ============================================================
+\section{Explorer DRC 许可证}
+\subsection*{Explorer DRC Licenses}
+
+IC Validator Explorer DRC 需要 Elite 许可。该功能需要下列 IC Validator 许可证：
+\begin{itemize}
+  \item \cmd{ICValidator-Manager}
+  \item \cmd{ICValidator2-GeometryEngine}
+\end{itemize}
+
+\begin{seeAlsoBox}
+更多信息见本手册「许可证与资源需求」一章。
+\end{seeAlsoBox}

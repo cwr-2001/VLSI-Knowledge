@@ -1,0 +1,759 @@
+% 第 8 章
+\bichapter{使用 Custom Router 布线}{Routing Using Custom Router}
+\label{chap:customroute}
+
+\begin{noteBox}
+本章为学习笔记式整理译文，按原书（V-2023.12，约 p.631--665）第 8 章的目录结构编写，覆盖全部小节的核心概念、命令与选项，但对原书大段表格文字与示例脚本做了归纳、精简与改写，不逐句照搬原文，请以官方 PDF 为准。
+\end{noteBox}
+
+Custom Router 是一款支持有网格（gridded）与无网格（gridless）布线的基于形状（shape-based）的布线器，适用于定制数字、混合信号与模拟电路的布线需求。在 Fusion Compiler 环境中，可用 Custom Router 为 block 之间的关键信号创建互连（route），再交由 Fusion Compiler 完成后续物理实现；也可用一组自定义布线约束对关键信号或时钟网做预布线（prerouting）。
+
+Custom Router 在 Fusion Compiler 环境中提供以下能力：
+\begin{itemize}
+  \item 批处理模式下的预布线；
+  \item 基于 Tcl 的布线约束管理；
+  \item 依据自定义布线约束的自动布线；
+  \item 用于预布线的混合（hybrid）流程；
+  \item DDR（Double Data Rate）网络布线流程。
+\end{itemize}
+
+Custom Router 与 Fusion Compiler 完全集成，支持 20~nm 及以下先进工艺的设计规则。本章依次介绍：Custom Router 使用前提、布线约束的定义、约束组管理、常用应用选项、\cmd{route\_custom} 布线、网络屏蔽、结果检查，以及混合流程与 DDR 流程。更详细的内容请参阅 \textit{Custom Compiler Custom Router User Guide}。
+
+% ============================================================
+\section{在 Fusion Compiler 工具中使用 Custom Router}
+\subsection*{Using Custom Router in the Fusion Compiler Tool}
+
+Fusion Compiler 提供一组 Tcl 命令，用于在其环境中运行 Custom Router。这些命令用于定义布线约束：在 block 级别为一条或多条网络添加走线，或添加差分对布线、总线布线、屏蔽等布线特性。
+
+此外还提供一组应用选项（application option），用于全局控制自定义布线的行为。关于约束与应用选项的具体定义方式，见「定义布线约束」与「使用 Custom Router 应用选项」。
+
+\cmd{route\_custom} 命令会结合已定义的布线约束，以及工艺文件（technology file）与设计本身的信息，调用 Custom Router 执行自动布线，详见「使用 Custom Router 布线」。
+
+Custom Router 支持的约束类型包括：
+\begin{itemize}
+  \item 网络屏蔽（net shielding）与差分对（differential pair）；
+  \item 长度匹配（matched length）；
+  \item 可变宽度与间距（variable width and space）；
+  \item Pin 宽度匹配与渐变（tapering）。
+\end{itemize}
+
+Custom Router 支持的 Fusion Compiler 非默认布线规则（nondefault routing rule）包括：布线层与 via、布线宽度与间距、布线网格（routing grid）、组内/组间间距、taper halo、布线阻挡（blockage）、布线走廊（routing corridor）以及屏蔽（shielding）。
+
+图~\ref{fig:custom-router-flow} 给出 Custom Router 的基本流程：在已完成电源地网布线、但时钟树尚未布线的 block 上，结合工艺文件中的设计规则定义布线约束，执行自定义布线，再进行后布线优化，最后分析布线结果。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 117：Basic Custom Router Flow）}\\[0.3em]
+\small 请参阅原版 PDF 插图；可将截图放入 \texttt{figures/} 目录后用 \texttt{\textbackslash includegraphics} 替换。
+\vspace{1.5cm}}}
+\caption{Custom Router 基本流程}
+\label{fig:custom-router-flow}
+\end{figure}
+
+% ============================================================
+\section{使用 Custom Router 前的准备}
+\subsection*{Before Using Custom Router}
+
+运行 Custom Router 之前，需要完成以下准备工作：
+\begin{itemize}
+  \item 确认工艺文件中已正确定义所需的设计规则，例如层与 via 的定义（详见 \textit{Synopsys Technology File and Routing Rules Reference Manual}）；
+  \item 检查设计中的连接关系，并排查 pin 阻挡（pin blockage）问题（详见 \textit{Custom Compiler Custom Router User Guide} 中 "Reviewing the Design" 相关内容）；
+  \item 确认 block 内的电源、地网已完成布线（详见 \textit{Fusion Compiler Design Planning User Guide}）；
+  \item 按照「检查可布线性」中的方法检查布局的可布线性。
+\end{itemize}
+
+% ============================================================
+\section{定义布线约束}
+\subsection*{Defining Routing Constraints}
+
+Fusion Compiler 提供一组全局生效的应用选项来控制自定义布线的结果（见「使用 Custom Router 应用选项」）。除此之外，还可以针对具体网络定义布线约束，这些约束的优先级高于全局应用选项，起到"引导"布线的作用。Custom Router 会同时遵守这些自定义约束与 Fusion Compiler 的非默认布线规则。
+
+\begin{noteBox}
+针对具体网络的约束必须应用在物理网络（physical net）上。在选取受约束网络时，应使用 \cmd{get\_nets~-physical\_context} 以确保返回的是物理网络对象，例如：
+\begin{lstlisting}
+fc_shell> create_net_shielding \
+    -for [get_nets -physical_context pr*] \
+    -disabled_layers {M5 M6} -sharing true \
+    -layer_gaps {M2 3 M3 5}
+{shielding_4}
+\end{lstlisting}
+\end{noteBox}
+
+表~\ref{tab:constraint-cmds} 汇总了用于创建各类 Custom Router 约束组（constraint group）的命令。关于非默认布线规则，见「使用非默认布线规则」；关于约束组的检查与移除，使用 \cmd{report\_constraint\_groups} 与 \cmd{remove\_constraint\_groups}（见「管理约束组」）。
+
+\begin{table}[htbp]
+\centering
+\caption{定义 Custom Router 布线约束的命令}
+\label{tab:constraint-cmds}
+\begin{tabularx}{\textwidth}{l X}
+\toprule
+命令 & 说明 \\
+\midrule
+\cmd{create\_bus\_routing\_style} & 为一组以单一总线主干（trunk）形式布线的网络指定总线布线风格，见「定义总线布线风格」。 \\
+\cmd{create\_differential\_group} & 为布线定义差分组，见「创建差分组」。 \\
+\cmd{create\_wire\_matching} & 为一组网络或 pin 到 pin 连接定义匹配走线长度，见「定义匹配走线长度」。 \\
+\cmd{create\_length\_limit} & 为一组网络或 pin 到 pin 连接定义最小走线长度，见「定义最小走线长度」。 \\
+\cmd{create\_net\_shielding} & 为一组网络或 bundle 定义屏蔽风格，见「在网络上插入屏蔽」。 \\
+\cmd{create\_net\_priority} & 决定网络的布线顺序，优先级越高越先布线，见「定义网络优先级」。 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{定义总线布线风格}
+\subsubsection*{Defining the Bus Routing Style}
+
+要将一组网络或 bundle 作为单一总线主干（trunk）布线，可用 \cmd{create\_bus\_routing\_style} 创建约束组，需要指定：
+\begin{itemize}
+  \item \textbf{约束组名称}：不指定时自动命名为 \texttt{bus\_style\_n}；若重名默认报错，可加 \opt{-force} 覆盖已有同名组；
+  \item \textbf{适用对象}：通过 \opt{-for} 指定网络、bundle 或拓扑边（topology edge）；
+  \item \textbf{约束内容}：通过表~\ref{tab:bus-style-opts} 中的选项，按层为主干指定约束，并覆盖各 bit 上的单独设置。
+\end{itemize}
+
+\begin{table}[htbp]
+\centering
+\caption{总线布线风格约束选项}
+\label{tab:bus-style-opts}
+\begin{tabularx}{\textwidth}{l X}
+\toprule
+选项 & 说明 \\
+\midrule
+\opt{-valid\_layers} & 指定主干可用层列表，工具据此推导最小/最大层。 \\
+\opt{-layer\_spacings} & 按层指定最小间距，如 \texttt{\{M1 5.0 M2 6.0\}}。 \\
+\opt{-layer\_widths} & 按层指定最小宽度，如 \texttt{\{M1 5.0 M2 6.0\}}。 \\
+\opt{-shield\_placement} & 主干屏蔽放置方式：\texttt{default}（默认，取自 \appopt{custom.route.bus\_intra\_shield\_placement}）、\texttt{double\_interleave}（每根线单独屏蔽）、\texttt{half\_interleave}（每两根线共享一次屏蔽）、\texttt{interleave}（相邻线间插入共享屏蔽）、\texttt{outside}（仅在主干/组外侧放置屏蔽）。见「总线布线选项」。 \\
+\opt{-corner\_type} & 总线主干拐角布线方式：\texttt{auto}（默认，自动选取以降低拥塞）、\texttt{cross}（拐角处各 bit 交叠）、\texttt{river}（拐角处各 bit 不交叠）。见「总线布线选项」。 \\
+\opt{-gap} & 最外侧总线 bit 与 block 内其他图形之间的间距，默认 0。 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+例如，以下命令为匹配 \texttt{pr*} 的网络创建总线布线约束组（未命名，自动得名 \texttt{bus\_style\_1}），屏蔽方式为 \texttt{interleave}，M2 层最小间距 3~$\mu$m，M3 层最小间距 5~$\mu$m：
+
+\begin{lstlisting}
+fc_shell> create_bus_routing_style \
+    -for [get_nets -physical_context pr*] \
+    -shield_placement interleave \
+    -layer_spacings {M2 3 M3 5}
+{bus_style_1}
+\end{lstlisting}
+
+\subsection{创建差分组}
+\subsubsection*{Creating Differential Groups}
+
+使用 \cmd{create\_differential\_group} 可为网络、bundle 或拓扑边创建差分组（differential group）或差分对（differential pair）。Custom Router 会为每条网络配对最近的 pin，并从两个 pin 之间的公共汇聚点开始布线，尽量让距离最近、走线模式最相似的一对网络配成对。
+
+需要指定：
+\begin{itemize}
+  \item \textbf{名称}：不指定时自动命名为 \texttt{differential\_pair\_n} 或 \texttt{differential\_group\_n}；同名默认报错，可用 \opt{-force} 覆盖；
+  \item \textbf{组内网络}：通过 \opt{-for} 指定；指定两条网络即构成差分对，三条则构成差分组；
+  \item \textbf{约束内容}：见表~\ref{tab:diffgroup-opts}。
+\end{itemize}
+
+\begin{table}[htbp]
+\centering
+\caption{差分组约束选项}
+\label{tab:diffgroup-opts}
+\begin{tabularx}{\textwidth}{l X}
+\toprule
+选项 & 说明 \\
+\midrule
+\opt{-twist\_style} & 绞线（twist）方式：\texttt{diagonal}（45°绞线）、\texttt{none}（默认，不绞线）、\texttt{orthogonal}（90°绞线）。 \\
+\opt{-twist\_interval} & 相邻两次绞线间的距离。 \\
+\opt{-twist\_offset} & 第一次绞线与被连接 pin 之间的距离，默认 0。 \\
+\opt{-valid\_layers} & 差分组可用的布线层。 \\
+\opt{-layer\_spacings} & 按层指定最小间距。 \\
+\opt{-layer\_widths} & 按层指定最小宽度。 \\
+\opt{-shield\_placement} & 当组内网络需要屏蔽时，主干的屏蔽放置方式，取值同「定义总线布线风格」，默认为 \texttt{outside}。见「总线布线选项」。 \\
+\opt{-gap} & 最外侧 bit 与其他图形之间的间距（微米），默认 0。 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+例如，以下命令为 \texttt{prn}、\texttt{prp} 两条网络创建差分对（自动命名为 \texttt{differential\_pair\_0}），不指定绞线方式，屏蔽方式取默认值：
+
+\begin{lstlisting}
+fc_shell> create_differential_group \
+    -for [get_nets -physical_context {prn prp}] \
+    -shield_placement default
+{differential_pair_0}
+\end{lstlisting}
+
+\subsection{在网络上插入屏蔽}
+\subsubsection*{Inserting Shields on the Nets}
+
+使用 \cmd{create\_net\_shielding} 可为选定网络添加屏蔽（shielding），以降低串扰或寄生效应。需要指定：
+\begin{itemize}
+  \item \textbf{名称}：不指定时自动命名为 \texttt{shielding\_n}；同名默认报错，可用 \opt{-force} 覆盖；
+  \item \textbf{适用对象}：通过 \opt{-for} 指定网络、bundle 或拓扑边；
+  \item \textbf{屏蔽风格与按层要求}：见表~\ref{tab:shield-opts}。
+\end{itemize}
+
+\begin{table}[htbp]
+\centering
+\caption{网络屏蔽约束选项（节选）}
+\label{tab:shield-opts}
+\begin{tabularx}{\textwidth}{l X}
+\toprule
+选项 & 说明 \\
+\midrule
+\opt{-shield\_net} / \opt{-shield\_net\_2} & 指定作为屏蔽的（次）网络；布单条信号网时分别用于左/下与右/上两侧屏蔽。 \\
+\opt{-via\_defs} & 可用于连接屏蔽的 via 定义；默认全部可用。 \\
+\opt{-gap} / \opt{-max\_gap} & 走线与屏蔽之间的全局最小/最大间距，默认 0。 \\
+\opt{-width} & 全局屏蔽宽度，默认 0。 \\
+\opt{-layer\_gaps} / \opt{-layer\_max\_gaps} / \opt{-layer\_widths} & 按层指定最小间距、最大间距、屏蔽宽度，默认 0。 \\
+\opt{-min\_segment} & 需要屏蔽的最小走线长度，默认 0。 \\
+\opt{-sharing} & 组内网络是否可共享屏蔽，取值 \texttt{unset}/\texttt{true}/\texttt{false}。 \\
+\opt{-group\_shield} & 使用同一套屏蔽图形屏蔽组内全部网络；与 \opt{-enclose\_pins} 互斥。 \\
+\opt{-enclose\_pins} / \opt{-enclose\_vias} & 屏蔽是否包裹 pin / via，取值 \texttt{unset}/\texttt{true}/\texttt{false}；前者与 \opt{-group\_shield} 互斥。 \\
+\opt{-disabled\_layers} & 不允许用于屏蔽的层。 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+例如，以下命令为名称以 \texttt{pr} 开头的网络创建屏蔽约束组（自动命名 \texttt{shielding\_4}）：M2 层最小间距 3~$\mu$m，M3 层 5~$\mu$m，允许共享屏蔽，且 M5、M6 层不可用于屏蔽：
+
+\begin{lstlisting}
+fc_shell> create_net_shielding \
+    -for [get_nets -physical_context pr*] \
+    -disabled_layers {M5 M6} -sharing true -layer_gaps {M2 3 M3 5}
+{shielding_4}
+\end{lstlisting}
+
+\subsection{定义网络优先级}
+\subsubsection*{Defining the Net Priority}
+
+使用网络优先级约束可以指定特定网络的布线顺序，优先级高的网络先布线。用 \cmd{create\_net\_priority} 创建约束组，需要指定：
+\begin{itemize}
+  \item \textbf{名称}：不指定时由命令自动分配；同名默认报错，可用 \opt{-force} 覆盖；
+  \item \textbf{适用对象}：通过 \opt{-for} 指定网络或 bundle；
+  \item \textbf{优先级}：通过 \opt{-priority} 指定，取值范围为 $-128$ 到 $128$（含边界）的整数。
+\end{itemize}
+
+例如，以下命令为匹配 \texttt{pr*} 的网络与 bundle 创建名为 \texttt{abc} 的约束组，优先级设为 15：
+
+\begin{lstlisting}
+fc_shell> create_net_priority abc \
+    -for [get_nets -physical_context pr*] \
+    -priority 15
+{abc}
+\end{lstlisting}
+
+\subsection{定义最小走线长度}
+\subsubsection*{Defining Minimum Wire Lengths}
+
+使用 \cmd{create\_length\_limit} 可为一组网络或 pin 到 pin 连接中的各对象分别定义不同的最小走线长度。此特性常用于对单驱动、多接收端（single driver, multiple receivers）的网络做长度限制布线：命令执行时，Custom Router 会在后台生成 Steiner 节点，并在驱动端、Steiner 节点与各接收端之间执行点到点布线；每个接收端可以有匹配长度约束，也可以有独立于驱动端的长度约束。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 118：Receivers With Individual Wire Length Constraints From Driver D）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{驱动端 D 带各自独立走线长度约束的多个接收端}
+\label{fig:receivers-individual-length}
+\end{figure}
+
+命令语法：
+\begin{lstlisting}
+fc_shell> create_length_limit
+    -for objects
+    [-min_value float]
+    [-exclude pins_or_ports]
+    [-driver pin_or_port]
+    [-force]
+    [intent_name]
+\end{lstlisting}
+
+主要选项：
+\begin{itemize}
+  \item \opt{-for}：必选，指定需满足约束的驱动 pin/port 或网络组；
+  \item \opt{-min\_value}：最小走线长度，默认 0；
+  \item \opt{-exclude}：从长度匹配约束中排除指定 pin 或 port；
+  \item \opt{-driver}：指定驱动 pin 或 port；
+  \item \opt{-force}：覆盖已有同名约束；
+  \item \textit{intent\_name}：约束名称，不指定则自动分配，同名默认报错。
+\end{itemize}
+
+\textbf{示例 29：为驱动 D 的 5 个接收端分别创建走线长度约束}\\
+针对驱动 D 与 5 个接收端 R1--R5，先为驱动网络指定驱动 pin，再为各接收端 pin 各自设置不同的最小长度（数值仅为示意）：
+
+\begin{lstlisting}
+fc_shell> create_length_limit -for [get_nets -physical_context $net] \
+    -driver [get_pins -physical_context D/o1]
+fc_shell> create_length_limit -for [get_pins -physical_context R1/a] \
+    -min_value 38.0
+fc_shell> create_length_limit -for [get_pins -physical_context R2/a] \
+    -min_value 40.0
+fc_shell> create_length_limit -for [get_pins -physical_context R3/a] \
+    -min_value 45.0
+fc_shell> create_length_limit -for [get_pins -physical_context R4/a] \
+    -min_value 42.0
+fc_shell> create_length_limit -for [get_pins -physical_context R5/a] \
+    -min_value 41.0
+\end{lstlisting}
+
+\textbf{示例 30：为 \texttt{pr*} 网络设置最小走线长度}\\
+以下命令为匹配 \texttt{pr*} 的网络与 bundle 创建名为 \texttt{abc} 的约束组，最小走线长度设为 10，即组内每条走线长度均不小于 10~$\mu$m：
+
+\begin{lstlisting}
+fc_shell> create_length_limit abc -for [get_nets -physical_context pr*] \
+    -min_value 10
+{abc}
+\end{lstlisting}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.2cm}
+\textit{（原书 Figure 119：Minimum Wire Length Constraint for pr* Nets）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.2cm}}}
+\caption{\texttt{pr*} 网络的最小走线长度约束}
+\label{fig:min-length-pr}
+\end{figure}
+
+\textbf{示例 31：为 a2/A pin 设置最小走线长度}\\
+以下命令为 \texttt{a2/A} pin 创建名为 \texttt{gcr\_length\_limit\_a2} 的约束组，最小走线长度设为 2000：
+
+\begin{lstlisting}
+fc_shell> create_length_limit -for [get_pins -physical_context a2/A] \
+    -min_value 2000.0 -force gcr_length_limit_a2
+\end{lstlisting}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.2cm}
+\textit{（原书 Figure 120：Minimum Wire Length Constraint for the a2/A Pin）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.2cm}}}
+\caption{a2/A pin 的最小走线长度约束}
+\label{fig:min-length-a2a}
+\end{figure}
+
+\subsection{定义匹配走线长度}
+\subsubsection*{Defining Matching Wire Lengths}
+
+使用 \cmd{create\_wire\_matching} 可定义一组网络或 pin 到 pin 连接，使其走线长度保持一致，从而降低时钟偏斜（skew）与时序违例。支持两种匹配方式：
+\begin{itemize}
+  \item \textbf{基于 pin（pin-based）}：pin 之间的走线长度需匹配，典型场景是多个接收端相对同一个驱动端 D（或 D'）保持长度一致；
+  \item \textbf{基于网络（net-based）}：指定网络的总走线长度需匹配，典型场景是两条网络（如 \texttt{pr1}、\texttt{pr2}）的总长度需落在给定容差（如 10~$\mu$m）范围内。
+\end{itemize}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.2cm}
+\textit{（原书 Figure 121：Receivers With Matched Wire Length From Driver D）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.2cm}}}
+\caption{驱动端 D 带匹配走线长度的多个接收端}
+\label{fig:matched-length-D}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.2cm}
+\textit{（原书 Figure 122：Receivers With Matched Wire Length From Driver D'）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.2cm}}}
+\caption{驱动端 D' 带匹配走线长度的多个接收端}
+\label{fig:matched-length-Dprime}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.2cm}
+\textit{（原书 Figure 123：Net-Based Wire Length Matching）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.2cm}}}
+\caption{基于网络的走线长度匹配}
+\label{fig:net-based-matching}
+\end{figure}
+
+命令语法：
+\begin{lstlisting}
+fc_shell> create_wire_matching
+    -for objects
+    -tolerance float
+    [-match_type type]
+    [-exclude objects]
+    [-relative]
+    [-driver pin_or_port]
+    [-force]
+    [intent_name]
+\end{lstlisting}
+
+主要选项：
+\begin{itemize}
+  \item \opt{-for}：必选，指定驱动 pin/port（pin-based）或网络组（net-based）；
+  \item \opt{-tolerance}：长度容差，须 $\ge 0$；配合 \opt{-relative} 可解释为百分比；
+  \item \opt{-relative}：将 \opt{-tolerance} $\le 1$ 的值解释为百分比，须与 \opt{-tolerance} 同时使用；
+  \item \opt{-match\_type}：匹配类型，\texttt{length}（默认，比较总长度）或 \texttt{length\_per\_layer}（按层比较长度）；
+  \item \opt{-exclude}：从匹配约束中排除指定 pin 或 port；
+  \item \opt{-driver}：指定驱动 pin 或 port；
+  \item \opt{-force}：覆盖已有同名约束；
+  \item \textit{intent\_name}：约束名称，不指定则自动分配。
+\end{itemize}
+
+布线完成后会生成长度匹配汇总报告，用于排查未满足容差的走线：若 \opt{-for} 指定的是基于 pin 的匹配，会生成 Length Constraint Report（原书 Figure 124）；若是基于网络的匹配，会生成 Routed Length Report（原书 Figure 125）。两种报告均按容差列出实际走线长度与偏差，便于定位超差的连接。
+
+以下按典型场景给出用法示例（数值与对象名仅为示意）：
+
+\textbf{示例 32/33：多接收端相对驱动 D（或 D'）的长度匹配}
+\begin{lstlisting}
+% 驱动为固定 pin D/o1，各接收端相对驱动匹配（容差 1%）
+fc_shell> create_wire_matching -for [get_nets -physical_context $net] \
+    -relative -tolerance 0.01 -driver [get_pins -physical_context D/o1]
+fc_shell> create_wire_matching -for [get_pins \
+    -physical_context {R1/a R2/a R3/a}] -tolerance 0.01 -relative
+
+% 驱动为变量指定的 pin（如平衡驱动 D'），其余接收端排除驱动本身后互相匹配
+fc_shell> create_wire_matching -for [get_nets -physical_context $net] \
+    -tolerance 0.01 -relative -driver $driver_full_name
+fc_shell> create_wire_matching \
+    -for [get_pins -physical_context -of_objects $net] \
+    -exclude $driver_full_name -tolerance 0.01 -relative
+\end{lstlisting}
+
+\textbf{示例 34/35：\texttt{pr*} 网络的绝对/相对容差匹配}
+\begin{lstlisting}
+% 绝对容差 10um
+fc_shell> create_wire_matching abc -for [get_nets -physical_context pr*] \
+    -tolerance 10
+{abc}
+
+% 相对容差 10%
+fc_shell> create_wire_matching def -for [get_nets -physical_context pr*] \
+    -tolerance 0.10 -relative
+{def}
+\end{lstlisting}
+
+\textbf{示例 36/37：按层匹配与排除特定 pin}
+\begin{lstlisting}
+% 对 clk 网络各终端按层比较走线长度，容差 1%
+fc_shell> create_wire_matching -for [get_pins -physical_context \
+    -of_objects [get_nets -physical_context {clk}]] \
+    -tolerance 0.01 -match_type length_per_layer -relative \
+    -force clk_match
+
+% 对 $nets 做匹配，但排除 u1/a pin，容差 5%
+fc_shell> create_wire_matching -for $nets -tolerance 0.05 \
+    -exclude [get_pins -physical_context u1/a] -force clk_match2
+\end{lstlisting}
+
+\textbf{示例 38：基于网络的匹配并排除指定 pin，随后布线}
+\begin{lstlisting}
+set nets [get_nets -physical_context {net1 net1p}]
+set_routing_rule -min_routing_layer m7 -max_routing_layer m8 \
+    -min_layer_mode allow_pin_connection -max_layer_mode hard $nets
+set exclude_pin_names [get_pins -physical_context {i2/a i3/a}]
+create_wire_matching -for $nets -tolerance 0.01 -relative \
+    -exclude $exclude_pin_names
+route_custom -nets $nets
+\end{lstlisting}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.2cm}
+\textit{（原书 Figure 126：Net-Based Wire Matching Constraints With Pin Exclusions）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.2cm}}}
+\caption{排除指定 pin 的基于网络的走线匹配约束}
+\label{fig:net-matching-exclusion}
+\end{figure}
+
+也可以结合 \cmd{set\_routing\_rule} 限定布线层范围，再定义匹配约束并运行布线，形成一个完整的"设层 $\to$ 设匹配约束 $\to$ 布线"流程，具体做法可参考「使用 DDR 布线流程」中的类似步骤。
+
+% ============================================================
+\section{管理约束组}
+\subsection*{Managing Constraint Groups}
+
+创建约束组之后，可以对其进行报告或移除：
+\begin{itemize}
+  \item \textbf{报告}：使用 \cmd{report\_constraint\_groups}，可用 \opt{-type} 指定要报告的约束类型（默认报告全部类型），用 \opt{-count} 指定报告对象数量。支持的类型包括：\texttt{bus\_style}（\cmd{create\_bus\_routing\_style}）、\texttt{differential\_group} 与 \texttt{differential\_pair}（\cmd{create\_differential\_group}）、\texttt{matched\_wire}（\cmd{create\_wire\_matching}）、\texttt{net\_priority}（\cmd{create\_net\_priority}）、\texttt{shielding}（\cmd{create\_net\_shielding}）、\texttt{wire\_length\_limit}（\cmd{create\_length\_limit}）。
+  \item \textbf{移除}：使用 \cmd{remove\_constraint\_groups}，指定要移除的约束组名，或用 \opt{-all} 移除全部。命令会解除相关对象与被移除约束组的关联，并报告实际移除的组数。
+\end{itemize}
+
+\begin{lstlisting}
+fc_shell> report_constraint_groups
+...
+Name                         Type                       Objects
+------------------------------------------------------------------------
+NDR_bus                      bus_style                  bus1
+NDR_diff                     differential_pair          clk0 clk1
+shield_diff                  shielding                  clk0 clk1
+matchL_con                   matched_wire               match1
+
+fc_shell> remove_constraint_groups $a
+\end{lstlisting}
+
+% ============================================================
+\section{使用 Custom Router 应用选项}
+\subsection*{Using Custom Routing Application Options}
+
+Fusion Compiler 提供一组应用选项来全局控制自定义布线结果；若需针对具体网络覆盖这些全局设置，见「定义布线约束」。
+
+要列出全部自定义布线相关的应用选项：
+\begin{lstlisting}
+fc_shell> report_app_options custom.route.*
+\end{lstlisting}
+
+若要启用混合流程（hybrid flow），将 \appopt{custom.route.hybrid\_flow} 设为 \texttt{on}，该选项会自动为一系列混合流程相关的应用选项设定合适的值。
+
+表~\ref{tab:app-opts-49} 按功能分组列出主要的自定义布线应用选项，各组的详细说明见后续小节。
+
+\begin{table}[htbp]
+\centering
+\caption{自定义布线应用选项（按功能分组）}
+\label{tab:app-opts-49}
+\begin{tabularx}{\textwidth}{l X}
+\toprule
+应用选项分组 & 说明 \\
+\midrule
+\appopt{custom.route.bus\_*}（corner\_type、intra\_shield\_placement、pin\_trunk\_offset、split\_even\_bits、split\_ignore\_width、tap\_off\_enable、tap\_off\_shielding） & 总线布线相关约束，见「总线布线选项」。 \\
+\appopt{custom.route.match\_box} & 指定 Custom Router 执行长度匹配的区域。 \\
+\appopt{custom.route.layer\_grid\_mode} & 指定走线及并行屏蔽、屏蔽跳线、总线屏蔽是否贴合走线轨道或布线网格，见「网格贴合选项」。 \\
+\appopt{custom.route.diffpair\_twist\_jumper\_*}（enable、interval、offset、style） & 差分对布线相关约束，见「差分对选项」。 \\
+\appopt{custom.route.net\_min\_layer\_mode} / \appopt{custom.route.net\_min\_layer\_mode\_soft\_cost} / \appopt{custom.route.net\_max\_layer\_mode} / \appopt{custom.route.net\_max\_layer\_mode\_soft\_cost} & 指定网络最小/最大布线层模式与相应代价，见「指定网络专属层约束」。 \\
+\appopt{custom.route.routing\_area} & 定义 Custom Router 执行布线（创建或修改走线）的区域；适用于大型 block 中只需处理局部区域的情形。 \\
+\appopt{custom.route.shield\_*}（connect\_mesh\_overlap、connect\_route、connect\_to\_supply、min\_open\_loop、min\_shield\_seg、min\_signal\_seg、net、second\_net） & 屏蔽相关约束，见「屏蔽选项」。 \\
+\appopt{custom.route.single\_loop\_match\_*}（match、max\_spacing、min\_spacing、offset\_layer） & 走线延长方式，见「单环长度补偿」与「使用 DDR 布线流程」。 \\
+\appopt{custom.route.skip\_connect\_pin\_type} & 启用混合流程，见「使用混合布线流程」。 \\
+\appopt{custom.route.distance\_to\_net\_pin} & 仅混合流程下使用 \appopt{custom.route.skip\_connect\_pin\_type} 时，当 pin 与走线的距离 $\le$ 该值即跳过该连接，取值格式为 \texttt{\{\{netName distance\} ...\}} 列表。 \\
+\appopt{custom.route.balance\_mode} & 降低中介层（interposer）设计中因走线长度与 via cut 数差异造成的偏斜，见「平衡模式选项」。 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+以下按功能分组详细说明主要应用选项。
+
+\subsection{总线布线选项}
+\subsubsection*{Bus Routing Options}
+
+一组以 \appopt{custom.route.bus\_*} 命名的应用选项用于控制总线布线的以下方面：
+
+\begin{itemize}
+  \item \textbf{拐角类型（Corner Type）}：\appopt{custom.route.bus\_corner\_type}，取值 \texttt{auto}（默认，自动选取以降低拥塞）、\texttt{cross}（拐角处交叠）、\texttt{river}（拐角处不交叠）；
+  \item \textbf{组内屏蔽放置（Intra-shield Placement）}：\appopt{custom.route.bus\_intra\_shield\_placement}，取值含义与「定义总线布线风格」中的 \opt{-shield\_placement} 相同，默认 \texttt{outside}；
+  \item \textbf{Pin-主干偏移（Pin-Trunk Offset）}：\appopt{custom.route.bus\_pin\_trunk\_offset}，用于改变总线主干与总线 bit pin 之间的默认间距；
+  \item \textbf{主干拆分（Trunk Splitting）}：\appopt{custom.route.bus\_split\_ignore\_width} 指定触发主干拆分的障碍（如电源网格）宽度阈值，即当遮挡宽度超过该值时把总线主干拆成多段；在此基础上，\appopt{custom.route.bus\_split\_even\_bits} 要求 \appopt{custom.route.bus\_split\_ignore\_width} 已设置，用于控制自动拆分时电源/地轨之间是否按偶数根 bit 布线；
+  \item \textbf{分支引出（Tapoffs）}：\appopt{custom.route.bus\_tap\_off\_enable} 控制是否将 pin 连接到总线主干上；开启后可用 \appopt{custom.route.bus\_tap\_off\_shielding} 为分支引出部分添加屏蔽。
+\end{itemize}
+
+以下示例中，总线主干含 4 根 bit，且已设置 \appopt{custom.route.bus\_split\_ignore\_width}；电源、地轨之间的空间只能容纳 3 根 bit。图~\ref{fig:bus-split-even-bits}(a) 示出 \appopt{custom.route.bus\_split\_even\_bits} 关闭时的两种可能结果，图~\ref{fig:bus-split-even-bits}(b) 示出该选项开启时的结果。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.2cm}
+\textit{（原书 Figure 127：Splitting Bus Trunk to Route Through Power and Ground Rails）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.2cm}}}
+\caption{总线主干为穿越电源/地轨而拆分}
+\label{fig:bus-split-even-bits}
+\end{figure}
+
+\subsection{网格贴合选项}
+\subsubsection*{Track Adherence Options}
+
+使用 \appopt{custom.route.layer\_grid\_mode} 控制走线及其并行屏蔽、并行屏蔽跳线（jumper）、总线屏蔽是否贴合走线轨道（track）或布线网格。取值为 \texttt{\{\{layerName mode\}\}} 形式的列表，\texttt{layerName} 可为具体层名或 \texttt{All}（全部层）；\texttt{mode} 可取：
+\begin{itemize}
+  \item \texttt{on}：贴合轨道，若该层无轨道定义则贴合布线网格；
+  \item \texttt{off}：不贴合轨道或网格，适用于无网格（gridless）布线；
+  \item \texttt{off\_cost~<costValue>}：尽量贴合轨道，数值越大越倾向于保持在轨道/网格上。
+\end{itemize}
+
+若未定义轨道与布线网格却指定了 \texttt{on}，Custom Router 会使用内部推导的网格：网格间距为走线宽度加图形间最小间距，偏移量取 0 或间距的一半（取能容纳更多 pin 的一个）。例如 \texttt{\{\{M2 off\} \{M3 off\_cost 4\}\}} 表示 M2 层不贴合网格、M3 层以代价值 4 尽量贴合。
+
+\subsection{差分对选项}
+\subsubsection*{Differential-Pair Options}
+
+一组 \appopt{custom.route.diffpair\_*} 应用选项用于控制差分对布线：\appopt{custom.route.diffpair\_twist\_jumper\_enable}（是否对组内网络做绞线）、\appopt{custom.route.diffpair\_twist\_jumper\_interval}（相邻绞线间距）、\appopt{custom.route.diffpair\_twist\_jumper\_offset}（首次绞线与被连接 pin 的距离，默认 0）、\appopt{custom.route.diffpair\_twist\_jumper\_style}（绞线方式，取值 \texttt{diagonal}/\texttt{none}（默认）/\texttt{orthogonal}，含义同「创建差分组」中的 \opt{-twist\_style}）。
+
+\subsection{屏蔽选项}
+\subsubsection*{Shielding Options}
+
+一组 \appopt{custom.route.shield\_*} 应用选项用于控制屏蔽行为：
+\begin{itemize}
+  \item \appopt{custom.route.shield\_connect\_mesh\_overlap}：在屏蔽与电源网格的每个交叉处创建 via 连接；若屏蔽与任何电源条均不相交，则退回默认的四段式连接方式；
+  \item \appopt{custom.route.shield\_connect\_route}：将屏蔽连接到地，会产生较长的连接线并可能阻碍后续布线，故仅在确有需要时开启（这类屏蔽会被标记为动态屏蔽）；
+  \item \appopt{custom.route.shield\_connect\_to\_supply}：将屏蔽连接到最近的电源网格；
+  \item \appopt{custom.route.shield\_min\_open\_loop}：同一层上开放式屏蔽环（open shield-loop）的最小总长度，短于该值则不添加屏蔽；
+  \item \appopt{custom.route.shield\_min\_shield\_seg} / \appopt{custom.route.shield\_min\_signal\_seg}：屏蔽段、需屏蔽走线段的最小长度，默认均为 0；
+  \item \appopt{custom.route.shield\_net} / \appopt{custom.route.shield\_second\_net}：全局默认的（次）屏蔽网络，含义同 \cmd{create\_net\_shielding} 中的 \opt{-shield\_net}/\opt{-shield\_net\_2}。
+\end{itemize}
+
+\subsection{单环长度补偿}
+\subsubsection*{Single-Loop Matching}
+
+创建单个绕线环（single loop）以延长走线、实现长度匹配，常用于 DDR 布线流程。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.2cm}
+\textit{（原书 Figure 128：Adding Single Loops to Extend Wires）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.2cm}}}
+\caption{通过单环延长走线}
+\label{fig:single-loop-match}
+\end{figure}
+
+相关应用选项：\appopt{custom.route.single\_loop\_match}（开启单环延长）、\appopt{custom.route.single\_loop\_match\_max\_spacing} / \appopt{custom.route.single\_loop\_match\_min\_spacing}（环内最大/最小间距）、\appopt{custom.route.single\_loop\_match\_offset\_layer}（允许环内某段走线使用与其余段不同的层）。
+
+\subsection{平衡模式选项}
+\subsubsection*{Balance Mode Option}
+
+\appopt{custom.route.balance\_mode} 应用选项用于中介层（interposer）设计，减小因走线长度与 via cut 数量差异带来的偏斜。将其设为 \texttt{true} 后：
+\begin{itemize}
+  \item Custom Router 会在同一网络的两个 $\mu$bump 与一个 C4 bump 之间创建 feedthrough 走线；
+  \item $\mu$bump 与 C4 bump 之间的走线长度保持一致；
+  \item 各 $\mu$bump--C4~bump 连接中的 via cut 数量保持一致。
+\end{itemize}
+
+典型用法是先用 \cmd{create\_routing\_rule}/\cmd{set\_routing\_rule} 定义各层宽度、via 及层方向（如 M2、M4 走水平，M1、M3、M5 走垂直），再打开 \appopt{custom.route.balance\_mode}，最后执行 \cmd{route\_custom}：
+
+\begin{lstlisting}
+fc_shell> create_routing_rule skew -widths {M1 6 M2 6 M3 6 M4 6 M5 25} \
+    -vias {{VIA12_1cut 3x3 R} {VIA23_1cut 3x3 R} {VIA34_1cut 3x3 R} \
+    {VIA45_1cut 2x5 R}}
+fc_shell> set_routing_rule $nets_to_route -rule skew \
+    -max_routing_layer M5 -min_routing_layer M1
+fc_shell> set_app_options -list {custom.route.balance_mode true}
+fc_shell> route_custom -nets $nets_to_route
+\end{lstlisting}
+
+% ============================================================
+\section{使用 Custom Router 布线}
+\subsection*{Routing With the Custom Router}
+
+执行自定义布线前，需先按照「定义布线约束」创建所需约束，并设置合适的应用选项。之后运行 \cmd{route\_custom} 即可调用 Custom Router 完成布线。默认对 block 内全部网络布线；如需限定范围，使用 \opt{-nets} 指定网络。
+
+默认情况下，命令运行结束后会清除内部配置数据；若希望在当前会话内继续运行其他 Custom Router 命令并保留缓存数据，可将 \opt{-keep\_session} 设为 \texttt{true}（默认 \texttt{false}）。
+
+典型流程示例（先定义总线风格与屏蔽约束，再设置应用选项，最后布线）：
+
+\begin{lstlisting}
+fc_shell> create_bundle -name Bus1 {net0 net1}
+fc_shell> create_bus_routing_style -for {Bus1} \
+    -valid_layers {M5 M6} -layer_widths {M5 0.4 M6 0.44} -force bus1
+fc_shell> create_net_shielding -for {Bus1} -shield_net VSS \
+    -layer_gaps 0.21 -layer_widths 0.2 -sharing true -force sh1
+fc_shell> set_app_options -name custom.route.bus_corner_type -value river
+fc_shell> set_app_options \
+    -name custom.route.bus_intra_shield_placement -value interleave
+fc_shell> route_custom -nets {net0 net1}
+\end{lstlisting}
+
+类似地，也可以先创建长度匹配约束或差分组约束，再执行 \cmd{route\_custom}：
+
+\begin{lstlisting}
+fc_shell> create_wire_matching -for MatchL1 \
+    -match_type length -tolerance 1 -force matchL1_con
+fc_shell> route_custom -nets {net1 net2 net3 net4}
+
+fc_shell> create_differential_group -for {net1 net2} \
+    -valid_layers {M3 M4} -layer_widths {M3 0.4 M4 0.4} \
+    -layer_spacings {M3 0.4 M4 0.4} \
+    -twist_style diagonal -twist_interval 80.0 -force Diff
+fc_shell> route_custom -nets {net1 net2}
+\end{lstlisting}
+
+% ============================================================
+\section{网络屏蔽}
+\subsection*{Shielding the Nets}
+
+在敏感网络周围添加屏蔽可以降低噪声与串扰。执行 \cmd{route\_custom} 时，工具会依据 \cmd{create\_net\_shielding} 定义的约束自动为相应网络添加屏蔽。
+
+如果需要单独在一次运行中为已布线网络补充屏蔽，可使用 \cmd{create\_custom\_shields}：
+
+\begin{lstlisting}
+fc_shell> create_custom_shields -nets {net1 net2}
+\end{lstlisting}
+
+要移除由 \cmd{create\_custom\_shields} 添加的屏蔽，使用 \cmd{remove\_custom\_shields}；该命令同时也会移除 \cmd{route\_custom} 自动创建的屏蔽。
+
+% ============================================================
+\section{检查布线结果}
+\subsection*{Checking the Routing Results}
+
+运行 Custom Router 完成布线后，可通过报告布线结果、生成拥塞图（congestion map）、运行 DRC 检查等方式检查结果的质量。具体检查方法见「分析布线结果」。
+
+% ============================================================
+\section{使用混合布线流程}
+\subsection*{Using a Hybrid Routing Flow}
+
+混合流程（hybrid flow）中，先用 Custom Router 完成总线主干布线但暂不完成部分 pin 连接，再用 Zroute 完成这些 pin 连接。这样既能利用 Custom Router 做预布线，又能避免两种布线器在 pin 连接方式上的差异带来的不一致与 DRC 违例。
+
+要启用混合流程，将 \appopt{custom.route.skip\_connect\_pin\_type} 设为下列一个或多个取值（默认 \texttt{none}，即不启用混合流程）：
+\begin{itemize}
+  \item \texttt{auto}：Custom Router 判断各 pin 的可布线性，自动完成可连接 pin 的连接；
+  \item \texttt{all}：不完成 block 内任何 pin 的连接；
+  \item \texttt{stdcell}：完成除标准单元 pin 之外的全部 pin 连接；
+  \item \texttt{io}：完成除 I/O 单元 pin 之外的全部 pin 连接；
+  \item \texttt{macro}：完成除 macro pin 之外的全部 pin 连接。
+\end{itemize}
+
+启用混合流程后，Custom Router 默认自行决定走线与未连接 pin 之间预留的间距；若需指定最大距离，可用 \appopt{custom.route.distance\_to\_net\_pin}，取值格式为 \texttt{\{net\_name distance\}} 的列表。
+
+典型流程：先用 Custom Router 完成主干布线（跳过全部或部分 pin 连接），再用 \cmd{route\_eco}、\cmd{remove\_redundant\_shapes} 与 \cmd{route\_detail~-incremental~true} 交由 Zroute 完成剩余 pin 连接与清理：
+
+\begin{lstlisting}
+fc_shell> set_app_options -name custom.route.skip_connect_pin_type \
+    -value all
+fc_shell> route_custom -nets {net1 net2}
+fc_shell> route_eco -nets {net1 net2}
+fc_shell> remove_redundant_shapes -nets {net1 net2}
+fc_shell> route_detail -incremental true
+\end{lstlisting}
+
+若只希望跳过标准单元 pin 的连接（其余 pin 由 Custom Router 完成），可先用 \cmd{set\_routing\_rule} 限定布线层范围，再将 \appopt{custom.route.skip\_connect\_pin\_type} 设为 \texttt{stdcell}，其余步骤相同。
+
+% ============================================================
+\section{使用 DDR 布线流程}
+\subsection*{Using a DDR Routing Flow}
+
+本节介绍如何用 Custom Router 对双倍数据速率（DDR）设计执行布线。图~\ref{fig:ddr-basic-flow} 给出 DDR 网络与 core 之间建立互连的基本流程：准备输入数据（定义 bundle、定义并应用布线规则）$\to$ 首次自定义布线 $\to$ 定义单环延长（设置长度匹配）$\to$ 二次自定义布线 $\to$ 插入 buffer 单元 $\to$ 运行 ECO 布线（含增量详细布线）$\to$ 修剪冗余图形。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 129：A Basic DDR Flow）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{基本 DDR 布线流程}
+\label{fig:ddr-basic-flow}
+\end{figure}
+
+具体步骤如下：
+\begin{enumerate}
+  \item \textbf{布线前准备}
+  \begin{itemize}
+    \item 将需要长度匹配的网络分组为 bundle：
+\begin{lstlisting}
+fc_shell> create_bundle -name GRP1 [get_nets $nets]
+\end{lstlisting}
+    \item 为 DDR 网络创建并应用布线规则，指定初始布线层（应预留至少两个额外层用于后布线长度匹配，例如初始布线用 M4、M5，则后布线匹配应包含 M3--M6）：
+\begin{lstlisting}
+fc_shell> create_routing_rule DDR -widths {layer value ...} \
+    -spacings {layer value ...}
+fc_shell> set_routing_rule -rule DDR -min_routing_layer M4 \
+    -max_routing_layer M5 $all_ddr_nets
+\end{lstlisting}
+    \item 按需添加布线阻挡，避免 Custom Router 在布局阻挡覆盖的区域内布线，从而减少后续插入 buffer 时出现无法放置的情况。
+  \end{itemize}
+  \item \textbf{首次自定义布线}：\cmd{route\_custom -nets \$all\_ddr\_nets}。
+  \item \textbf{定义长度匹配相关约束}
+  \begin{itemize}
+    \item 设置单环匹配相关应用选项：\appopt{custom.route.single\_loop\_match}（开启）、\appopt{custom.route.single\_loop\_match\_min\_spacing}、\appopt{custom.route.single\_loop\_match\_max\_spacing}、\appopt{custom.route.single\_loop\_match\_offset\_layer}；
+    \item 为各 bundle 设置匹配约束：\cmd{create\_wire\_matching -for [get\_bundles GRP1] -match\_type length -tolerance 20 -force match1}（对 \texttt{GRP2} 同理）；
+    \item 用 \appopt{custom.route.match\_box} 设置匹配布线的边界框（默认 \texttt{\{\{0 0\} \{0 0\}\}}，设置后布线器只在框内进行匹配布线，应确保该框覆盖全部可用信道空间）。
+  \end{itemize}
+  \item \textbf{执行长度匹配布线}：\cmd{route\_custom -nets [get\_bundles \{GRP1\}]}；若定义了多个匹配框，需对每个框分别运行。
+  \item \textbf{报告不匹配的网络}：可对日志文件搜索关键字 \texttt{Mismatch}。
+  \item \textbf{减少不匹配网络数量}，可选方法包括：重新分配各组在同一信道内的可用布线层后重跑初始布线；调大 \appopt{custom.route.single\_loop\_match\_max\_spacing}；或允许单环使用不同层（\appopt{custom.route.single\_loop\_match\_offset\_layer} 设为 \texttt{true}）。
+  \item \textbf{插入 buffer 单元}：使用 \cmd{add\_buffer\_on\_route}，可指定网络/单元前缀便于识别，并用 \opt{-repeater\_distance\_length\_ratio} 控制插入间隔（例如总长的 20\%）。
+  \item \textbf{布局合法化}：\cmd{legalize\_placement -cells \$ddr\_BUF} 与 \cmd{check\_legality -cells \$ddr\_BUF}（\opt{-cells} 选项仅标准 legalizer 支持）。
+  \item \textbf{保留时钟网走线形状}：将相关走线与 via 的 \texttt{shape\_use} 属性设为 \texttt{user\_route}。
+  \item \textbf{限制后续改动范围}：将相关走线与 via 的 \texttt{physical\_status} 属性设为 \texttt{minor\_change}。
+  \item \textbf{运行 ECO 布线重新连接网络}：\cmd{route\_eco -nets \$all\_nets -reroute modified\_nets\_only}。
+  \item \textbf{运行增量详细布线修复 DRC}：先将 \texttt{shape\_use} 属性改回 \texttt{detail\_route}，再执行 \cmd{route\_detail -incremental true}，最后用 \cmd{remove\_redundant\_shapes} 清理冗余图形。
+  \item \textbf{检查布线结果}：用 \cmd{check\_routes} 检查 DRC 违例（默认仅检查信号图形之间；加 \opt{-check\_from\_user\_shapes~true} 可扩展到信号图形与用户图形之间）；也可在 GUI 中查看 ECO 网络与 buffer，或报告 DDR 网络与 ECO 网络的长度。
+\end{enumerate}

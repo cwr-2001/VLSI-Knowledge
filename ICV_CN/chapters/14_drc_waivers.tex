@@ -1,0 +1,322 @@
+% 第 14 章 DRC Waivers
+\bichapter{DRC Waivers}{DRC Waivers}
+\label{chap:waiver}
+
+本章介绍 IC Validator 工具的 DRC waivers 能力及其用法。
+
+DRC waivers 能力分以下各节说明：
+\begin{itemize}
+  \item 定义 Waivers
+  \item 创建 Waiver 数据库
+  \item 使用 Waiver 数据库
+\end{itemize}
+
+DRC waivers 允许你对 IC Validator 运行中发现的错误进行分类与标注，并将错误导出到 waiver 数据库，供后续 IC Validator 运行使用。
+DRC Waivers 流程分为三个独立步骤：
+\begin{itemize}
+  \item 定义哪些错误可被 waive，并通过 VUE 或 \cmd{icv\_pydb} 命令行实用程序对错误数据库加注
+  \item 在磁盘上创建持久化 waiver 数据库
+  \item 在后续 IC Validator 运行中应用 waivers
+\end{itemize}
+
+以下各节分别说明这些步骤。
+
+\figplaceholder{Figure 96: General Waiver Flow}{一般 Waiver 流程}{fig:waiver-flow}
+
+% ============================================================
+\section{定义 Waivers}
+\subsection*{Defining Waivers}
+
+可使用 VUE 或 ASCII 错误报告文件 \cmd{cell.LAYOUT\_ERRORS} 审查写入错误数据库（PYDB）的设计错误。
+在许多设计中，存在可被 waive 的 DRC 违例，即这些错误无需在版图中修复。
+这可以是必须在 tapeout 前修复的临时 waiver，也可以是晶圆厂批准的永久 waiver。
+可为 waivers 添加用户注释或预定义的 waiver 属性，以便为审查 waivers 的其他工程师提供更多上下文。
+
+IC Validator SQLite 错误数据库允许多用户并发访问；在审查错误并应用 waivers 时，访问该数据库的其他用户可以看到你已应用的更新。
+
+IC Validator 支持若干 waiver 类别：
+\begin{itemize}
+  \item 持久化 waiver 类别：Waive、Watch、Ignore
+  \item 非持久化 waiver 类别：Error、Fixed
+\end{itemize}
+
+持久化 waiver 类别可导出到 waiver 数据库。见``创建 Waiver 数据库''。
+通过多种持久化 waiver 类别，可将已 waive 的错误划分到不同类别，使设计过程中的 waiver 管理更简便。
+这些 waiver 类别同等对待。例如，可在整个设计过程直至 tapeout 均拟 waive 该错误时选择 Waive，并选择 Watch 以标示可在下一两次设计迭代中修复的错误。
+
+非持久化 waiver 类别向调试同一错误数据库的其他用户提供信息。
+例如，将错误定义为 Error 并附用户注释 ``this error needs to be fixed in conjunction with rule ABCD''，则在同一错误数据库中审查该错误的任何人都能看到此指导。
+
+\subsection{使用 VUE 定义 Waivers}
+\subsubsection*{Using VUE to Define Waivers}
+
+定义 waivers 最常见的方式是通过 VUE DRC 浏览器。有多种方式 waive 错误。
+
+要 waive 某违例（规则）中的全部错误形状，在 Violation Browser 中选择该违例并右键单击以查看选项菜单。选择适当的 waiver 类别，如图~\ref{fig:vue-viol-browser} 所示。
+
+\figplaceholder{Figure 97: Violation/Cell in Violation Browser}{Violation Browser 中的违例/单元}{fig:vue-viol-browser}
+
+本例选择了 Waive 类别。选择后出现窗口，允许提供可选用户注释并定义 waiver 上下文。
+
+\figplaceholder{Figure 98: Optional User Comment}{可选用户注释}{fig:vue-user-comment}
+
+Context 选项决定这些 waivers 在未来 IC Validator 运行中何时适用。设为 ALL 时，若与错误匹配则始终应用该 waiver。设为顶层单元时（本例顶层单元名为 ``top''），仅当当前顶层 block 再次作为顶层单元运行时才应用该 waiver。
+
+定义 waivers 后，错误浏览器中会新增一列以显示含已 waive 错误的违例。
+
+\figplaceholder{Figure 99: Error Browser Column}{错误浏览器列}{fig:vue-err-browser-col}
+
+每个错误现已用 waiver 信息加注。
+
+\figplaceholder{Figure 100: Waiver Information}{Waiver 信息}{fig:vue-waiver-info}
+
+状态现为 Waive。From 列显示 ``vue''，表示当前 waiver 由用户应用，并非 IC Validator 引用 waiver 数据库时找到的。
+
+Error List 可用于仅 waive 某些错误，如图~\ref{fig:vue-error-list} 所示。
+
+\figplaceholder{Figure 101: Error List}{错误列表}{fig:vue-error-list}
+
+可通过按住 Shift-click 与 Ctrl-click 选择 R.M4.W 违例中的个别错误，然后右键单击查看 waive 选项菜单。另有选项 Waive In Area，允许 waive 特定区域内的全部错误，而无需从 Error List 中逐个选择。
+
+错误被 waive 后，可在错误列表中过滤以隐藏特定 waiver 类别。在 DRC/Extraction VUE 选项中，使用 Enable/Disable filter functions 部分选择要在 Error List 中显示的 waiver 类别。
+
+\figplaceholder{Figure 102: Filter Settings}{过滤设置}{fig:vue-filter}
+
+本例中，分类为 Waive 的错误从 Error List 中过滤掉。显示所有其他 waiver 类别。
+
+图~\ref{fig:vue-updated-list} 展示更新后的 Error List：
+
+\figplaceholder{Figure 103: Updated Error List}{更新后的错误列表}{fig:vue-updated-list}
+
+\subsection{使用命令行实用程序定义 Waivers}
+\subsubsection*{Defining Waivers Using the Command-Line Utilities}
+
+可使用 \cmd{icv\_pydb} 命令行实用程序定义 waivers。更多信息见第~\ref{chap:errmgmt}~章``错误管理实用程序''。
+
+\subsection{自定义 Waiver 属性}
+\subsubsection*{Custom Waiver Properties}
+
+除用户注释外，还可为给定规则与单元定义额外的 waiver 属性。这些属性有助于添加信息，并提供跨设计或工艺节点管理 waivers 的额外方式。
+例如，可为 waivers 赋予定义特定跟踪号及其当前管理审批状态的 waiver 属性。若 waiver 未获批准，可使用 \cmd{pydb\_export} 与 \cmd{-select\_waiver\_properties} 命令行选项，从 waiver 数据库中移除具有该跟踪号的任何 waiver。
+
+允许的值定义在由 VUE 读取的 JSON 格式文件中。
+
+\begin{lstlisting}[style=shell,caption={JSON 属性文件（waiver\_properties.json）},label={ex:waiver-props-json}]
+{
+    "waiver_property_definitions": [
+      {
+         "property_name": "WaiverTracking#",
+         "property_values": []
+      },
+      {
+         "property_name": "Valid_through",
+         "property_values": ["milestone1", "milestone2", "milestone3"]
+      },
+      {
+         "property_name": "Status",
+         "property_values": ["pending", "approved", "not approved"],
+         "default_value": "pending"
+      }
+    ]
+}
+\end{lstlisting}
+
+每个属性有 \cmd{property\_name}、\cmd{property\_values}，以及可选的 \cmd{default\_value}。
+\cmd{property\_name} 遵循 OASIS 属性标准，即使用可打印 ASCII 字符，排除空格、制表符、换行符与控制字符。属性值不受限制。
+
+\begin{noteBox}
+\cmd{WAIVER\_REPORT} 文件使用 \texttt{|} 作为多个属性值之间的分隔符。为避免混淆，请勿使用该字符。
+\end{noteBox}
+
+设置下列环境变量后，VUE 会读取该 JSON 文件：
+\begin{lstlisting}[style=shell]
+setenv ICV_WAIVER_PROPERTY_DEFINITION_FILE waiver_properties.json
+\end{lstlisting}
+
+然后创建含允许属性的自定义窗口。
+在 Violation Browser 中，右键单击选择规则与单元。此时可用 Add Waiver Properties 选项。
+
+\figplaceholder{Figure 104: Add Waiver Properties}{添加 Waiver 属性}{fig:vue-add-waiver-props}
+
+选择该选项以定义用户属性。
+
+该规则/单元的所有已 waive 错误继承这些属性。可在 Violation Detail 窗格中查看属性，如下所示。
+
+% ============================================================
+\section{创建 Waiver 数据库}
+\subsection*{Creating a Waiver Database}
+
+为当前设计定义全部 waivers 后，将信息导出到独立的 waiver 数据库。Waiver 数据库可以是 SQLite 格式（CPYDB）或 OASIS 格式。Waiver 数据库是自包含的，即 waiver 错误所需的全部信息（用户注释、用户 ID、日期、waiver 属性等）均包含在数据库内。
+
+可使用 VUE 或 \cmd{pydb\_export} 命令行实用程序导出 waiver 数据库。
+
+要用 VUE 导出 SQLite waiver 数据库，选择 Classification > Export Classification Data (CPYDB)。
+
+在此可定义数据库的详细信息。
+
+输出数据库名写入启动 VUE 时的工作目录。要写到其他路径，在输出文件名中包含该路径。默认情况下，IC Validator 创建新的 waiver 数据库。可通过设置 Append Mode 将此信息追加到现有 CPYDB 数据库。导出期间，VUE 导出错误数据库中定义的任何新 waivers。要包含全部 waivers（包括先前从另一 waiver 数据库匹配到的），勾选 Include Matched Errors 框。
+
+SQLite 格式允许为 waiver 数据库设置口令。除非知道口令，否则无法修改该 waiver 数据库。
+
+要从 VUE 导出 OASIS 格式 waiver 数据库，选择 Classification > Export Classification Data (OASIS)。
+
+此处窗口提供 waiver 数据库的设置。
+
+输出数据库名写入启动 VUE 时的工作目录。要写到其他路径，在输出文件名中包含该路径。输出的 OASIS 格式将 waiver 形状放在特殊命名的单元中，该单元为每组 waivers 提供规则与单元名（\cmd{Rule\_Name@cellname}）。Rule Name Delimiter 允许你定义工艺节点规则名的分隔符。在下列示例中，规则名使用 ``:'' 字符作为规则名与规则描述之间的分隔符。设置后，分隔符左侧的全部字符定义 waiver 单元名。若未设置，或规则名很长，则 Max Rule Name Length 将该 waiver 单元名截断到该长度。默认值为 \cmd{"[[:space:]]+:|[[:space:]]*:[[:space:]]"}，可匹配大多数晶圆厂 runset 命名约定。
+
+现可在 IC Validator WorkBench 中打开 OASIS 格式 waiver 数据库。在 waiver 数据库的树视图中（如下图所示），可以看到数据库有一个以 \cmd{@} 为前缀的单元。这是 holding cell，包含为该单元定义的全部 waivers。该单元本身不含任何 waiver 形状；形状包含在放置于 holding cell 内的规则专用单元中。
+
+每个 waiver 单元（\cmd{rule@cell}）在单元上附着属性。
+
+这些属性在导出时设置。导出 waiver 数据库的用户会将其用户 ID 列在 \cmd{createID} 属性中，以及导出时间戳。\cmd{waiverChecksum} 属性在导出时对该单元计算。IC Validator 读取 waiver 单元时，会计算校验和并与存储的属性比较。若属性不同，表示数据库自导出后已被修改。\cmd{WAIVER\_REPORT} 文件末尾包含校验和是否匹配的信息。
+
+给定 Violation/Cell 的全部 waiver 形状写入任意层号。IC Validator 不使用层号，而是使用 \cmd{violationComment} 属性来了解 waiver 形状适用于哪条规则。因此不需要映射文件。
+
+% ============================================================
+\section{使用 Waiver 数据库}
+\subsection*{Using a Waiver Database}
+
+创建 waiver 数据库后，可将其用作其他 IC Validator 运行的输入。新运行不必是同一顶层单元。IC Validator 导入当前运行中存在的 Cell / Violation 的全部 waiver 形状。IC Validator waivers 是完全层次化的。
+
+\cmd{waiver\_options()} 函数提供对 IC Validator 运行期间如何应用与报告 waivers 的控制。该命令分为两个主要部分。第一部分是数据库管理：提供 waiver 数据库列表并定制每个数据库的处理方式。第二部分提供 IC Validator 对全部 waivers 与报告使用的全局 waiver 控制。
+
+数据库管理由 \cmd{databases} 参数控制。IC Validator 自动检测数据库格式，同一 IC Validator 运行中可同时提供 CPYDB 与 OASIS 格式。使用 OASIS 格式 waiver 数据库时不需要层映射文件。
+
+对每个 waiver 数据库，可定制控制以提供跨设计的灵活性。包括：
+\begin{itemize}
+  \item 控制在找不到 waiver 数据库时如何处理。
+  \item 用此数据库 waive 的错误是抑制还是分类。抑制意味着已 waive 的错误不写入 PYDB 或 \cmd{LAYOUT\_ERRORS} 文件。
+  \item 也可为 waiver 数据库给出单元前缀或单元后缀。若流程在将单元放入更大宏块时使单元唯一化，但基单元的 waivers 仍可应用于重命名后的单元，则此功能很有用。
+  \item 生成特殊报告，列出 IC Validator 运行期间未匹配的数据库中全部 waiver 形状。
+\end{itemize}
+
+全局 waiver 控制决定如何将 waiver 形状与运行期间发现的错误形状比较，包括任何规则专用覆盖与报告生成。
+
+\subsection{匹配模式}
+\subsubsection*{Matching Modes}
+
+可控制 IC Validator 如何将 waiver 形状匹配到给定错误形状。所有匹配均在所有相交的 waiver 形状已合并、所有相交的错误形状已合并之后进行。在某些情况下，为允许合并发生，形状可能需要提升到共同父单元。匹配是层次化的，即层次合并后的 waiver 形状不必与层次合并后的错误形状在同一单元中即可找到匹配。
+
+有三种匹配模式可用：\cmd{EXACT}、\cmd{ENCLOSE}（默认）与 \cmd{INTERACT}。
+\begin{itemize}
+  \item \cmd{EXACT} 模式：层次合并后的 waiver 形状必须与层次合并后的错误形状完全匹配，才会应用 waiver。
+  \item \cmd{ENCLOSE} 模式是默认匹配模式。Waiver 形状必须包围错误形状。
+  \item \cmd{INTERACT} 模式：任何与 waiver 形状层次相交的错误均被 waive。使用 \cmd{include\_touch} 参数可将外侧相触（outside-touch）交互视为 waive 的相交。
+\end{itemize}
+
+\begin{noteBox}
+使用 \cmd{tolerance} 参数可改善全角度（all-angle）形状的匹配。
+\end{noteBox}
+
+在 \cmd{waiver\_options()} 中设置的匹配模式适用于全部 \cmd{waiver\_databases}。可用 \cmd{rule\_overrides} 参数覆盖特定规则的匹配模式。例如，除 \cmd{R.MY.STRICT\_RULE} 外的全部规则允许 \cmd{ENCLOSE} 模式；对该规则，仅当 waiver 与错误形状完全匹配时才应用 waivers。例如：
+\begin{lstlisting}[style=pxl]
+waiver_options(
+  databases = { {"/path/to/waiver.oas"}},
+  matching_mode = ENCLOSE,
+  rule_overrides = {
+    violation_comments = {"R.MY.STRICT_RULE"},
+    matching_mode = EXACT,
+    tolerance     = 0.005
+  }
+ );
+\end{lstlisting}
+
+\subsection{Waiver 报告文件}
+\subsubsection*{Waiver Report File}
+
+IC Validator 将全部已分类（已 waive）的错误写入 IC Validator 工作目录中的 waiver 报告文件（\cmd{cell.WAIVER\_REPORT}）。
+
+\cmd{LAYOUT\_ERRORS} 文件与 VUE run\_summary 选项卡显示：
+\begin{lstlisting}[style=shell]
+ERRORS (WAIVERS APPLIED)
+\end{lstlisting}
+
+默认生成 waiver 报告文件，含规则汇总（包括已应用的 waivers）以及输入 waiver 数据库列表。
+\begin{lstlisting}[style=shell]
+-------------------------------------------------------------------------
+----
+WAIVER SUMMARY
+-------------------------------------------------------------------------
+----
+
+R.M3.L: M3 can not have 3 or mor... | Waive : 5 | Ignore : 0 | Watch : 0
+ | WaiverConflict : 0 | Unmatched : 0
+R.M4.W: M4 Minimum width >= 0.24    | Waive : 4 | Ignore : 0 | Watch : 0
+ | WaiverConflict : 0 | Unmatched : 0
+\end{lstlisting}
+
+表列为：规则名、Waive、Ignore、Watch 类别计数、WaiverConflict 计数，以及 Unmatched waiver 计数。
+\begin{itemize}
+  \item 当具有不同 waiver 类别的相交 waiver 形状被层次合并在一起时，发生 waiver 冲突。
+  \item Unmatched 是该规则在所有输入 waiver 数据库中未在当前设计中匹配的 waiver 形状计数。
+\end{itemize}
+
+也可通过设置下列内容生成详细 waiver 报告：
+\begin{lstlisting}[style=pxl]
+waiver_options(report_waiver_details = true)
+\end{lstlisting}
+
+这会为每个 waiver 添加表格，含单元、waiver 类别、匹配模式、上下文、匹配到的 waiver 形状所在的 waiver 数据库、任何 waiver 属性，以及错误详情（距离、包围盒等）。
+
+\begin{noteBox}
+可用 \cmd{-runset\_config} 命令行选项修改 \cmd{waiver\_options()} 函数。
+\end{noteBox}
+
+可在 IC Validator 运行完成后生成 waiver 报告文件。若不想在默认 IC Validator 运行中查看详情，但希望运行后再查看，此功能很有用。
+\begin{lstlisting}[style=shell]
+%icv_pydb -i ./run_details/pydb/PYDB_top \
+     -create_waiver_report top.DETAILED_WAIVERS \
+     -include_waiver_details
+\end{lstlisting}
+
+也可用 \cmd{icv\_pydb} 实用程序生成 JSON 格式的 waiver 报告文件。若需编写脚本处理给定设计上已应用的 waivers，这种结构化格式更易于解析。
+\begin{lstlisting}[style=shell]
+% icv_pydb -i ./run_details/pydb/PYDB_top \
+      -create_json_waiver_file top.waiver_file \
+      -include_waiver_details
+\end{lstlisting}
+
+\begin{lstlisting}[style=shell,caption={JSON 格式 Waiver 报告文件},label={ex:json-waiver-report}]
+{
+     "icv_run_info": {
+     "library_name": "../../../lab_data/INLIB_TRAINING.GDS",
+     "structure_name": "top",
+     "generated_by": "IC Validator RHEL64
+  S-2021.06-SP3-BETA-20211123.7086978 2021/11/23",
+     "runset_name": "../modular.rs",
+      "user_name": "johndoe",
+      "time_started": "2021/11/24 12:00:58PM",
+      "time_ended": "2021/11/24 12:01:13PM"
+   },
+   "rules": [
+      {"rule": "R.M3.L", "violation_comments": ["R.M3.L: M3 can not have 3
+ or more consecutive line segments be < 0.07000000000000001"]},
+      {"rule": "R.M4.W", "violation_comments": ["R.M4.W: M4 Minimum width
+ >= 0.24"]}
+   ],
+   "waiver_databases": [
+      {
+        "waiver_database_id": "WDB1",
+        "file":
+ "/path/to/johndoe/TRAINING/drc/lab_answers/lab5_modularize/mywaivers_db.oas",
+        "checksum": "PASS"
+      }
+   ],
+   "waiver_details": [
+      {
+        "rule": "R.M3.L",
+        "command": ".././include/metal_rules.rs:78:vertices_edge",
+        "cell": "top",
+        "class": "Waive",
+        "mode": "Enclose",
+        "context": "ALL",
+        "waiver_sources": ["WDB1:top"],
+        "unique_id": "E.12.100.1",
+        "bbox": [30.2400, 15.3700, 30.2400, 15.4000],
+        "user_comments": ["waiving M3.L rule."]
+      }
+],
+   "unmatched_waiver_details": [ ],
+   "rule_overrides": [ ]
+}
+\end{lstlisting}

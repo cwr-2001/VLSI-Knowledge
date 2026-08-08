@@ -1,0 +1,1218 @@
+% 第 10 章 Optimization
+\bichapter{优化}{Optimization}
+\label{chap:opt}
+
+DC Explorer 提供快速综合以加速高质量 RTL 开发。相对完整综合，运行时间显著更短，便于对多种配置做 what-if 分析，以满足功能、时序与面积要求。
+使用 \cmd{compile\_exploration} 综合设计。DC Explorer 并发优化全部 endpoint，并使用不同优化引擎，使运行时间相对设计规模近似线性。
+
+本章包括以下主题：
+\begin{itemize}
+  \item Compile 策略
+  \item 执行自顶向下 Compile
+  \item 执行自底向上 Compile
+  \item 面向高性能设计的优化
+  \item 执行手动高扇出综合
+  \item 解析设计引用的多实例
+  \item 定义库子集限制
+  \item 优化多角多模式设计
+  \item 带 Floorplan 物理约束的优化
+  \item 执行功耗优化
+  \item 流水线逻辑 Retiming
+  \item 其他优化功能
+\end{itemize}
+
+% ============================================================
+\section{Compile 策略}
+\subsection*{Compile Strategies}
+
+对层次化设计可采用多种 compile 策略。基本策略为：
+\begin{itemize}
+  \item \textbf{自顶向下（Top-down）compile} — 顶层设计及其全部子设计一起 compile
+  \item \textbf{自底向上（Bottom-up）compile} — 从层次底部开始分别 compile 各子设计，再逐级向上直至顶层
+\end{itemize}
+
+以图~\ref{fig:dce-compile-strat} 所示简单设计说明自顶向下策略。表~\ref{tab:dce-top-spec} 给出该设计的顶层/全局规格，由例~\ref{ex:dce-defaults-con} 中的脚本定义；这些规格适用于 \texttt{TOP} 及其全部子设计。
+
+\figplaceholder{Figure 51: Design to Illustrate Compile Strategies}{用于说明 Compile 策略的设计}{fig:dce-compile-strat}
+
+\begin{table}[htbp]
+\centering
+\caption{设计 TOP 的设计规格}
+\label{tab:dce-top-spec}
+\begin{tabular}{@{}ll@{}}
+\toprule
+规格类型 & 取值 \\
+\midrule
+Operating condition & WCCOM \\
+Clock frequency & 40 MHz \\
+Input delay time & 3 ns \\
+Output delay time & 2 ns \\
+Input drive strength & \texttt{drive\_of (IV)} \\
+Output load & 1.5 pF \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{lstlisting}[caption={设计 TOP 的约束文件（defaults.com）},label={ex:dce-defaults-con}]
+set_operating_conditions WCCOM
+create_clock -period 25 clk
+set_input_delay 3 -clock clk \
+   [remove_from_collection [all_inputs] [get_ports clk]]
+set_output_delay 2 -clock clk [all_outputs]
+set_load 1.5 [all_outputs]
+set_driving_cell -lib_cell IV [all_inputs]
+set_drive 0 clk
+\end{lstlisting}
+
+\begin{noteBox}
+为防止时钟网络被缓冲，脚本将时钟端口（\texttt{clk}）的输入驱动电阻设为 0（无限驱动强度）。
+\end{noteBox}
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 执行自顶向下 Compile
+  \item 执行自底向上 Compile
+\end{itemize}
+\end{seeAlsoBox}
+
+% ============================================================
+\section{执行自顶向下 Compile}
+\subsection*{Performing a Top-Down Compile}
+
+对不受内存或 CPU 限制的设计，可使用自顶向下策略。内存受限的顶层设计常可先用 block abstraction 替换部分子设计后再采用该策略；用 block abstraction 替换子设计可降低顶层中该实例的内存需求。
+
+优点：
+\begin{itemize}
+  \item 提供一键式（push-button）方法
+  \item 自动处理块间依赖
+\end{itemize}
+
+缺点：需要更多内存；对超过约 100K 门的设计可能运行时间更长。
+
+步骤：
+\begin{enumerate}
+  \item 加载整个设计。
+  \item 在顶层施加属性与约束（实现设计规格）。
+\begin{noteBox}
+也可向子设计分配局部属性与约束，但须相对于顶层设计定义。
+\end{noteBox}
+  \item Compile 设计。
+\begin{noteBox}
+若顶层含一个或多个 block abstraction，使用第~\ref{chap:hier}~章「使用层次化模型」中的 compile 流程。
+\end{noteBox}
+\end{enumerate}
+
+例~\ref{ex:dce-topdown} 给出 \texttt{TOP} 的自顶向下 compile 脚本；约束通过包含「Compile 策略」示例中的约束文件施加。
+
+\begin{lstlisting}[caption={自顶向下 Compile 脚本},label={ex:dce-topdown}]
+/* read in the entire design */
+read_verilog E.v
+read_verilog D.v
+read_verilog C.v
+read_verilog B.v
+read_verilog A.v
+read_verilog TOP.v
+current_design TOP
+link
+report_design_mismatch
+/* apply constraints and attributes */
+source defaults.con
+/* compile the design */
+compile_exploration
+\end{lstlisting}
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item Compile 策略
+  \item 第~\ref{chap:hier}~章「使用层次化模型」
+  \item 第~\ref{chap:memory}~章「处理内存中的设计」
+  \item 第~\ref{chap:env}~章「定义设计环境」
+  \item 第~\ref{chap:constraints}~章「定义设计约束」
+\end{itemize}
+\end{seeAlsoBox}
+
+% ============================================================
+\section{执行自底向上 Compile}
+\subsection*{Performing a Bottom-Up Compile}
+
+推荐策略是自顶向下 compile。但为应对设计与运行时间挑战，或采用分而治之的综合方法，可使用自底向上 compile（亦称层次化 compile 流程）：分别 compile 子块，再并入顶层。
+
+DC Explorer 可读取下列类型的层次块：
+\begin{itemize}
+  \item 在 DC Explorer 中生成的网表
+  \item 在 DC Explorer 或 IC Compiler 中生成的 block abstraction
+\end{itemize}
+
+可将子块 compile 后以完整 \texttt{.ddc} 网表或 block abstraction 提供给顶层；也可在 IC Compiler 中继续处理子块以创建 block abstraction 再提供给顶层。子块的时序与物理信息会传播到顶层供物理综合使用；还可在顶层综合期间为子块提供布局位置以保持与 IC Compiler 的相关性。
+
+在层次化/自底向上流程中，用 \cmd{compile\_exploration -scan -gate\_clock} 做顶层集成。工具自动将块级时序与布局传播到顶层并驱动优化；也可指定子块布局位置。顶层优化时考虑布局，并可使用与后端工具相同的物理约束。
+
+要进一步了解，见：
+\begin{itemize}
+  \item 自底向上 Compile 概览
+  \item Compile 子块
+  \item 在顶层 Compile 设计
+\end{itemize}
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item Compile 策略
+  \item 第~\ref{chap:hier}~章「层次化模型概览」
+\end{itemize}
+\end{seeAlsoBox}
+
+\subsection{自底向上 Compile 概览}
+\subsubsection*{Overview of Bottom-Up Compile}
+
+在自底向上流程中，compile 子块并将已映射子块保存为 \texttt{.ddc} 网表，再在 IC Compiler 中生成 block abstraction；也可将已映射子块直接保存为 \texttt{.ddc} 中的 block abstraction。
+
+顶层综合可接受：
+\begin{itemize}
+  \item DC Explorer 综合的 \texttt{.ddc} 网表
+  \item DC Explorer 创建的 block abstraction
+  \item IC Compiler 创建的 block abstraction
+\end{itemize}
+
+\begin{noteBox}
+IC Compiler 不能接受 DC Explorer 的 block abstraction。
+\end{noteBox}
+
+图~\ref{fig:dce-hier-ba-flow} 给出含 block abstraction 设计的层次化流程概览。
+
+\figplaceholder{Figure 52: Overview of the Hierarchical Flow for Designs Containing Block Abstractions}{含 Block Abstraction 设计的层次化流程概览}{fig:dce-hier-ba-flow}
+
+主要任务：
+\begin{enumerate}
+  \item Compile 子块 — 分别 compile 各子设计
+  \item 在顶层 Compile 设计 — 读入顶层及尚未在内存中的已 compile 子设计，再 compile 顶层
+\end{enumerate}
+
+\subsection{Compile 子块}
+\subsubsection*{Compiling the Subblock}
+
+\begin{enumerate}
+  \item 指定逻辑库与物理库。
+  \item 读入子块（Verilog、VHDL、网表或 \texttt{.ddc}），并将当前设计设为该子块。
+  \item 施加块级时序约束与功耗约束。
+  \item （可选）提供物理约束。
+  \item （可选）在 Design Vision layout 窗口中直观验证综合前 floorplan；需链接全部适用设计与库。
+  \item 用 \cmd{compile\_exploration -scan -gate\_clock} 对子块做 test-ready 与时钟门控 compile。
+  \item 运行 \cmd{uniquify -force}，为每个单元实例创建唯一设计名，避免顶层集成时名称冲突。
+  \item 写出设计数据前，用 \cmd{change\_names -rules verilog -hierarchy} 对全部设计对象应用 Verilog 命名规则。
+\end{enumerate}
+
+此后按目标继续：
+\begin{itemize}
+  \item \textbf{创建完整 \texttt{.ddc} 网表} — 用 \cmd{write\_file -format ddc} 保存；顶层综合时读入或加入 \varname{link\_library}
+  \item \textbf{为子块生成 Block Abstraction} — 见下文
+  \item \textbf{在 IC Compiler 中为子块生成 Block Abstraction} — 见下文
+\end{itemize}
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 指定逻辑库 / 物理库
+  \item 使用 Floorplan 物理约束
+  \item 在顶层 Compile 设计
+\end{itemize}
+\end{seeAlsoBox}
+
+\subsubsection{为子块生成 Block Abstraction}
+\subsubsection*{Generating a Block Abstraction for the Subblock}
+
+完成「Compile 子块」步骤后继续：
+\begin{enumerate}
+  \item 运行 \cmd{create\_block\_abstraction} — 识别当前设计接口逻辑并注释到内存中的设计
+  \item 用 \cmd{write\_file} 保存，例如：
+\begin{lstlisting}
+de_shell> write_file -hierarchy -format ddc -output myfile.mapped.ddc
+\end{lstlisting}
+        应在创建后立即保存；\cmd{write\_file} 将完整设计（含 block abstraction 信息）写入 \texttt{.ddc}。
+\end{enumerate}
+
+然后按「在顶层 Compile 设计」集成。
+
+\subsubsection{在 IC Compiler 中为子块生成 Block Abstraction}
+\subsubsection*{Generating a Block Abstraction for the Subblock in IC Compiler}
+
+\begin{enumerate}
+  \item 在 DC Explorer 中用 \cmd{write\_file -format ddc} 写出块级设计。
+  \item 在 IC Compiler 中设置设计与 Milkyway 库。
+  \item 读入已映射子块的 \texttt{.ddc} 以及 topographical 模式生成的块 SCANDEF。
+  \item 用 IC Compiler 命令创建 floorplan，或用 \cmd{read\_def} 从 DEF 读入。
+  \item 运行 \cmd{place\_opt}。
+  \item 运行 \cmd{clock\_opt}。
+  \item 运行 \cmd{route\_opt}。
+  \item 运行 \cmd{create\_block\_abstraction}。
+  \item 运行 \cmd{save\_mw\_cel} 创建 CEL 视图。
+\end{enumerate}
+
+\subsection{在顶层 Compile 设计}
+\subsubsection*{Compiling the Design at the Top Level}
+
+\begin{enumerate}
+  \item 指定逻辑库与物理库。若使用 IC Compiler 创建的 block abstraction，须将含该 CEL 视图的 Milkyway 设计库加入顶层 Milkyway 参考库列表。
+  \item 若使用 DC Explorer 或 IC Compiler 的 block abstraction，用 \cmd{set\_top\_implementation\_options} 指定应以 block abstraction 集成的块：
+  \begin{itemize}
+    \item DC Explorer（\texttt{.ddc}）：在打开块之前使用 \opt{-block\_references}；否则加载完整块网表
+    \item IC Compiler（CEL）：设置顶层链接选项；否则无法链接到 IC Compiler block abstraction。若已将含 CEL 的 Milkyway 库加入参考库列表，链接顶层时自动加载
+  \end{itemize}
+\begin{noteBox}
+要在顶层综合期间忽略完全位于 block abstraction 内的时序路径，见第~\ref{chap:hier}~章「忽略 Block Abstraction 内的时序路径」。
+\end{noteBox}
+  \item （可选）将 \varname{timing\_ignore\_paths\_within\_block\_abstraction} 设为 \texttt{true}，忽略完全位于 block abstraction 内的寄存器到寄存器路径。
+  \item 读入顶层设计（Verilog、VHDL、网表或 \texttt{.ddc}）。
+  \item 读入已映射子块，可为：完整 \texttt{.ddc} 网表；DC Explorer block abstraction（须先设 \cmd{set\_top\_implementation\_options}，仅加载接口逻辑）；IC Compiler block abstraction（须在链接前设置选项）。
+\begin{noteBox}
+可将 \texttt{.ddc} 加入 \varname{link\_library} 而非直接读入；链接到顶层时工具自动加载。
+\end{noteBox}
+  \item 将当前设计设为顶层。
+  \item （可选）对完整 \texttt{.ddc} 网表用 \cmd{set\_physical\_hierarchy} 将子块当作物理子块；此时顶层综合保留块内逻辑结构与单元布局。若不希望当作物理块，则省略该命令。
+  \item 用 \cmd{link} 将子块链接到顶层。
+  \item 施加顶层时序与功耗约束。
+  \item （可选）提供物理约束（\cmd{set\_cell\_location} 或从 DEF \cmd{extract\_physical\_constraints}）。
+  \item （可选）直观验证 floorplan。
+  \item 运行 \cmd{compile\_exploration -scan -gate\_clock}。
+  \item 用 \cmd{write\_file -format ddc} 写出顶层网表（与原始 \texttt{.ddc} 合并变更并写出完整块）。
+\end{enumerate}
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 指定逻辑库 / 物理库
+  \item 忽略 Block Abstraction 内的时序路径
+  \item 使用 Floorplan 物理约束
+\end{itemize}
+\end{seeAlsoBox}
+
+% ============================================================
+\section{面向高性能设计的优化}
+\subsection*{Performing Optimization for High-Performance Designs}
+
+可用 \cmd{compile\_exploration} 做更好 QoR 的优化，尤其对时序约束很紧的高性能设计。该命令可在 compile 期间应用最佳的一组以时序为中心的变量，用于关键延时优化并改善面积 QoR。
+
+默认 compile 对多数设计可给出良好结果。若设计探索后仍未达优化目标，可尝试：
+\begin{itemize}
+  \item Datapath 优化
+  \item 面向最小面积的优化
+\end{itemize}
+
+\subsection{Datapath 优化}
+\subsubsection*{Datapath Optimization}
+
+Datapath 设计常见于含大量数据操作的应用（3-D、多媒体、DSP）。Datapath 提取将加、减、乘等算术算子变换为 datapath 块，由 datapath 生成器实现，利用进位保存算术改善 QoR。
+
+运行 \cmd{compile\_exploration} 时默认启用 datapath 优化。DC Explorer 使用 datapath 生成器构建算术组件，并在优化期间考虑位级时序上下文。要将 datapath 生成器与 \cmd{compile\_exploration} 一起使用，请将 \texttt{dw\_foundation.sldb} 列入 synthetic library 列表；必要时执行 \cmd{set synthetic\_library dw\_foundation.sldb}。需要 DesignWare 许可证。
+
+默认若 synthetic library 列表中无 \texttt{dw\_foundation.sldb} 但 DesignWare 许可证已成功检出，则仅对当前命令自动将该库加入列表；用户指定的 synthetic/link library 列表不受影响。
+
+DC Explorer 启用 datapath 提取，并在 compile 期间探索多种 datapath 与资源共享选项。收益包括：共享 datapath 算子；提取 datapath；探索可能涉及不同资源共享配置的更好解；在资源共享与 datapath 优化之间做更好折中。
+
+\subsection{面向最小面积的优化}
+\subsubsection*{Optimizing for Minimum Area}
+
+若设计有时序约束，时序始终优先于面积。对面积极关键设计，指定现实约束。微调面积时可保留层次，并让 DC Explorer 默认执行边界优化；要进一步减小面积，可能需要移除层次边界。
+
+若未满足面积约束，可尝试跨层次边界优化：
+\begin{itemize}
+  \item 边界优化（Boundary Optimization）
+  \item 层次移除（Hierarchy Removal）
+\end{itemize}
+
+\subsubsection{边界优化}
+\subsubsection*{Boundary Optimization}
+
+默认 DC Explorer 跨层次边界优化。也可：
+\begin{lstlisting}
+de_shell> set_boundary_optimization subdesign true
+\end{lstlisting}
+
+启用后，工具传播常量、未连接引脚与互补信息。对许多常量（VCC/GND）连接到子设计输入的设计，传播可减小面积（见图~\ref{fig:dce-bound-opt}）。
+
+\figplaceholder{Figure 53: Benefits of Boundary Optimization}{边界优化的收益}{fig:dce-bound-opt}
+
+若禁用边界优化仍需减小面积，将 \varname{compile\_optimize\_unloaded\_seq\_logic\_with\_no\_bound\_opt} 设为 \texttt{true}（默认 \texttt{false}）以移除未连接逻辑：跨层次移除未连接寄存器；通过多比特寄存器传播未连接逻辑以移除未使用位并推断更小尺寸的多比特寄存器。
+
+\subsubsection{层次移除}
+\subsubsection*{Hierarchy Removal}
+
+默认第一遍 compile 自动 ungroup 小设计层次；第二遍用基于延时的 auto-ungrouping 沿关键路径 ungroup。Ungrouping 移除层次边界，使工具可在更多门上优化。也可用 \cmd{set\_ungroup} 在优化前指定要 ungroup 的单元。
+
+默认第二遍中全部 DesignWare 层次无条件 ungroup。将 \varname{compile\_ultra\_ungroup\_dw} 设为 \texttt{false}（默认 \texttt{true}）可阻止。
+
+\begin{seeAlsoBox}
+移除层次级别。
+\end{seeAlsoBox}
+
+% ============================================================
+\section{执行手动高扇出综合}
+\subsection*{Performing Manual High-Fanout Synthesis}
+
+用 \cmd{create\_buffer\_tree} 手动运行高扇出综合以控制缓冲树的创建与移除。默认 \cmd{compile\_exploration} 会自动做高扇出综合。
+
+\begin{noteBox}
+必须已有已映射设计才能运行手动高扇出综合。
+\end{noteBox}
+
+\cmd{create\_buffer\_tree} 移除设计中已有缓冲树并重新创建。要保留已有缓冲树，指定 \opt{-incremental}：此时仅在 \opt{-from} 指定的各网上按需构建缓冲树以降低高扇出，不移除现有缓冲器/反相器。
+
+步骤：
+\begin{enumerate}
+  \item 用 \cmd{report\_buffer\_tree} 报告已映射网表上的当前缓冲树实现
+  \item 识别 \cmd{compile\_exploration} 产生的次优缓冲
+  \item 用 \cmd{remove\_buffer\_tree} 与 \cmd{create\_buffer\_tree} 按需移除并创建缓冲树
+\end{enumerate}
+
+插入的缓冲器/反相器可能被其他优化命令进一步优化；要在优化期间保留特定缓冲器/反相器，对其设置 \texttt{size\_only} 或 \texttt{dont\_touch} 等限制属性。
+
+% ============================================================
+\section{解析设计引用的多实例}
+\subsection*{Resolving Multiple Instances of a Design Reference}
+
+在层次化设计中，子设计常被多个单元实例引用。例如图~\ref{fig:dce-multi-ref} 中设计 \texttt{TOP} 对设计 C 引用两次（\texttt{U2/U3} 与 \texttt{U2/U4}）。
+
+\figplaceholder{Figure 54: Multiple Instances of a Design Reference}{设计引用的多实例}{fig:dce-multi-ref}
+
+对 \cmd{check\_design} 使用 \opt{-multiple\_designs} 报告与多重实例化设计相关的信息消息；列出全部多重实例化设计及实例名与属性（\texttt{dont\_touch}、\texttt{black\_box}、\texttt{ungroup}）。
+
+处理方法：
+\begin{itemize}
+  \item \textbf{Uniquify 方法} — compile 过程自动 uniquify；仍可在 compile 前手动 \cmd{uniquify}，但这会增加运行时间（compile 时会再次 uniquify）。不能关闭 uniquify 过程。
+  \item \textbf{Compile-Once-Don't-Touch 方法} — 用 \cmd{set\_dont\_touch} 在其余设计 compile 时保留已 compile 的子设计
+  \item \textbf{Ungroup 方法} — 用 \cmd{ungroup} 移除层次
+\end{itemize}
+
+\begin{seeAlsoBox}
+保留子设计。
+\end{seeAlsoBox}
+
+\subsection{Uniquify 方法}
+\subsubsection*{Uniquify Method}
+
+Uniquify 过程复制并重命名任何多重引用的设计，使每个实例引用唯一设计；创建新唯一设计后从内存移除原始设计，原始设计及其集合不再可访问。
+
+工具在 compile 过程中自动 uniquify，可解析当前设计层次中的多重引用（带 \texttt{dont\_touch} 的除外）。之后可基于各单元实例的独特环境优化每个设计副本。
+
+也可用 \cmd{uniquify} 的 \opt{-reference} 或 \opt{-cell} 为特定引用/单元创建唯一副本；即使标有 \texttt{dont\_touch} 也会复制。\opt{-cell} 接受实例对象；指定下层实例时会 uniquify 到该实例的完整路径，例如：
+\begin{lstlisting}
+de_shell> uniquify -cell mid1/bot1
+\end{lstlisting}
+
+命名约定由 \varname{uniquify\_naming\_style} 指定，默认 \texttt{\%s\_\%d}（\texttt{\%s} 为原子设计名或 \opt{-base\_name}；\texttt{\%d} 为形成唯一名的最小整数）。
+
+对图中设计 C 的多重实例，自动 uniquify 创建 \texttt{C\_0} 与 \texttt{C\_1}：
+\begin{lstlisting}
+de_shell> current_design top
+de_shell> compile_exploration
+\end{lstlisting}
+
+\figplaceholder{Figure 55: Uniquify Results}{Uniquify 结果}{fig:dce-uniquify}
+
+相对 compile-once-don't-touch：需要更多内存；compile 时间更长。
+
+\subsection{Compile-Once-Don't-Touch 方法}
+\subsubsection*{Compile-Once-Don't-Touch Method}
+
+若多重引用设计各实例周围环境足够相似，可先用某一实例的环境 compile，再用 \cmd{set\_dont\_touch} 在后续优化中保留该子设计。
+
+步骤：
+\begin{enumerate}
+  \item Compile 被引用的子设计
+  \item 对引用已 compile 子设计的全部实例设置 \texttt{dont\_touch}
+  \item Compile 整个设计
+\end{enumerate}
+
+例如（假设 \texttt{U2/U3} 环境最差）：
+\begin{lstlisting}
+de_shell> current_design top
+...
+de_shell> current_design C
+de_shell> compile_exploration
+de_shell> current_design top
+de_shell> set_dont_touch {U2/U3 U2/U4}
+de_shell> compile_exploration
+\end{lstlisting}
+
+\figplaceholder{Figure 56: Compile-Once-Don't-Touch Results}{Compile-Once-Don't-Touch 结果}{fig:dce-codt}
+
+优点：引用设计只 compile 一次；比 uniquify 更省内存与时间。主要缺点：表征可能不适用于全部实例；带 \texttt{dont\_touch} 的对象不能 ungroup。
+
+\begin{seeAlsoBox}
+保留子设计。
+\end{seeAlsoBox}
+
+\subsection{Ungroup 方法}
+\subsubsection*{Ungroup Method}
+
+效果与 uniquify 类似（创建唯一副本），并额外移除层次级别；用 \cmd{ungroup} 产生平坦网表。Ungroup 实例后可重新 compile 顶层：
+\begin{lstlisting}
+de_shell> current_design B
+de_shell> ungroup {U3 U4}
+de_shell> current_design top
+de_shell> compile_exploration
+\end{lstlisting}
+
+\figplaceholder{Figure 57: Ungroup Results}{Ungroup 结果}{fig:dce-ungroup}
+
+特点：比 compile-once-don't-touch 更耗内存与时间；通常提供最佳综合结果。缺点：移除用户定义的设计层次。
+
+\begin{seeAlsoBox}
+移除层次级别。
+\end{seeAlsoBox}
+
+\subsection{保留子设计}
+\subsubsection*{Preserving Subdesigns}
+
+用 \cmd{set\_dont\_touch} 在优化期间保留子设计：在单元、网络、引用与设计上放置 \texttt{dont\_touch}，防止被修改或替换。
+
+\begin{noteBox}
+设计中的任何 block abstraction 会自动标记 \texttt{dont\_touch}；其单元也标记为 don't touch。
+\end{noteBox}
+
+\texttt{dont\_touch} 不阻止或禁用穿过该设计的时序。注意：
+\begin{itemize}
+  \item 在层次单元上设置会对其下全部单元隐含 don't touch
+  \item 在库单元上设置会对该单元全部实例隐含 don't touch
+  \item 在网络上设置仅对连接到该网的已映射组合单元隐含 don't touch；若仅连到 generic logic，优化可能移除该网
+  \item 在引用上设置会在后续优化中对使用该引用的全部单元隐含 don't touch
+  \item 在设计上设置仅当该设计作为层次实例化在另一设计中时有效；对顶层设计设置无效
+  \item 不能用 \cmd{ungroup} ungroup 带 \texttt{dont\_touch} 的对象；自动 ungrouping 也不影响 don't touch 对象
+\end{itemize}
+
+\begin{noteBox}
+对 synthetic part 单元以及连有未映射单元的网络，\texttt{dont\_touch} 被忽略；compile 时会对连到未映射单元（generic logic）的 don't touch 网络发出警告。
+\end{noteBox}
+
+用 \cmd{remove\_attribute} 或将 \cmd{set\_dont\_touch} 设为 \texttt{false} 移除该属性。
+
+\begin{seeAlsoBox}
+第~\ref{chap:hier}~章「使用层次化模型」。
+\end{seeAlsoBox}
+
+% ============================================================
+\section{定义库子集限制}
+\subsection*{Defining Library Subset Restrictions}
+
+可将时序单元与已实例化组合单元的映射与优化限制到目标库中用户指定的库单元子集。
+对 \cmd{define\_libcell\_subset} 使用 \opt{-family\_name} 定义一个或多个子集；仅当库单元满足下列条件时才归入子集：
+\begin{itemize}
+  \item 必须是时序单元或已实例化组合单元
+  \item 不能已属于另一子集
+  \item 必须具有相同功能标识
+\end{itemize}
+
+分组后，这些库单元在 compile 期间不用于一般映射；DC Explorer 仅用它们映射由 \cmd{set\_libcell\_subset} 指定的时序单元与已实例化组合单元。用 \opt{-object\_list} 指定要优化的单元列表；指定单元必须未映射，或已实例化为子集中的某一库单元。
+
+运行这两条命令后，全部优化（含单元尺寸调整与交换）限制在该库子集中的单元；该限制仅适用于优化期间创建、映射或修改的单元，不适用于未优化的设计部分。
+
+\begin{lstlisting}
+de_shell> define_libcell_subset -libcell_list {SDFLOP1 SDFLOP2} \
+   -family_name specialflops
+de_shell> set_libcell_subset -libcell_list [get_cells {reg01 reg02}] \
+   -family_name specialflops
+\end{lstlisting}
+
+用 \cmd{report\_libcell\_subset} 报告；用 \cmd{remove\_libcell\_subset} 移除约束或用户定义子集：
+\begin{lstlisting}
+de_shell> report_libcell_subset -object_list [get_cells reg01]
+de_shell> remove_libcell_subset -object_list [get_cells {reg01 reg02}]
+de_shell> remove_libcell_subset -family_name specialflops
+\end{lstlisting}
+
+% ============================================================
+\section{优化多角多模式设计}
+\subsection*{Optimizing Multicorner-Multimode Designs}
+
+DC Explorer 可跨多个 mode 与多个 corner 并发分析并优化多角多模式（MCMM）设计。因用户界面相似，该功能便于在 DC Explorer 与 IC Compiler 流程之间获得易用性与兼容性。
+
+下列主题描述 MCMM 设计优化：
+\begin{itemize}
+  \item 多角多模式概念
+  \item 多角多模式设计不支持的功能
+  \item 基本多角多模式流程
+  \item 在多角多模式流程中处理库
+  \item 定义 Scenario
+  \item 管理 Scenario
+  \item 并发多角多模式优化与时序分析
+  \item 多角多模式设计的报告命令
+  \item 多角多模式设计支持的 SDC 命令
+  \item 在多角多模式设计中使用 Block Abstraction
+\end{itemize}
+
+\subsection{多角多模式概念}
+\subsubsection*{Multicorner-Multimode Concepts}
+
+在多个工作条件（corner）与多个 mode 下工作的设计称为多角多模式设计。
+
+常用术语：
+\begin{itemize}
+  \item \textbf{Corner} — 由一组工艺、电压与温度（PVT）条件组成的工作条件。Corner 不依赖功能设置，用于捕获制造工艺变化以及芯片工作环境中预期的电压与温度变化。
+  \item \textbf{Mode} — 由一组时钟、供电电压、时序约束与库定义；也可有 SDF 或寄生文件等注释数据。MCMM 设计可工作于测试、任务、待机等多种 mode。
+  \item \textbf{Scenario} — modal 约束与 corner 规格的组合。工具以 scenario 或 scenario 集作为 MCMM 分析与优化的单位。某些约束可同时属于 mode 与 corner 规格。优化 MCMM 设计涉及管理设计的 scenario。
+\end{itemize}
+
+\begin{seeAlsoBox}
+管理 Scenario（下文）。
+\end{seeAlsoBox}
+
+\subsection{多角多模式设计不支持的功能}
+\subsubsection*{Unsupported Features for Multicorner-Multimode Designs}
+
+DC Explorer 对 MCMM 设计不支持：
+\begin{itemize}
+  \item 功耗驱动的时钟门控 — 使用 \cmd{compile\_exploration -gate\_clock} 时，时钟门插入与 scenario 无关
+  \item 时钟树估计
+  \item k-factor scaling — MCMM 设计库不支持 k-factor scaling，为各 scenario 指定的工作条件必须匹配 link library 列表中某一库的标称工作条件
+  \item 针对个别 scenario 的 \cmd{set\_min\_library} — 该命令定义的库设置适用于全部 scenario
+  \item \cmd{set\_scenario\_options} 的 \opt{-leakage\_power} 与 \opt{-dynamic\_power} — 若指定，工具忽略并发出警告
+\end{itemize}
+
+\subsection{基本多角多模式流程}
+\subsubsection*{Basic Multicorner-Multimode Flow}
+
+图~\ref{fig:dce-mcmm-flow} 给出基本 MCMM 流程。关键步骤是创建 scenario 定义。至少应包括 scenario 名、工作条件、TLUPlus 库与约束；可创建多个 scenario。对每个 scenario 指定该 mode 特有的约束与该 corner 特有的工作条件。
+
+\figplaceholder{Figure 58: Basic Multicorner-Multimode Flow}{基本多角多模式流程}{fig:dce-mcmm-flow}
+
+\begin{lstlisting}[caption={运行多角多模式流程的基本脚本}]
+#......path settings......
+set search_path ". $DESIGN_ROOT $lib_path/dbs \
+   $lib_path/mwlibs/macros/LM"
+set target_library "stdcell.setup.ftyp.db \
+   stdcell.setup.typ.db stdcell.setup.typhv.db"
+set link_library [concat * $target_library \
+   setup.ftyp.130v.100c.db setup.typhv.130v.100c.db \
+   setup.typ.130v.100c.db]
+set_min_library stdcell.setup.typ.db -min_version stdcell.hold.typ.db
+#......MW setup......
+#......load design......
+create_scenario s1
+set_operating_conditions WORST -library stdcell.setup.typ.db:stdcell_typ
+set_tlu_plus_files -max_tluplus design.tlup -tech2itf_map layermap.txt
+read_sdc s1.sdc
+set_scenario_options -scenarios s1 -setup false -hold false
+
+create_scenario s2
+set_operating_conditions BEST -library stdcell.setup.ftyp.db:stdcell_ftyp
+set_tlu_plus_files -max_tluplus design.tlup -tech2itf_map layermap.txt
+read_sdc s2.sdc
+
+create_scenario s3
+set_operating_conditions NOM -library stdcell.setup.ftyp.db:stdcell_ftyp
+set_tlu_plus_files -max_tluplus design.tlup -tech2itf_map layermap.txt
+read_sdc s3.sdc
+
+set_active_scenarios {s1 s2}
+report_scenarios
+compile_exploration -scan -gate_clock
+report_qor
+report_constraint
+report_timing -scenarios [all_scenarios]
+...
+compile_exploration -scan
+\end{lstlisting}
+
+\subsection{在多角多模式流程中处理库}
+\subsubsection*{Handling Libraries in the Multicorner-Multimode Flow}
+
+\subsubsection{使用具有相同 PVT 标称值的 Link Library}
+\subsubsection*{Using Link Libraries With the Same PVT Nominal Values}
+
+Link library 包含全部 scenario 链接设计所用的库。因一个 scenario 常使用多个库（标准单元库与宏库等），工具自动将库分组为集合，并识别各 scenario 应链接哪一集合。
+
+具有相同 PVT 值的库分到同一集合。工具用 scenario 定义中最大工作条件的 PVT 值选择适当集合。若在 link library 中找不到合适单元则报错；应在优化前验证工作条件与库设置。
+
+表~\ref{tab:dce-link-pvt} 示例给出 link library 列表、标称 PVT 与库中工作条件。
+
+\begin{table}[htbp]
+\centering
+\caption{具有 PVT 值与工作条件的 Link Library}
+\label{tab:dce-link-pvt}
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+Link library（顺序） & 标称 PVT & 库中工作条件（PVT） \\
+\midrule
+Combo\_cells\_slow.db & 1/0.85/130 & WORST (1/0.85/130) \\
+Sequentials\_fast.db & 1/1.30/100 & None \\
+Macros\_fast.db & 1/1.30/100 & None \\
+Macros\_slow.db & 1/0.85/130 & None \\
+Combo\_cells\_fast.db & 1/1.30/100 & BEST (1/1.3/100) \\
+Sequentials\_slow.db & 1/0.85/130 & None \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+下例创建 scenario \texttt{s1}，单元实例链接到 \texttt{Combo\_cells\_slow}、\texttt{Macros\_slow} 与 \texttt{Sequentials\_slow}：
+\begin{lstlisting}
+de_shell> create_scenario s1
+de_shell> set_operating_conditions -max WORST -library slow
+\end{lstlisting}
+
+对 \cmd{set\_operating\_conditions} 使用 \opt{-library} 有助于工具识别正确 PVT。链接时用最大工作条件的 PVT 在 link library 列表中找匹配。该方法可链接无工作条件定义的库，并支持标准单元与宏分属不同库文件。
+
+\paragraph{防止不一致的库}
+\paragraph*{Preventing Inconsistent Libraries}
+
+对多库设计，若同名库单元功能、引脚名或引脚顺序不一致，工具发出警告。应在运行 MCMM 流程前用 \cmd{check\_library} 检查：
+\begin{lstlisting}
+de_shell> set_check_library_options -mcmm
+de_shell> check_library -logic_library_name {a.db b.db}
+\end{lstlisting}
+
+指定 \opt{-mcmm} 时，\cmd{check\_library} 执行 MCMM 专用检查（如工作条件或不一致的下电功能）；检测到不一致时生成报告并发出信息消息。
+
+\paragraph{在库单元上设置 dont\_use}
+\paragraph*{Setting the dont\_use Attribute on Library Cells}
+
+若在某库单元上设置 \texttt{dont\_use}，MCMM 流程要求该单元的全部表征都有该属性，否则可能视为库不一致。可用通配符：
+\begin{lstlisting}
+de_shell> set_dont_use */AN2
+\end{lstlisting}
+
+带 \texttt{dont\_use} 的库单元若与各 corner 库单元引脚顺序不同，工具继续流程且不报错/警告；若移除这些单元上的 \texttt{dont\_use}，则发出 MV-087 错误。
+
+\subsubsection{使用不同的 PVT 值}
+\subsubsection*{Using Distinct PVT Values}
+
+为确保单元实例正确链接，为工作条件使用不同的标称 PVT。工具用 PVT 将 link library 分组（如不同 corner 的最大库为一组）。当各 scenario 的最大库没有不同的 PVT 时，单元实例可能错误链接到该集合中第一个类型匹配的单元，即使 \cmd{set\_operating\_conditions ... -library} 指定了 scenario 专用库。
+
+例~\ref{ex:dce-indistinct-pvt} 与表~\ref{tab:dce-pvt-lib}/\ref{tab:dce-scen-op} 说明：工具将 \texttt{Ftyp.db} 与 \texttt{TypHV.db} 分到同一集合且 \texttt{Ftyp.db} 在前，导致 scenario \texttt{s2} 的单元错误链接到 \texttt{Ftyp.db} 而非预期的 \texttt{TypHV.db}。
+
+\begin{table}[htbp]
+\centering
+\caption{具有标称 PVT 与工作条件的 Link Library}
+\label{tab:dce-pvt-lib}
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+Link library & 标称 PVT & 工作条件（PVT） \\
+\midrule
+Ftyp.db & 1/1.30/100 & WORST (1/1.30/100) \\
+Typ.db & 1/0.85/100 & WORST (1/0.85/100) \\
+TypHV.db & 1/1.30/100 & WORST (1/1.30/100) \\
+HoldTyp.db & 1/0.85/100 & BEST (1/0.85/100) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\caption{Scenario 及其工作条件}
+\label{tab:dce-scen-op}
+\small
+\begin{tabular}{@{}lllll@{}}
+\toprule
+ & s1 & s2 & s3 & s4 \\
+\midrule
+Max Opcond & WORST (Typ.db) & WORST (TypHV.db) & WORST (Ftyp.db) & WORST (Typ.db) \\
+Min Opcond & None & None & None & BEST (HoldTyp.db) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{lstlisting}[caption={导致链接问题的不清晰 PVT 值},label={ex:dce-indistinct-pvt}]
+create_scenario s1
+set_operating_conditions WORST -library Typ.db:Typ
+create_scenario s2
+set_operating_conditions WORST -library TypHV.db:TypHV
+create_scenario s3
+set_operating_conditions WORST -library Ftyp.db:Ftyp
+create_scenario s4
+set_operating_conditions \
+   -max WORST -max_library Typ.db:Typ \
+   -min BEST -min_library HoldTyp.db:HoldTyp
+\end{lstlisting}
+
+\paragraph{模糊库警告}
+\paragraph*{Ambiguous Libraries Warning}
+
+若设计使用含同名单元且标称 PVT 相同的库，工具发出警告：库模糊，并指明使用/忽略哪些库。
+
+\subsubsection{定义最小库}
+\subsubsection*{Defining Minimum Libraries}
+
+用 \cmd{set\_operating\_conditions} 为各 scenario 定义最小库。若用 \cmd{set\_min\_library} 为某一 scenario 定义最小库，即使未对全部 scenario 定义，工具也会将该库用作全部 scenario 的最小库。
+
+一个最小库可关联多个最大库（表~\ref{tab:dce-minlib-ok}）。但不能将两个不同最小库关联到两个 scenario 中的同一最大库（表~\ref{tab:dce-minlib-bad}）；此时工具对两个 scenario 都应用第一个最小库。
+
+\begin{table}[htbp]
+\centering
+\caption{支持的库配置}
+\label{tab:dce-minlib-ok}
+\begin{tabular}{@{}lll@{}}
+\toprule
+ & Scenario s1 & Scenario s2 \\
+\midrule
+Maximum library & Slow.db & SlowHV.db \\
+Minimum library & Fast\_0yr.db & Fast\_0yr.db \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\caption{不支持的多重最小库配置}
+\label{tab:dce-minlib-bad}
+\begin{tabular}{@{}lll@{}}
+\toprule
+ & Scenario s1 & Scenario s2 \\
+\midrule
+Maximum library & Slow.db & Slow.db \\
+Minimum library & Fast\_0yr.db & Fast\_10yr.db \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{自动检测驱动单元库}
+\subsubsection*{Automatic Detection of Driving Cell Libraries}
+
+要用 \cmd{set\_driving\_cell} 的 \opt{-library} 为不同 scenario 指定不同库以构建驱动单元时序弧。工具在 link library 集合中搜索；若不存在则报错。
+
+若不指定 \opt{-library}，工具搜索匹配工作条件的全部库：使用集合中第一个匹配工作条件的库；若无匹配则使用含匹配库单元的第一个库；若仍无则报错。
+
+\subsection{定义 Scenario}
+\subsubsection*{Defining Scenarios}
+
+为 MCMM 流程设置设计时，必须为每个 scenario 指定 TLUPlus 文件、工作条件与 SDC 约束。DC Explorer 用标称 PVT 将库分组；对每个 scenario 用最大工作条件的 PVT 选择集合。
+
+创建 scenario 定义：
+\begin{enumerate}
+  \item 用 \cmd{create\_scenario} 创建名称。创建第一个 scenario 时，先前全部 scenario 专用约束从设计移除：
+\begin{lstlisting}
+de_shell> create_scenario s1
+Warning: Any existing scenario-specific constraints
+are discarded. (MV-020)
+Current scenario is: s1
+\end{lstlisting}
+  \item 用 \cmd{set\_operating\_conditions} 指定工作条件。
+  \item 用 \cmd{set\_tlu\_plus\_files} 指定 TLUPlus。要启用温度缩放，TLUPlus 须含 \texttt{GLOBAL\_TEMPERATURE} 与 \texttt{CRT1}（\texttt{CRT2} 可选）。
+  \item 用例如 \cmd{read\_sdc s1.sdc} 指定设计约束。
+  \item （可选）用 \cmd{set\_scenario\_options} 设置 setup/hold 延时优化等选项。
+  \item （可选）用 \cmd{read\_sdf} 指定正确的网络 RC 与引脚到引脚延时。
+\end{enumerate}
+
+\begin{seeAlsoBox}
+管理 Scenario（下文）。
+\end{seeAlsoBox}
+
+\subsection{管理 Scenario}
+\subsubsection*{Managing Scenarios}
+
+\subsubsection{设置当前 Scenario}
+\subsubsection*{Setting the Current Scenario}
+
+用 \cmd{current\_scenario} 指定当前 scenario。定义多个 scenario 时，工具跨全部 scenario 并发分析与优化，与当前 scenario 设置无关。
+
+\subsubsection{定义活动 Scenario}
+\subsubsection*{Defining Active Scenarios}
+
+并发分析与优化期间，可将活动 scenario 限制为必要或主导（dominant）者，以降低内存与运行时间。主导 scenario 是对其至少一个受约束对象（如与引脚关联的延时约束、网络的设计规则约束、漏电功耗）在全部 scenario 中具有最差 slack 的 scenario。
+
+用 \cmd{set\_active\_scenarios} 定义活动 scenario；相关命令还有 \cmd{all\_scenarios} 与 \cmd{all\_active\_scenarios}。
+
+\subsubsection{启用 Scenario Reduction}
+\subsubsection*{Enabling Scenario Reduction}
+
+默认工具用当前 scenario 优化。要启用 scenario reduction，先将 \varname{de\_enable\_physical\_flow} 设为 \texttt{true} 以启用物理流程。
+
+\begin{noteBox}
+运行 scenario reduction 需要 DC-Extension 许可证。
+\end{noteBox}
+
+在物理流程中，将并发分析与优化限制到主导 scenario 子集通常不会导致显著 QoR 差异。工具分析全部活动 scenario，基于违例 endpoint 数量确定主导集合，再针对时序、功耗与设计规则优化。
+
+可用 \cmd{set\_preferred\_scenario} 选择首选 scenario；工具将其视为最具约束性的 scenario，仍执行 reduction，但把首选当作最紧约束。
+
+\subsubsection{指定 Scenario 选项}
+\subsubsection*{Specifying Scenario Options}
+
+用 \cmd{set\_scenario\_options} 为优化定义特定约束选项；用 \opt{-scenarios} 可一次施加到多个 scenario（活动或非活动）。未指定 scenario 时仅作用于当前 scenario。
+
+\opt{-setup} 启用/禁用最大延时优化（默认 \texttt{true}）；\opt{-hold} 启用/禁用最小延时优化（默认 \texttt{true}；设为 \texttt{false} 时忽略 hold/最小延时违例）。
+
+用 \cmd{report\_scenario\_options} 报告；用 \cmd{remove\_scenario} 移除指定 scenario（删除其中全部 scenario 专用约束）。
+
+\subsection{并发多角多模式优化与时序分析}
+\subsubsection*{Concurrent Multicorner-Multimode Optimization and Timing Analysis}
+
+工具可跨全部 scenario 对最差违例并发优化，消除顺序方法中的收敛问题。时序分析在全部 scenario 上并发进行，代价按全部 scenario 的时序与设计规则衡量；因此时序与约束报告显示跨全部 scenario 的最差情况。
+
+运行时序分析可用：
+\begin{itemize}
+  \item 传统 min-max 分析：\cmd{set\_operating\_conditions -analysis\_type bc\_wc}
+  \item Early-late 分析：\cmd{set\_operating\_conditions -analysis\_type on\_chip\_variation}（PrimeTime 亦用 OCV）
+\end{itemize}
+
+\subsection{多角多模式设计的报告命令}
+\subsubsection*{Reporting Commands for Multicorner-Multimode Designs}
+
+用 \cmd{report\_scenarios} 报告全部已定义 scenario 的设置（逻辑库、工作条件、TLUPlus 等）；用 \cmd{report\_scenario\_options} 报告由 \cmd{set\_scenario\_options} 设置的选项（默认报告当前活动 scenario）。
+
+支持 \opt{-scenario} 的报告命令包括：\cmd{report\_timing}、\cmd{report\_path\_group}、\cmd{report\_timing\_derate}、\cmd{report\_extraction\_options}、\cmd{report\_constraint}、\cmd{report\_tlu\_plus\_files}、\cmd{report\_clock}。
+
+报告当前 scenario 详情（报告头含当前 scenario 名）的命令包括：\cmd{report\_net}、\cmd{report\_delay\_estimation\_options}、\cmd{report\_annotated\_check}、\cmd{report\_transitive\_fanout}、\cmd{report\_annotated\_transition}、\cmd{report\_disable\_timing}、\cmd{report\_annotated\_delay}、\cmd{report\_attribute}、\cmd{report\_power\_calculation}、\cmd{report\_case\_analysis}、\cmd{report\_ideal\_network}、\cmd{report\_timing\_requirements}、\cmd{report\_internal\_loads}、\cmd{report\_transitive\_fanin}、\cmd{report\_clock\_gating\_check}、\cmd{report\_crpr}、\cmd{report\_delay\_calculation}、\cmd{report\_clock\_timing} 等。
+
+\subsection{多角多模式设计支持的 SDC 命令}
+\subsubsection*{Supported SDC Commands for Multicorner-Multimode Designs}
+
+MCMM 流程支持的 SDC 命令包括（节选）：\cmd{all\_clocks}、\cmd{create\_clock}、\cmd{create\_generated\_clock}、\cmd{get\_clocks}、\cmd{group\_path}、\cmd{set\_annotated\_delay}、\cmd{set\_case\_analysis}、\cmd{set\_clock\_gating\_check}、\cmd{set\_clock\_latency}、\cmd{set\_clock\_transition}、\cmd{set\_clock\_uncertainty}、\cmd{set\_data\_check}、\cmd{set\_disable\_timing}、\cmd{set\_drive}、\cmd{set\_false\_path}、\cmd{set\_fanout\_load}、\cmd{set\_input\_delay}、\cmd{set\_input\_transition}、\cmd{set\_load}、\cmd{set\_max\_capacitance}、\cmd{set\_max\_delay}、\cmd{set\_max\_transition}、\cmd{set\_min\_delay}、\cmd{set\_multicycle\_path}、\cmd{set\_output\_delay}、\cmd{set\_propagated\_clock}、\cmd{set\_resistance}、\cmd{set\_timing\_derate}。
+
+\subsection{在多角多模式设计中使用 Block Abstraction}
+\subsubsection*{Using Block Abstractions in Multicorner-Multimode Designs}
+
+Block abstraction 与 MCMM scenario 兼容：可将 MCMM 约束施加到 block abstraction，并在顶层使用。
+
+\begin{noteBox}
+在 MCMM 设计中使用 block abstraction 时，必须将 \varname{de\_enable\_physical\_flow} 设为 \texttt{true}。
+\end{noteBox}
+
+指南：
+\begin{itemize}
+  \item 对每个顶层 MCMM scenario，所用各 block abstraction 块中必须存在同名 scenario。不匹配时用 \cmd{select\_block\_scenario} 映射；用 \opt{-reset} 重置用户指定映射。
+  \item Block abstraction 可有顶层未使用的额外 scenario。
+  \item 无 MCMM scenario 的顶层默认只能与无 MCMM scenario 的 block abstraction 一起使用；用 \cmd{select\_block\_scenario} 映射后，即使顶层无 MCMM 也可使用 MCMM block abstraction。
+  \item 对所用每个 TLUPlus，block abstraction 存储提取数据与指定工作条件；顶层不能为已有 TLUPlus 使用额外文件或定义额外温度 corner。
+  \item 有 MCMM scenario 的顶层可与无 MCMM 定义的 block abstraction 一起使用；此时全部顶层 scenario 使用相同块数据，无日志消息。
+\end{itemize}
+
+\subsubsection{在顶层将 Block Abstraction 与 Scenario 一起使用}
+\subsubsection*{Using Block Abstractions With Scenarios at the Top Level}
+
+\begin{enumerate}
+  \item 将当前设计设为顶层。
+  \item 用 \cmd{remove\_scenario -all} 移除全部 scenario。
+  \item 为顶层定义 scenario（须与设计中 block abstraction 块的 scenario 定义匹配；须在下一步前全部定义完）。
+  \item 用 \cmd{compile\_exploration} 执行优化。\\
+        compile 开始时检查顶层与 block abstraction 之间无 scenario 不匹配；遇下列情况终止：数量不匹配（顶层多于块时也报错终止）；定义不一致；顶层未定义 scenario 而块有定义时也报错终止。也可用 \cmd{check\_scenarios} 检查一致性。
+\end{enumerate}
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 在多角多模式设计中使用 Block Abstraction
+  \item 第~\ref{chap:hier}~章「使用层次化模型」
+\end{itemize}
+\end{seeAlsoBox}
+
+% ============================================================
+\section{带 Floorplan 物理约束的优化}
+\subsection*{Performing Optimization With Floorplan Physical Constraints}
+
+使用 floorplan 物理约束的主要原因是准确表示布局区域，并改善与布局后设计的时序相关性。运行以布局为驱动的优化可改善 DC Explorer 与 Design Compiler topographical 模式之间的 QoR 与相关性，尤其对复杂 floorplan 的设计。
+
+默认优化不包含任何 floorplan 信息。可提供高层 floorplan 物理约束以确定 core area 与形状、端口位置、宏位置与方向、voltage area、placement blockage 与 placement bound。这些约束可源自 IC Compiler floorplan、从 DEF 提取，或手动创建。
+
+步骤：
+\begin{enumerate}
+  \item 设置物理库。
+  \item 将 \varname{de\_enable\_physical\_flow} 设为 \texttt{true} 以启用物理流程：
+\begin{lstlisting}
+de_shell> set_app_var de_enable_physical_flow true
+\end{lstlisting}
+  \item （可选）提供 floorplan 物理约束；未指定时工具自动推导 floorplan 信息。
+  \item 运行 \cmd{compile\_exploration}。
+\end{enumerate}
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 指定物理库
+  \item 第~\ref{chap:floorplan}~章「使用 Floorplan 物理约束」
+  \item 物理流程中的拥塞报告
+\end{itemize}
+\end{seeAlsoBox}
+
+% ============================================================
+\section{执行功耗优化}
+\subsection*{Performing Power Optimization}
+
+执行功耗优化时，可启用时钟门控、运行漏电功耗优化，并注释设计对象的开关活动信息。DC Explorer 不支持 IEEE 1801 UPF，但可处理先前已实例化的电源管理单元（如隔离单元与电平移位单元）。
+\begin{itemize}
+  \item 启用时钟门控：
+\begin{lstlisting}
+de_shell> compile_exploration -gate_clock
+\end{lstlisting}
+  \item 启用漏电功耗优化，用 \cmd{set\_multi\_vth\_constraint}，例如：
+\begin{lstlisting}
+de_shell> set_multi_vth_constraint -lvth_groups {lvt svt} \
+   -lvth_percentage 15 -type soft -cost cell_count
+\end{lstlisting}
+        在 DC Explorer 中应对 \opt{-cost} 指定 \texttt{cell\_count}，表示设计中低阈值电压单元的百分比。
+  \item 用 \cmd{set\_switching\_activity} 注释网络开关活动，例如：
+\begin{lstlisting}
+de_shell> set_switching_activity [get_net net1] \
+   -static_probability 0.2 -toggle_rate 10 -period 1000
+\end{lstlisting}
+\end{itemize}
+
+\begin{noteBox}
+DC Explorer 不支持 SAIF 文件。
+\end{noteBox}
+
+更多信息见 \textit{Power Compiler User Guide} 与 \textit{Design Vision User Guide}。
+
+% ============================================================
+\section{流水线逻辑 Retiming}
+\subsection*{Pipelined-Logic Retiming}
+
+用 \cmd{set\_optimize\_registers} 启用流水线逻辑 retiming。在逻辑综合前于 RTL 级描述电路时，很难找到最优寄存器位置并编码到 HDL。通过寄存器 retiming，可自动调整时序设计中触发器位置，尽量均衡各级延时。
+
+\cmd{set\_optimize\_registers} 所用技术对流水线 datapath 块特别有用：先指定所需流水线级数，并在 RTL 中把全部流水线寄存器放在组合逻辑的输入或输出；retiming 期间工具将这些寄存器移入组合逻辑、平衡各级延时，并基于给定时钟周期归档最优时序与面积结果。
+
+Retiming 在主输入与主输出处保持电路行为不变（除非添加流水线级或选择不保留复位状态的特殊选项），因此不必更改为原始 RTL 开发的仿真 testbench。
+
+但 retiming 会改变设计中寄存器的位置、内容与名称；使用内部寄存器输入/输出作为参考点的验证策略将不再适用。Retiming 也可能改变层次单元功能，并向其接口添加时钟、清零、置位与使能引脚。
+
+\subsection{流水线逻辑 Retiming 命令}
+\subsubsection*{Pipelined-Logic Retiming Command}
+
+在 \cmd{compile\_exploration} 之前运行 \cmd{set\_optimize\_registers}，以便在综合期间启用 retiming。该命令在指定设计或当前设计上设置 \texttt{optimize\_registers} 属性，使 compile 时自动调用并在优化期间 retiming。亦称 one-pass retiming，因由 \cmd{compile\_exploration} 一步完成。
+
+\subsection{寄存器 Retiming 示例}
+\subsubsection*{Register Retiming Example}
+
+Retiming 期间寄存器在组合逻辑中前移或后移。图~\ref{fig:dce-retime-before} 与图~\ref{fig:dce-retime-after} 给出通过后移寄存器降低延时的示例：retiming 前关键路径有四级组合逻辑与一个终点寄存器；retiming 后寄存器被四个寄存器替换并后移两级逻辑，关键路径变为两级，各级关键路径延时小于初始单级。延时降低常伴随寄存器数量增加，但通常增幅不大。
+
+\figplaceholder{Figure 59: Circuit Before Retiming}{Retiming 前的电路}{fig:dce-retime-before}
+\figplaceholder{Figure 60: Circuit After Retiming}{Retiming 后的电路}{fig:dce-retime-after}
+
+\subsection{含 Path Group 约束的寄存器 Retiming}
+\subsubsection*{Retiming Registers Containing Path Group Constraints}
+
+带 path group 约束的寄存器可被 retiming，前提是新寄存器继承原寄存器约束，且除 path group 上定义的例外外无其他时序例外。属于不同 path group 的寄存器在流水线逻辑 retiming 期间分开考虑。
+
+允许的情况包括：
+\begin{itemize}
+  \item \textbf{前移} — 仅当寄存器属于相同 path group；否则不 retiming。前移产生的寄存器继承原 path group 约束。
+  \item \textbf{后移} — 后移产生的重复寄存器继承原 path group 约束。
+  \item \textbf{MCMM 设计中的 retiming} — 工具识别在全部 scenario 中属于相同 path group 的寄存器并 retiming；不允许跨 path group。共享全部 scenario 相同 path group 规格的寄存器（如 \texttt{reg\_0}/\texttt{reg\_1}）分到一组；不共享的（如 \texttt{reg\_2}/\texttt{reg\_3}）保持分离。
+  \item \textbf{MCMM 中的前移} — 仅当寄存器跨全部 scenario 共享相同 path group 规格时允许。
+\end{itemize}
+
+不允许：
+\begin{itemize}
+  \item 用寄存器引脚而非寄存器创建 path group，例如 \cmd{create\_path\_group -to A\_reg/D}
+  \item Path group 包含始于并终于同一寄存器的路径，例如：
+\begin{lstlisting}
+de_shell> create_path_group \
+   -from A [get_cells ff_reg*] -to [get_cells ff_reg*]
+\end{lstlisting}
+\end{itemize}
+
+% ============================================================
+\section{其他优化功能}
+\subsection*{Additional Optimization Features}
+
+可用下列技术改善优化结果：
+\begin{itemize}
+  \item 保留子设计
+  \item 修复多端口网络
+  \item 优化多比特寄存器
+  \item 物理流程中的拥塞报告
+  \item 控制 Path Group 创建
+\end{itemize}
+
+更多信息见 \textit{Design Compiler User Guide}。
+
+\subsection{保留子设计}
+\subsubsection*{Preserving Subdesigns}
+
+见上文「解析设计引用的多实例」中的「保留子设计」；要点相同：用 \cmd{set\_dont\_touch}，block abstraction 自动 don't touch，以及各类对象上设置 \texttt{dont\_touch} 的隐含范围与限制。
+
+\begin{seeAlsoBox}
+第~\ref{chap:hier}~章「使用层次化模型」。
+\end{seeAlsoBox}
+
+\subsection{修复多端口网络}
+\subsubsection*{Fixing Multiple-Port Nets}
+
+用 \cmd{set\_fix\_multiple\_port\_nets} 向连接到多个端口的网络插入缓冲器/反相器、复制逻辑或重布线。图~\ref{fig:dce-mpn} 所示多端口网络包括：穿越网络（输入端口馈入输出端口）；连接到多个输出端口的网络（逻辑等价输出）。
+
+\figplaceholder{Figure 61: Nets Connected to Multiple Ports}{连接到多个端口的网络}{fig:dce-mpn}
+
+这些多端口网络在门级网表中以 \texttt{assign} 语句表示，可能在后端工具中引起设计规则违例。防止步骤：
+\begin{enumerate}
+  \item 将 \varname{compile\_advanced\_fixed\_multiple\_port\_nets} 设为 \texttt{true}（DC Explorer 默认已为 \texttt{true}），以启用修复多端口网络与常量驱动端口。
+  \item 用适当选项对设计设置 \texttt{fix\_multiple\_port\_nets} 属性，例如：
+\begin{lstlisting}
+de_shell> set_fix_multiple_port_nets -all -buffer_constants
+\end{lstlisting}
+        用 \opt{-exclude\_clock\_network} 排除时钟网络；用 \opt{-no\_rewire} 禁用缓冲插入前的重布线。
+  \item 运行 \cmd{compile\_exploration}。工具按选项通过插入缓冲器、复制逻辑或重布线修复带该属性的设计中的多端口网络。
+\end{enumerate}
+
+修复顺序：
+\begin{enumerate}
+  \item 重布线连接，确保每个此类网络只连到一个层次端口（先重布线以避免不必要缓冲；因默认启用边界优化，也会跨层次重布线）。
+  \item 对未由重布线修复的网络插入缓冲器/反相器。
+\end{enumerate}
+
+图~\ref{fig:dce-feedthru} 显示通过跨层次重布线修复设计 B 中穿越的情况。
+
+\figplaceholder{Figure 62: Feedthrough Fixed by Rewiring Across the Hierarchy}{通过跨层次重布线修复穿越}{fig:dce-feedthru}
+
+表~\ref{tab:dce-fix-mpn} 汇总 \cmd{set\_fix\_multiple\_port\_nets} 选项。
+
+\begin{table}[htbp]
+\centering
+\caption{set\_fix\_multiple\_port\_nets 命令选项}
+\label{tab:dce-fix-mpn}
+\small
+\begin{tabular}{@{}ll@{}}
+\toprule
+目的 & 选项 \\
+\midrule
+禁用修复多端口网络 & \opt{-default} \\
+插入缓冲器以防止穿越网络 & \opt{-feedthroughs} \\
+使每个驱动单元只驱动一个输出端口 & \opt{-outputs} \\
+复制逻辑常量使每个常量只驱动一个输出端口 & \opt{-constants} \\
+等价于上述三者 & \opt{-all} \\
+对逻辑常量插入缓冲器而非复制逻辑 & \opt{-buffer\_constants} \\
+禁用修复前的重布线 & \opt{-no\_rewire} \\
+排除时钟网络中的多端口网络 & \opt{-exclude\_clock\_network} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{优化多比特寄存器}
+\subsubsection*{Optimizing Multibit Registers}
+
+若逻辑库中有多比特寄存器单元，DC Explorer 可用其替换单比特寄存器，以降低时钟树功耗、时钟树缓冲器数量、时钟树线长与面积。
+
+\subsubsection{多比特寄存器}
+\subsubsection*{Multibit Registers}
+
+工具用单比特寄存器表示寄存器位。在 RTL 总线推断流程中，可指示工具将多个寄存器位组织为多比特组件，并目标实现为多比特寄存器（例如八位可实现为一个 8 比特库寄存器或两个 4 比特库寄存器）。
+
+如图~\ref{fig:dce-multibit}，用多比特单元替换单比特可降低：时钟树功耗与缓冲器数；时钟树总线长；因共享晶体管与优化晶体管级版图而减小的面积。须与布局/布线优化灵活性的损失权衡。
+
+\figplaceholder{Figure 63: Replacing Two Multiple Single-Bit Register Cells With One Multibit Register}{用一个多比特寄存器替换多个单比特寄存器}{fig:dce-multibit}
+
+\subsubsection{运行 RTL 总线推断流程}
+\subsubsection*{Running the RTL Bus Inference Flow}
+
+运行该流程时，工具将属于各总线（按 RTL 定义）的寄存器位分到多比特组件；实际替换发生在 \cmd{compile\_exploration} 期间。也可用 \cmd{create\_multibit} 手动分组。
+
+步骤：
+\begin{enumerate}
+  \item 设置 \varname{hdlin\_infer\_multibit} 指导如何从 RTL 总线推断，例如：
+\begin{lstlisting}
+de_shell> set_app_var hdlin_infer_multibit default_all
+\end{lstlisting}
+  \item 读入 RTL。
+  \item （可选）用 \cmd{set\_multibit\_options} 指定推断模式与多比特寄存器最小宽度。
+  \item （可选）用 \cmd{create\_multibit} 手动将特定单比特单元/实例分到多比特组件（需已映射设计或 GTECH；实例不能已属于另一多比特组件）：
+\begin{lstlisting}
+de_shell> create_multibit x_reg[0] x_reg[1] -name my_multi
+\end{lstlisting}
+  \item （可选）用 \cmd{remove\_multibit} 排除某些单比特寄存器：
+\begin{lstlisting}
+de_shell> remove_multibit y_reg
+\end{lstlisting}
+  \item 用 \cmd{compile\_exploration} compile；指定 \opt{-scan} 时先将单比特替换为扫描单元再做多比特综合：
+\begin{lstlisting}
+de_shell> compile_exploration -gate_clock -scan
+\end{lstlisting}
+  \item 用 \cmd{report\_multibit} 报告全部多比特组件（推断或手动创建）。
+\end{enumerate}
+
+\subsubsection{Compile 期间的非连续多比特映射}
+\subsubsection*{Noncontiguous Multibit Mapping During Compile}
+
+\cmd{compile\_exploration} 可将多比特组件的非连续位映射到多比特寄存器。如图~\ref{fig:dce-noncontig}，将非连续的 \texttt{A\_reg[0]} 与 \texttt{A\_reg[2]} 打包到两比特寄存器 \texttt{A\_reg[2,0]}；\texttt{A\_reg[1]} 因 \texttt{size\_only} 保留为单比特。
+
+\figplaceholder{Figure 64: Noncontiguous Multibit Mapping}{非连续多比特映射}{fig:dce-noncontig}
+
+更多信息见 \textit{Multibit Register Synthesis and Physical Implementation Application Note}。
+
+\subsection{物理流程中的拥塞报告}
+\subsubsection*{Congestion Reporting in the Physical Flow}
+
+DC Explorer 在物理流程中执行拥塞驱动布局以降低布线拥塞。将 \varname{de\_enable\_physical\_flow} 设为 \texttt{true}（默认 \texttt{false}）以启用物理流程。拥塞驱动布局可改善与 Design Compiler topographical 模式的相关性，尤其对复杂 floorplan。
+
+表~\ref{tab:dce-cong-rpt} 列出物理流程中报告拥塞状态的命令；运行时工具用 Zroute 估计拥塞信息。
+
+\begin{table}[htbp]
+\centering
+\caption{拥塞报告命令}
+\label{tab:dce-cong-rpt}
+\begin{tabular}{@{}ll@{}}
+\toprule
+命令 & 说明 \\
+\midrule
+\cmd{report\_congestion} & 生成全局布线拥塞报告 \\
+\cmd{report\_congestion\_options} & 报告当前设计的拥塞选项 \\
+\cmd{set\_congestion\_options} & 设置拥塞优化选项 \\
+\cmd{remove\_congestion\_options} & 移除指定拥塞选项 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+表~\ref{tab:dce-route-opt} 列出用于设置/了解拥塞估计路由选项的命令。
+
+\begin{table}[htbp]
+\centering
+\caption{路由选项命令}
+\label{tab:dce-route-opt}
+\small
+\begin{tabular}{@{}lp{0.55\textwidth}@{}}
+\toprule
+命令 & 说明 \\
+\midrule
+\cmd{set\_route\_zrt\_common\_options} & 设置全局布线、track assignment 与详细布线的公共选项 \\
+\cmd{get\_route\_zrt\_common\_options} & 返回指定公共路由选项的值 \\
+\cmd{report\_route\_zrt\_common\_options} & 报告全部公共路由选项设置 \\
+\cmd{set\_route\_zrt\_global\_options} & 设置全局布线选项 \\
+\cmd{get\_route\_zrt\_global\_options} & 返回指定全局路由选项的值 \\
+\cmd{report\_route\_zrt\_global\_options} & 报告全部全局路由选项设置 \\
+\cmd{create\_route\_guide} 配合利用率选项 & 创建带水平/垂直 track 利用率及层设置的 route guide \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{noteBox}
+DC Explorer 不支持 \cmd{set\_congestion\_optimization} 命令。
+\end{noteBox}
+
+若报告显示严重拥塞，可在 GUI 中生成拥塞图进一步分析，识别高拥塞区域并判断设计是否可布。详见 \textit{Design Vision User Guide}。
+
+\subsubsection{读写单元扩展数据}
+\subsubsection*{Reading and Writing Cell Expansion Data}
+
+拥塞优化期间，拥塞区域中的单元会扩展以占据更多空间、形成更低密度区域。工具生成单元扩展数据（面积、宽度、高度），以便与 IC Compiler / IC Compiler II 更好相关。用 \cmd{read\_cell\_expansion} 与 \cmd{write\_cell\_expansion} 读写：
+\begin{lstlisting}
+de_shell> write_cell_expansion out.exp
+\end{lstlisting}
+
+\begin{seeAlsoBox}
+带 Floorplan 物理约束的优化（上文）。
+\end{seeAlsoBox}
+
+\subsection{控制 Path Group 创建}
+\subsubsection*{Controlling Path Group Creation}
+
+用 \cmd{create\_auto\_path\_groups} 自动为 I/O、宏与集成时钟门控单元创建特定 path group。
+
+\subsubsection{改善 QoR}
+\subsubsection*{Improving QoR}
+
+在 elaboration 之后、优化之前对 \cmd{create\_auto\_path\_groups} 指定 \opt{-mode rtl}，可指示工具自动创建 path group 以改善 QoR：
+\begin{lstlisting}
+de_shell> create_auto_path_groups -mode rtl
+de_shell> compile_exploration
+de_shell> remove_auto_path_groups
+de_shell> report_qor
+\end{lstlisting}
+
+命令在自动创建 path group 前保存用户创建的 path group；RTL 模式下每个层次一个 path group，多层层次则每层都创建。要用仅含用户指定 path group 的 QoR 报告，用 \cmd{remove\_auto\_path\_groups} 移除工具创建的 path group（保留用 \cmd{group\_path} 创建的）。
+
+\subsubsection{防止 Path Group 创建}
+\subsubsection*{Preventing Path Group Creation}
+
+用 \opt{-exclude} 列出 \texttt{IO}、\texttt{macro}、\texttt{ICG} 的组合以防止创建特定 path group：
+\begin{lstlisting}
+de_shell> create_auto_path_groups -mode rtl -exclude {IO macro}
+\end{lstlisting}
+
+在 RTL 模式下，用 \opt{-min\_regs\_per\_hierarchy} 防止为寄存器数少的层次创建 path group（默认 10）；寄存器数低于该值的层次不创建 path group。
+
+\begin{seeAlsoBox}
+第~\ref{chap:analyze}~章「报告结果质量」。
+\end{seeAlsoBox}

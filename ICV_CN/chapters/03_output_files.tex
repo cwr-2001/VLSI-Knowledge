@@ -1,0 +1,431 @@
+% 第 3 章 Output Files
+\bichapter{输出文件}{Output Files}
+\label{chap:output}
+
+本章概述 IC Validator 设计规则检查（DRC）与版图对照原理图（LVS）的输出文件。
+
+本章内容包括：
+\begin{itemize}
+  \item 输出文件说明（Description of Output Files）
+  \item 通用 DRC 与 LVS 输出文件（General DRC and LVS Output Files）
+  \item LVS 专用输出文件（LVS-Specific Output Files）
+\end{itemize}
+
+% ============================================================
+\section{输出文件说明}
+\subsection*{Description of Output Files}
+
+IC Validator 产生的输出文件取决于所执行的运行类型。
+
+若执行 DRC，工具生成错误文件与摘要文件。错误文件列出设计中的 DRC 错误；摘要文件列出设计信息与已完成运行的信息。
+
+若执行器件提取（device extraction），工具生成错误文件、摘要文件与版图网表（layout netlist）文件。版图网表在 LVS 比较中与原理图网表对照。DRC 与器件提取运行都会在 \cmd{run\_details} 与 \cmd{run\_details/hierarchy} 目录中生成树结构（tree structure）、虚拟 cell（virtual cell）与技术（technology）文件。
+
+若执行 LVS 比较，工具生成错误文件、日志文件与等价性摘要（equivalence summary）文件。错误文件列出版图中与原理图不匹配的网络与器件。
+
+错误、摘要与版图网表文件写入当前工作目录。另有位于 \cmd{run\_details} 目录的附加文件，有助于调试 LVS 错误。
+
+所有输出文件命名为 \cmd{cell.abbreviation}，其中 \cmd{cell} 为 \cmd{library()} 函数中 \cmd{cell} 参数所指定的名称；\cmd{cell} 之后的扩展名是文件用途的缩写。例如，account 文件名为 \cmd{cell.acct}。
+
+% ============================================================
+\section{通用 DRC 与 LVS 输出文件}
+\subsection*{General DRC and LVS Output Files}
+
+图~\ref{fig:icv-out-common} 显示 DRC 与 LVS 运行共有的输出文件与目录。各文件说明见以下各小节。
+
+\figplaceholder{Figure 4：Output Files and Directories Common to DRC and LVS}{DRC 与 LVS 共有的输出文件与目录}{fig:icv-out-common}
+
+\subsection{结果文件}
+\subsubsection*{Results File}
+
+IC Validator 创建 \cmd{RESULTS} 文件 \cmd{cell.RESULTS}，提供运行关键区域的结果以及对 search/grep 关键结果的摘要。该文件还包含本次运行所用的 IC Validator 命令行选项，是分析 IC Validator 运行结果的起点。
+
+\cmd{cell.RESULTS} 文件分为下列各节：
+
+\begin{itemize}
+  \item \textbf{Results Header（结果头）}
+  \begin{itemize}
+    \item 若 DRC 运行完成且无违例，工具返回单行：\cmd{RESULTS: CLEAN}。
+    \item 若 DRC 运行完成但有违例，工具返回单行：\cmd{RESULTS: NOT CLEAN}。
+    \item 若 LVS 运行完成，头节返回两行结果：
+    \begin{itemize}
+      \item 第一行：\cmd{LVS Compare Results: PASS | FAIL}；
+      \item 第二行：\cmd{DRC and Extraction Results: CLEAN | NOT CLEAN}。
+    \end{itemize}
+    \item 未完成的 DRC 或 LVS 运行返回单行：\cmd{RESULTS: RUN ABORTED}。
+  \end{itemize}
+
+  \item \textbf{Execution（执行信息）}\\
+  本节分两部分：
+  \begin{itemize}
+    \item 第一部分打印 IC Validator 横幅与版权信息，以及工具的调用方式。
+    \item 第二部分为基本运行信息，包括：输入库文件名、顶层 cell 名、输入库版图格式、runset 文件名、工作目录路径、run details 目录路径、LVS 错误文件名、layout 错误文件名、用户名，以及 IC Validator 运行的起止时间。
+  \end{itemize}
+
+  \item \textbf{Results Summary: DRC Run（DRC 运行结果摘要）}\\
+  本节分两部分：
+  \begin{itemize}
+    \item 第一部分报告规则与 DRC 错误统计，包括：已运行规则总数、未执行规则数、含违例的规则数、违例总数。详细违例数据见 \cmd{cell.LAYOUT\_ERRORS}。
+    \item 第二部分为表格，列出各规则名及其违例总数。仅当 \cmd{run\_options()} 的 \cmd{verbose\_results\_file} 参数包含 \cmd{ERRORS} 选项时才输出。规则名根据 \cmd{error\_options()} 的 \cmd{rule\_name\_delimiter} 参数从规则注释中提取。若运行了 DRC 错误分类（error classification），违例计数中排除已豁免（waived）的违例。未执行的规则显示状态 \cmd{Not Executed}。规则下各函数的违例计数一般不报告，但无归属规则的函数除外：这些函数缩进两格，报告在默认规则名 \cmd{Violation} 之下。违例计数前缀为 \cmd{v =}，便于搜索特定违例数。
+  \end{itemize}
+
+  \item \textbf{Results Summary: LVS Run（LVS 运行结果摘要）}\\
+  本节分两部分：
+  \begin{itemize}
+    \item 第一部分为 LVS 比较统计表，报告：LVS 比较结果、顶层等价点（top equivalence points）、已检查 black-box cell 数、通过的 black-box cell 数、失败的 black-box cell 数、已检查等价点数、成功等价点数、失败等价点数。详细比较违例见 \cmd{cell.LVS\_ERRORS}。
+    \item 第二部分列出所有等价点与 black-box 对的 LVS 结果：先列失败的等价点与 black-box cell，再列通过的。可用 search/grep 快速查找。
+  \end{itemize}
+
+  \item \textbf{Assign Layer Statistics（Assign 层统计）}\\
+  本节分两部分：
+  \begin{itemize}
+    \item 第一部分报告四项：已用 assign 层总数、空的已用 assign 层数、非空的已用 assign 层数、被剪枝（pruned）的 assign 层数。
+    \item 第二部分为表格，列出各层名、该层的层次与扁平多边形计数（若被剪枝则显示 \cmd{Pruned}），以及层或 datatype 赋值。仅当 \cmd{run\_options()} 的 \cmd{verbose\_results\_file} 包含 \cmd{ASSIGNS} 时才输出。表格分为三部分：1）非空已用层；2）空的已用层；3）剪枝层。每层的 assign 语句包含 layer/datatype 赋值及用户提供的其他赋值选项。
+  \end{itemize}
+
+  \item \textbf{Run Configuration（运行配置）}\\
+  本节包含下列七部分：
+  \begin{itemize}
+    \item \cmd{run\_options()}：报告 \cmd{verbose\_results\_file} 参数。
+    \item \cmd{hierarchy\_options()}：报告 \cmd{delete} 参数。
+    \item \cmd{error\_options()}：报告 \cmd{error\_limit\_per\_check}、\cmd{match\_errors}、\cmd{report\_empty\_violations}、\cmd{clean\_classifications}。
+    \item \cmd{drc\_black\_box\_options()}：报告 \cmd{black\_box\_cells}、\cmd{black\_box\_region\_cells}、\cmd{keepout\_layers\_check}、\cmd{keepout\_violation\_comment}。
+    \item Production Environment Variables：列出所有已设置的生产环境变量，并在列表末给出总数。
+    \item Debug Environment Variables：列出所有已设置的调试环境变量，并在列表末给出总数。
+    \item Distributed processing：报告分布式核数与 turbo，随后列出各主机及其规格（型号、CPU、核数、RAM、交换空间）；主机名旁还显示该主机上的分布式进程数与 CPU 数。
+  \end{itemize}
+
+  \item \textbf{Performance Statistics（性能统计）}\\
+  本节报告五项：
+  \begin{itemize}
+    \item IC Validator 运行时间；
+    \item 单命令峰值内存；
+    \item 峰值磁盘用量；
+    \item 分布式主机峰值内存（表格：主机、该主机上的分布式处理与 CPU 数、主机峰值内存与 RAM）；
+    \item 总体分布式利用率（overall distributed utilization）。
+  \end{itemize}
+\end{itemize}
+
+\subsection{错误文件}
+\subsubsection*{Error File}
+
+IC Validator 在 DRC 或网表提取运行中创建错误文件 \cmd{cell.LAYOUT\_ERRORS}。这类错误称为 layout errors。\cmd{LAYOUT\_ERRORS} 文件包含运行结果、错误摘要列表以及更详细的错误列表。
+
+文件顶部标明 \cmd{CLEAN} 或 \cmd{ERRORS}，便于快速判断设计是否存在 layout 错误。
+
+接下来是摘要节：给出函数注释、函数本身，以及若有错误则给出该函数的错误数。
+
+最后是详情节。每条错误报告包含：标识所执行检查的错误描述；发生错误的结构（structure）名；错误位置或包围盒（bounding box）；以及特定检查的其他信息。位置坐标按层次报告，即相对于所命名结构，且对每个被引用结构只报告一次。也可用 VUE 调试工具以图形方式查看这些错误。
+
+运行期间，\cmd{LAYOUT\_ERRORS} 会随时更新结果与摘要节。运行结束时写出最终版本，并按 \cmd{error\_options(report\_error\_details)} 的规定包含详情节。
+
+下列 \cmd{LAYOUT\_ERRORS} 片段对应 metal1（Met1）最小面积规则。runset 中编码如下：
+\begin{lstlisting}[style=pxl]
+//R.Met1.A
+{
+   @"R.Met1.A:For Metal 1, minimum area must be 0.04";
+   area( Met1, value < 0.04);
+};
+\end{lstlisting}
+
+\cmd{LAYOUT\_ERRORS} 对该规则的报告示例如下：
+\begin{lstlisting}
+                    LAYOUT ERRORS RESULTS: ERRORS
+
+                 ##### #### ####     ### ####      ###
+                 #     #   # #   # #    # #    # #
+                 #### #### #### #       # ####     ###
+                 #     # # # # #        # # #          #
+                 ##### #   # #   # ### #       # ####
+
+=========================================================================
+
+Library name:    ../../lab_data/INLIB_TRAINING.GDS
+Structure name: top
+Generated by:   IC Validator <platform> <release> <date>
+
+Runset name: icv runset.rs
+User name: juser
+Time started: 2016/03/02 07:35:12AM
+Time ended: 2016/03/02 07:35:51AM
+
+Called as: icv runset.rs
+                      ERROR SUMMARY
+
+  R.Met1.A: Minimum area must be 0.04
+    area .............................................. 1 violation found.
+
+                              ERROR DETAILS
+
+-------------------------------------------------------------------------
+R.Met1.A: Minimum area must be 0.04
+-------------------------------------------------------------------------
+
+sf.rs:238:area
+- - - - - - - - - - - - - - - - - - - - - - - - - - - -
+Structure ( lower left x, y ) ( upper right x, y) Area
+- - - - - - - - - - - - - - - - - - - - - - - - - - - -
+top       (37.2700, 4.0300)   (37.4800, 4.1700)   0.0294
+\end{lstlisting}
+
+\subsection{摘要文件}
+\subsubsection*{Summary File}
+
+IC Validator 在 DRC 或网表提取运行中创建摘要文件 \cmd{cell.sum}。
+
+若使用 \cmd{-verbose} 命令行选项，打印到屏幕的信息与写入摘要文件的信息相同。区别在于：屏幕输出按工具处理顺序打印，而摘要文件内容按 runset 的顺序排序。
+
+\subsection{规则文件}
+\subsubsection*{Rules File}
+
+待执行的规则写入 \cmd{run\_details} 目录下的 \cmd{cell.rules}。在完成各类 runset 选择之后仍留在 runset 中的违例名与违例注释会报告到 \cmd{cell.rules}。runset 选择的例子包括：预处理器指令、可选规则（selectable rules）、增量层（incremental layers）、以及仅运行剪枝（run-only pruning）。
+
+违例名与违例注释从最终解析树（parse tree）中的所有规则采集。由于运行时条件命令（\cmd{if}/\cmd{then}/\cmd{else} 以及 \cmd{for}/\cmd{foreach}/\cmd{while} 循环）可能仍保留，最终解析树中的规则不保证一定会执行。最终解析树中所有命令都会输出规则信息，包括因运行时条件而未执行的命令。
+
+违例名与违例注释未必总能静态解析；此时输出文件提供文件名与行号，而非规则名。
+
+若 runset 规则没有 \cmd{@=} 违例块，输出中仅出现违例注释。
+
+默认注释为 \cmd{Violation}；规则使用默认注释时，输出中出现 \cmd{@ "Violation"}。
+
+下列为 \cmd{cell.rules} 文件示例：
+\begin{lstlisting}
+                          ICV_Master (R)
+        Copyright (c) 1996 - 2015 Synopsys, Inc.
+   This software and the associated documentation are proprietary to
+Synopsys,Inc. This software may only be used in accordance with the terms
+ and conditions a written license agreement with Synopsys, Inc. All
+ other use, reproduction, or distribution of this software is strictly
+    prohibited.
+
+Called as: icv runset.rs -i test.gds
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+User name:        synopsoid
+Layout format:    GDSII
+Input file name: test.gds
+Top cell name:    top
+Time started:     2015/11/03 02:43:08PM
+-------------------------------------------------------------------------
+                          Rules to be Executed
+-------------------------------------------------------------------------
+     Unresolved violation name/comment found at runset.rs:100
+@ "Rule comment with no violation block"
+@ "Violation"
+VIOL_101 @= { @ "VIOL_101_comment" }
+VIOL_102 @= { @ "VIOL_102_comment" }
+VIOL_103 @= { @ "VIOL_103_comment" }
+VIOL_104 @= { @ "VIOL_104_comment" }
+VIOL_105 @= { @ "VIOL_105_comment" }
+\end{lstlisting}
+
+\subsection{技术文件}
+\subsubsection*{Technology File}
+
+IC Validator 创建技术文件 \cmd{cell.tech}，显示本次运行所设置的选项，包括默认值与用户指定值。技术文件包含三节：exploded cells、deleted cells，以及 placement explode 统计。
+
+\subsection{树结构输出文件}
+\subsubsection*{Tree Structure Output File}
+
+IC Validator 在 DRC 或网表提取运行中创建名为 \cmd{cell.tree} 的树结构文件。树结构文件包含设计层次树信息，以及对设计树中每个 cell 的引用统计。\cmd{cell.tree0} 表示原始数据；\cmd{cell.tree1} 在所有 explode 选项完成后创建。使用 hierarchy 选项时会创建更多树文件。编号 $N$ 最大的 \cmd{cell.treeN} 是本次运行实际处理的层次。若 \cmd{run\_options()} 的 \cmd{print\_preprocess\_files} 参数指定 \cmd{TREE}，则打印树文件；\cmd{compress\_tree\_files} 参数决定写入磁盘时是否压缩。
+
+\subsection{虚拟 Cell 文件}
+\subsubsection*{Virtual Cell File}
+
+虚拟 cell 文件 \cmd{cell.vcell} 包含配对（pairing）、创建集合（sets）以及虚拟 cell explode 的信息，具体取决于 runset 选项与设计数据。文件包含 Pair、Set 与 Exclude 各节。
+
+\subsubsection{Pair 节}
+\paragraph*{Pair Section}
+
+Pair 节报告每次虚拟 cell pass 迭代中创建的 cell 对。\cmd{hierarchy\_options()} 中 \cmd{pairs} 参数的 \cmd{iterate\_max} 选项设定最大迭代次数。
+
+\subsubsection{Set 节}
+\paragraph*{Set Section}
+
+Set 节报告每次虚拟 cell pass 迭代中创建的集合。\cmd{hierarchy\_options()} 中 \cmd{sets} 参数的 \cmd{iterate\_max} 选项设定最大迭代次数。
+
+\subsubsection{Explode 节}
+\paragraph*{Explode Section}
+
+Explode 节显示为将相互作用的 placement 汇集到共同父级之下而被 explode 的所有分支。更多信息见 \textit{IC Validator Reference Manual} 中 \cmd{hierarchy\_options()} 的 \cmd{explode} 参数。
+
+\subsection{分布式日志文件}
+\subsubsection*{Distributed Log File}
+
+分布式日志文件以 runset 名加 \cmd{dp.log} 扩展名命名，所含信息多于摘要文件：包括函数何时发送到某主机，以及主机完成该函数后产生的结果。分布式日志按执行顺序排列，而非按 runset 顺序。
+
+\subsection{分布式统计文件}
+\subsubsection*{Distributed Statistics File}
+
+分布式统计文件以 runset 名加 \cmd{dp.stats} 扩展名命名，包含分布式处理统计。
+
+\subsection{分布式工作目录}
+\subsubsection*{Distributed Work Directory}
+
+分布式运行会在 \cmd{run\_details} 下创建名为 \cmd{dp\_work} 的工作目录，内含分布式运行所用的子目录与文件。若该目录在运行前已存在，则连同其全部内容被删除并重新创建。因此请勿在某次运行的 \cmd{run\_details} 中把个别目录命名为 \cmd{dp\_work}。
+
+\subsection{图形错误结构}
+\subsubsection*{Graphical Error Structures}
+
+IC Validator 生成错误数据库 PYDB，可在版图编辑器（如 VUE）中查看。其中包含位于设计规则违例附近的错误多边形与坐标。不同检查产生的图形可按 runset 规定写入错误结构中的不同层与 datatype。关于错误数据库以及用于分类错误的 \cmd{pydb\_report}、\cmd{pydb\_export} 实用程序，见「DRC 错误分类」（DRC Error Classification）。
+
+错误数据库包含违例块生成的全部错误数据，以及 VUE 调试会话所需的全部信息。默认位置为 \cmd{run\_details/pydb}；可用 \cmd{error\_options()} 的 \cmd{db\_path} 参数更改。该数据库支持数据挖掘，并可据此创建自定义报告。
+
+\begin{noteBox}
+可在 IC Validator 运行完成之前开始审查错误数据库。
+\end{noteBox}
+
+IC Validator 生成的错误结构层次模仿正在检查的数据库层次。因此，数据库中某结构发现的错误会出现在错误层次中的对应错误结构中。仅对含有错误、或引用了含错误结构的数据库结构生成错误结构。若未发现任何错误，则不创建错误层次。
+
+错误结构默认以前缀 \cmd{ERR\_} 命名，置于结构名之前。例如，cell \cmd{CLOCK} 的默认错误结构为 \cmd{ERR\_CLOCK}。可在写入函数（如 \cmd{write\_gds()}）中用 \cmd{error\_cell\_prefix} 参数重定义该前缀。
+
+例如：
+
+\begin{center}
+\small
+\begin{minipage}[t]{0.45\textwidth}
+\textbf{Database hierarchy}\\[0.4em]
+\ttfamily
+CHIP \{\\
+\hphantom{xx}ALU \{\\
+\hphantom{xxxx}BIT0\\
+\hphantom{xxxx}BIT1 \}\\
+\hphantom{xx}CLOCK \{\\
+\hphantom{xxxx}CLK1\\
+\hphantom{xxxx}CLK2\\
+\hphantom{xxxx}CLK3 \}\\
+\}
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.45\textwidth}
+\textbf{Error hierarchy}\\[0.4em]
+\ttfamily
+ERR\_CHIP \{\\
+\hphantom{xx}ERR\_ALU \{\\
+\hphantom{xxxx}ERR\_BIT0\\
+\hphantom{xxxx}ERR\_BIT1 \}\\
+\hphantom{xx}ERR\_CLOCK \{\\
+\hphantom{xxxx}ERR\_CLK1\\
+\hphantom{xxxx}ERR\_CLK3 \}\\
+\}
+\end{minipage}
+\end{center}
+
+在错误层次中没有 \cmd{ERR\_CLK2}：要么原始 \cmd{CLK2} cell 在预处理中被 explode，要么结构 \cmd{CLK2} 本身不含错误且不含含错误的结构。若先前含错误的 IC Validator 运行经修正后重跑，先前的错误层次结构会保留。若新运行未发现错误，工具不会覆盖这些结构，但新错误层次不会再引用这些先前含错误的 cell。
+
+% ============================================================
+\section{LVS 专用输出文件}
+\subsection*{LVS-Specific Output Files}
+
+图~\ref{fig:icv-out-lvs} 显示 LVS 运行的输出文件与目录。各文件说明见以下各小节。
+
+\figplaceholder{Figure 5：Output Files and Directories for LVS}{LVS 的输出文件与目录}{fig:icv-out-lvs}
+
+\subsection{LVS 调试文件}
+\subsubsection*{LVS Debugging File}
+
+\cmd{compare()} 函数创建调试文件 \cmd{cell.LVS\_ERRORS}，指示原理图对照版图比较是否成功。该文件是调试 LVS 问题的起点。
+
+根据比较是否成功，文件列出 PASS/FAIL 信息以及（若有）layout 错误。随后列出重要的失败等价点（按高/低优先级排序），并提供用于排查设计的诊断信息。
+
+\subsection{提取的版图网表文件}
+\subsubsection*{Extracted Layout Netlist File}
+
+每当 runset 中指定 \cmd{netlist()} 提取函数时，IC Validator 创建提取的版图网表文件 \cmd{cell.net}。该文件是版图数据库中所发现结构的层次化描述。
+
+\subsection{提取的版图 SPICE 网表文件}
+\subsubsection*{Extracted Layout SPICE Netlist File}
+
+每当 runset 中指定 \cmd{write\_spice()} 时，IC Validator 创建提取的 SPICE 版图网表文件 \cmd{cell.sp}。该文件是版图数据库中所发现结构的层次化 SPICE 描述。更多信息见 \textit{IC Validator Reference Manual} 中的 \cmd{write\_spice()}。
+
+\subsection{Account 文件}
+\subsubsection*{Account File}
+
+IC Validator 创建 account 文件 \cmd{cell.acct}，列出层次中每个 cell 提取出的器件数量及其类型。所示累计计数（cumulative count）为该结构所含全部器件的总数。
+
+\subsection{包围盒文件}
+\subsubsection*{Bounding Box File}
+
+IC Validator 创建包围盒文件 \cmd{cell.bbox}，列出设计中 cell 总数以及每个 cell 的包围盒坐标。
+
+\subsection{等价文件}
+\subsubsection*{Equivalence Files}
+
+若未提供等价文件，LVS 比较运行会自动生成用于比较版图与原理图网表的等价文件。生成时，IC Validator 会识别某些多余、无助于比较的等价点。在全部分析完成后，工具生成 \cmd{equiv.run}，列出本次运行所用的全部等价 cell。更多信息见 \textit{IC Validator Reference Manual} 中的 \cmd{equiv\_options()}。
+
+\subsection{器件拉平摘要文件}
+\subsubsection*{Device Leveling Summary File}
+
+器件拉平摘要（device leveling summary，DLS）文件用于追溯器件按层次级别如何被提取。可通过 \cmd{run\_details} 目录中的 \cmd{cell.dls} 诊断信息，确定器件被提取到错误层次（即被 leveled）的根本原因。
+
+下列为 \cmd{cell.dls} 文件示例：
+\begin{lstlisting}
++-----------------------------------------------------------------------+
+|                        ICV Device Leveling Summary                    |
++-----------------------------------------------------------------------+
+
+Device Leveling Summary Results:
+
+Body Layers          | Cell | Layer Interacted:
+----------------+--------+---------------------
+ngt.polygonlayer.0001 A       nsd.polygonlayer.0001, NW.polygonlayer.0003
+pgt.polygonlayer.0001 B       psd.polygonlayer.0001
+...
+\end{lstlisting}
+
+器件拉平摘要文件显示：器件识别与属性计算之后，无法推回其原始 cell 的器件 body 层。成功推回的 body 层不出现在此文件中。文件显示：
+\begin{itemize}
+  \item \textbf{Body Layers}：被拉出原所在 cell 的器件 body 派生层。
+  \item \textbf{Cell}：被 leveled 器件的原始 cell。
+  \item \textbf{Layer Interacted}：与器件 body 交互从而导致 leveling 的层。若同一 body 层的多边形跨多个层次发生交互，则该列打印 body 层名。
+\end{itemize}
+
+\subsection{比较日志文件}
+\subsubsection*{Compare Log File}
+
+IC Validator 在 LVS 运行中创建日志文件 \cmd{cell\_lvs.log}。该比较日志包含与 \cmd{compare()} 函数相关的全部消息。
+
+\subsection{比较树文件}
+\subsubsection*{Compare Tree Files}
+
+\cmd{compare()} 产生两个树文件：\cmd{lay.tree} 给出版图网表的层次结构；\cmd{sch.tree} 给出原理图网表的层次结构。这些文件位于 \cmd{run\_details/lvsflow} 目录。
+
+\subsection{比较目录输出文件}
+\subsubsection*{Compare Directory Output Files}
+
+LVS 比较的详细输出放在比较目录 \cmd{run\_details/compare} 中。等价文件中的每个等价点在评估时，会在该比较目录下创建子目录，子目录名基于版图结构名。图~\ref{fig:icv-compare-dir} 给出比较目录示例。
+
+\figplaceholder{Figure 6：Compare Directory Structure Example}{比较目录结构示例}{fig:icv-compare-dir}
+
+\subsection{单个等价点摘要文件}
+\subsubsection*{Individual Equivalence Summary File}
+
+每个结构比较的结果写入摘要文件 \cmd{sum.schematic\_module\_name.layout\_structure\_name}，通常称为 \cmd{sum.cell.cell}。该文件位于工作目录下的 compare 子目录中，如图~\ref{fig:icv-compare-dir} 所示。若 \cmd{compare()} 的 \cmd{remove\_equiv\_sum\_files} 参数为 \cmd{NONE}，或该等价点完成时无错误/警告，则不生成此文件。摘要信息包括：每种器件出现次数；找到的网络总数；以及因合并（merging）而移除或创建的器件与网络数。若无法匹配全部器件与网络，摘要会列出差异。
+
+\cmd{sum.cell.cell} 分为下列各节：
+\begin{itemize}
+  \item Comparison Result（比较结果）
+  \item Diagnostic Error（诊断错误）
+  \item Unmatched Nodes（未匹配节点）
+  \item Error Information（错误信息）
+  \item Warning Information（警告信息）
+  \item Preprocessing Information（预处理信息）
+  \item Comparison Information（比较信息）
+  \item Merged Node Information（合并节点信息）
+  \item Cross-Referencing Information（交叉引用信息）
+  \item Statistics Report（统计报告）
+\end{itemize}
+
+\subsection{分区原理图网表}
+\subsubsection*{Partitioned Schematic Netlist}
+
+该部分比较所用的原理图数据写入 \cmd{sch.cell}，位于工作目录下的 compare 子目录中（见图~\ref{fig:icv-compare-dir}）。若 \cmd{compare()} 的 \cmd{write\_equiv\_netlists} 为 \cmd{FAILED} 且该等价点完成时无错误/警告，或该参数为 \cmd{NONE}，则不生成此文件。该文件是 explode 非等价结构后的原理图网表，通常对分析比较结果帮助不大。
+
+\subsection{分区版图网表}
+\subsubsection*{Partitioned Layout Netlist}
+
+该部分比较所用的版图数据写入 \cmd{lay.cell}，位于工作目录下的 compare 子目录中（见图~\ref{fig:icv-compare-dir}）。若 \cmd{compare()} 的 \cmd{write\_equiv\_netlists} 为 \cmd{FAILED} 且该等价点完成时无错误/警告，或该参数为 \cmd{NONE}，则不生成此文件。该文件是 explode 非等价结构后的版图网表，通常对分析比较结果帮助不大。
+
+\subsection{编辑错误}
+\subsubsection*{Editing Errors}
+
+错误结构写入数据库后，即可开始编辑并修正错误。\cmd{LAYOUT\_ERRORS} 列出每个错误的位置与结构名；摘要文件 \cmd{cell.sum} 列出有错误的检查。由于 IC Validator 输出是层次化的，无论结构被放置多少次，每个错误只需修正一次。持续此过程直至消除全部错误。

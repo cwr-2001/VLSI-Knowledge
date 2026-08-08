@@ -1,0 +1,1454 @@
+                                                                                      Feedback
+
+
+
+
+10
+Delay Calculation
+     To perform delay calculation accurately and efficiently, PrimeTime can use models
+     to represent the driver, RC network, and capacitive loads on the net. An ideal model
+     produces the same delays and slews as a SPICE simulation at the output of the driver and
+     at the input of each receiver. To learn about the different models and analysis modes for
+     delay calculation, see
+     •   Overview of Delay Calculation
+     •   Nonlinear Delay Models
+     •   Composite Current Source Timing Models
+     •   Cross-Library Voltage and Temperature Scaling
+     •   Waveform Propagation
+     •   Characterization Trip Points
+     •   Fast Multidrive Delay Analysis
+     •   Parallel Driver Reduction
+     •   Multi-Input Switching Analysis
+     •   Unit Delay Analysis
+
+
+Overview of Delay Calculation
+     To perform static timing analysis, PrimeTime must accurately calculate the delay and slew
+     (transition time) at each stage of each timing path. A stage consists of a driving cell, the
+     annotated RC network at the output of the cell, and the capacitive load of the network
+     load pins. The goal is to compute the response at the driver output and at the network
+     load pins, given the input slew or waveform at the driver input, using the least amount of
+     runtime necessary to get accurate results.
+     To perform stage delay calculation accurately and efficiently, PrimeTime uses models
+     to represent the driver, RC network, and capacitive loads on the net. An ideal model
+     produces exactly the same delays and slews as a SPICE simulation at the output of the
+     driver and at the input of each receiver. --
+
+
+
+PrimeTime® User Guide                                                                         335
+T-2022.03
+                                                                                             Feedback
+Chapter 10: Delay Calculation
+Overview of Delay Calculation
+
+
+Figure 104         Models used to calculate stage delays and slews
+
+
+
+             SIN             Driver
+                                                                                               Receivers
+
+                                            Parasitic
+                                            RC network
+
+
+
+
+                                                                                           Receiver
+                                                                                            model
+                               Driver
+                               model                     Reduced-order                     Receiver
+             SIN                                         network model                      model
+
+                                                                                           Receiver
+                                                                                            model
+                         Response to input waveforms calculated here
+
+
+     The driver model is intended to reproduce the response of the driving cell’s underlying
+     transistor circuitry when connected to an arbitrary RC network, given a specific input slew.
+     The reduced-order network model is a simplified representation of the full annotated
+     network that has nearly the same response characteristics as the original network.
+     PrimeTime uses the Arnoldi reduction method to create this model.
+     The receiver model is intended to represent the complex input capacitance characteristics
+     of a cell input pin, including the effects of the rise and fall transition, the slew at the pin, the
+     receiver output load, the state of the cell, and the voltage and temperature conditions.
+     To specify the types of driver and receiver models for RC delay calculation, set the
+     rc_driver_model_mode and rc_receiver_model_mode variables to one of the following
+     values:
+     •   basic – RC delay calculation uses the basic nonlinear delay model (NLDM) present in
+         the cell libraries.
+     •   advanced (default) – RC delay calculation uses the more advanced Composite Current
+         Source (CCS) timing model, if CCS data is present in the cell libraries; otherwise, the
+         NLDM model is used.
+
+
+PrimeTime® User Guide                                                                                 336
+T-2022.03
+                                                                                       Feedback
+Chapter 10: Delay Calculation
+Nonlinear Delay Models
+
+
+     The advanced CCS timing model has many advantages, one of which is the solution to
+     the problem described by the RC-009 warning message. This warning occurs when the
+     drive resistance of the driver model is much less than the network impedance to ground.
+     The CCS timing model is also better at handling the Miller Effect, dynamic IR drop, and
+     multivoltage analysis.
+
+
+Nonlinear Delay Models
+     The nonlinear delay model (NLDM) is the earlier, established method of representing
+     the driver and receiver of a path stage. The driver model uses a linear voltage ramp in
+     series with a resistor (a Thevenin model), as shown in the following figure. The resistor
+     helps smooth out the voltage ramp so that the resulting driver waveform is similar to the
+     curvature of the actual driver driving the RC network.
+
+Figure 105    NLDM driver and receiver models
+                   Driver                                               Receiver
+                   model                                                models
+
+
+                                                                                   C
+                            Rd
+
+                      +                   Reduced-order
+                                          network model
+                                                                                   C
+                      –
+                            v(t)
+                                                                                   C
+
+
+
+
+     The driver model has three model parameters: the drive resistance Rd, the ramp start
+     time tz, and the ramp duration delta t. PrimeTime chooses parameter values to match the
+     output waveforms as closely as possible. It builds a different simplified driver model for
+     each gate timing arc (for example, from U1/A to U1/Z) and for each sense (for example,
+     rising edge).
+     When the drive resistor is much less than the impedance of the network to ground, the
+     smoothing effect is reduced, potentially reducing the accuracy of RC delay calculation.
+     When this condition occurs, PrimeTime adjusts the drive resistance to improve accuracy
+     and issues an RC-009 warning.
+     The NLDM receiver model is a capacitor that represents the load capacitance of the
+     receiver input. A different capacitance value can apply to different conditions such as
+
+
+PrimeTime® User Guide                                                                          337
+T-2022.03
+                                                                                        Feedback
+Chapter 10: Delay Calculation
+Composite Current Source Timing Models
+
+
+     the rising and falling transitions or the minimum and maximum timing analysis. A single
+     capacitance value, however, applies to a given timing check, which does not support
+     accurate modeling of the Miller Effect.
+     Note:
+        The Miller Effect is the effective change in capacitance between transistor
+        terminals that occurs with a change in voltage across those terminals.
+
+
+Composite Current Source Timing Models
+     With the advent of smaller nanometer technologies, the Composite Current Source (CCS)
+     timing approach of modeling cell behavior has been developed to address the effects
+     of deep submicron processes. The driver model uses a time-varying current source, as
+     shown in the following figure. The advantage of this driver model is its ability to handle
+     high-impedance nets and other nonmonotonic behavior accurately.
+
+Figure 106   CCS timing driver and receiver models
+
+                      Driver                                                          Receiver
+                      model                                                           models
+
+
+                                                                                           C1 , C2
+
+
+                                                       Reduced-order
+                                                       network model                        C1 , C2
+               i(t)
+
+                                                                                            C1 , C2
+                                                               v
+
+                                                                                t
+                                                                   C1   C2
+
+
+     The CCS timing receiver model uses two different capacitor values rather than a single
+     lumped capacitance. The first capacitance is used as the load up to the input delay
+     threshold. When the input waveform reaches this threshold, the load is dynamically
+     adjusted to the second capacitance value. This “C1C2” model provides a much better
+     approximation of loading effects in the presence of the Miller Effect.
+     In some cases, different input signals can affect the input capacitance of the receiver.
+     Conditional pin-based models are used in the library to describe the pin capacitance for
+     different input signals. If there are conditional pin-based receiver models in the library,
+
+
+
+PrimeTime® User Guide                                                                              338
+T-2022.03
+                                                                                        Feedback
+Chapter 10: Delay Calculation
+Composite Current Source Timing Models
+
+
+     PrimeTime considers all receiver models and chooses the worst among the enabled pin-
+     based and arc-based receiver models for the analysis.
+     In PrimeTime, the CCS timing analysis requires detailed parasitics. It uses the following
+     library information, in the order of highest to lowest precedence, for delay calculation with
+     detailed parasitics:
+     1. CCS timing driver and receiver models, if both are available.
+     2. CCS timing driver model, if available, and lumped pin capacitance for the receiving
+        cells.
+     3. NLDM delay and transition tables and pin capacitance for the receiving cells. (Use a
+        CCS timing receiver model only with a CCS timing driver model.)
+     After a timing update, you can determine whether CCS timing data was used for delay
+     calculation by running the report_delay_calculation command. In the command,
+     specify the cell or net by using the -from and -to options, or specify a timing arc using the
+     -of_objects option. The following examples show CCS timing driver and receiver model
+     data used for a cell and net delay calculation.
+pt_shell> report_delay_calculation -from cell1/A -to cell1/Z
+...
+arc sense: positive_unate
+arc type: cell
+Calculation Rise    Rise    Fall   Fall   Slew    Rail
+Thresholds: Delay Slew      Delay Slew    Derate Voltage Temp.
+---------------------------------------------------------------
+   from-pin 50      30->70 50      70->30 0.400   1.100   125.0
+     to-pin 50      30->70 50      70->30 0.400   1.100   125.0
+RC network on pin 'cell1/Z' :
+----------------------------------------------------------
+Number of elements = 8 Capacitances + 7 Resistances
+Total capacitance = 0.03062 pF
+Total capacitance = 0.03062 (in library unit)
+Total resistance   = 0.017983 Kohm
+Advanced driver-modeling used for rise and fall.
+                           Rise        Fall
+------------------------------------------------------------------
+Input transition time = 0.100000     0.100000 (in library unit)
+Effective capacitance = 0.002625     0.002800 (in pF)
+Effective capacitance = 0.002625     0.002800 (in library unit)
+Output transition time = 0.060388    0.047040 (in library unit)
+Cell delay             = 0.050937    0.045125 (in library unit)
+pt_shell> report_delay_calculation -from [get_pins cell/Z] \
+          -to [get_pins receiver/A]
+...
+From pin: cell/Z
+To pin:   receiver/A
+Main Library Units: 1ns 1pF 1kOhm
+arc sense: unate
+
+
+
+PrimeTime® User Guide                                                                           339
+T-2022.03
+                                                                                      Feedback
+Chapter 10: Delay Calculation
+Composite Current Source Timing Models
+
+
+arc type:    net
+Calculation Rise    Rise   Fall   Fall   Slew    Rail
+Thresholds: Delay Slew     Delay Slew    Derate Voltage Temp
+-------------------------------------------------------------
+   from-pin 50      30->70   50   70->30 1.000 0.900 125.0
+     to-pin 50      30->70   50   70->30 1.000 0.900 125.0
+RC network on pin 'cell/Z' :
+------------------------------------------------------
+Number of elements = 8 Capacitances + 7 Resistances
+Total capacitance = 0.003062 pF
+Total capacitance = 0.003062 (in library unit)
+Total resistance   = 0.017983 Kohm
+Advanced receiver-modeling used for rise and fall.
+Advanced Receiver Model
+                             Rise          Fall
+----------------------------------------------------------------------
+Receiver model capacitance   1 = 0.001966 0.001888 (in library unit)
+Receiver model capacitance   2 = 0.002328 0.002160 (in library unit)
+                              Rise       Fall
+-------------------------------------------------------------------
+Net delay                = 0.000024    0.000064   (in library unit)
+Transition time          = 0.059192    0.037599   (in library unit)
+From_pin transition time = 0.059078    0.037666   (in library unit)
+To_pin transition time   = 0.059192    0.037599   (in library unit)
+Net slew degradation     = 0.000114   -0.000067   (in library unit)
+
+
+     Pin Capacitance Reporting
+     Timing modeling with CCS consists of a driver model and a receiver model. As the input
+     capacitance of a cell varies during the input signal transition, the CCS receiver model uses
+     two capacitances, C1 and C2, to model this variation and guarantee accuracy. C1 and C2
+     correspond to the input capacitances before and after the delay trip point, respectively.
+     Typically, the values of C1 and C2 are functions of input slew and output load. Therefore, it
+     is possible that the values of C1 and C2 are larger than the library pin capacitance that is
+     derived from CCS receiver models.
+     By default, the CCS receiver model information is used to compute the pin capacitance
+     behaviors reported for load pins. The CCS receiver models are used for checking
+     maximum capacitance violations, which ensures that all possible load extrapolations
+     reported by RC-011 can be reported by the report_constraint command. The actual
+     total capacitance is defined as the sum of wire capacitance and the maximum across each
+     pin's (C1, C2) capacitance.
+     The following commands reflect this CCS pin capacitance reporting behavior:
+     •   report_attribute
+
+     •   report_constraint -min_capacitance and -max_capacitance
+
+     •   report_delay_calculation
+
+
+PrimeTime® User Guide                                                                         340
+T-2022.03
+                                                                                     Feedback
+Chapter 10: Delay Calculation
+Composite Current Source Timing Models
+
+
+     •   report_net
+
+     •   report_timing -capacitance
+
+     The following attributes reflect this CCS pin capacitance reporting behavior:
+     •   total_ccs_capacitance_max_fall
+
+     •   total_ccs_capacitance_max_rise
+
+     •   total_ccs_capacitance_min_fall
+
+     •   total_ccs_capacitance_min_rise
+
+     This reporting behavior is controlled by the
+     report_capacitance_use_ccs_receiver_model variable, which has a default of true.
+     When you set this variable to false, the previous method of reporting library-derived
+     lumped pin capacitances is used.
+     Note:
+         There might be inconsistencies with reporting capacitance in PrimeTime,
+         IC Compiler, and Design Compiler. In PrimePower, there might be a mismatch
+         of capacitance values between the reports displayed when using the
+         report_delay_calculation and report_power_calculation commands.
+
+
+     Guidelines for Characterizing Design Rule Constraints
+     The max_transition pin attributes are normally present on the input and output pins of
+     library cells. For input pins, the max_transition attribute value should not exceed the
+     maximum slew index in the NLDM and CCS driver and CCS receiver_capacitance2 tables.
+     Use the lowest value of the maximum slew index between the NLDM and CCS tables as
+     a reference. The tables used as reference are for the rising and falling timing arcs from
+     the relevant input pin for which the max_transition attribute is being characterized. Take
+     both the arc-based and pin-based tables into account.
+     The max_capacitance pin attributes are normally present on the output pins of library
+     cells. For output pins, the max_capacitance attribute value should not exceed the
+     maximum load index in the NLDM and CCS driver as well as CCS receiver_capacitance1
+     and receiver_capacitance2 tables. Use the lowest value of the maximum load index
+     between the NLDM and CCS tables as a reference. The tables used as reference are for
+     the rising and falling timing arcs to the relevant output pin for which the max_capacitance
+     attribute is being characterized. Take both the arc-based and pin-based tables into
+     account.
+
+
+
+
+PrimeTime® User Guide                                                                        341
+T-2022.03
+                                                                                             Feedback
+Chapter 10: Delay Calculation
+Cross-Library Voltage and Temperature Scaling
+
+
+
+     Resolving the CCS Extrapolation Warning Message (RC-011)
+     Because large driver or receiver load extrapolations can cause inaccurate results, the tool
+     issues an RC-011 message when it attempts to calculate an RC delay with a slew or load
+     that is
+     •   Smaller than the minimum library slew or load indexes
+         To resolve this issue, add a small first slew index or load index in the library.
+     •   Larger than the maximum library slew or load indexes
+         If you use libraries that follow the Guidelines for Characterizing Design Rule
+         Constraints, resolve this issue by fixing the max_transition and max_capacitance
+         violations reported by the report_constraint command. To ensure that all the
+         max_capacitance violations in RC-011 are reported by the report_constraint
+         command, set the report_capacitance_use_ccs_receiver_model variable to true.
+     If the libraries are not compliant with the Guidelines for Characterizing Design Rule
+     Constraints, consider RC-011 warning messages to be important. You need to address the
+     design rule constraints to fix these warnings.
+     By default, the tool handles the extrapolation of CCS timing data by clipping at 10 percent
+     above the maximum library index and at 80 percent of the minimum library index.
+     To increase the extrapolation range, set the following variable:
+     pt_shell> set_app_var rc_ccs_extrapolation_range_compatibility false
+
+     With this setting, the tool extrapolates by clipping at 50 percent above the maximum library
+     index and at 50 percent below the minimum library index. This behavior reduces the
+     number of RC-011 warning messages.
+
+
+Cross-Library Voltage and Temperature Scaling
+     PrimeTime performs voltage and temperature scaling by interpolating data between
+     libraries characterized at different voltage and temperature corners. This cross-library
+     scaling allows you to analyze timing, noise, and power at voltage and temperature values
+     that are different from those of the corner libraries. Examples of scaling data include the
+     following:
+     •   Composite Current Source (CCS) timing driver and receiver models
+     •   CCS noise data
+     •   Timing and design rule constraints
+
+
+
+
+PrimeTime® User Guide                                                                              342
+T-2022.03
+                                                                                         Feedback
+Chapter 10: Delay Calculation
+Cross-Library Voltage and Temperature Scaling
+
+
+     •   Power data used in PrimePower
+     •   Nonlinear delay model (NLDM) delay and slew data
+     Scaling reduces the number of libraries required for the analysis of multivoltage designs
+     and therefore reduces the library characterization effort.
+     Library groups specify the scaling relationships between multiple libraries. To define a
+     library group for scaling, use the define_scaling_lib_group command:
+     pt_shell> define_scaling_lib_group \
+               {lib_0.9V.db lib_1.05V.db lib_1.3V.db}
+
+     There is no limit on the number of libraries in a group. To cover different portions of the
+     design, use this command multiple times to define multiple library groups. However, each
+     library can be part of no more than one library group.
+     To report the defined scaling library groups, use the report_lib_groups command.
+     To report point-to-point delay calculations, including the libraries used for scaling, use the
+     report_delay_calculation command.
+
+     To define a library group for the exact-match flow, use the define_scaling_lib_group
+     command with the -exact_match_only option:
+     pt_shell> define_scaling_lib_group -exact_match_only \
+               {lib_0.9V.db lib_1.0V.db lib_1.1V.db}
+
+     In the exact-match flow, operating conditions must exactly match one of the libraries, and
+     no scaling between libraries is performed.
+     The following commands invoke library scaling and exact matching:
+     set_operating_conditions
+     set_voltage
+     set_temperature
+     set_rail_voltage
+
+     For more information on library scaling, see SolvNetPlus article 000024652, “PrimeTime
+     Multivoltage Scaling Application Note.”
+
+
+     Scaling for Multirail Level Shifter Cells
+     PrimeTime can perform scaling for multirail cells such as level shifters, which connect
+     driver and load pins of cells belonging to different power domains. Accurate multirail
+     scaling enables PrimeTime to analyze the dependencies on multiple variables, including
+     multiple rail voltages and temperature.
+
+
+
+
+PrimeTime® User Guide                                                                            343
+T-2022.03
+                                                                                        Feedback
+Chapter 10: Delay Calculation
+Cross-Library Voltage and Temperature Scaling
+
+
+     By default, multirail scaling is enabled for timing, noise, and power analysis. The tool
+     automatically applies multirail scaling when there are enough libraries in the scaling library
+     group to support the required scaling formation for the number of rails.
+     To set up multirail scaling:
+     1. Set up scaling library groups using the define_scaling_lib_group command.
+         Ensure that there is at least one scaling library group for each scaling situation. For
+         example, have at least one scaling library group for regular one-rail cells and another
+         for two-rail level shifters that require scaling in more dimensions:
+         pt_shell> define_scaling_lib_group \
+                  {std_lib_0.9V.db \
+                   std_lib_1.1V.db}
+         pt_shell> define_scaling_lib_group \
+                  {LS_lib_0.9V_0.9V.db \
+                   LS_lib_0.9V_1.1V.db \
+                   LS_lib_1.1V_0.9V.db \
+                   LS_lib_1.1V_1.1V.db }
+
+     2. Put cells that require scaling in different dimensions into different libraries, and put
+        those libraries into different scaling library groups. For example, two-rail level shifter
+        cells require at least eight libraries to perform both voltage and temperature scaling if
+        you are using the on-the-grid formation. All other one-rail cells can be put in one library,
+        and only four libraries are needed to perform both voltage and temperature scaling of
+        these one-rail cells.
+     3. Set the design instance operating conditions by using the set_voltage,
+        set_rail_voltage, set_operating_conditions, and set_temperature commands.
+
+     4. Report the library groups by using the report_lib_groups command:
+         pt_shell> report_lib_groups -scaling -show {voltage temp process}
+         ...
+         Group    Library            Temperature Voltage           Process
+         -----------------------------------------------------------------
+         Group 1
+               mylib_wc_ccs            125.00   1.08                1.00
+               mylib_wc0d72_ccs        125.00   0.86                1.00
+         Group 2
+               mylib_lvtwc0d720d72_ccs 125.00   { V:0.86 VL:0.86 } 1.00
+               mylib_lvtwc0d720d9_ccs 125.00    { V:1.08 VL:0.86 } 1.00
+               mylib_lvtwc0d90d72_ccs 125.00    { VL:0.86 V:1.08 } 1.00
+               mylib_lvtwc0d90d9_ccs   125.00   { V:1.08 VL:1.08 } 1.00
+         Group 3
+               mylib_lvtwc_ccs         125.00   1.08                1.00
+               mylib_lvtwc0d72_ccs     125.00   0.86                1.00
+
+
+
+
+PrimeTime® User Guide                                                                           344
+T-2022.03
+                                                                                            Feedback
+Chapter 10: Delay Calculation
+Cross-Library Voltage and Temperature Scaling
+
+
+
+     Scaling Timing Derates in Voltage Scaling Flows
+     The set_timing_derate command allows you to specify early or late timing adjustment
+     values on different object scopes. In voltage scaling flows, when you apply timing derates
+     on library cells across libraries in a scaling group, the tool can compute scaled derates for
+     cell instances based on their voltage.
+     For example,
+     define_scaling_lib_group {lib_1.1V.db lib_1.0V.db lib_0.9V.db}
+
+     set_timing_derate -late [get_lib_cell lib_1.1V/INV1] 1.07
+     set_timing_derate -late [get_lib_cell lib_1.0V/INV1] 1.10
+     set_timing_derate -late [get_lib_cell lib_0.9V/INV1] 1.15
+
+     To enable voltage scaling of timing derates, set the following variable:
+     pt_shell> set_app_var \
+       timing_enable_derate_scaling_for_library_cells_compatibility false
+
+     For best results, also set the following variable to enable computation of fully scaled
+     (interpolated) derate values:
+     pt_shell> set_app_var \
+       timing_enable_derate_scaling_interpolation_for_library_cells true
+
+     With these settings applied,
+     •   Scaling is performed for both set_timing_derate derates and table-based timing
+         derates read in by the read_ocvm command.
+     •   If a cell's voltage configuration exactly matches that of a scaling library, that library's
+         derate data is used.
+     •   If a cell's voltage configuration does not exactly match a scaling library, a fully scaled
+         (interpolated) derate computed from nearby scaling libraries is used.
+     •   If a cell has multiple rails, then the worst-case (non-interpolated) derate from nearby
+         scaling libraries is used.
+     By default, both of these features (derate scaling and interpolation-based derate scaling)
+     are disabled by default. For details, see the man pages.
+     If you set derating on a library cell in one scaling library, you should also set derating
+     on the same library cell in the other scaling libraries as well. Otherwise, you can have
+     “missing” derates at some voltage conditions. If a voltage-scaled derate cannot be
+     computed for a library cell because of this, the tool uses the next derate setting found in
+     the object scope precedence list (link library derate, then hierarchical cell, then global).
+
+
+
+
+PrimeTime® User Guide                                                                                  345
+T-2022.03
+                                                                                            Feedback
+Chapter 10: Delay Calculation
+Waveform Propagation
+
+
+     See Also
+     •   Derating Timing Delays for more information about the set_timing_derate command
+
+
+     Excluding Rails From Multirail Scaling Library Groups
+     The define_scaling_lib_group command provides an -excluded_rail_names option
+     that allows specified library voltage rails to be ignored by voltage scaling.
+     These rails are ignored when validating scaling group formations and when performing the
+     scaling calculations themselves, thus reducing N-dimensional multirail scaling to a lower
+     dimension.
+     This option can be used in true scaling flows to remove problematic rails that prevent valid
+     formations. It can also be used in exact-match flows to remove problematic rails that do
+     not match cell instances.
+     In the following example, a 2-D scaling group cannot be created with only two libraries (at
+     least three are required), but a 1-D scaling group can be created by ignoring the VDD2
+     rail:
+     define_scaling_lib_group { \
+         slow__VDD1_1.0__VDD2_1.5.db \
+         slow__VDD1_2.0__VDD2_1.6.db \
+       } \
+       -excluded_rail_names {VDD2}
+
+     The -excluded_rail_names option should be used with care, as it disables consistency
+     checks and scaling algorithms that are normally applied to the analysis.
+     This option affects all cells in the scaling group libraries. To exclude rails for specific library
+     cells, use the set_disable_pg_pins command instead.
+
+
+Waveform Propagation
+     Waveform effects such as the long tail effect and the receiver Miller effect can be
+     significant in 16-nm and smaller geometries. Ignoring these effects can lead to
+     inaccuracies in delay calculation when design waveforms deviate significantly from the
+     waveforms used during library characterization.
+     To improve accuracy in the presence of waveform distortions, you can enable advanced
+     waveform propagation, which uses a combination of CCS timing and CCS noise models
+     during delay calculation. Waveform propagation supports both graph-based and path-
+     based analysis and requires libraries that contain nonlinear delay models (NLDM), CCS
+     timing, and CCS noise models. The libraries also need the normalized driver waveform.
+
+
+
+
+PrimeTime® User Guide                                                                               346
+T-2022.03
+                                                                                          Feedback
+Chapter 10: Delay Calculation
+Characterization Trip Points
+
+
+     To enable waveform propagation, set the delay_calc_waveform_analysis_mode
+     variable to full_design. Waveform propagation improves accuracy for all arcs that have
+     the required library data. If the required data is not available, the tool performs standard
+     delay calculation.
+     To use waveform propagation during setup and hold constraint analysis, set the
+     delay_calc_waveform_analysis_constraint_arcs_compatibility variable to false.
+     By default, the variable is set to true, which causes the tool to perform setup and hold
+     constraint analysis using only nonlinear delay model (NLDM) lookup tables.
+
+
+Characterization Trip Points
+     The characterization trip points of a design (waveform measurement thresholds) affect the
+     calculation of delays and transition times by PrimeTime. PrimeTime establishes the trip
+     points as follows:
+     1. If thresholds are defined on specific library pins, the application tools use those. Library
+        pin thresholds override library-level thresholds of the same name.
+     2. If library pin thresholds are not defined, but library-level thresholds are, the application
+        tools use the library-level thresholds.
+     3. If neither library pin level nor library-level thresholds are defined, the application tools
+        use the thresholds defined in the main library (the first library in the link path).
+     4. If none of the previous thresholds are defined, the application tools use default trip
+        points at 20 percent and 80 percent of the rail voltage for transition time calculations
+        and 50 percent of the rail voltage for delay calculations.
+     5. If the trip points defined by any of these methods are not valid (for instance, 0 percent
+        and 100 percent), the trip points are set to 5 percent and 95 percent of the rail voltage
+        for transition time calculations and 50 percent of the rail voltage for delay calculations.
+     Figure 107 and Figure 108 show some signal waveforms and the trip points used to
+     calculate transition times (slews) and delays. The default trip point values define slew as
+     the time that a signal takes to change from 20 to 80 percent or from 80 to 20 percent of the
+     rail voltage, and they define cell delay as the amount of time from the input signal reaching
+     50 percent of the rail voltage to the output signal reaching 50 percent of the rail voltage.
+
+
+
+
+PrimeTime® User Guide                                                                              347
+T-2022.03
+                                                                                                   Feedback
+Chapter 10: Delay Calculation
+Characterization Trip Points
+
+
+Figure 107     Slew transition points
+
+
+        Upper slew threshold rising edge
+        (default: 80%)
+
+        Lower slew threshold rising edge
+        (default: 20%)
+
+                                                    Rising transition time (slew)
+
+
+
+
+        Upper slew threshold falling edge
+        (Default: 80%)
+
+        Lower slew threshold falling edge
+        (Default: 20%)
+
+
+                                                        Falling transition time (slew)
+
+
+
+Figure 108     Input/output transition points
+
+
+
+                                                                                Output threshold rising edge
+        Input threshold rising edge                                             (default: 50%)
+        (default: 50%)
+
+
+                                                 Delay
+
+
+
+
+        Input threshold falling edge
+        (default: 50%)                                                         Output threshold falling edge
+                                                                               (default: 50%)
+
+                                                Delay
+
+
+
+
+     To check the threshold levels defined in a library, use the report_lib command.
+     To check the threshold settings used for a particular delay calculation arc, use the
+     report_delay_calculation -thresholds command.
+
+
+PrimeTime® User Guide                                                                                          348
+T-2022.03
+                                                                                         Feedback
+Chapter 10: Delay Calculation
+Fast Multidrive Delay Analysis
+
+
+
+Fast Multidrive Delay Analysis
+      In large designs with annotated parasitics, the runtime for RC delay calculation can be
+      large for massively multidriven networks. The primary bottleneck in this process is the
+      runtime required to compute the trip times for measuring delays and slews at the load
+      pins.
+      For massively multidriven networks with homogeneous drivers (drivers with similar input
+      skews, slews, and operating conditions), a fast multidrive calculation mode significantly
+      reduces the runtime. This mode shorts all of the driver nodes together with a network
+      of resistors and uses a single driver model at the first driver node for all waveform
+      calculations. The drive strength of the single driver is scaled up to be equivalent to the
+      whole set of original drivers. The delay calculation results for the single driver are copied
+      to all of the other drivers, including delay, slew, driver model parameters, and effective
+      capacitance.
+      The maximum number of network drivers that are handled without invoking the fast
+      multidrive analysis mode is nine. The presence of ten or more parallel drivers invokes the
+      fast multidrive analysis mode.
+      When PrimeTime uses the fast multidrive analysis mode, it generates an RC-010 warning
+      message that reports the number of drivers, the number of loads, the input slew and input
+      skew spreads, and the matching or mismatching of driver library timing arcs and driver
+      operating conditions. This information can help determine the accuracy of the analysis.
+      The accuracy of this mode is best when the driver library arcs are the same and operate
+      under the same context (operating conditions, input slew, input skew, and so on), and
+      operate with the same network impedance. These conditions are often typical of mesh
+      networks. Any differences in operating conditions and input slews can cause small
+      differences in output delay and output slew. For accuracy, the differences in input skews
+      should be small compared to the delays through the network. For higher accuracy, you can
+      calculate the delays and slews with an external tool and annotate them onto the network.
+      For more information, see the following topics:
+      •   Parallel Driver Reduction
+      •   Reducing SDF for Clock Mesh/Spine Networks
+
+
+Parallel Driver Reduction
+      Because clock signals must typically drive a large number of loads, clocks are often
+      buffered to provide the drive strength necessary to reduce clock skew to an acceptable
+      level. A large clock network might use a large number of drivers operating in parallel.
+      These drivers can be organized in a “mesh” or “spine” pattern to distribute the signal
+      throughout the chip.
+
+
+PrimeTime® User Guide                                                                             349
+T-2022.03
+                                                                                     Feedback
+Chapter 10: Delay Calculation
+Parallel Driver Reduction
+
+
+     If a design has 1,000 drivers in parallel driving 1,000 loads, PrimeTime must keep track of
+     one million different timing arcs between the drivers and loads. Timing analysis of such a
+     network can consume a large amount of CPU and memory resources.
+     For better performance, PrimeTime can reduce the number of timing arcs that must
+     be analyzed, as shown in the following figure. If you enable parallel driver reduction,
+     PrimeTime selects one driver in a parallel network and analyzes the timing arcs through
+     that driver only.
+
+
+
+
+PrimeTime® User Guide                                                                        350
+T-2022.03
+                                                                      Feedback
+Chapter 10: Delay Calculation
+Parallel Driver Reduction
+
+
+Figure 109    Parallel driver reduction
+
+                                                              D   Q
+
+              CLK
+
+
+
+                                                              D   Q
+
+
+
+
+                                                              D   Q
+
+
+
+
+       pt_shell> set_app_var timing_reduce_multi_drive_net_arcs true
+       pt_shell> set_app_var timing_reduce_multi_drive_net_arcs_threshold 1000
+       pt_shell> link_design
+
+
+
+                                                              D   Q
+
+              CLK
+
+
+
+                                                              D   Q
+
+
+
+
+                                                              D   Q
+
+
+
+
+PrimeTime® User Guide                                                        351
+T-2022.03
+                                                                                           Feedback
+Chapter 10: Delay Calculation
+Parallel Driver Reduction
+
+
+
+     Invoking Parallel Driver Reduction
+     To enable parallel driver reduction, set the timing_reduce_multi_drive_net_arcs
+     variable to true. By default, parallel driver reduction is disabled. During design
+     linking, the tool checks for the presence of nets with multiple drivers. If the tool
+     finds a net with driver-load combinations exceeding the threshold specified by the
+     timing_reduce_multi_drive_net_arcs_threshold variable, it reduces the number of
+     timing arcs associated with the drivers of that net.
+     The timing_reduce_multi_drive_net_arcs_threshold variable specifies the minimum
+     number of timing arcs that must be present to trigger a reduction. By default, it is set
+     to 10,000, which means that PrimeTime reduces the timing arcs of a net if the number
+     of drivers multiplied by the number of loads on the net is more than 10,000. In typical
+     designs, this large number only occurs in clock networks.
+     The tool performs driver reduction for a net when all of the following conditions are true:
+     •   The number of driver-load combinations is more than the variable-specified threshold
+         (10,000 by default).
+     •   Driver cells are nonsequential library cells (not flip-flops or latches and not
+         hierarchical).
+     •   All drivers of the net are instances of the same library cell.
+     •   All the drivers are connected to the same input and output nets.
+     To expand a reduced network to its original form or to perform driver reduction with a
+     different threshold, you must relink the design.
+
+
+     Working With Reduced Drivers
+     When layout is complete and detailed parasitic data is available, it is not possible to
+     annotate this data on a reduced network. To get accurate results, use an external
+     simulator such as SPICE to get detailed delay information for the network. Then you can
+     annotate the clock latency values and transition times on the individual clock pins of the
+     sequential cells, while still allowing PrimeTime to treat the reduced network as ideal, with
+     zero delay. This technique provides reasonably accurate results, while being very efficient
+     because the clock network timing only needs to be analyzed one time, even for multiple
+     PrimeTime analysis runs.
+     If you back-annotate the design with the read_sdf command, any annotations on the
+     reduced timing arcs are ignored. PrimeTime issues a PTE-048 message when this
+     happens. Suppress these messages with the following command:
+     pt_shell> suppress_message PTE-048
+
+
+
+
+PrimeTime® User Guide                                                                            352
+T-2022.03
+                                                                                         Feedback
+Chapter 10: Delay Calculation
+Multi-Input Switching Analysis
+
+
+      If you write out SDF with the write_sdf command, no interconnect delays are generated
+      for the reduced network.
+      Reducing parallel drivers only affects the timing arcs analyzed by PrimeTime, not the
+      netlist. Therefore, it does not affect the output of the write_changes command. For
+      information about RC delay calculation with massively multidriven networks, see Fast
+      Multidrive Delay Analysis.
+
+
+Multi-Input Switching Analysis
+      To characterize the input-to-output delay of a combinational logic gate for a library, the
+      characterization tools consider the switching of one input at a time among multiple inputs.
+      However, when multiple inputs switch at the same time, the delay can be different. To
+      increase the timing accuracy in these situations, you can invoke multi-input switching
+      analysis. Using this feature requires a PrimeTime-ADV license.
+      In the 4-input NAND gate shown in the following figure, an output transition from low to
+      high can be triggered by a single input going low while the other inputs are held high
+      (Case A) or by all inputs going low simultaneously (Case B). In Case A, only one active
+      transistor in the NAND gate pulls up the output, whereas in Case B, four active transistors
+      do the same thing in parallel, so Case B has the shorter input-to-output delay.
+
+Figure 110     Multi-Input Switching Example: 4-Input NAND Gate
+
+                Case A: Only input A1 switches
+
+                        A1
+                        A2
+                                                      Z
+                        A3
+                        A4
+                                                 A1-to-Z delay is less for Case B
+                Case B: All four inputs
+                switch at the same time
+
+
+      The logic library contains only the delay value for single-input switching. However,
+      simultaneous switching can occur in circuits such as memory decoders. If a NAND gate
+      is in a data path of such a circuit, a hold check is optimistic for the simultaneous switching
+      case because the true delay is less. Multi-input switching analysis can account for this
+      effect.
+      For the opposite situation where the output of the NAND gate goes from high to low,
+      multi-input switching results in longer delays than single-input switching, which can affect
+      setup checking. However, setup-critical data paths are usually long, with many gates, so
+      a small increase in one gate delay has a negligible overall effect. Conversely, hold-critical
+
+
+
+PrimeTime® User Guide                                                                            353
+T-2022.03
+                                                                                          Feedback
+Chapter 10: Delay Calculation
+Multi-Input Switching Analysis
+
+
+      data paths are usually short, where a small decrease in delay can be important. For this
+      reason, multi-input switching analysis applies only to minimum-delay (hold) checking.
+
+
+      Multi-Input Switching Analysis Modes
+      Multi-input switching analysis provides three analysis modes: lib_cell, lib_arc, and
+      advanced.
+
+      Library Cell User-Defined Coefficients
+      The lib_cell analysis mode allows you to define delay-scaling coefficients on library
+      cells. These coefficients are defined by the set_multi_input_switching_coefficient
+      command.
+      For example,
+      pt_shell> set_multi_input_switching_coefficient \
+                  [get_lib_cell lib1/NAND4gx] -rise -delay 0.683
+
+      To determine the correct delay adjustment factor for each multi-input combinational cell
+      and output transition type, use the HSPICE tool or other simulation tool to find the actual
+      reduced delays when all inputs switch simultaneously.
+      Library Timing Arc User-Defined Coefficients
+      The lib_arc analysis mode allows you to define delay-scaling coefficients on individual
+      library cell timing arcs. These coefficients can be provided in a library or applied by a script
+      file.
+      This mode allows more detailed coefficient behaviors to be defined, including switching pin
+      group information. For example,
+      cell("AND4X1") {
+        pin(Z) {
+          direction : output;
+          function : "(A1|A2) & (B1|B2)";
+          timing() {
+            related_pin : A1;
+            timing_sense : negative_unate;
+            ...
+            sdf_cond : "A2 == 1'b1 && B1 == 1'b0 && B2 == 1'b0";
+            when : "A2&!B1&!B2";
+            mis_factor_rise : 0.85;
+            mis_pin_set_rise : "A1 A2";
+            mis_factor_fall : 0.8;
+            mis_pin_set_fall : "A1 B1 B2";
+          }
+
+      For details on these library attributes, see Defining Library Timing Arc Coefficients.
+
+
+
+PrimeTime® User Guide                                                                             354
+T-2022.03
+                                                                                              Feedback
+Chapter 10: Delay Calculation
+Multi-Input Switching Analysis
+
+
+      The lib_arc analysis mode requires a PrimeTime-ADV-PLUS license.
+      Advanced Multi-Input Switching Analysis
+      The advanced analysis mode analyzes library cell data, along with actual pin slew, arrival,
+      load, and waveform information, to automatically estimate multi-input switching effects.
+      User-defined coefficients are not required, but the following library data is required:
+      •    CCS timing models
+      •    CCS noise models (arc-based)
+      •    All when conditions characterized
+      Table 18 shows the supported library cell types.
+Table 18       Supported Library Cell Types for Advanced Multi-Input Switching Analysis
+
+      AND2        OR2        NAND2      NOR2       AO211       AOI211     OA211      OAI211
+
+      AND3        OR3        NAND3      NOR3       AO21        AOI21      OA21       OAI21
+
+      AND4        OR4        NAND4      NOR4       AO22        AOI22      OA22       OAI22
+
+                                                   AO31        AOI31      OA31       OAI31
+
+
+
+
+      An output pin of a multi-output cell qualifies if (1) its logic function and library data qualify,
+      and (2) its logic function shares no input pins with other output pins.
+      For library cells that do not meet the requirements, you can apply user-defined coefficients
+      to library cells or library timing arcs with the other two analysis methods.
+      The advanced analysis mode requires a PrimeTime-ADV-PLUS license.
+
+
+      Defining Library Timing Arc Coefficients
+      The lib_arc analysis mode allows you to define delay-scaling coefficients on individual
+      library cell timing arcs. These coefficients can be provided in a library or applied by a script
+      file.
+      The coefficients are provided using the following attributes defined on library cell timing
+      arcs:
+      mis_factor_rise
+      mis_factor_fall
+
+
+
+
+PrimeTime® User Guide                                                                                 355
+T-2022.03
+                                                                                         Feedback
+Chapter 10: Delay Calculation
+Multi-Input Switching Analysis
+
+
+      mis_pin_set_rise
+      mis_pin_set_fall
+
+      These attributes are not standard Liberty attributes. Thus, to include them in a library, they
+      must be declared as user attributes at the top of the library file:
+      library(mis_arc_based_lib) {
+        define(mis_factor_rise, timing, float);
+        define(mis_factor_fall, timing, float);
+        define(mis_pin_set_rise, timing, string);
+        define(mis_pin_set_fall, timing, string);
+
+      Then in each timing() group, their values can be defined as needed:
+        cell("NAND2X1") {
+          pin(ZN) {
+            direction : output;
+            function : "!A | !B";
+            timing() {
+              related_pin : A;
+              timing_sense : negative_unate;
+              ...
+              mis_factor_rise : 0.55;
+              mis_pin_set_rise : "A B";
+            }
+            timing() {
+              related_pin : B;
+              timing_sense : negative_unate;
+              ...
+              mis_factor_rise : 0.45;
+              mis_pin_set_rise : "A B";
+            }
+
+      The mis_factor_rise and mis_factor_fall attributes specify the delay-scaling
+      coefficients to use when all pins in the mis_pin_set_rise and mis_pin_set_fall pin set
+      switch, respectively. If fewer pins switch, an intermediate factor is computed as described
+      in Arrival Window Overlap Checking.
+
+
+
+
+PrimeTime® User Guide                                                                            356
+T-2022.03
+                                                                                          Feedback
+Chapter 10: Delay Calculation
+Multi-Input Switching Analysis
+
+
+      Cells can have both “rise” and “fall” MIS attributes relevant to the same timing arc. For
+      example, an AO22 gate can have different pin sets (and coefficients) for the rising and
+      falling transitions of an arc:
+
+          when : "A2 & !B1 & !B2"; /* A2==1, B1==0, B2==0 */
+          mis_pin_set_rise : "A1 B1 B2";
+          mis_pin_set_fall : "A1 A2";
+
+
+      0→1      A1           rise            1→0     A1          fall
+
+      1        A2                           1→0     A2
+      0→1      B1                           0       B1
+
+      0→1      B2                           0       B2
+
+
+      Cells can have multiple pin sets that sensitize MIS effects. For example, the falling A1→Z
+      arc of an AO22 gate might be influenced by side pins from either AND gate also switching.
+      To specify multiple pin sets, separate them with “+” in the attribute value:
+
+          when : "A2 & B1 & B2"; /* A2==1, B1==1, B2==1 */
+          mis_pin_set_fall : "A1 A2 + A1 B1 B2";
+
+                            fall                                fall
+      1→0      A1           (pin set 1)     1→0     A1          (pin set 2)
+
+      1→0      A2                           1       A2
+      1        B1                           1→0     B1
+
+      1        B2                           1→0     B2
+
+
+      When all pins in any pin set switch together, the full coefficient value applies.
+      Note:
+          For MIS analysis, PrimeTime conservatively assumes that when conditions
+          could represent pre-transition or post-transition side pin values. The convention
+          of how to assign MIS effects to conditional arcs is dependent on the library
+          characterization tool.
+      The attributes must be declared as imported user attributes in PrimeTime before the library
+      is loaded, so that they are retained in memory. To do this, run the following commands
+      before the library is loaded:
+      define_user_attribute \
+        -type float -class lib_timing_arc -import mis_factor_rise
+      define_user_attribute \
+        -type float -class lib_timing_arc -import mis_factor_fall
+      define_user_attribute \
+
+
+PrimeTime® User Guide                                                                             357
+T-2022.03
+                                                                                       Feedback
+Chapter 10: Delay Calculation
+Multi-Input Switching Analysis
+
+
+        -type string -class lib_timing_arc -import mis_pin_set_rise
+      define_user_attribute \
+        -type string -class lib_timing_arc -import mis_pin_set_fall
+
+      If your library does not contain these attributes, you can define them in a Tcl script
+      file. The script should first define the attributes with the define_user_attribute
+      -import commands above, then define the attributes on library timing arcs using the
+      set_user_attribute and get_lib_timing_arcs commands as follows:
+      # include the define_user_attribute commands here
+      # define_user_attribute ...
+
+      # apply per-library-arc coefficient values
+      set_user_attribute \
+        [get_lib_timing_arcs -from NAND2/a -to NAND2/ZN] \
+        mis_factor_rise 0.35
+      set_user_attribute \
+        [get_lib_timing_arcs -from NAND2/a -to NAND2/ZN] \
+        mis_pin_set_rise {a b}
+      set_user_attribute \
+        [get_lib_timing_arcs -from NAND2/b -to NAND2/ZN] \
+        mis_factor_fall 0.40
+      set_user_attribute \
+        [get_lib_timing_arcs -from NAND2/b -to NAND2/ZN] \
+        mis_pin_set_fall {a b}
+
+      For complex cells, you can use the -filter option of the get_lib_timing_arcs
+      command to filter arcs by sense, when, or other attributes.
+
+
+      Configuring Multi-Input Switching Analysis
+      To use multi-input switching analysis,
+      1. Enable the feature by setting the following variable to true:
+         pt_shell> set_app_var \
+                     si_enable_multi_input_switching_analysis true
+
+      2. Specify the ordered list of analysis modes to use by setting the
+         si_multi_input_switching_analysis_mode variable. For example,
+         pt_shell> # use all analysis modes, preferring advanced where possible
+         pt_shell> set_app_var \
+                     si_multi_input_switching_analysis_mode \
+                     {advanced lib_arc lib_cell}
+
+         This variable specifies which analysis modes to use, and in what order of precedence
+         (highest first). Valid values are lib_cell, lib_arc, and advanced. If an analysis mode
+         is not in the list, it is not used.
+
+
+
+PrimeTime® User Guide                                                                          358
+T-2022.03
+                                                                                           Feedback
+Chapter 10: Delay Calculation
+Multi-Input Switching Analysis
+
+
+      3. If you are using the lib_cell analysis mode,
+         a. Define scaling coefficients on library cells:
+             pt_shell> set_multi_input_switching_coefficient \
+                         [get_lib_cell lib1/NAND4gx] -rise -delay 0.683
+
+         b. (Optional) Report the applied library cell coefficients:
+             pt_shell> report_multi_input_switching_coefficient
+
+      4. If you are using the lib_arc analysis mode,
+         ◦   If your library contains lib_arc attribute information, define the user-defined
+             attributes in PrimeTime before the libraries are loaded:
+             set_app_var link_path {* lib_with_MIS.db}
+
+             define_user_attribute \
+               -type float -class lib_timing_arc -import mis_factor_rise
+             define_user_attribute \
+               -type float -class lib_timing_arc -import mis_factor_fall
+             define_user_attribute \
+               -type string -class lib_timing_arc -import mis_pin_set_rise
+             define_user_attribute \
+               -type string -class lib_timing_arc -import mis_pin_set_fall
+
+             read_verilog ...
+             link_design TOP ;# libraries (and attributes) are loaded here
+
+         ◦   If you are defining lib_arc attribute information with a Tcl script file, source the file
+             after the libraries are loaded:
+             set_app_var link_path {* lib_with_MIS.db}
+
+             read_verilog ...
+             link_design TOP ;# libraries (and attributes) are loaded here
+
+             source lib_arc_coefficients.tcl
+
+         For details on how to provide lib_arc coefficient information, see Defining Library
+         Timing Arc Coefficients.
+      5. If you are using the advanced analysis mode,
+         ► (Optional) Report the library cells that qualify for automatic multi-input switching
+           analysis:
+             pt_shell> report_multi_input_switching_lib_cells
+
+
+
+
+PrimeTime® User Guide                                                                              359
+T-2022.03
+                                                                                          Feedback
+Chapter 10: Delay Calculation
+Multi-Input Switching Analysis
+
+
+
+      Multi-Input Switching Analysis Example
+      The following script demonstrates library cell multi-input switching analysis.
+      set search_path {. my_lib.db}
+      set link_path {my_lib.db}
+      read_verilog design.v
+      link_design
+      read_parasitics design.spef
+      source design.sdc
+
+      # Enable multi-input switching analysis
+      set_app_var si_enable_multi_input_switching_analysis true
+
+      # Use the lib_cell analysis mode
+      set_app_var si_multi_input_switching_analysis_mode {lib_cell}
+
+      # Specify delay change factors for library cells
+      set_multi_input_switching_coefficient \
+       [get_lib_cell lib1/NAND4gx] -rise -delay 0.683
+
+      # Report multi-input switching delay factors applied
+      report_multi_input_switching_coefficient
+
+      update_timing -full
+      report_timing -delay_type min -input_pins
+      report_delay_calculation -min -from Inst1/A -to Inst1/Z
+
+      In this example, the tool looks for situations in which a rising transition occurs at the output
+      of each instance of the library cell NAND4gx, and multiple inputs of the cell can switch at
+      the same time. In these situations, the tool multiplies the library-specified delay value by
+      a factor between 0.683 and 1.0 (depending on the number of potential switching inputs),
+      resulting in a shorter minimum delay from input to output.
+
+
+      Arrival Window Overlap Checking
+      By default, when you enable multi-input switching analysis, the tool considers arrival
+      windows for the signal transitions at the multiple inputs. When considering a transition
+      on one input, it looks for overlapping arrival windows of the other inputs, as shown in the
+      following figure.
+
+
+
+
+PrimeTime® User Guide                                                                             360
+T-2022.03
+                                                                                           Feedback
+Chapter 10: Delay Calculation
+Multi-Input Switching Analysis
+
+
+Figure 111     Arrival Windows for Multi-Input Switching Analysis
+
+
+                                       A1
+                                       A2
+                                                                     Z
+                                       A3
+                                       A4                       A1-to-Z delay is fully
+                                                                adjusted by delay factor
+
+
+      When considering the delay from input A1 to output Z, if the other input arrival windows
+      overlap the input A1 arrival window, the full multi-input delay factor applies to the library
+      delay value. Conversely, if there is no overlap, a factor of 1.0 applies. If some input arrival
+      windows overlap and others do not, an intermediate factor applies (computed using an
+      inverse proportional model).
+      You can disable the arrival window analysis and always fully apply the multi-input delay
+      factor when multiple inputs can switch in the same clock cycle. This results in a more
+      pessimistic analysis but saves runtime compared to the default multi-input switching
+      analysis. To invoke this runtime-saving option, set the following additional variable:
+      # Enable multi-input switching analysis
+      set_app_var si_enable_multi_input_switching_analysis true
+
+      # Disable input arrival window timing analysis
+      set_app_var si_enable_multi_input_switching_timing_window_filter false
+
+
+      Including or Excluding Specific Cells in MIS Analysis
+      The set_multi_input_switching_analysis command allows you to include or exclude
+      specific cells or library cells from MIS analysis:
+      set_multi_input_switching_analysis # Set multi-input switching analysis
+                                            information for cells
+        [-exclude_only]    (Exclude cells for MIS)
+        [-include_only]    (Include cells for MIS)
+        [-reset]           (Reset previously applied set command)
+        [-analysis_mode one-of-string]
+                           (Apply to specified analysis mode:
+                            Values: lib_cell, lib_arc, advanced)
+        object_list        (List of cell or lib_cell instances with MIS)
+
+      where:
+      •   object_list can contain leaf cells or library cells
+      •   The -include_only option includes only the specified objects in MIS analysis
+
+
+
+
+PrimeTime® User Guide                                                                             361
+T-2022.03
+                                                                                        Feedback
+Chapter 10: Delay Calculation
+Multi-Input Switching Analysis
+
+
+      •   The -exclude_only option excludes the specified objects from MIS analysis (but
+          allows it for everything else)
+      •   The -analysis_mode option restricts the specification to only the specified analysis
+          modes
+      For details, see the man page.
+
+
+      Scaling the Tool-Computed Advanced MIS Derates
+      The set_advanced_multi_input_switching_factor command allows you to scale the
+      tool-computed advanced MIS delay-scaling coefficients:
+      set_advanced_multi_input_switching_factor
+        -scale_factor scale_factor
+                       (Factor used for scaling advanced MIS coefficient:
+                       Range: 0 to 1)
+        [-all]         (Apply factor to entire design)
+        -reset         (Reset previously applied set command)
+        [-inverse]     (Apply inverse factor)
+        [object_list] (List of libcells to scale advanced MIS factor)
+
+      By default, the scaling factor relaxes the MIS adjustment by being multiplied against the
+      speedup value. A value of 1 keeps the speedup as-is, a value of 0 relaxes (removes) the
+      speedup entirely, and values in between relax the speedup partially:
+      # do not modify the MIS-adjusted cell delay at all
+      set_advanced_multi_input_switching_factor -scale_factor 1
+
+      # keep 70% of the tool-computed speedup
+      set_advanced_multi_input_switching_factor -scale_factor 0.7
+
+      # discard the tool-computed speedup entirely
+      # (revert to the original non-MIS cell delay)
+      set_advanced_multi_input_switching_factor -scale_factor 0
+
+      When the -inverse option is specified, the scaling factor strengthens the speedup by
+      being multiplied directly against the MIS-adjusted cell delay:
+      # do not modify the MIS-adjusted cell delay at all
+      set_advanced_multi_input_switching_factor -scale_factor 1 -inverse
+
+      # multiply the MIS-adjusted cell delay by 0.7
+      set_advanced_multi_input_switching_factor -scale_factor 0.7 -inverse
+
+      # multiply the MIS-adjusted cell delay by 0
+      # (the final cell delay becomes zero)
+      set_advanced_multi_input_switching_factor -scale_factor 0 -inverse
+
+      The command applies to the specified objects (if object_list is used) or to the entire design
+      (if -all is used).
+
+
+PrimeTime® User Guide                                                                            362
+T-2022.03
+                                                                                         Feedback
+Chapter 10: Delay Calculation
+Unit Delay Analysis
+
+
+     For details, see the man page.
+
+
+Unit Delay Analysis
+     When performing flow testing and constraint validation, the focus is typically on looking for
+     warning and error messages rather than on the numerical timing results.
+     The PrimeTime tool provides a unit delay calculation mode that computes a 1.0 unit delay
+     value (in library units) for every cell delay, net delay, pin transition, and coupled-net delta
+     delay and transition. For example,
+        Point                                  DTrans Trans Delta Incr     Path
+        -----------------------------------------------------------------------
+        clock CLK1 (rise edge)                                   0.0     0.0
+        clock network delay (propagated)                         8.0     8.0
+        uv21/CP (DFD1)                               1.0         0.0     8.0 r
+        uv21/Q (DFD1)                                1.0         1.0 &   9.0 r
+        uv12/A2 (ND2D2)                        0.0   1.0   0.0   1.0 & 10.0 r
+        uv12/ZN (ND2D2)                              1.0         1.0 & 11.0 f
+        uv13/I (BUFFD6)                        1.0   1.0   1.0   2.0 & 13.0 f
+        uv13/Z (BUFFD6)                              1.0         1.0    14.0 f
+        uv14/I (INVD8)                         0.0   1.0   0.0   1.0    15.0 f
+        uv14/ZN (INVD8)                              1.0         1.0    16.0 r
+        uv1O/D (DFD1)                          0.0   1.0   0.0   1.0    17.0 r
+        data arrival time                                               17.0
+
+        clock CLK1 (rise edge)                                  10.0    10.0
+        clock network delay (propagated)                         8.0    18.0
+        clock reconvergence pessimism                            0.0    18.0
+        uv1O/CP (DFD1)                                                  18.0 r
+        library setup time                                      -1.0    17.0
+        data required time                                              17.0
+        ----------------------------------------------------------------------
+        data required time                                              17.0
+        data arrival time                                              -17.0
+        ----------------------------------------------------------------------
+        slack (MET)                                                      0.0
+
+     This feature improves runtime. There is no effect on memory consumption.
+     To enable this feature, set the following variable:
+     pt_shell> set_app_var timing_enable_unit_delay true
+
+     Also disable the following features—CRPR, SI, AOCVM, POCVM, and advanced latch
+     analysis—if you are using them:
+     pt_shell> set_app_var timing_remove_clock_reconvergence_pessimism false
+     pt_shell> set_app_var si_enable_analysis false
+     pt_shell> set_app_var timing_aocvm_enable_analysis false
+
+
+
+PrimeTime® User Guide                                                                            363
+T-2022.03
+                                                                Feedback
+Chapter 10: Delay Calculation
+Unit Delay Analysis
+
+
+     pt_shell> set_app_var timing_pocvm_enable_analysis false
+     pt_shell> set_app_var timing_enable_through_paths false
+
+
+
+
+PrimeTime® User Guide                                                 364
+T-2022.03
+

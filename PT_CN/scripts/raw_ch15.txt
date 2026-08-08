@@ -1,0 +1,1724 @@
+                                                                                       Feedback
+
+
+
+
+15
+SMVA Graph-Based Simultaneous Multivoltage
+Analysis
+     SMVA graph-based simultaneous multivoltage analysis considers all combinations of
+     supply voltages for each path simultaneously, for all paths in the whole design, in a single
+     analysis run. To learn about SMVA analysis, see:
+     •   Overview of SMVA
+     •   Configuring SMVA Analysis
+     •   Reporting Timing Paths in an SMVA Analysis
+     •   DVFS Scenarios
+     •   Using SMVA Analysis With Other PrimeTime Features
+     •   Usage Examples
+     •   Commands and Attributes With DVFS Scenario Support
+     •   Feature Compatibility
+
+
+Overview of SMVA
+     In multivoltage designs, timing paths can cross from one power domain to another. When
+     the power domains can operate at multiple supply voltages, traditional analysis cannot
+     accurately analyze how the supply voltage combinations affect each path. If a single
+     voltage is used for each domain, then the voltage combinations are not bounded. If min/
+     max (on-chip variation) voltages are used for each domain, then the analysis is pessimistic
+     because different cells in the same domain cannot operate at different voltages at the
+     same time.
+     Graph-based simultaneous multivoltage analysis (SMVA) is an analysis method that
+     removes this pessimism. Within-domain paths are analyzed at all voltage levels of
+     the domain they belong to, and cross-domain paths are analyzed at all voltage level
+     combinations of the voltage domains they traverse, all in a single run.
+     SMVA analysis is particularly useful for designs that use dynamic voltage and frequency
+     scaling (DVFS) techniques to adjust the supply voltage and frequency during chip
+
+
+PrimeTime® User Guide                                                                          508
+T-2022.03
+                                                                                      Feedback
+Chapter 15: SMVA Graph-Based Simultaneous Multivoltage Analysis
+Overview of SMVA
+
+
+     operation, using more power when required for demanding tasks and less power at other
+     times. You can get accurate timing results in these situations by providing scaling library
+     groups and specifying the particular supply voltages of the power domains in the design.
+
+
+     SMVA Requirements
+     Graph-based SMVA analysis requires the following:
+     •   The design must have multivoltage power intent information. For details, see
+         Multivoltage Analysis Requirements.
+     •   The SMVA feature is enabled by the PrimeTime-ADV-PLUS license. The number of
+         required licenses depends on the number of voltage levels and DVFS scenarios used
+         in the analysis. For details, see SMVA Licensing.
+
+
+     SMVA Power Domain Analysis
+     When the SMVA feature is enabled, graph-based analysis simultaneously considers all
+     combinations of supply voltages for each path, for all paths in the design (both cross-
+     domain and within-domain), excluding impossible combinations for each path and path
+     segment, in a single analysis run.
+     For example, consider the paths shown in the following figure. The power supply for
+     domains A and B can be independently set to either low or high voltage levels.
+
+Figure 143   Supply Combinations for Cross-Domain and Within-Domain Paths
+
+
+             Domain A, Voltages Low and High            Domain B, Voltages Low and High
+
+             A Low, B Low
+             A Low, B High
+             A High, B Low
+             A High, B High
+                               FF1                                          FF4
+
+
+                            A Low                                  B Low
+                            A High                                 B High
+                      FF2                    FF3             FF5                    FF6
+
+
+
+     The within-domain timing paths starting at FF2 (blue) and FF5 (purple) are analyzed at
+     both the low and high supply voltages of their respective domains. On the other hand,
+
+
+
+
+PrimeTime® User Guide                                                                          509
+T-2022.03
+                                                                                       Feedback
+Chapter 15: SMVA Graph-Based Simultaneous Multivoltage Analysis
+Configuring SMVA Analysis
+
+
+     the timing path starting at FF1 (red) is a cross-domain path, which is analyzed under four
+     possible combinations of supply voltages for the two domains crossed by the path.
+     Each path operating under a given supply condition is treated as a separate path for
+     collection and reporting purposes. For example, the physical path from FF1 to FF4 (red)
+     can be reported up to four times by the report_timing -nworst command, once for
+     each of the four possible supply combinations, for each type of timing constraint (setup
+     and hold).
+     A timing path is identified as a cross-domain path if any timing arc in the data path or
+     clock path crosses a power domain boundary. This can be a net arc, when the driving cell
+     belongs to one domain and the receiver belongs to a different domain. It can also be a cell
+     arc in the case of a level shifter.
+     The UPF infrastructure determines the power domain membership. Every cell must have
+     its PG pins connected to a supply net, and each port should have a defined supply net.
+     The tool recognizes supply net connections specified both by the Verilog PG netlist and
+     by UPF commands (connect_supply_net). Specifying the supply connections using a
+     Verilog PG netlist is the preferred method because it is more direct, concise, and reliable.
+     For any timing path that contains an object without supply net information, the tool
+     finds the most likely supply from the design and library information and uses the single
+     voltage value of that supply. To report missing information, you can use the following
+     check_timing commands:
+     check_timing -include unconnected_pg_pins
+     check_timing -include supply_net_voltage
+
+
+
+Configuring SMVA Analysis
+     To configure SMVA analysis, do the following before the first timing update:
+     1. Configure your design for multivoltage analysis, as described in Chapter 14,
+        Multivoltage Design Flow.
+     2. Enable SMVA analysis by setting the following variable:
+        set_app_var timing_enable_cross_voltage_domain_analysis true
+
+     3. Define reference voltage names and voltage values for the power domains, as
+        described in Defining Named SMVA Voltage References.
+        This information allows the tool to collect and combine multiple voltage corner
+        configurations runs into a single run.
+
+
+
+
+PrimeTime® User Guide                                                                           510
+T-2022.03
+                                                                                      Feedback
+Chapter 15: SMVA Graph-Based Simultaneous Multivoltage Analysis
+Configuring SMVA Analysis
+
+
+     4. (Optional) Control or restrict the scope of SMVA analysis by setting the
+        timing_cross_voltage_domain_analysis_mode variable to one of the following
+        values:
+         ◦   full (the default) – The tool performs timing analysis and calculates slack values
+             for all paths in the design, including cross-domain and within-domain paths. By
+             default, all reporting and ECO commands consider all paths in the design.
+         ◦   only_crossing – The tool performs timing analysis on all paths in the design, but
+             it calculates slack only for cross-domain paths. Reporting and ECO commands
+             consider only cross-domain paths.
+         ◦   exclude_crossing – The tool performs timing analysis on all paths in the design,
+             but it calculates slack only for within-domain paths. Reporting and ECO commands
+             consider only within-domain paths.
+         ◦   legacy – The tool performs path-based analysis of cross-domain paths and ignores
+             within-domain paths.
+
+
+     Defining Named SMVA Voltage References
+     To specify the allowed combinations of voltages in each domain for SMVA analysis, use
+     the following commands:
+     •   get_supply_groups {supplies}
+
+         Creates a collection of supply groups that contain the specified supplies. To determine
+         the membership of supply nets to supply groups, the command traces the supply
+         connections using both the Verilog PG netlist and the UPF connect_supply_net
+         commands.
+     •   set_voltage_levels -reference_names {names} supply_group_collection
+
+         Defines a set of named voltage references for a supply group collection, such as high
+         and low, and assigns a name to each reference voltage.
+     •   set_voltage -reference_name name \
+           -object_list supply_group_collection voltage
+
+         Associates specific voltage values with the reference names previously defined by the
+         set_voltage_levels command.
+
+     For example, suppose that you have lower-level blocks named B1 and B2 in a top-level
+     design named TOP. You have two reference voltage conditions, named main_low and
+     main_high, corresponding to TOP supply voltages of 0.95 and 0.76, and block-level
+     voltages of 0.90 and 0.81, as shown in the following figure.
+
+
+
+
+PrimeTime® User Guide                                                                          511
+T-2022.03
+                                                                                  Feedback
+Chapter 15: SMVA Graph-Based Simultaneous Multivoltage Analysis
+Reporting Timing Paths in an SMVA Analysis
+
+
+Figure 144   Reference Voltage Conditions
+
+
+                                               Top
+
+                B1                                     B2
+                                                                                    main_high
+                                                                                     Top: 0.95
+                                                                                     B1: 0.90
+                                                                                     B2: 0.90
+
+                                                                                    main_low:
+                                                                                     Top: 0.76
+                                                                                     B1: 0.81
+                                                                                     B2: 0.81
+
+
+
+
+     To define these conditions for graph-based DVFS analysis, use the following commands:
+     set sg_block [get_supply_groups {B1/VDD B2/VDD}]
+     set_voltage_levels -reference_names {main_low main_high} $sg_block
+     set_voltage -reference_name main_high -object_list $sg_block 0.90
+     set_voltage -reference_name main_low -object_list $sg_block 0.81
+
+     set sg_top [get_supply_groups VDDTOP]
+     set_voltage_levels -reference_names {main_low main_high} $sg_top
+     set_voltage -reference_name main_high -object_list $sg_top 0.95
+     set_voltage -reference_name main_low -object_list $sg_top 0.76
+
+     The highlighted commands and options are available only for SMVA analysis.
+
+
+Reporting Timing Paths in an SMVA Analysis
+     In an SMVA analysis, the report_timing command includes an additional line in each
+     path header indicating the voltage configuration.
+     pt_shell> report_timing -through BLK2/C
+     ...
+       Startpoint: BLK1/FF1 (rising edge-triggered flip-flop clocked by CLKB1[0])
+       Endpoint: BLK2/FF3 (rising edge-triggered flip-flop clocked by CLKB2[0])
+       Path Group: CLKB2[0]
+       Path Type: max
+       Voltage Config: VDDT:lo, VDD1:lo, VDD2:lo
+     ...
+
+
+
+
+PrimeTime® User Guide                                                                     512
+T-2022.03
+                                                                                   Feedback
+Chapter 15: SMVA Graph-Based Simultaneous Multivoltage Analysis
+Reporting Timing Paths in an SMVA Analysis
+
+
+     In addition, you can use the -supply_net_group option to see supply group information
+     along the timing path. For example,
+     pt_shell> report_timing -through BLK2/C -supply_net_group
+     ...
+       Startpoint: BLK1/FF1 (rising edge-triggered flip-flop clocked by CLKB1[0])
+       Endpoint: BLK2/FF3 (rising edge-triggered flip-flop clocked by CLKB2[0])
+       Path Group: CLKB2[0]
+       Path Type: max
+       Voltage Config: VDDT:lo, VDD1:lo, VDD2:lo
+
+       Point                                    Incr       Path    Supply-Net-Group
+       -------------------------------------------------------------------------------
+       clock CLKB1[0] (rise edge)               0.00       0.00
+       clock network delay (propagated)         0.00       0.00
+       BLK1/FF1/CP (DFCND1LVT)                  0.00       0.00 r VDD1
+       BLK1/FF1/Q (DFCND1LVT)                   0.21       0.21 r VDD1
+       U1/Z (BUFFD2LVT)                         0.07       0.28 r VDDT
+       BLK2/C (block2) <-                       0.00       0.28 r
+       BLK2/FF3/D (DFCND1LVT)                   0.01       0.29 r VDD2
+       data arrival time                                   0.29
+
+       clock CLKB2[0] (rise edge)              10.00      10.00
+       clock network delay (propagated)         0.00      10.00
+       clock reconvergence pessimism            0.00      10.00
+       BLK2/FF3/CP (DFCND1LVT)                            10.00 r
+       library setup time                      -0.06       9.94
+       data required time                                  9.94
+       -------------------------------------------------------------------------------
+       data required time                                  9.94
+       data arrival time                                  -0.29
+       -------------------------------------------------------------------------------
+       slack (MET)                                         9.65
+
+     Similarly, timing_path collection objects include a dvfs_scenario attribute whose
+     description attribute can be queried:
+     pt_shell> get_attribute $path dvfs_scenario.description
+     {VDD2:lo, VDD1:lo, VDDT:lo}
+
+     As described in SMVA Power Domain Analysis, each voltage condition of a timing path
+     is treated as a separate path for collection and reporting purposes. For example, the
+     -nworst option can return multiple voltage condition versions of the same path.
+
+     By default, SMVA analysis considers both within-domain and cross-domain paths. You
+     can globally restrict this by setting the timing_cross_voltage_domain_analysis_mode
+     variable.
+
+
+
+
+PrimeTime® User Guide                                                                        513
+T-2022.03
+                                                                                     Feedback
+Chapter 15: SMVA Graph-Based Simultaneous Multivoltage Analysis
+DVFS Scenarios
+
+
+     You can also use the -domain_crossing option of the report_timing and
+     get_timing_paths commands to restrict this on a per-command basis:
+
+     •   -domain_crossing all – The command gathers or reports all paths, including both
+         cross-domain and within-domain paths. This is the default behavior.
+     •   -domain_crossing only_crossing – The command gathers or reports only cross-
+         domain paths.
+     •   -domain_crossing exclude_crossing – The command gathers or reports only
+         within-domain paths.
+
+
+DVFS Scenarios
+     For designs that use dynamic voltage and frequency scaling (DVFS), you can use DVFS
+     scenarios to analyze the design under all DVFS conditions simultaneously. For details, see
+     the following topics:
+     •   DVFS Scenario Concepts
+     •   Querying DVFS Scenarios
+     •   Applying DVFS Scenarios to Commands and Attributes
+     •   DVFS-Related Object Attributes
+     Note:
+         DVFS scenarios are voltage/frequency scenarios used in SMVA analysis. They
+         are not related to the operating condition and constraint scenarios used in
+         distributed multi-scenario analysis (DMSA).
+
+
+     DVFS Scenario Concepts
+     Simultaneous multivoltage analysis (SMVA) allows you to define multiple supply voltage
+     groups in the design, then analyze all voltage combinations simultaneously in a single run.
+     By itself, SMVA analysis varies only the supply voltages.
+     Dynamic voltage and frequency scaling (DVFS) is a design technique that adjusts
+     supply voltage and frequency during chip operation, using more power when required
+     for demanding tasks and less power at other times. In these designs, additional timing
+     parameters (such as clock frequency) must also vary with voltage.
+     To properly analyze these designs, SMVA analysis provides a DVFS scenario feature that
+     allows you to
+
+
+
+
+PrimeTime® User Guide                                                                         514
+T-2022.03
+                                                                                        Feedback
+Chapter 15: SMVA Graph-Based Simultaneous Multivoltage Analysis
+DVFS Scenarios
+
+
+     •   Apply design constraints to specific voltage conditions
+     •   Run reporting and analysis commands under specific voltage conditions
+
+     DVFS Scenario Collection Objects
+     A DVFS scenario is represented by a dvfs_scenario collection object that captures a
+     description of voltage conditions in the design. It can include a single supply group or
+     multiple supply groups, and each supply group can include one or more named voltage
+     references.
+     For example,
+
+      {VDDT:lo}                                    A single supply group at a single named voltage
+                                                   reference
+
+      {VDD1:lo sleep, VDDT:hi, VDD2:lo sleep} Multiple supply groups, some with multiple
+                                                   allowable named voltage references
+
+
+     You can use the get_dvfs_scenarios command to construct a dvfs_scenario collection
+     object. For example,
+     set my_dvfs_scenario1 [get_dvfs_scenarios \
+       -supply_group VDDT -reference_names {lo}]
+
+     set my_dvfs_scenario2 [get_dvfs_scenarios \
+       -supply_group VDD1 -reference_names {lo sleep} \
+       -supply_group VDDT -reference_names {hi} \
+       -supply_group VDD2 -reference_names {lo sleep}]
+
+     Both commands return a single dvfs_scenario collection object that describes the
+     specified voltage condition requirements:
+     pt_shell> sizeof_collection $my_dvfs_scenario1
+     1
+     pt_shell> sizeof_collection $my_dvfs_scenario2
+     1
+     pt_shell> get_attribute $my_dvfs_scenario1 description
+     {VDDT:lo}
+     pt_shell> get_attribute $my_dvfs_scenario2 description
+     {VDD1:lo sleep, VDDT:hi, VDD2:lo sleep}
+
+     The order of supply groups and named voltage references is not important.
+     It is important to realize that dvfs_scenario collection objects are constructed and used
+     as needed. The tool does not fully enumerate every possible partial and full voltage
+     condition description in memory, as this would be computationally infeasible.
+     For simplicity, documentation outside this topic refers to “DVFS scenarios” instead of
+     dvfs_scenario collection objects.
+
+
+PrimeTime® User Guide                                                                           515
+T-2022.03
+                                                                                        Feedback
+Chapter 15: SMVA Graph-Based Simultaneous Multivoltage Analysis
+DVFS Scenarios
+
+
+     Propagated DVFS Scenarios
+     Each timing path has a set of DVFS scenarios that fully describe its possible voltage
+     conditions. For example, a within-domain and cross-domain timing path might have the
+     following fully describing DVFS scenarios:
+
+Figure 145    Fully Describing DVFS Scenarios for Individual Timing Paths
+      VDDT
+                                                                          VDD1
+
+                                {VDDT:hi, VDD1:hi}
+                                {VDDT:hi, VDD1:lo}
+                                                                     {VDD1:hi}
+        {VDDT:hi}               {VDDT:lo, VDD1:hi}
+                                                                     {VDD1:lo}
+        {VDDT:lo}               {VDDT:lo, VDD1:lo}
+
+
+
+     A DVFS scenario that is fully describing for one path might be partially describing for
+     another. For example, {VDDT:hi} is fully describing for the path on the left but partially
+     describing for the path on the right.
+     If you obtain the fully describing DVFS scenarios for every path in the design, you get the
+     propagated DVFS scenarios for that design.
+     For example, a design with three voltage supply groups (VDDT, VDD1, and VDD2) with
+     various within-domain and cross-domain paths might have the following propagated DVFS
+     scenarios:
+
+Figure 146    The Propagated DVFS Scenarios for a Design
+
+                                          VDDT           {VDDT:hi}
+       VDD1                                              {VDDT:lo}                           VDD2
+
+                             {VDD1:hi, VDDT:hi}             {VDDT:hi, VDD2:hi}
+                             {VDD1:hi, VDDT:lo}             {VDDT:hi, VDD2:lo}
+         {VDD1:hi}           {VDD1:lo, VDDT:hi}             {VDDT:lo, VDD2:hi}         {VDD2:hi}
+         {VDD1:lo}           {VDD1:lo, VDDT:lo}             {VDDT:lo, VDD2:lo}         {VDD2:lo}
+
+
+
+
+     A propagated DVFS scenario always has a single named voltage reference per supply
+     group.
+
+     Using DVFS Scenarios to Control Command Scope
+     When you use a DVFS scenario with a constraint or reporting command, the command
+     applies to the propagated DVFS scenarios that are compatible with the command-
+     specified DVFS scenario.
+
+
+
+PrimeTime® User Guide                                                                             516
+T-2022.03
+                                                                                       Feedback
+Chapter 15: SMVA Graph-Based Simultaneous Multivoltage Analysis
+DVFS Scenarios
+
+
+     A propagated DVFS scenario is compatible with a command-specified DVFS scenario if
+     there is no conflict in the supply group named voltage references between them.
+     In the following example, a DVFS scenario of {VDD1:lo VDDT:lo} is given to the
+     report_timing command, causing the command to exclude propagated DVFS scenarios
+     with named voltage references other than those explicitly allowed:
+
+Figure 147    Applying a DVFS Scenario to a Command
+        report_timing -dvfs_scenarios \
+                                                                         Excludes paths with
+          [get_dvfs_scenarios \
+                                                                            {VDD1:hi}
+             -supply_group VDD1 -reference_names {lo} \
+                                                                         Excludes paths with
+             -supply_group VDDT -reference_names {lo}]]
+                                                                            {VDDT:hi}
+
+                                          VDDT          {VDDT:hi}
+       VDD1                                             {VDDT:lo}                              VDD2
+
+                             {VDD1:hi, VDDT:hi}           {VDDT:hi, VDD2:hi}
+                             {VDD1:hi, VDDT:lo}           {VDDT:hi, VDD2:lo}
+         {VDD1:hi}           {VDD1:lo, VDDT:hi}                                        {VDD2:hi}
+                                                          {VDDT:lo, VDD2:hi}
+         {VDD1:lo}           {VDD1:lo, VDDT:lo}           {VDDT:lo, VDD2:lo}
+                                                                                       {VDD2:lo}
+
+
+
+
+     In this example, note that paths entirely within VDD2 are not excluded. When you specify
+     a DVFS scenario for a command, it excludes what is incompatible with the specified DVFS
+     scenario; it does not limit inclusion to only the specified scenario conditions.
+
+
+     Querying DVFS Scenarios
+     DVFS scenarios are referenced as collection objects. You can use the
+     get_dvfs_scenarios command to query and return them.
+
+     Constructing a DVFS Scenarios for Supply Group Conditions
+     To construct a DVFS scenario for particular supply group voltage conditions, specify one
+     or more -supply_group and -reference_names option pairs:
+     pt_shell> get_dvfs_scenarios \
+                 -supply_group $sg_top -reference_names {low}
+
+     pt_shell> get_dvfs_scenarios \
+                 -supply_group $sg_blk1 -reference_names {low sleep} \
+                 -supply_group $sg_top -reference_names {high} \
+                 -supply_group $sg_blk2 -reference_names {low sleep}
+
+     This returns a DVFS scenario collection object with the specified conditions. See DVFS
+     Scenario Collection Objects for details.
+
+
+PrimeTime® User Guide                                                                           517
+T-2022.03
+                                                                                     Feedback
+Chapter 15: SMVA Graph-Based Simultaneous Multivoltage Analysis
+DVFS Scenarios
+
+
+     Use this method to construct a DVFS scenario to be passed to a constraint or reporting
+     command.
+     Obtaining All Propagated DVFS Scenarios
+     To obtain the full set of propagated DVFS scenarios for the current design, use the
+     -propagated option of the get_dvfs_scenarios command:
+     pt_shell> get_dvfs_scenarios -propagated
+
+     A logical design update is performed if the design is not currently updated.
+     The result is a collection of multiple dvfs_scenario collection objects, each
+     corresponding to one or more timing paths in the design. See Propagated DVFS
+     Scenarios for details.
+     This collection of propagated DVFS scenarios can be used for design exploration. Note
+     that not all commands with the -dvfs_scenarios option support multiple DVS scenario
+     collection objects as input.
+
+
+     Applying DVFS Scenarios to Commands and Attributes
+     By default, commands and attributes that support DVFS scenarios consider all DVFS
+     scenarios. The following topics describe how to limit these commands and attributes to a
+     subset of DVFS scenarios:
+     •   Applying DVFS Scenarios to Individual Commands
+     •   Applying DVFS Scenarios to Attribute Queries
+     •   Applying DVFS Scenarios to Scripts
+     •   Setting a DVFS Scenario Context for Command Execution
+     •   Disabling and Enabling DVFS Scenarios
+     •   DVFS Scenario Specification Precedence
+     For details on which commands and attributes support DVFS scenarios, see Commands
+     and Attributes With DVFS Scenario Support.
+
+     Applying DVFS Scenarios to Individual Commands
+     Commands that have a -dvfs_scenarios option allow you to explicitly specify the DVFS
+     scenarios for the command to consider:
+     pt_shell> report_timing -dvfs_scenarios $my_dvfs_scenarios
+
+     Explicitly specified DVFS scenarios take precedence over any script-based or context-
+     based DVFS scenario settings.
+
+
+PrimeTime® User Guide                                                                         518
+T-2022.03
+                                                                                      Feedback
+Chapter 15: SMVA Graph-Based Simultaneous Multivoltage Analysis
+DVFS Scenarios
+
+
+     Applying DVFS Scenarios to Attribute Queries
+     To query the value of an attribute in specific DVFS scenarios, include a dvfs_scenario
+     collection object in parentheses after the attribute name. For example,
+     set low_low [get_dvfs_scenarios \
+       -supply VDD_top -reference_names {low} \
+       -supply VDD_block -reference_names {low}]
+
+     get_attribute $pin pin_capacitance_max($low_low)
+     get_attribute $pin net.pin_capacitance_max($low_low)
+     report_attribute -attribute {pin_capacitance_max($low_low)} $pin
+     get_pins -filter {pin_capacitance_max($low_low) > 0.1}
+
+     If the collection contains multiple DVFS scenarios, the worst-case value is returned, which
+     is the minimum or maximum value according to the attribute type. If the per-scenario
+     values differ but cannot be merged (such as for string attributes), the tool issues an
+     ATTR-11 warning.
+     If a queried attribute does not support DVFS scenarios, the tool issues an ATTR-3 error.
+     Attribute subscripts take precedence over any script-based or context-based DVFS
+     scenario settings.
+
+     Applying DVFS Scenarios to Scripts
+     To apply DVFS scenarios to an entire SDC constraint file or PrimeTime script, use the
+     -dvfs_scenarios option of the read_sdc or source command, respectively:
+     pt_shell> source -dvfs_scenarios [get_dvfs_scenarios ...]
+
+     pt_shell> read_sdc -dvfs_scenarios [get_dvfs_scenarios ...]
+
+     These commands are equivalent to using the -dvfs_scenarios option with each
+     command that supports the option, and subscripting each attribute query that supports
+     such access.
+     When you use this method, consider the following:
+     Not all SDC commands support the -dvfs_scenarios option. If such a command is
+     encountered by the read_sdc or source command, the latest command has priority over
+     earlier ones. To avoid ambiguous settings, it is recommended to use only the commands
+     that support the -dvfs_scenarios option in the constraint script.
+     Commands that do not currently support the -dvfs_scenarios option might be enhanced
+     in future releases to support it, resulting in changes to results. This is another reason to
+     use only commands that support the -dvfs_scenarios option.
+
+
+
+
+PrimeTime® User Guide                                                                         519
+T-2022.03
+                                                                                    Feedback
+Chapter 15: SMVA Graph-Based Simultaneous Multivoltage Analysis
+DVFS Scenarios
+
+
+     Setting a DVFS Scenario Context for Command Execution
+     To apply DVFS scenarios to an arbitrary sequence of commands, including scripts and Tcl
+     procedures, use the push_dvfs_scenario and pop_dvfs_scenario commands:
+     pt_shell> push_dvfs_scenario -dvfs_scenario $low_low
+
+     pt_shell> # ...analysis commands for low_low DVFS scenario...
+
+     pt_shell> pop_dvfs_scenario
+
+     The push_dvfs_scenario command creates a DVFS scenario context that applies
+     to subsequent commands and attribute queries that support DVFS scenario use. The
+     pop_dvfs_scenario command removes the most recently applied context.
+
+     DVFS scenario contexts can be nested. In this case, there is no interaction between the
+     inner and outer DVFS contexts; the inner context only is used until it is popped.
+     Timing updates within DVFS contexts are not supported.
+
+     Disabling and Enabling DVFS Scenarios
+     You can use the -disable and -enable options of the configure_dvfs_scenarios
+     command to control which DVFS scenarios are included in the analysis.
+     For example,
+     pt_shell> configure_dvfs_scenarios -disable $low_low
+
+     pt_shell> # ...analysis with $low_low omitted...
+
+     pt_shell> configure_dvfs_scenarios -enable $low_low
+
+     The report_dvfs_scenarios -disabled command reports any currently disabled
+     scenarios:
+     pt_shell> report_dvfs_scenarios -disabled
+     ...
+       Current Ignored Scenarios:
+     ------------------------------------------------------------
+      B1/VDD:low VDDTOP:low
+
+     Disabled DVFS scenarios are omitted entirely from the analysis. Timing updates do not
+     compute their data, and reporting does not consider them.
+     Any enabling or disabling of DVFS scenarios requires a full timing update (update_timing
+     with the -full option). By default, the update_timing command performs an incremental
+     timing update, which is not sufficient to update the DVFS scenario changes.
+
+
+
+
+PrimeTime® User Guide                                                                        520
+T-2022.03
+                                                                                      Feedback
+Chapter 15: SMVA Graph-Based Simultaneous Multivoltage Analysis
+DVFS Scenarios
+
+
+     An alternative method is to set a false path to everything in the DVFS scenarios to be
+     disabled. For example,
+     pt_shell> set top_high_block_low [get_dvfs_scenarios ...]
+
+     pt_shell> set_false_path -to * -dvfs_scenarios $top_high_block_low
+
+     DVFS Scenario Specification Precedence
+     When multiple DVFS scenario reference methods are used, the most specific method
+     (“closest” to the command) takes precedence.
+     Explicit DVFS scenario references (the -dvfs_scenarios option of constraint and
+     reporting commands, scenario-specific attribute queries) have the highest precedence. For
+     example,
+     •   report_timing -dvfs_scenarios $dvfs_scenario
+
+     •   get_attribute $pin power_rail_voltage_max($dvfs_scenario)
+
+     Implicit references via DVFS scenario contexts have a lower precedence:
+     •   read_sdc -dvfs_scenarios $dvfs_scenario
+
+     •   source -dvfs_scenarios $dvfs_scenario
+
+     •   push_dvfs_scenario $dvfs_scenario
+
+     All three implicit reference methods have equal precedence; the last applied implicit
+     context wins.
+     The get_current_dvfs_scenario command returns the current DVFS scenario context,
+     or 0 if no context exists.
+     Lower-precedence DVFS scenario references are completely ignored when a higher-
+     precedence reference applies.
+
+
+     DVFS-Related Object Attributes
+     You can query the attributes in the following table to get SMVA information about timing
+     paths and DVFS scenarios.
+
+Attribute name                  Class            Type             Description
+
+dvfs_scenario                   timing_path      dvfs_scenario    dvfs_scenario associated with
+                                                 object           the timing path
+
+
+
+
+PrimeTime® User Guide                                                                           521
+T-2022.03
+                                                                                         Feedback
+Chapter 15: SMVA Graph-Based Simultaneous Multivoltage Analysis
+Using SMVA Analysis With Other PrimeTime Features
+
+
+Attribute name                  Class            Type                Description
+
+has_voltage_domain_crossing timing_path          Boolean             true for a cross-domain
+                                                                     path (a path reported
+                                                                     by report_timing
+                                                                     -domain_crossing
+                                                                     only_crossing)
+
+supply_groups                   dvfs_scenario    supply_group        The collection of supply groups
+                                                 object collection   relevant to the dvfs_scenario
+
+
+     For example, to iterate through a path collection and filter the cross-domain paths, use a
+     script similar to the following:
+     set my_path_collection [get_timing_paths ...]
+     foreach_in_collection path $my_path_collection {
+       if {[get_attribute $path has_voltage_domain_crossing]} {
+         // Take action regarding voltage-domain-crossing $path here
+         ...
+       }
+     }
+
+
+
+Using SMVA Analysis With Other PrimeTime Features
+     The following topics describe how SMVA analysis interacts with other PrimeTime features:
+     •   HyperScale Hierarchical Analysis
+     •   Voltage-Scaled Timing Derates in SMVA Flows
+     •   Extracted Timing Models
+     •   Noise Analysis
+
+
+     HyperScale Hierarchical Analysis
+     The SMVA feature is compatible with HyperScale hierarchical analysis. The flow uses
+     accurate aggressor modeling and context annotations (such as arrival times and latency
+     values) at the top-to-block hierarchical boundaries for all voltage configurations:
+     •   For HyperScale block models written by the write_hier_data command during block-
+         level analysis, data for all DVFS scenarios is captured. For example, arrival times and
+         cross-talk aggressor behavior are tracked and captured for each voltage configuration.
+         The block-level model is used during top-level analysis and allows you to analyze all
+         DVFS scenarios as if the run is flat.
+
+
+
+
+PrimeTime® User Guide                                                                             522
+T-2022.03
+                                                                                      Feedback
+Chapter 15: SMVA Graph-Based Simultaneous Multivoltage Analysis
+Using SMVA Analysis With Other PrimeTime Features
+
+
+     •   For HyperScale context information written by the write_hier_data command during
+         top-level analysis, the context data accurately represents all DVFS scenarios. The
+         merged context data from the top level is used during block-level analysis, and allows
+         you to analyze all DVFS scenarios as if the run is flat.
+     In other words, HyperScale SMVA allows you to analyze both the block and top levels for
+     all DVFS scenarios, providing the same timing as seen in a flat run, while also allowing the
+     reduction in memory and runtime consumption of HyperScale technology.
+     The HyperScale flow requires consistent SMVA setup between the block level and
+     top level, including enabling SMVA, voltage domains, voltage levels, DVFS scenarios,
+     and so on, in addition to the consistency requirements for non-SMVA runs such as
+     clocks, libraries, and timing exceptions. Note that the tool does not perform SMVA setup
+     consistency checking between the top and block levels, so inconsistent SMVA setup may
+     result in unpredictable errors.
+     The following script examples demonstrate HyperScale block-level and top-level analyses
+     with the SMVA feature.
+     set hier_enable_analysis true
+     # HyperScale block-level session
+
+     set link_path {* *.db}
+     # Without UPF 2.0 commands impcicit supply_sets are not needed
+     set upf_create_implicit_supply_sets false
+     read_verilog block.v.gz
+     link_design block
+
+     set timing_enable_cross_voltage_domain_analysis true
+
+     read_parasitics -format spef block.spef
+     # Power Supply Definitions
+     create_power_domain B -elements [get_cells {"ff1" "iv1" … }]
+     create_power_domain T #virtual top domain
+
+     create_supply_net sn_T -domain T
+     create_supply_net gn_T -domain T
+
+     create_supply_net sn_B -domain B
+     create_supply_net gn_B -domain B
+
+     set_domain_supply_net -primary_power_net sn_T -primary_ground_net gn_T T
+     set_domain_supply_net -primary_power_net sn_B -primary_ground_net gn_B B
+
+     set_voltage_levels sn_T -reference_names {hi lo}
+     set_voltage_levels sn_B -reference_names {hi lo}
+
+     set_voltage -object_list sn_T -reference_name lo 0.80 -min 0.90
+     set_voltage -object_list sn_T -reference_name hi 1.10 -min 1.20
+     set_voltage -object_list sn_B -reference_name lo 0.70 -min 0.80
+
+
+
+PrimeTime® User Guide                                                                        523
+T-2022.03
+                                                                       Feedback
+Chapter 15: SMVA Graph-Based Simultaneous Multivoltage Analysis
+Using SMVA Analysis With Other PrimeTime Features
+
+
+     set_voltage -object_list sn_B -reference_name hi 1.00 -min 1.10
+
+     create_clock -name CK1 -period 10 clk1 -dvfs_scenarios \
+      [get_dvfs_scenarios -supply_group sn_B -reference_names hi]
+     create_clock -name CK1 -period 12 clk1 -dvfs_scenarios \
+      [get_dvfs_scenarios -supply_group sn_B -reference_names lo] -add
+
+     create_clock -name CK2 -period 10 clk2 -dvfs_scenarios \
+      [get_dvfs_scenarios -supply_group sn_T -reference_names hi]
+     create_clock -name CK2 -period 12 clk2 -dvfs_scenarios \
+      [get_dvfs_scenarios -supply_group sn_T -reference_names lo] -add
+
+     # different cycles for specific scenarios
+     set_multicycle_path 3 -from CK1 -to CK2 -dvfs_scenarios \
+      [get_dvfs_scenarios -supply_group sn_B -reference_names hi \
+                          -supply_group sn_T -reference_names lo ]
+     set_multicycle_path 4 -through iv1/Z -dvfs_scenarios \
+      [get_dvfs_scenarios -supply_group sn_B -reference_names hi \
+                          -supply_group sn_T -reference_names lo ]
+
+     # specify non DVFS timing constraints
+     read_sdc block.sdc
+
+     # read_context and apply clock mapping if any:
+     read_context ./top
+     set_clock_map CK1 -parent_clocks CK1
+     set_clock_map CK2 -parent_clocks CK2
+
+     # run "full" SMVA timing analysis
+     update_timing
+
+     # Write out the model data
+     write_hier_data ./block
+
+     ------------------------------------------------------------------------
+
+     # HyperScale top-level session
+
+     set link_path {* *.db}
+     # without UPF 2.0 commands impcicit supply_sets are not needed
+     set upf_create_implicit_supply_sets false
+
+     set_hier_config -block block -path ./block
+
+     read_verilog top.v.gz
+     link_design top
+
+     set timing_enable_cross_voltage_domain_analysis true
+     set timing_cross_voltage_domain_analysis_mode full
+
+     read_parasitics -format spef top.spef
+
+
+
+PrimeTime® User Guide                                                        524
+T-2022.03
+                                                                                  Feedback
+Chapter 15: SMVA Graph-Based Simultaneous Multivoltage Analysis
+Using SMVA Analysis With Other PrimeTime Features
+
+
+     # Power Supply Definitions
+
+     create_power_domain T -elements [get_cells {"fft" "a" … }]
+
+     create_supply_net sn_T -domain T
+     create_supply_net gn_T -domain T
+
+     set_domain_supply_net -primary_power_net sn_T -primary_ground_net gn_T T
+     set_voltage_levels sn_T -reference_names {hi lo}
+     # UPF for block will be loaded from HS model as B/sn_B
+     set_voltage_levels B/sn_B -reference_names {hi lo}
+
+     set_voltage -object_list sn_T   -reference_name lo 0.80 -min 0.90
+     set_voltage -object_list sn_T   -reference_name hi 1.10 -min 1.20
+     set_voltage -object_list B/sn_B -reference_name lo 0.70 -min 0.80
+     set_voltage -object_list B/sn_B -reference_name hi 1.00 -min 1.10
+
+     create_clock -name CK1 -period 10 clk1 -dvfs_scenarios \
+      [get_dvfs_scenarios -supply_group B/sn_B -reference_names hi]
+     create_clock -name CK1 -period 12 clk1 -dvfs_scenarios \
+      [get_dvfs_scenarios -supply_group B/sn_B -reference_names lo] -add
+
+     create_clock -name CK2 -period 10 clk2 -dvfs_scenarios \
+      [get_dvfs_scenarios -supply_group sn_T -reference_names hi]
+     create_clock -name CK2 -period 12 clk2 -dvfs_scenarios \
+      [get_dvfs_scenarios -supply_group sn_T -reference_names lo]              -add
+
+     # different cycles for specific scenarios
+     set_multicycle_path 3 -from CK1 -to CK2 -dvfs_scenarios \
+      [get_dvfs_scenarios -supply_group B/sn_B -reference_names hi \
+                          -supply_group sn_T -reference_names lo ]
+     set_multicycle_path 4 -through B/iv1/Z -dvfs_scenarios \
+      [get_dvfs_scenarios -supply_group B/sn_B -reference_names lo \
+                          -supply_group sn_T -reference_names hi ]
+
+     # specify non DVFS timing constraints
+     read_sdc design.sdc
+     set_clock_map CK1 -block_clocks CK1
+     set_clock_map CK2 -block_clocks CK2
+
+     update_timing
+
+     # write block context
+     write_hier_data ./top
+
+     Context Characterization Flow
+     The SMVA feature is compatible with the context characterization flow using the
+     characterize_context and write_context commands. The generated context
+     uses accurate delay and latency across all DVFS scenarios. The output format of the
+     write_context command must be in binary context format (-format gbc).
+
+
+PrimeTime® User Guide                                                                      525
+T-2022.03
+                                                                                       Feedback
+Chapter 15: SMVA Graph-Based Simultaneous Multivoltage Analysis
+Using SMVA Analysis With Other PrimeTime Features
+
+
+     Also, the hier_characterize_context_mode variable must be set to full_context (the
+     default), not constraints_only.
+
+
+     Voltage-Scaled Timing Derates in SMVA Flows
+     The set_timing_derate command allows you to specify early or late timing adjustment
+     values on different object scopes. In SMVA flows, you can apply voltage-specific timing
+     derates, and the tool dynamically scales them as needed during the SMVA analysis.
+     To enable this feature, set the following variables:
+     pt_shell> set_app_var \
+       timing_enable_derate_scaling_for_library_cells_compatibility false
+
+     pt_shell> set_app_var \
+       timing_enable_derate_scaling_interpolation_for_library_cells true
+
+     For details, see Scaling Timing Derates in Voltage Scaling Flows.
+     With these settings applied, if you set timing derates on library cells in scaling group
+     libraries, the tool scales the derate values as needed according to the instance-specific
+     voltages computed per DVFS scenario. For example,
+     define_scaling_lib_group {lib_1.1V.db lib_1.0V.db lib_0.9V.db}
+
+     # define timing derates on scaling library cells
+     set_timing_derate -late [get_lib_cell lib_1.1V/INV1] 1.07
+     set_timing_derate -late [get_lib_cell lib_1.0V/INV1] 1.10
+     set_timing_derate -late [get_lib_cell lib_0.9V/INV1] 1.15
+
+     # define voltages for SMVA DVFS scenarios
+     set_voltage_levels sg1 -reference_names {hi lo}
+     set_voltage -object_list sg1 -reference_name lo 0.90                 ;# exact derate
+     set_voltage -object_list sg1 -reference_name hi 1.05                 ;# scaled derate
+
+     In this example, the following derating values apply to INV1 cells in DVFS scenarios:
+     •   sg1:lo – The low voltage 0.90 is an exact match with the 0.9V library, so the derating
+         value 1.15 set on the INV1 cell in that library cell applies.
+     •   sg1:hi – The high voltage 1.05 is not an exact match with any library. The derating
+         values set on INV1 library cells in the two nearest libraries (1.0V and 1.1V) are 1.07
+         and 1.10. The worse value is used, 1.10.
+     The set_timing_derate command also has the -dvfs_scenarios option, allowing you
+     to directly specify the DVFS scenarios to which cell derating applies. This is supported
+     only for leaf cell instances, and the DVFS scenario can only reference supplies for that
+     cell. As with ordinary derating, a set_timing_derate setting applied to a cell instance
+     overrides a more general setting on the corresponding library cell.
+
+
+PrimeTime® User Guide                                                                             526
+T-2022.03
+                                                                                         Feedback
+Chapter 15: SMVA Graph-Based Simultaneous Multivoltage Analysis
+Using SMVA Analysis With Other PrimeTime Features
+
+
+
+     Extracted Timing Models
+     The SMVA feature is compatible with extracted timing model (ETM) blocks used in a
+     scaling library group. To generate a timing model, you need to provide characterization
+     data for the ETM at each voltage corner.
+     The extract_model command in SMVA mode automatically produces one ETM file
+     for each active DVFS scenario (or voltage combination) relevant to the design. When
+     -dvfs_scenarios is used, the extract_model command automatically extracts
+     one model for each DVFS scenario compatible with the scenario specified with
+     -dvfs_scenarios option.
+
+     The names of extracted models are formed by combining the output model name specified
+     in the extract_model command, the voltage domain names, and voltage level names.
+     For example, suppose that you have voltage domains SN1 and SN2, and each domain
+     has two configurations named low and high. The command extract_model -output
+     test generates the following library model files:
+     test_SN1_low_SN2_low.lib
+     test_SN1_low_SN2_high.lib
+     test_SN1_high_SN2_low.lib
+     test_SN1_high_SN2_high.lib
+
+     The tool performs delay calculation for the ETM using the delay tables from the
+     appropriate voltage corner based on the DVFS scenarios explored during SMVA analysis.
+     The ETM blocks extracted at different voltages must pass all library group formation
+     criteria, including sharing the same number and types of timing arcs. Only the values in
+     the timing tables can be different.
+     In some cases, extraction at different supply voltages can result in different timing arcs.
+     For example, a transparent latch might be characterized as transparent in one model and
+     not in the other, due to different arrival times within the block. In that case, attempting to
+     create a scaling library group with these blocks triggers an error, and using the models in
+     this manner is not supported.
+
+     Timing Arc Multiple-Rail Delay Dependency
+     With the SMVA feature enabled, the PrimeTime tool supports complex macro cells in
+     which the timing arcs of a library cell depend on PG pins other than the PG pins related
+     to the “from” and “to” pins of the arc. For example, a low-power memory cell might have
+     constraint arcs that depend on the states of both the main and backup power supplies. An
+     extra PG supply on which the timing arc depends is called a virtual PG pin.
+     The mapping of constraint arcs to virtual PG pins is not directly supported in Liberty
+     syntax. Instead, the PrimeTime tool supports usage of a user-defined lib_timing_arc
+     attribute called related_power_pins_user. The PrimeTime tool imports the related
+
+
+
+PrimeTime® User Guide                                                                            527
+T-2022.03
+                                                                                        Feedback
+Chapter 15: SMVA Graph-Based Simultaneous Multivoltage Analysis
+Using SMVA Analysis With Other PrimeTime Features
+
+
+     power pin information from a user-defined attribute in the Liberty description of the cell.
+     You can also manually set this attribute per library timing arc.
+     For example, the following .lib description of a memory cell defines the related power pin
+     attribute and sets the attribute to the pin name VDD_SRAM.
+     # Modifications to Liberty .lib file
+     library (MEM_1_0.81) {
+        define (related_power_pins_user, timing, string);
+        ...
+        cell("dual_rail_ram") {
+            ...
+            pin (D) {
+                direction : input;
+                related_power_pin : VDD;
+                timing() {
+                  related_pin : "CLK"
+                  timing_type : setup_rising;
+                  related_power_pins_user : "VDD_SRAM";
+                }
+            }
+        }
+
+     The following PrimeTime script defines the attribute and imports the PG pin mapping
+     information.
+     # Import user-defined attribute
+     define_user_attribute related_power_pins_user \
+       -classes lib_timing_arc -type string -import
+
+     # Add one of the SRAM libraries to the link path
+     set_link_path {MEM_1_0.81 <other libs needed in design>}
+
+     read_verilog top.v
+
+     # Set up scaling library group for SRAM
+     define_scaling_lib_group \
+       { MEM_1_0.81 MEM_1_0.72 MEM_0.9_0.81 MEM_0.9_0.72}
+
+     # Other scaling groups in design go here ...
+
+     # Enable SMVA graph-based analysis
+     set timing_enable_cross_voltage_domain_analysis true
+
+     load_upf chip_connectivity.upf
+
+     # Define voltage levels to explore in SMVA analysis
+     set_voltage_levels {VDD1 VDD2} -reference_names {low high}
+     set_voltage -supply_group VDD1 -reference_name low 0.9
+     set_voltage -supply_group VDD1 -reference_name high 1
+     set_voltage -supply_group VDD2 -reference_name low 0.72
+     set_voltage -supply_group VDD2 -reference_name high 0.81
+
+
+
+PrimeTime® User Guide                                                                              528
+T-2022.03
+                                                                                    Feedback
+Chapter 15: SMVA Graph-Based Simultaneous Multivoltage Analysis
+Using SMVA Analysis With Other PrimeTime Features
+
+
+
+     read_parasitics top.spef
+
+     read chip.sdc
+
+     update_timing -full
+
+     The lib_timing_arc attribute named has_arc_related_power_pins returns true when
+     the PG pin dependence of this timing arc has been augmented with the specification of a
+     related_power_pins_user user-defined attribute.
+
+     The lib_timing_arc attributes named related_power_pins, unrelated_power_pins,
+     and has_arc_related_power_pins provide information about the related power pins that
+     affect (or do not affect) the timing arc.
+
+
+     Noise Analysis
+     You can analyze noise in an SMVA analysis, provided that
+     •   You define DVFS scenarios for the SMVA analysis.
+     •   You analyze noise in a single DVFS scenario at a time.
+     The update_noise command provides a -dvfs_scenarios option that accepts a single
+     scenario. The scenario must be fully describing (specifies a voltage name for all supply
+     groups in the design).
+     The report_noise command reports the noise results from the last DVFS scenario
+     updated with the update_noise -dvfs_scenarios command.
+     You can use these commands as follows to analyze noise across multiple DVFS
+     scenarios:
+     # apply noise settings across all DVFS scenarios here
+     set_input_noise ...
+     set_noise_lib_pin ...
+     set_noise_margin ...
+
+     foreach_in_collection dvfs_scenario [get_dvfs_scenarios ...] {
+       # apply per-DVFS-scenario noise settings here
+       set_input_noise ...
+       set_noise_lib_pin ...
+       set_noise_margin ...
+
+         # update noise information, report the results
+         update_noise -dvfs_scenarios $dvfs_scenario
+         report_noise ...
+     }
+
+
+
+
+PrimeTime® User Guide                                                                       529
+T-2022.03
+                                                                                      Feedback
+Chapter 15: SMVA Graph-Based Simultaneous Multivoltage Analysis
+Usage Examples
+
+
+     Noise settings that are common across all DVFS scenarios can be specified once before
+     any noise analysis is run. Noise settings that vary by DVFS scenario must be specified just
+     before analyzing that specific scenario.
+     The update_noise command also considers DVFS contexts applied by the following
+     commands:
+     •   push_dvfs_scenario
+
+     •   source -dvfs_scenario
+
+     •   read_sdc -dvfs_scenario
+
+
+
+Usage Examples
+     The following usage examples demonstrate the SMVA flow:
+     •   SMVA Analysis for All Voltage Conditions
+     •   SMVA Analysis for Specific DVFS Constraints
+     In the following script examples, the text highlighted in red shows the commands,
+     command options, and variables used ins the SMVA flow. These features can be used
+     only when the timing_enable_cross_voltage_domain_analysis variable is set to
+     true.
+
+
+     SMVA Analysis for All Voltage Conditions
+     To perform SMVA analysis of all combinations of multivoltage conditions, use the following
+     procedure:
+     1. Enable cross-domain analysis and SMVA analysis.
+     2. Define the scaling library groups.
+     3. Load the UPF specification.
+     4. Specify the supply groups and reference voltage levels.
+     5. Specify voltage values for each reference voltage level.
+     6. Run the timing analysis.
+     7. (Optional) Generate additional reports for specific voltage configurations.
+     The following example demonstrates the flow.
+
+     set_app_var link_path {* lib_1.0V_pg.db \
+       lib_1.0V_lvt_pg.db lib_1.0V_hvt_pg.db}
+
+
+PrimeTime® User Guide                                                                       530
+T-2022.03
+                                                                      Feedback
+Chapter 15: SMVA Graph-Based Simultaneous Multivoltage Analysis
+Usage Examples
+
+
+     read_verilog mydesign.v.gz
+     current_design mydesign
+     link
+
+     # 1. Enable cross-domain analysis and define analysis type
+     set_app_var timing_enable_cross_voltage_domain_analysis true
+
+     # 2. Define scaling library groups
+     define_scaling_lib_group \
+       "lib_1.0V_pg.db lib_0.9V_pg.db lib_0.8V_pg.db"
+     define_scaling_lib_group \
+       "lib_1.0V_lvt_pg.db lib_0.9V_lvt_pg.db lib_0.8V_lvt_pg.db"
+     define_scaling_lib_group \
+       "lib_1.0V_hvt_pg.db lib_0.9V_hvt_pg.db lib_0.8V_hvt_pg.db"
+
+     # 3. Read UPF specification
+     load_upf mydesign.upf
+     # Ensure that all ports have a related supply net assigned as needed
+     set_related_supply_net -object_list [get_ports *] -power VDD -ground VSS
+
+     # 4. Specify supply groups and reference voltage levels
+     set sg [get_supply_groups VDDTOP]
+     set_voltage_levels -reference_names { main_low main_high } $sg
+
+     # 5. Specify voltage values for each reference voltage level
+     set_voltage -reference_name main_high -object_list $sg 1.0
+     set_voltage -reference_name main_low -object_list $sg 0.86
+
+     # Optional instance-specific set_voltage commands go here
+
+     # Additional timing checks for PG pins and supply nets
+     check_timing -override_defaults unconnected_pg_pins
+     check_timing -override_defaults supply_net_voltage
+
+     # Specify timing constraints (other than DVFS)
+     read_sdc mydesign.sdc
+
+     # 6. Run a "full" SMVA timing analysis
+     update_timing
+
+     # Report worst path across all possible voltage configurations
+     report_timing
+
+     # 7. Generate additional reports for specific voltage configurations
+     #    [Optional]
+     set vdd_main_low [get_dvfs_scenarios \
+       -supply_group [get_supply_groups VDDTOP] -reference_names main_low]
+     report_timing -dvfs_scenarios $vdd_main_low
+
+
+
+
+PrimeTime® User Guide                                                        531
+T-2022.03
+                                                                                      Feedback
+Chapter 15: SMVA Graph-Based Simultaneous Multivoltage Analysis
+Usage Examples
+
+
+
+     SMVA Analysis for Specific DVFS Constraints
+     To perform SMVA analysis of specific combinations of multivoltage conditions, use the
+     following procedure:
+     1. Enable cross-domain analysis and SMVA analysis.
+     2. Define the scaling library groups.
+     3. Load the UPF specification.
+     4. Specify the supply groups and reference voltage levels.
+     5. Specify voltage values for each reference voltage level.
+     6. Specify the DVFS scenarios and the related design constraints.
+     7. Run the timing analysis.
+     8. (Optional) Generate additional reports for specific voltage configurations.
+     Each combination of voltage supply values for the power domains is called a dynamic
+     voltage and frequency scaling (DVFS) scenario.
+     Note:
+        DVFS scenarios are not related to operating condition scenarios analyzed in
+        distributed multi-scenario analysis (DMSA). DVFS multivoltage scenarios are
+        analyzed in a single run, whereas DMSA operating condition scenarios are
+        analyzed in distributed runs.
+     The following example demonstrates the flow.
+
+     set_app_var link_path {* lib_1.0V_pg.db \
+       lib_1.0V_lvt_pg.db lib_1.0V_hvt_pg.db}
+     read_verilog mydesign.v.gz
+     current_design mydesign
+     link
+
+     # 1. Enable cross-domain analysis and define analysis type
+     set_app_var timing_enable_cross_voltage_domain_analysis true
+
+     # 2. Define scaling library groups
+     define_scaling_lib_group \
+       "lib_1.0V_pg.db lib_0.9V_pg.db lib_0.8V_pg.db"
+     define_scaling_lib_group \
+       "lib_1.0V_lvt_pg.db lib_0.9V_lvt_pg.db lib_0.8V_lvt_pg.db"
+     define_scaling_lib_group \
+       "lib_1.0V_hvt_pg.db lib_0.9V_hvt_pg.db lib_0.8V_hvt_pg.db"
+
+     # 3. Read UPF specification
+
+
+
+PrimeTime® User Guide                                                                        532
+T-2022.03
+                                                                       Feedback
+Chapter 15: SMVA Graph-Based Simultaneous Multivoltage Analysis
+Usage Examples
+
+
+     load_upf mydesign.upf
+     # Ensure that all ports have a related supply net assigned as needed
+     set_related_supply_net -object_list [get_ports *] -power VDD -ground VSS
+
+     # 4. Specify supply groups and reference voltage levels
+     set vdd_top [get_supply_groups VDDTOP]
+     set vdd_block1 [get_supply_groups B1/VDD]
+     set vdd_block2 [get_supply_groups B2/VDD]
+     set_voltage_levels -reference_names {low high} $vdd_top
+     set_voltage_levels -reference_names {low high} $vdd_block1
+     set_voltage_levels -reference_names {low high} $vdd_block2
+
+     # 5. Specify voltage values for each reference voltage level
+     set_voltage -reference_name high -object_list $vdd_top 1.0
+     set_voltage -reference_name low -object_list $vdd_top 0.86
+     set_voltage -reference_name high -object_list $vdd_block1 1.0
+     set_voltage -reference_name low -object_list $vdd_block1 0.86
+     set_voltage -reference_name high -object_list $vdd_block2 1.0
+     set_voltage -reference_name low -object_list $vdd_block2 0.86
+
+     # Optional instance-specific set_voltage commands
+
+     # 6. Define DVFS scenarios and DVFS-specific design constraints
+
+     # ------------------------------------------------------------------
+     # Create DVFS scenarios
+     set vdd_top [get_supply_groups VDDTOP]
+     set vdd1 [get_supply_groups B1/VDD]
+     set vdd2 [get_supply_groups B2/VDD]
+     set vdd_mission [get_dvfs_scenarios \
+       -supply_group $vdd_top -reference_names high]
+     set vdd_sleep [get_dvfs_scenarios \
+       -supply_group $vdd_top -reference_names low]
+     set vdd1_low_vdd2_high [get_dvfs_scenarios \
+       -supply_group $vdd1 -reference_names low
+       -supply_group $vdd2 -reference_names high]
+     set vdd1_high_vdd2_low [get_dvfs_scenarios \
+       -supply_group $vdd1 -reference_names high
+       -supply_group $vdd2 -reference_names low]
+     # Define clocks that depend on the DVFS scenarios
+     create_clock -name CK1 -period 200 \
+       -dvfs_scenarios $vdd_mission [get_pin pll/o]
+     create_clock -name CK1 -period 300 \
+       -dvfs_scenarios $vdd_sleep [get_pin pll/o]
+
+     # Specify timing exceptions that depend on the DVFS scenarios
+     set_false_path -from CK2 -to CK1 \
+       -dvfs_scenarios { $vdd1_high_vdd2_low $vdd1_low_vdd2_high}
+     set_multicycle_path 3 -from CK1 -to CK2
+     set_multicycle_path 4 -from CK1 -to CK2 \
+       -dvfs_scenarios $vdd1_high_vdd2_low
+     set_multicycle_path 5 -from CK1 -to CK2 \
+
+
+PrimeTime® User Guide                                                        533
+T-2022.03
+                                                                                   Feedback
+Chapter 15: SMVA Graph-Based Simultaneous Multivoltage Analysis
+Commands and Attributes With DVFS Scenario Support
+
+
+         -dvfs_scenarios $vdd1_low_vdd2_high
+
+     # Additional timing checks for PG pins and supply nets
+     check_timing -override_defaults unconnected_pg_pins
+     check_timing -override_defaults supply_net_voltage
+
+     # Specify timing constraints (other than DVFS)
+     read_sdc mydesign.sdc
+     # ------------------------------------------------------------------
+
+     # 7. Run a "full" graph-based DVFS timing analysis
+     update_timing
+
+     # Report worst path across all possible DVFS scenarios
+     report_timing
+
+     # 8. Generate additional reports for specific voltage configurations
+     #    [Optional]
+     set vdd_main_low [get_dvfs_scenarios \
+       -supply_group [get_supply_groups VDDTOP] -reference_names low]
+     report_timing -dvfs_scenarios $vdd_main_low
+
+
+
+Commands and Attributes With DVFS Scenario Support
+     The following topics list the commands and attributes with DVFS scenario support:
+     •   Commands With DVFS Scenario Support
+     •   Attributes With DVFS Scenario Support
+
+
+     Commands With DVFS Scenario Support
+     The following commands support usage of the -dvfs_scenarios option in SMVA analysis
+     to restrict the scope of a constraint or a report to specific DVFS scenarios:
+     create_clock
+     create_generated_clock
+     define_cell_alternative_lib_mapping
+     extract_model
+     get_timing_paths
+     read_sdc
+     remove_clock_gating_check
+     remove_clock_latency
+     remove_clock_uncertainty
+     remove_fanout_load
+     remove_input_delay
+     remove_max_capacitance
+     remove_max_fanout
+     remove_max_transition
+     remove_min_capacitance
+
+
+PrimeTime® User Guide                                                                    534
+T-2022.03
+                                                                  Feedback
+Chapter 15: SMVA Graph-Based Simultaneous Multivoltage Analysis
+Commands and Attributes With DVFS Scenario Support
+
+
+     remove_output_delay
+     remove_waveform_integrity_analysis
+     report_analysis_coverage
+     report_clock
+     report_clock_timing
+     report_clock_gating_check
+     report_constraint
+     report_crpr
+     report_delay_calculation
+     report_etm_arc
+     report_global_slack
+     report_global_timing
+     report_min_period
+     report_min_pulse_width
+     report_noise          ;# single DVFS scenario at a time
+     report_port
+     report_pulse_clock_max_transition
+     report_pulse_clock_max_width
+     report_pulse_clock_min_transition
+     report_pulse_clock_min_width
+     report_qor
+     report_si_bottleneck
+     report_timing
+     report_timing_derate
+     report_waveform_integrity_analysis
+     set_annotated_transition
+     set_clock_gating_check
+     set_clock_latency
+     set_clock_uncertainty
+     set_driving_cell       ;# only -input_transition_rise/fall
+     set_false_path
+     set_fanout_load
+     set_input_delay
+     set_load               ;# only -pin_load
+     set_max_capacitance
+     set_max_fanout
+     set_min_capacitance
+     set_output_delay
+     set_false_path
+     set_max_delay
+     set_max_transition
+     set_min_capacitance
+     set_min_delay
+     set_multicycle_path
+     set_output_delay
+     set_path_margin
+     set_timing_derate
+     set_waveform_integrity_analysis
+     source
+     update_noise           ;# single DVFS scenario at a time
+     write_interface_timing
+     write_sdf
+
+
+
+PrimeTime® User Guide                                                   535
+T-2022.03
+                                                                                      Feedback
+Chapter 15: SMVA Graph-Based Simultaneous Multivoltage Analysis
+Commands and Attributes With DVFS Scenario Support
+
+
+     Note the following:
+     •     The check_timing and report_exceptions commands support SMVA by applying
+           the checking or reporting to all the possible scenario and voltage combinations.
+     •     The update_noise command has some limitations. See Noise Analysis for details.
+
+
+     Attributes With DVFS Scenario Support
+     The following attributes can be queried for their value in a particular DVFS scenario or set
+     of scenarios. In the case of multiple scenarios, the worst-case value is returned.
+Table 32       Attributes That Support Querying by DVFS Scenario
+
+      Attribute name                       Object class
+
+      actual_fall_transition_max           pin, port
+
+      actual_fall_transition_min           pin, port
+
+      actual_rise_transition_max           pin, port
+
+      actual_rise_transition_min           pin, port
+
+      actual_transition_max                pin, port
+
+      actual_transition_min                pin, port
+
+      cached_c1_max_fall                   pin, port
+
+      cached_c1_max_rise                   pin, port
+
+      cached_c1_min_fall                   pin, port
+
+      cached_c1_min_rise                   pin, port
+
+      cached_c2_max_fall                   pin, port
+
+      cached_c2_max_rise                   pin, port
+
+      cached_c2_min_fall                   pin, port
+
+      cached_c2_min_rise                   pin, port
+
+      cached_ceff_max_fall                 pin, port
+
+      cached_ceff_max_rise                 pin, port
+
+      cached_ceff_min_fall                 pin, port
+
+
+
+
+PrimeTime® User Guide                                                                         536
+T-2022.03
+                                                                  Feedback
+Chapter 15: SMVA Graph-Based Simultaneous Multivoltage Analysis
+Commands and Attributes With DVFS Scenario Support
+
+
+Table 32    Attributes That Support Querying by DVFS Scenario
+(Continued)
+
+      Attribute name                       Object class
+
+      cached_ceff_min_rise                 pin, port
+
+      ceff_params_max                      pin, port
+
+      ceff_params_min                      pin, port
+
+      constraining_max_transition          pin, port
+
+      drc_actual_max_capacitance           pin, port
+
+      drc_actual_max_transition            pin, port
+
+      drc_constraining_max_capacitance     pin, port
+
+      drc_max_capacitance_slack            pin, port
+
+      drc_max_transition_slack             pin, port
+
+      driver_model_scaling_libs_max        pin, port
+
+      driver_model_scaling_libs_min        pin, port
+
+      driver_model_type_max_fall           pin, port
+
+      driver_model_type_max_rise           pin, port
+
+      driver_model_type_min_fall           pin, port
+
+      driver_model_type_min_rise           pin, port
+
+      effective_capacitance_max            pin, port
+
+      effective_capacitance_min            pin, port
+
+      exact_match_lib_cell_max_fall        cell, port
+
+      exact_match_lib_cell_max_rise        cell, port
+
+      exact_match_lib_cell_min_fall        cell, port
+
+      exact_match_lib_cell_min_rise        cell, port
+
+      fanout_load                          lib_pin, pin, port
+
+      is_driver_scaled_max_fall            pin, port
+
+      is_driver_scaled_max_rise            pin, port
+
+
+
+
+PrimeTime® User Guide                                                   537
+T-2022.03
+                                                                  Feedback
+Chapter 15: SMVA Graph-Based Simultaneous Multivoltage Analysis
+Commands and Attributes With DVFS Scenario Support
+
+
+Table 32    Attributes That Support Querying by DVFS Scenario
+(Continued)
+
+      Attribute name                       Object class
+
+      is_driver_scaled_min_fall            pin, port
+
+      is_driver_scaled_min_rise            pin, port
+
+      is_receiver_scaled_max_fall          pin, port
+
+      is_receiver_scaled_max_rise          pin, port
+
+      is_receiver_scaled_min_fall          pin, port
+
+      is_receiver_scaled_min_rise          pin, port
+
+      max_capacitance                      lib_pin, pin, port
+
+      max_capacitance_clock_path_fall      clock
+
+      max_capacitance_clock_path_rise      clock
+
+      max_capacitance_data_path_fall       clock
+
+      max_capacitance_data_path_rise       clock
+
+      max_fanout                           lib_pin, pin, port
+
+      max_transition                       lib_pin, pin, port
+
+      max_transition_clock_path_fall       clock
+
+      max_transition_clock_path_rise       clock
+
+      max_transition_data_path_fall        clock
+
+      max_transition_data_path_rise        clock
+
+      min_capacitance                      lib_pin, pin, port
+
+      min_fanout                           lib_pin, pin, port
+
+      min_transition                       lib_pin, pin, port
+
+      receiver_model_scaling_libs_max      pin, port
+
+      pin_capacitance_max                  pin, port, net
+
+      pin_capacitance_max_fall             pin, port, net
+
+      pin_capacitance_max_rise             pin, port, net
+
+
+
+
+PrimeTime® User Guide                                                   538
+T-2022.03
+                                                                            Feedback
+Chapter 15: SMVA Graph-Based Simultaneous Multivoltage Analysis
+Feature Compatibility
+
+
+Table 32    Attributes That Support Querying by DVFS Scenario
+(Continued)
+
+      Attribute name                       Object class
+
+      pin_capacitance_min                  pin, port, net
+
+      pin_capacitance_min_fall             pin, port, net
+
+      pin_capacitance_min_rise             pin, port, net
+
+      receiver_model_scaling_libs_min      pin, port
+
+      power_rail_voltage_max               pin, port
+
+      power_rail_voltage_min               pin, port
+
+      receiver_model_type_max_fall         pin, port
+
+      receiver_model_type_max_rise         pin, port
+
+      receiver_model_type_min_fall         pin, port
+
+      receiver_model_type_min_rise         pin, port
+
+      voltage_for_max_delay                pg_pin_info
+
+      voltage_for_min_delay                pg_pin_info
+
+
+
+
+Feature Compatibility
+     SMVA analysis is not compatible with the following features:
+     •   Noise analysis on multiple DVFS scenarios at once
+     •   Extracted timing model (ETM) generation of a single SMVA model
+     •   Reduced-resource ECO
+     •   Different SDF annotated delay data per DVFS scenario
+     •   Phase-locked loop generated clocks (create_generated_clock -pll_feedback and
+         -pll_output)
+
+     •   Certain types of advanced attribute usage
+
+
+
+
+PrimeTime® User Guide                                                              539
+T-2022.03
+

@@ -1,0 +1,578 @@
+# -*- coding: utf-8 -*-
+"""Generate 13_variation.tex — Chapter 13 Variation."""
+from pathlib import Path
+
+OUT = Path(r"d:\IC Design\VLSI\PT_CN\chapters\13_variation.tex")
+
+PARTS = []
+
+PARTS.append(r"""% 第 13 章 Variation
+\bichapter{片上师变异}{Variation}
+\label{chap:var}
+
+片上师变异（on-chip variation）分析对最小路径与最大路径施加不同的工作条件。为提高精度，可采用以下变异方法：
+\begin{itemize}
+  \item 先进片上师变异（Advanced On-Chip Variation，AOCV）
+  \item 参数化片上师变异（Parametric On-Chip Variation，POCV）
+\end{itemize}
+
+% ============================================================
+\section{先进片上师变异}
+\subsection*{Advanced On-Chip Variation}
+
+先进片上师变异（AOCV）分析根据路径中的门数量与路径跨越的物理距离，对变异较小的路径施加较小的降额（derating），从而降低悲观度。AOCV 比传统 OCV 分析更不悲观——传统 OCV 依赖不区分路径特性的恒定降额因子。
+
+路径越长、门越多，总变异往往越小，因为门与门之间的随机变异会相互抵消。路径在芯片上跨越的物理距离越大，系统性变异往往越大。AOCV 分析计算基于路径深度与位置的包围盒（bounding box）度量，得到路径特定的 AOCV 降额因子。
+
+AOCV 分析与 PrimeTime 所有其他特性协同工作，并影响所有报告命令。它兼容分布式多场景分析与多核分析。关于 AOCV 的使用，参见：
+\begin{itemize}
+  \item AOCV 流程
+  \item 配置先进片上师变异分析
+  \item 导入 AOCV 信息
+  \item 查询时序路径上的 AOCV 降额
+\end{itemize}
+
+\subsection{AOCV 流程}
+\subsubsection*{The AOCV Flow}
+
+要启用 AOCV，将变量 \cmd{timing\_aocvm\_enable\_analysis} 设为 \texttt{true}。还需提供适用于不同路径深度与物理路径距离范围的降额因子表，并使用 \cmd{read\_ocvm} 命令读入 PrimeTime。
+
+下表给出当路径的逻辑深度与物理距离落在指定范围内时，用于对路径中单元 early 延时进行降额的示例值：
+\begin{lstlisting}
+version:                 1.0
+object_type:             design
+rf_type:                 rise fall
+delay_type:              cell
+derate_type:             early
+object_spec:             top
+voltage:                 1.2
+depth:                   0 1 2 3
+distance:                100 200
+table:                   0.88 0.94 0.96 0.97 \
+                         0.84 0.86 0.88 0.91
+\end{lstlisting}
+
+启用 AOCV 并读入降额表后，按常规方式使用 \cmd{update\_timing} 或 \cmd{report\_timing} 执行时序分析；分析结果反映基于路径逻辑深度与物理跨度的不同降额因子。
+
+PrimeTime 中的 AOCV 集成于基于图（graph-based）与基于路径（path-based）的分析能力。签核可使用基于图的 AOCV；基于路径的 AOCV 可作为可选能力，用于细化仍违例路径的分析。
+
+\subsubsection{基于图的 AOCV 分析}
+\paragraph*{Graph-Based AOCV Analysis}
+
+基于图的 AOCV 分析是在 \cmd{update\_timing} 期间执行的快速、全设计范围分析。可利用全设计范围内降低的降额悲观度来节省面积并提升性能。
+
+基于构造，图分析计算深度与距离度量的保守值。执行基于图的 AOCV 时，选择保守的路径深度与基于位置的包围盒值，以界定穿过某单元的最坏情况路径。例如，某单元的深度计数不超过穿过该单元的最小深度路径的深度；否则对最小深度路径的分析可能过于乐观。
+
+基于图的 AOCV 是进一步用基于路径的 AOCV 分析缩减裕量的前提。对大多数设计，基于图的 AOCV 足以签核。
+
+\subsubsection{基于路径的 AOCV 分析}
+\paragraph*{Path-Based AOCV Analysis}
+
+若基于图的 AOCV 完成后仍有违例，可调用基于路径的 AOCV 分析以降低悲观度并提高结果精度；该分析将每条路径与其他路径隔离分析。使用 \cmd{report\_timing} 或 \cmd{get\_timing\_paths} 并将 \opt{-pba\_mode} 设为 \texttt{path}：
+\begin{lstlisting}
+pt_shell> report_timing -pba_mode path
+\end{lstlisting}
+
+在基于图的 AOCV 中，PrimeTime 计算穿过每条时序弧的所有路径的深度与距离，并对所有此类路径应用找到的最坏值；而在基于路径模式下，则为每条单独时序路径精确计算深度与距离。
+
+默认情况下，选择带 AOCV 的基于路径分析时，PrimeTime 同时执行常规基于路径分析（不含 AOCV）与 AOCV 基于路径分析。不含 AOCV 的分析执行基于路径的 slew 传播重算；AOCV 分析通过对更深路径与跨越更短物理距离的路径减少降额来降低悲观度。
+
+为节省运行时间，可仅执行基于路径分析的 AOCV 部分，并对基于路径分析使用最坏 slew 传播而非重算的 slew 传播。将变量 \cmd{pba\_derate\_only\_mode} 设为 \texttt{true} 即可。
+
+\subsection{配置先进片上师变异分析}
+\subsubsection*{Configuring Advanced On-Chip Variation Analysis}
+
+要配置 AOCV 分析，设置下表中的变量。
+
+\begin{table}[htbp]
+\centering
+\caption{AOCV 分析配置变量}
+\label{tab:aocv-vars}
+\small
+\begin{tabularx}{\textwidth}{@{}lX@{}}
+\toprule
+变量 & 说明 \\
+\midrule
+\cmd{timing\_aocvm\_analysis\_mode} & 指定深度度量的计算方式 \\
+\cmd{timing\_aocvm\_enable\_clock\_network\_only} & 仅对时钟网络应用 AOCV 分析 \\
+\cmd{timing\_aocvm\_enable\_single\_path\_metrics} & 指定 AOCV 是否对网线与单元使用独立的深度与距离值 \\
+\cmd{timing\_ocvm\_enable\_distance\_analysis} & 指定先进或参数化 OCV 分析是否执行基于距离的分析 \\
+\cmd{timing\_ocvm\_precedence\_compatibility} & 控制先进或参数化 OCV 对 OCV 降额的回退 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{导入 AOCV 信息}
+\subsubsection*{Importing AOCV Information}
+
+执行 AOCV 分析必须在降额表中指定 AOCV 信息。要建模与工艺变异无关的其他效应，可使用 guard-band 时序降额。
+
+关于如何指定 AOCV 信息，参见：
+\begin{itemize}
+  \item 指定 AOCV 降额表
+  \item AOCV 文件格式
+  \item AOCV 表组
+  \item 指定深度系数
+  \item AOCV 中的 Guard-Banding
+  \item 增量时序降额
+  \item 在 AOCV 分析中使用 OCV 降额
+\end{itemize}
+
+\subsubsection{指定 AOCV 降额表}
+\paragraph*{Specifying AOCV Derating Tables}
+
+使用 \cmd{read\_ocvm} 从磁盘文件读取 AOCV 降额表。降额表标注到一个或多个设计对象，并直接应用于时序弧延时。允许的设计对象类为层次单元、库单元与设计。
+
+使用 \cmd{write\_binary\_aocvm} 从 ASCII 格式 AOCV 文件创建二进制编码 AOCV 文件，用于保护敏感的工艺相关信息。\cmd{read\_ocvm} 可读取由 \cmd{write\_binary\_aocvm} 创建的二进制及压缩二进制 AOCV 文件，无需额外参数。
+
+若在 \cmd{report\_timing} 中指定 \opt{-derate}，内部计算的 AOCV 降额因子显示在 derate 列。
+
+使用 \cmd{report\_aocvm} 显示 AOCV 降额表数据。从二进制或压缩二进制文件导入的 AOCV 降额表在 \cmd{report\_aocvm} 输出中不可见。可显示标注了 early、late、rise、fall、cell 或 net 降额表的设计对象，也可确定哪些单元与网线已标注或未标注 AOCV 信息。
+
+在基于图的 AOCV 分析中，在 \cmd{report\_aocvm} 的 \opt{object\_list} 中指定时序弧，将显示基于图的深度与距离度量及弧对象上的 AOCV 降额因子：
+\begin{lstlisting}
+pt_shell> report_aocvm [get_timing_arcs -of_objects [get_cells U1]]
+\end{lstlisting}
+
+若在 \opt{object\_list} 中指定时序路径，将显示该路径的路径度量（distance、launch depth、capture depth）：
+\begin{lstlisting}
+pt_shell> report_aocvm [get_timing_paths -path_type full_clock_expanded \
+          -pba_mode path]
+\end{lstlisting}
+
+\subsubsection{AOCV 文件格式}
+\paragraph*{File Format for AOCV}
+
+AOCV 文件格式允许指定多个 AOCV 降额表，支持：
+\begin{itemize}
+  \item 一维表（仅 depth 或仅 distance）
+  \item 二维表（depth 与 distance）
+\end{itemize}
+
+文件格式定义可将 AOCV 表与对象组关联；PrimeTime 根据以下定义在内部选择对象：
+\begin{itemize}
+  \item \texttt{object\_type design | lib\_cell | cell}
+  \item \texttt{object\_spec [patterns]}
+\end{itemize}
+
+在 \texttt{object\_spec} 中，\texttt{patterns} 可选，指定对象名及基于对象属性求值的表达式。可对 \texttt{patterns} 使用正则匹配，与 \cmd{get\_cells}、\cmd{get\_lib\_cells}、\cmd{get\_designs} 等命令相同。
+
+\begin{noteBox}
+除另有说明外，所有描述均为必需项。在文件任意位置添加注释请使用双斜杠 \texttt{//}。
+\end{noteBox}
+
+\begin{table}[htbp]
+\centering
+\caption{AOCV 文件格式语法（表 23）}
+\label{tab:aocv-format}
+\small
+\begin{tabularx}{\textwidth}{@{}lX@{}}
+\toprule
+说明符 & 说明 \\
+\midrule
+\texttt{version} & AOCV 版本号 \\
+\texttt{group\_name} & 表组名，可用 \cmd{set\_aocvm\_table\_group} 应用 \\
+\texttt{object\_type} & \texttt{design | lib\_cell | cell} \\
+\texttt{rf\_type} & \texttt{rise | fall | rise fall} \\
+\texttt{delay\_type} & \texttt{cell | net | cell net} \\
+\texttt{derate\_type} & \texttt{early | late} \\
+\texttt{path\_type} & \texttt{clock | data | clock data} \\
+\texttt{object\_spec} & 描述受表影响对象的模式 \\
+\texttt{voltage} & 供电电压（伏），可选；表仅适用于该电压的单元 \\
+\texttt{depth} & $M$ 个浮点值，表示路径中连续逻辑单元数；未提供则 $M{=}0$ \\
+\texttt{distance} & $N$ 个浮点值，表示路径物理距离（nm）；未提供则 $N{=}0$ \\
+\texttt{table} & $N \times M$ 个降额因子；PrimeTime 对表内数据点线性插值，不对外推 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+当具有相同 \texttt{rf\_type} 与 \texttt{derate\_type} 的不同 \texttt{object\_type} 条目作用于同一单元或网线时，优先级规则与 \cmd{set\_timing\_derate} 一致。
+
+单元弧降额优先级（高到低）：库单元 $\rightarrow$ 层次单元 $\rightarrow$ 设计。
+
+网线弧降额优先级（高到低）：层次单元 $\rightarrow$ 设计。
+
+\begin{noteBox}
+当多个具有相同 \texttt{object\_type}、\texttt{rf\_type}、\texttt{derate\_type} 的表条目作用于同一对象时，最后一个表条目优先。
+\end{noteBox}
+
+若指定 \texttt{voltage} 但缺少关联浮点值，或未指定 \texttt{voltage}，则降额表适用于所有电压。对多电源轨单元，不要指定电压，而应指定多电源轨所有可能输入-输出电压组合中最保守的降额因子。
+
+以下示例为整个设计设置 early AOCV 表，适用于所有 cell 与 net：
+\begin{lstlisting}
+version:                 1.0
+object_type:             design
+rf_type:                 rise fall
+delay_type:              cell net
+derate_type:             early
+object_spec:             top
+depth:                   0 1 2 3
+distance:                100 200
+table:                   0.87 0.93 0.95 0.96 \
+                         0.83 0.85 0.87 0.90
+\end{lstlisting}
+
+以下示例包含可选 \texttt{path\_type} 语句；PrimeTime 仅将表数据应用于指定路径类型。要对时钟路径与数据路径分别降额，\cmd{timing\_aocvm\_analysis\_mode} 须设为 \texttt{separate\_data\_and\_clock\_metrics}。省略 \texttt{path\_type} 时表同时适用于时钟与数据路径。使用 \texttt{path\_type} 时，\texttt{version} 须为 \texttt{2.0}。
+
+\subsubsection{AOCV 表组}
+\paragraph*{AOCV Table Groups}
+
+可定义多组 AOCV 表，用于层次不同块。为每组命名，并用 \cmd{set\_aocvm\_table\_group} 应用于层次单元。各层可独立应用表，块在更高层次复用时保持 AOCV 表设置。
+
+在 AOCV 表中用 \texttt{group\_name} 关键字指定组名。使用 \texttt{group\_name} 时 \texttt{version} 须为 \texttt{3.0}。未使用 \texttt{group\_name} 的表属于默认 AOCV 表组，应用于未分配命名表组的设计部分。
+
+\begin{lstlisting}
+pt_shell> set_aocvm_table_group core_tables [get_cells H1]
+\end{lstlisting}
+
+将 \texttt{core\_tables} 应用于层次块实例 H1；该组适用于 H1 内完全封闭的网线及 H1 内所有单元（含更低层次）。\texttt{core\_tables} 不适用于部分在 H1 内、部分在外的网线。
+
+\cmd{report\_aocvm} 报告各表组及默认表组中已标注 AOCV 的单元数量，并显示各定义表组名与对应层次单元。
+
+用 \cmd{reset\_aocvm\_table\_group} 移除命名表组的应用。注意：在时序更新后使用 \cmd{set\_aocvm\_table\_group}、\cmd{reset\_aocvm\_table\_group} 或 \cmd{read\_ocvm} 会触发新的完整时序更新。
+
+\subsubsection{指定深度系数}
+\paragraph*{Specifying Depth Coefficients}
+
+可为单元指定深度系数，根据单元复杂度修改路径深度计算。复杂单元可能含异常多晶体管，可赋予大于默认 1 的逻辑深度计数。例如缓冲器常由两级反相器串联实现，可赋予 derate 系数 2.0。
+
+\begin{lstlisting}
+pt_shell> set_aocvm_coefficient 2.0 [get_lib_cells lib1/BUF2]
+\end{lstlisting}
+
+设置 AOCV 系数为可选项，默认系数为 1.0。
+
+\subsubsection{AOCV 中的 Guard-Banding}
+\paragraph*{Guard-Banding in AOCV}
+
+Guard-band 时序降额可在 AOCV 流程中建模非工艺相关效应。\cmd{set\_timing\_derate}、\cmd{report\_timing\_derate}、\cmd{reset\_timing\_derate} 提供 \opt{-aocvm\_guardband} 选项。
+
+在 AOCV 上下文中，弧上应用的降额为 guard-band 降额与 AOCV 降额之积；guard-band 在 AOCV 上下文外无效。
+
+\cmd{report\_timing\_derate -aocvm\_guardband} 仅报告 guard-band 降额。\opt{-variation} 与 \opt{-aocvm\_guardband} 互斥。
+
+\subsubsection{增量时序降额}
+\paragraph*{Incremental Timing Derating}
+
+增量时序降额可对单元或网线等对象上的降额因子微调。使用 \cmd{set\_timing\_derate -increment}。\opt{-increment} 与 \opt{-aocvm\_guardband} 互斥。
+
+增量降额遵循与常规降额相同的优先级与覆盖规则。默认情况下，指定的增量降额替换该对象上先前的增量降额。将 \cmd{timing\_enable\_cumulative\_incremental\_derate} 设为 \texttt{true} 可累加而非覆盖。
+
+若无时序降额因子，增量降额使用 0.0，常规降额使用 1.0。增量因子加到常规因子上；若最终因子小于 0.0，则转换为 0.0 以避免负延时。
+
+增量降额计算示例：
+\begin{itemize}
+  \item AOCV 分析中，单元 \texttt{u1/u252} 的 regular late 降额 1.082、early 0.924：
+\begin{lstlisting}
+set_app_var timing_aocvm_enable_analysis true
+set_timing_derate -increment -late 0.03 [get_cells u1/u252]
+set_timing_derate -increment -early -0.03 [get_cells u1/u252]
+\end{lstlisting}
+  最终 late $= 1.082 + 0.03 = 1.112$，early $= 0.924 + (-0.03) = 0.894$。
+  \item OCV 分析中可类似组合全局与单元级增量降额；\cmd{reset\_timing\_derate -increment} 仅重置增量部分。
+\end{itemize}
+
+\cmd{report\_timing\_derate -increment} 报告增量降额因子。
+
+\subsubsection{在 AOCV 分析中使用 OCV 降额}
+\paragraph*{Using OCV Derating in AOCV Analysis}
+
+PrimeTime 提供统一框架，使 AOCV 在特定条件下可使用 OCV 降额。默认同时考虑 OCV 与 AOCV；同级时 AOCV 优先于 OCV。单元弧默认优先级（高到低）：OCV 叶级单元、AOCV 库单元、OCV 库单元、AOCV 层次单元、OCV 层次单元、AOCV 设计、OCV 设计。
+
+将 \cmd{timing\_aocvm\_ocv\_precedence\_compatibility} 设为 \texttt{true} 可完全忽略 OCV 降额，此时优先级为：AOCV 库单元、AOCV 层次单元、AOCV 设计。
+
+\subsection{查询时序路径上的 AOCV 降额}
+\subsubsection*{Querying AOCV Derating on Timing Paths}
+
+要获取应用于时序路径的 AOCV 降额详细信息，可查询以下 AOCV 属性：\texttt{aocvm\_coefficient}、\texttt{applied\_derate}、\texttt{depth}、\texttt{derate\_factor\_depth\_distance}、\texttt{distance}、\texttt{guardband}、\texttt{incremental}。
+
+虽然 AOCV 降额基于时序弧，这些属性关联于弧端点的时序点对象，可用于基于图与基于路径的分析。
+
+使用前须：将 \cmd{timing\_aocvm\_enable\_analysis} 设为 \texttt{true}；或使用 \cmd{get\_timing\_paths -pba\_mode} 运行基于路径的 AOCV。
+
+示例脚本遍历时序路径并查询属性：
+\begin{lstlisting}
+set path_list [get_timing_paths ...]
+foreach_in_collection path $path_list {
+  foreach_in_collection point [get_attribute $path points] {
+    echo [format "Derate value: %f" [get_attr $point applied_derate]]
+  }
+}
+\end{lstlisting}
+""")
+
+PARTS.append(r"""
+% ============================================================
+\section{参数化片上师变异（POCV）}
+\subsection*{Parametric On-Chip Variation (POCV)}
+
+参数化片上师变异（POCV）将实例延时建模为实例特有变量的函数，即实例延时由该实例的唯一延时变量参数化。POCV 提供：
+\begin{itemize}
+  \item 针对随机变异的统计单参数降额
+  \item AOCV 与 POCV 表数据的统一输入格式与表征来源
+  \item 非统计时序报告
+  \item 时序路径的有限统计报告（均值、sigma）
+  \item 与现有 PrimeTime 功能的兼容性
+  \item 降低基于图与基于路径分析之间的悲观度差距
+  \item 增量时序分析开销更小
+\end{itemize}
+
+使用该特性需要 PrimeTime-ADV 许可证。关于 POCV 分析，参见：
+\begin{itemize}
+  \item POCV 变量与命令
+  \item 准备 POCV 输入数据
+  \item 导入带物理位置的 SPEF 文件
+  \item 启用 POCV 分析
+  \item 加载 POCV 输入数据
+  \item 指定 Guard Banding
+  \item 缩放 POCV 系数
+  \item 启用约束与 Slew 变异
+  \item 启用基于矩的建模分析
+  \item 报告 POCV 结果
+  \item 统计图合并悲观度
+  \item 查询 POCV Slack 与到达时间属性
+\end{itemize}
+
+\subsection{POCV 变量与命令}
+\subsubsection*{Variables and Commands for Parametric On-Chip Variation}
+
+\begin{table}[htbp]
+\centering
+\caption{POCV 分析变量（表 24）}
+\label{tab:pocv-vars}
+\footnotesize
+\begin{tabularx}{\textwidth}{@{}lX@{}}
+\toprule
+变量 & 说明 \\
+\midrule
+\cmd{parasitics\_enable\_tail\_annotation} & 从寄生文件读取 tail 标注数据以进行 via 变异分析 \\
+\cmd{timing\_enable\_constraint\_variation} & 对 setup/hold 约束启用约束变异 \\
+\cmd{timing\_enable\_slew\_variation} & 对单元延时启用 slew 变异 \\
+\cmd{timing\_enable\_via\_variation} & 启用物理 via 变异分析 \\
+\cmd{timing\_pocvm\_corner\_sigma} & 指定 POCV 延时/约束分析的角 sigma \\
+\cmd{timing\_pocvm\_enable\_analysis} & 启用 POCV 分析 \\
+\cmd{timing\_pocvm\_enable\_extended\_moments} & 使用非对称基于矩的建模数据 \\
+\cmd{timing\_pocvm\_max\_transition\_sigma} & POCV 最大 transition time 分析的角 sigma \\
+\cmd{timing\_pocvm\_precedence} & 文件与库 POCV 系数优先级 \\
+\cmd{timing\_pocvm\_report\_sigma} & 报告用 sigma \\
+\cmd{timing\_use\_slew\_variation\_in\_constraint\_arcs} & 在约束弧变异计算中使用 slew 变异 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\caption{POCV 分析命令（表 25）}
+\label{tab:pocv-cmds}
+\footnotesize
+\begin{tabularx}{\textwidth}{@{}lX@{}}
+\toprule
+命令 & 说明 \\
+\midrule
+\cmd{read\_ocvm} & 读取 POCV 表 \\
+\cmd{read\_ivm} & 读取 via 变异表 \\
+\cmd{report\_delay\_calculation -derate} & 报告延时计算降额详情 \\
+\cmd{report\_ocvm -type pocvm} & 显示 POCV 系数与基于距离的降额表 \\
+\cmd{report\_ivm} & 显示 via 变异表 \\
+\cmd{report\_timing -derate} & 在时序报告中报告 POCV 信息 \\
+\cmd{report\_timing\_derate -pocvm\_coefficient\_scale\_factor} & 报告 POCV 缩放 \\
+\cmd{report\_timing\_derate -pocvm\_guardband} & 报告 POCV guard banding \\
+\cmd{reset\_timing\_derate -pocvm\_*} & 移除 POCV 缩放或 guard banding \\
+\cmd{set\_timing\_derate -pocvm\_*} & 指定 POCV 缩放或 guard banding \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{准备 POCV 输入数据}
+\subsubsection*{Preparing Input Data for Parametric On-Chip Variation}
+
+使用 POCV 需要以下输入数据之一：
+\begin{itemize}
+  \item 侧文件中的 POCV 单系数
+  \item Liberty Variation Format（LVF）中的 POCV slew-load 表
+\end{itemize}
+
+若同时读取两种数据，侧文件中的 POCV 单系数优先级更高，覆盖库中的 POCV slew-load 表。
+
+\subsubsection{侧文件中的 POCV 单系数}
+\paragraph*{POCV Single Coefficient Specified in a Side File}
+
+AOCV 表格式 4.0 扩展格式用以下字段指定 POCV 信息：
+\begin{itemize}
+  \item \texttt{ocvm\_type: aocvm | pocvm} — OCV 方法类型
+  \item \texttt{coefficient: sigma\_value} — 随机变异系数（sigma）
+\end{itemize}
+
+若指定 \texttt{ocvm\_type: pocvm}，不能指定 \texttt{depth} 字段；\texttt{coefficient} 与 \texttt{distance} 互斥。须为 POCV 系数（随机变异）与基于距离的变异分别指定不同表。
+
+\begin{table}[htbp]
+\centering
+\caption{系数与基于距离的 POCV 表（表 26）}
+\label{tab:pocv-tables}
+\small
+\begin{tabularx}{\textwidth}{@{}llX@{}}
+\toprule
+变异类型 & POCV 应用于 & 示例 \\
+\midrule
+系数 & 库单元 & \texttt{version: 4.0}, \texttt{ocvm\_type: pocvm}, \texttt{coefficient: 0.05} \\
+基于距离 & 设计级 & \texttt{distance: 1 10 50 100 500}, \texttt{table: ...} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+从 Monte-Carlo HSPICE 仿真提取库单元 POCV 系数：
+\[
+\text{POCV coefficient} = \frac{s\ (\text{delay variation})}{m\ (\text{nominal delay})}
+\]
+
+POCV 数据生成通常比 AOCV 更快：AOCV 需在长单元链上做 Monte-Carlo，POCV 仅需单级或少数级。
+
+\subsubsection{LVF 中的 POCV Slew-Load 表}
+\paragraph*{POCV Slew-Load Table in Liberty Variation Format}
+
+PrimeTime 可读取每条延时时序弧的 POCV slew-load 表（LVF）。使用 LVF 可根据不同 slew 与负载条件应用不同系数，比固定系数更准确。支持延时弧、setup/hold、recovery/removal 及 clock-gating 检查。
+
+在 link 设计前将带 POCV LVF 的库载入 PrimeTime。POCV LVF 须存在于时序库中，不能从单独文件读取；单位为库的时间单位。PrimeTime 也可读取 LVF 中的基于距离降额表。
+
+\begin{seeAlsoBox}
+示例 20、21 见原书 POCV LVF slew-load 表与基于距离降额语法。
+\end{seeAlsoBox}
+
+\subsubsection{ETM 中 LVF 系数的提取}
+\paragraph*{Extraction of LVF Coefficients in ETMs}
+
+使用 \cmd{extract\_model} 且启用 POCV 时，默认生成 LVF 表建模 POCV 效应，使消费 ETM 的工具可在各角准确分析。可为组合与顺序延时弧生成 delay sigma 表；启用约束变异时也可为约束弧生成 constraint sigma 表。
+
+推荐生成 LVF 表以获得顶层最佳精度；若下游工具不完全支持 LVF，可用 \cmd{extract\_model\_create\_variation\_tables} 控制 ETM 生成的 LVF 数据类型。
+
+\subsection{导入带物理位置的 SPEF 文件}
+\subsubsection*{Importing a SPEF File With Physical Locations}
+
+对 POCV 使用基于距离的降额表时，工具需要坐标计算路径距离（不需要坐标计算路径深度）。
+
+从 SPEF 或 GPD 寄生文件读取节点坐标：
+\begin{enumerate}
+  \item \cmd{set\_app\_var read\_parasitics\_load\_locations true}
+  \item \cmd{read\_parasitics} …
+\end{enumerate}
+
+\subsection{启用 POCV 分析}
+\subsubsection*{Enabling Parametric On-Chip Variation Analysis}
+
+\begin{lstlisting}
+pt_shell> set_app_var timing_pocvm_enable_analysis true
+\end{lstlisting}
+
+POCV 时序更新作为 \cmd{update\_timing} 的一部分自动执行。默认在 3 sigma 分析；用 \cmd{timing\_pocvm\_corner\_sigma} 修改，例如设为 4。
+
+\subsection{加载 POCV 输入数据}
+\subsubsection*{Loading the Parametric On-Chip Variation Input Data}
+
+\begin{lstlisting}
+pt_shell> read_ocvm pocv_coefficient_file_name
+pt_shell> read_ocvm pocv_distance_based_derating_file_name
+\end{lstlisting}
+
+须在表中使用 Synopsys AOCV 文件格式 4.0 或更高版本指定系数或降额因子。POCV 表可标注库单元、层次单元与设计。单元上优先级（低到高）：设计、层次单元、库单元；网线上：设计、层次单元。
+
+库 POCV 与侧文件单系数可同时使用；同一库单元上侧文件单系数覆盖 LVF。
+
+\subsection{指定 Guard Banding}
+\subsubsection*{Specifying Guard Banding}
+
+与 AOCV 类似，POCV 可用 guard banding 建模非工艺效应：
+\begin{lstlisting}
+pt_shell> set_timing_derate -cell_delay -pocvm_guardband -early 0.95
+pt_shell> set_timing_derate -cell_delay -pocvm_guardband -late 1.05
+\end{lstlisting}
+
+POCV guard band 同时作用于标称单元延时（均值）与单元延时变异（sigma）。
+
+\cmd{report\_timing\_derate -pocvm\_guardband} 仅报告 guard band；\cmd{reset\_timing\_derate -pocvm\_guardband} 重置。
+
+\subsection{缩放 POCV 系数}
+\subsubsection*{Scaling the Parametric On-Chip Variation Coefficient}
+
+除 guard banding 外，可仅缩放单元延时变异而不改变 POCV 表中的系数：
+\begin{lstlisting}
+pt_shell> set_timing_derate -cell_delay \
+          -pocvm_coefficient_scale_factor -early 0.97
+pt_shell> set_timing_derate -cell_delay \
+          -pocvm_coefficient_scale_factor -late 1.03
+\end{lstlisting}
+
+仅将缩放因子应用于单元延时变异（sigma）。
+
+\subsection{启用约束与 Slew 变异}
+\subsubsection*{Enabling Constraint and Slew Variation}
+
+可选设置提高 POCV 精度：
+\begin{itemize}
+  \item \cmd{timing\_enable\_constraint\_variation true} — setup/hold 约束变异
+  \item \cmd{timing\_use\_slew\_variation\_in\_constraint\_arcs} — 在约束弧中包含 slew 变异（\texttt{setup\_hold}、\texttt{setup}、\texttt{hold} 或 \texttt{none}）
+  \item \cmd{timing\_enable\_slew\_variation true} — 单元延时 slew 变异
+\end{itemize}
+
+工具从 .lib/.db 中的 LVF 读取约束与 slew 变异数据。\cmd{report\_timing -variation} 或 \cmd{report\_ocvm} 可报告。
+
+\subsection{启用基于矩的建模分析}
+\subsubsection*{Enabling Analysis With Moment-Based Modeling}
+
+支持使用含基于矩 LVF 延时与约束数据的单元库，更准确建模先进工艺节点与极低供电电压下的非高斯统计变异特性。
+
+\figplaceholder{Figure 138: Moment-Based Asymmetric Delay Distribution}{基于矩的非对称延时分布}{fig:pocv-moment}
+
+统计参数包括均值偏移（mean shift）、标准差（standard deviation）与偏度（skewness），在 LVF 中由 \texttt{ocv\_std\_dev\_*}、\texttt{ocv\_mean\_shift\_*}、\texttt{ocv\_skewness\_*} 指定。
+
+\begin{lstlisting}
+pt_shell> set_app_var timing_pocvm_enable_extended_moments true
+\end{lstlisting}
+
+变异报告中，参数的均值包含标称值与均值偏移调整。该特性需要 PrimeTime-ADV-PLUS 许可证。
+
+\subsection{报告 POCV 结果}
+\subsubsection*{Reporting Parametric On-Chip Variation Results}
+
+\begin{enumerate}
+  \item 报告 POCV 系数与降额
+  \item 报告 POCV 分析结果
+\end{enumerate}
+
+\cmd{report\_ocvm -type pocvm} 显示 POCV 系数与基于距离的降额表；\cmd{-list\_not\_annotated} 报告缺失数据的单元。对 POCV LVF 须在对象列表中指定库时序弧。
+
+POCV 与所有 PrimeTime 报告命令协同。默认在 3-sigma 报告；\cmd{timing\_pocvm\_report\_sigma} 修改报告 sigma（不触发 \cmd{update\_timing}）。设为 0 可查看无 POCV 的 slack。
+
+\cmd{report\_timing -variation} 显示变异时序报告。Incr 列中 Mean、Sensit、Corner 提供各增量延时分布的均值、标准差与角信息；Corner $=$ Mean $\pm K \times$ Sensit，$K$ 为 \cmd{timing\_pocvm\_report\_sigma}。Path 列提供累积到达分布信息。
+
+\cmd{report\_delay\_calculation -derate} 详细报告 POCV 分析中所有降额如何得到最终单元延时与 sigma（示例 23、24）。
+
+\subsection{统计图合并悲观度}
+\subsubsection*{Statistical Graph Merging Pessimism}
+
+POCV 中延时为统计分布而非固定值。比较多路延时（如多输入门汇聚弧）时，最大延时可大于各单独延时的最大值，称为图合并悲观度（graph merging pessimism）。
+
+POCV 通过在 \cmd{report\_timing -variation} 中以时序点调整（\texttt{statistical graph pessimism}）移除该悲观度。
+
+\begin{noteBox}
+同时使用 \opt{-from} 与 \opt{-to} 的 \cmd{report\_timing} 可能比仅用 \opt{-to} 具有更少的图合并悲观度；因此 \cmd{report\_timing -to xyz} 的结果可界定但不必然等于 \cmd{report\_timing -from abc -to xyz}。
+\end{noteBox}
+
+\subsection{查询 POCV Slack 与到达时间属性}
+\subsubsection*{Querying POCV Slack and Arrival Attributes}
+
+POCV 在 pin、时序路径与时序点上使用以下 slack/到达属性（表 27）：\texttt{max\_*\_variation\_arrival/slack}、\texttt{min\_*\_variation\_arrival/slack}、\texttt{statistical\_adjustment}、\texttt{variation\_arrival}、\texttt{variation\_slack}。
+
+这些是统计量，直接查询返回空列表；须查询 \texttt{mean} 或 \texttt{std\_dev} 子属性：
+\begin{lstlisting}
+pt_shell> get_attribute [get_attribute [get_pins I/ZN] \
+          max_fall_variation_slack] mean
+0.990180
+pt_shell> get_attribute $path variation_slack.std_dev
+0.000488
+\end{lstlisting}
+""")
+
+text = "\n".join(PARTS)
+OUT.write_text(text, encoding="utf-8")
+cjk = sum(1 for c in text if "\u4e00" <= c <= "\u9fff")
+print(f"Wrote {OUT} bytes={OUT.stat().st_size} lines={text.count(chr(10))+1} CJK={cjk}")

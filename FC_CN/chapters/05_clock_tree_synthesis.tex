@@ -1,0 +1,1593 @@
+% 第 4 章
+\bichapter{时钟树综合}{Clock Tree Synthesis}
+\label{chap:cts}
+
+要在 Fusion Compiler 中执行时钟树综合（CTS），请参阅以下主题：
+\begin{itemize}
+  \item CTS 前提条件
+  \item 定义时钟树
+  \item 验证时钟树
+  \item 设置时钟树设计规则约束
+  \item 指定 CTS 设置
+  \item 实现时钟树并执行 CTS 后优化
+  \item 实现多源时钟树（Multisource Clock Trees）
+  \item 分析时钟树结果
+\end{itemize}
+
+% ============================================================
+\section{CTS 前提条件}
+\subsection*{Prerequisites for Clock Tree Synthesis}
+
+在对 block 运行 CTS 之前，应满足以下要求：
+\begin{itemize}
+  \item 已用 \cmd{create\_clock} 或 \cmd{create\_generated\_clock} 标识时钟源。
+  \item block 已完成布局与优化。\\
+        使用 \cmd{check\_legality -verbose} 确认布局合法。对布局不合法的 block 运行 CTS 可能导致运行时间过长、QoR 下降。\\
+        开始 CTS 前，估计的 QoR 应已满足要求，包括：
+        \begin{itemize}
+          \item \textbf{拥塞（Congestion）}\\
+                若 CTS 前拥塞未解决，插入时钟树可能使拥塞恶化。若 block 拥塞，可用 \opt{-congestion} 与 \opt{-congestion\_effort high} 重新运行 \cmd{create\_placement}，但运行时间可能较长。
+          \item 时序（Timing）
+          \item 最大电容（Maximum capacitance）
+          \item 最大转换时间（Maximum transition time）
+        \end{itemize}
+  \item 电源与地网已预布线（prerouted）。
+  \item 高扇出网络（如 scan enable）已用缓冲器综合。
+  \item 已定义 active scenario。\\
+        默认情况下，工具对所有为 setup 或 hold 分析启用的 active scenario 中的全部时钟进行综合与优化。
+\end{itemize}
+
+% ============================================================
+\section{定义时钟树}
+\subsection*{Defining the Clock Trees}
+
+运行 CTS 前，应分析 block 中每棵时钟树并确定：
+\begin{itemize}
+  \item 时钟根（clock root）是什么；
+  \item 所需的时钟 sink 与时钟树例外（exceptions）；
+  \item 时钟树是否包含既有单元（如 clock-gating 单元）；
+  \item 时钟树是否自收敛（\textbf{convergent clock path}）或与另一时钟树重叠（\textbf{overlapping clock path}）；
+  \item 是否与其他时钟树存在时序关系（如 interclock skew 要求）。
+\end{itemize}
+
+据此定义时钟树并确认工具得到的定义正确。工具根据 block 中已定义的时钟推导时钟树；若不满足需求，可按下列主题定义：
+\begin{itemize}
+  \item 推导时钟树
+  \item 定义时钟树例外
+  \item 限制时钟网络上的优化
+  \item 跨 mode 复制时钟树例外
+  \item 由理想时钟延迟推导时钟树例外
+  \item 处理存在平衡冲突的端点
+\end{itemize}
+
+\subsection{推导时钟树}
+\subsubsection*{Deriving the Clock Trees}
+
+工具从时钟根出发，沿传递扇出（transitive fanout）追踪至时钟端点以推导时钟树。一般在遇到时序单元或宏的时钟引脚时终止；但对集成时钟门控（ICG）单元，或其扇出驱动 generated clock 的时序单元，工具会继续穿越。
+
+若门控逻辑使用非单极性（non-unate）单元（如 XOR/XNOR），追踪时会同时使用正单极性与负单极性时序弧。若与 block 功能模式不符，可用 \cmd{set\_case\_analysis} 将单元非时钟输入保持为常量，迫使其进入 CTS 所需功能模式。
+
+例如，图~\ref{fig:cts-non-unate} 所示门控逻辑中，可用下列命令使 XOR 门（U0）进入功能模式：
+\begin{lstlisting}
+fc_shell> set_case_analysis 0 U0/B
+\end{lstlisting}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.2cm}
+\textit{（原书 Figure 36：Non-Unate Gated Clock）}\\[0.3em]
+\small 请参阅原版 PDF 插图；可将截图放入 \texttt{figures/} 后用 \texttt{\textbackslash includegraphics} 替换。
+\vspace{1.2cm}}}
+\caption{非单极性门控时钟}
+\label{fig:cts-non-unate}
+\end{figure}
+
+\subsubsection{识别时钟根}
+\subsubsection*{Identifying the Clock Roots}
+
+工具将 \cmd{create\_clock} 定义的时钟源（输入端口或内部层次引脚）作为时钟根。
+
+对由 \cmd{create\_generated\_clock} 定义的嵌套时钟树，工具将 master-clock 源视为时钟根，嵌套树端点视为该 master-clock 源的端点。例如图~\ref{fig:cts-nested} 中，工具将 CLK 端口视为 \cmd{genclk1} 的时钟根。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.2cm}
+\textit{（原书 Figure 37：Nested Clock Tree With a Generated Clock）}
+\vspace{1.2cm}}}
+\caption{带 generated clock 的嵌套时钟树}
+\label{fig:cts-nested}
+\end{figure}
+
+若 block 含 generated clock，须正确界定 master-clock 源，否则 skew 与时序 QoR 会变差：
+\begin{itemize}
+  \item 若无法回溯到 master-clock 源，则无法将该 generated clock 的 sink 与其源的 sink 一并平衡；
+  \item 若 master-clock 源并非由 \cmd{create\_clock}/\cmd{create\_generated\_clock} 定义的时钟源，则无法为其或其源综合时钟树。
+\end{itemize}
+用 \cmd{check\_clock\_trees} 验证 master-clock 源定义，见「验证时钟树」。
+
+\subsubsection{指定时钟根时序特性}
+\subsubsection*{Specifying the Clock Root Timing Characteristics}
+
+为获得真实 CTS 结果，须正确建模时钟根时序特性：
+\begin{itemize}
+  \item 若时钟根为无 I/O pad 的输入端口，须准确指定 driving cell。\\
+        若驱动过弱，工具可能插入额外缓冲以满足最大转换时间、最大电容等 DRC。\\
+        未指定 driving cell（或驱动强度）时，工具假定端口具有无限驱动能力。\\
+        例如，CLK1 为 CLK1 时钟树根，设驱动为 mylib/CLKBUF：
+\begin{lstlisting}
+fc_shell> set_driving_cell -lib_cell mylib/CLKBUF [get_ports CLK1]
+\end{lstlisting}
+  \item 若时钟根为已插入 I/O pad 的输入端口，须准确指定输入转换时间。例如上升 0.3、下降 0.2：
+\begin{lstlisting}
+fc_shell> set_input_transition -rise 0.3 [get_ports CLK1]
+fc_shell> set_input_transition -fall 0.2 [get_ports CLK1]
+\end{lstlisting}
+\end{itemize}
+
+\subsubsection{识别时钟端点}
+\subsubsection*{Identifying the Clock Endpoints}
+
+推导时钟树时，工具识别两类端点：
+\begin{itemize}
+  \item \textbf{Sink pins}（亦称 balancing pins）：用于延迟平衡。工具为所有 sink 赋予零插入延迟并用于平衡。CTS 中 sink 参与 DRC 与时钟时序（skew、insertion delay）的计算与优化。
+  \item \textbf{Ignore pins}：排除在时钟时序计算与优化之外；仅参与 DRC 计算与优化。CTS 时在 ignore pin 前插入 guide buffer 以隔离；该点之外不再做 skew/insertion delay 优化，但仍做 DRC 修复。
+\end{itemize}
+
+工具将下列端点识别为 sink pins：
+\begin{itemize}
+  \item 时序单元（latch 或 flip-flop）的时钟引脚（除非该单元驱动 generated clock）；
+  \item 宏单元的时钟引脚。
+\end{itemize}
+
+工具将下列端点识别为 ignore pins：
+\begin{itemize}
+  \item 位于另一时钟扇出中的时钟树源引脚。例如图~\ref{fig:cts-cascaded} 中，被驱动时钟 clk2 的源引脚是驱动时钟 clk1 的 ignore pin；被驱动时钟的 sink 不视为驱动时钟的 sink。
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}
+\textit{（原书 Figure 38：Cascaded Clock With Two Source Clocks）}
+\vspace{1.0cm}}}
+\caption{双源级联时钟}
+\label{fig:cts-cascaded}
+\end{figure}
+  \item 时序单元的非时钟输入引脚；
+  \item 三态使能引脚；
+  \item 输出端口；
+  \item 定义不正确的时钟引脚（例如无触发沿信息，或无到输出的时序弧）；
+  \item 用 \cmd{set\_case\_analysis} 保持常量的缓冲器/反相器输入引脚；
+\begin{noteBox}
+若时钟源被 \cmd{set\_case\_analysis} 保持为常量，工具不会综合该时钟树。
+\end{noteBox}
+  \item 无扇出、或无已启用时序弧的组合单元/ICG 输入引脚。
+\end{itemize}
+
+可在 GUI 中检查 sink/ignore 识别是否正确（见「在 GUI 中分析时钟树」）。若默认正确，时钟树定义即完成；否则先排查禁用时序弧与 case analysis（\cmd{report\_disable\_timing}、\cmd{report\_case\_analysis}），删除导致错误定义的设置。必要时用 \cmd{set\_clock\_balance\_points} 覆盖默认 balancing/ignore 设置，见「定义时钟树例外」。
+
+\subsection{定义时钟树例外}
+\subsubsection*{Defining Clock Tree Exceptions}
+
+时钟树例外是用户对工具为特定时钟推导的默认端点（balancing 与 ignore pins）所做的更改。工具支持：
+\begin{itemize}
+  \item \textbf{用户定义 sink pins}：在工具推导之外额外定义 sink（例如将工具推导的 ignore pin 定义为 sink）。见「定义 Sink Pins」。
+  \item \textbf{用户定义插入延迟要求}：为 sink（推导或用户指定）指定特殊 insertion delay。见「定义插入延迟要求」。
+  \item \textbf{用户定义 ignore pins}：排除工具推导为 sink 的端点（例如排除组合逻辑之后的所有分支）。见「定义 Ignore Pins」。
+\end{itemize}
+
+\subsubsection{定义 Sink Pins}
+\subsubsection*{Defining Sink Pins}
+
+语法：
+\begin{lstlisting}
+set_clock_balance_points
+   -clock clock
+   -consider_for_balancing true
+   -balance_points pins
+   [-corners corners]
+\end{lstlisting}
+
+\opt{-clock} 可选；省略则对所有时钟生效。用户指定 sink 的默认 insertion delay 为 0；覆盖方法见「定义插入延迟要求」。默认应用于所有 corner；用 \opt{-corners} 可限定。
+
+例如将 U2/A 指定为当前 corner 下 CLK 的 sink：
+\begin{lstlisting}
+fc_shell> set_clock_balance_points -clock [get_clocks CLK] \
+   -consider_for_balancing true -balance_points [get_pins U2/A]
+\end{lstlisting}
+
+报告用 \cmd{report\_clock\_balance\_points}（同时报告用户定义的 sink 与 ignore）。移除用 \cmd{remove\_clock\_balance\_points}：
+\begin{lstlisting}
+fc_shell> remove_clock_balance_points -clock [get_clocks CLK] \
+   -balance_points [get_pins U2/A]
+\end{lstlisting}
+
+\subsubsection{定义插入延迟要求}
+\subsubsection*{Defining Insertion Delay Requirements}
+
+用 \cmd{set\_clock\_balance\_points} 的 \opt{-delay} 覆盖 sink 默认零相位延迟。工具将指定延迟（正或负）加到到达该 sink 的计算插入延迟上。语法：
+\begin{lstlisting}
+set_clock_balance_points
+   [-clock clock]
+   -delay delay
+   [-rise] [-fall] [-early] [-late]
+   -balance_points pins
+   [-corners corners]
+\end{lstlisting}
+
+默认用于最长/最短路径以及上升/下降路径；用 \opt{-rise}/\opt{-fall}/\opt{-early}/\opt{-late} 控制适用范围。默认所有 corner；用 \opt{-corners} 限定。
+
+例如对 U2/CLK 在上升最短路径使用 2.0~ns：
+\begin{lstlisting}
+fc_shell> set_clock_balance_points -clock [get_clocks CLK] \
+   -rise -early -delay 2.0 -balance_points [get_pins U2/CLK]
+\end{lstlisting}
+
+用 \cmd{report\_clock\_balance\_points} 报告用户定义插入延迟、带用户插入延迟的推导 sink，以及用户定义 ignore pins。
+
+\subsubsection{定义 Ignore Pins}
+\subsubsection*{Defining Ignore Pins}
+
+语法：
+\begin{lstlisting}
+set_clock_balance_points
+   [-clock clock]
+   -consider_for_balancing false
+   -balance_points pins
+\end{lstlisting}
+
+\opt{-clock} 可选。对图~\ref{fig:cts-ignore} 中 CLK 树，若要忽略 U2 之后的所有分支：
+\begin{lstlisting}
+fc_shell> set_clock_balance_points -clock [get_clocks CLK] \
+   -consider_for_balancing false -balance_points [get_pins U2/A]
+\end{lstlisting}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}
+\textit{（原书 Figure 39：User-Defined Ignore Pin）}
+\vspace{1.0cm}}}
+\caption{用户定义的 ignore pin}
+\label{fig:cts-ignore}
+\end{figure}
+
+报告用 \cmd{report\_clock\_balance\_points}。CTS 时工具添加 guide buffer 隔离 ignore pin；后续数据通路优化可修复 guide buffer 之外的 DRC。移除：
+\begin{lstlisting}
+fc_shell> remove_clock_balance_points -clock [get_clocks CLK] \
+   -balance_points [get_pins U2/CLK]
+\end{lstlisting}
+
+\subsubsection{确保时钟树例外有效}
+\subsubsection*{Ensuring Clock Tree Exceptions are Valid}
+
+工具通过引脚属性 \cmd{is\_clock\_used\_as\_clock} 是否为 true 判断引脚是否在时钟网络上。若对属性为 false 的引脚用 \cmd{set\_clock\_balance\_points} 指定例外，工具会接受但在 CTS 中忽略。
+
+考虑图~\ref{fig:cts-beyond-net} 的时钟网络：默认情况下，U2/A、U2/Y、FF3/D 的 \cmd{is\_clock\_used\_as\_clock} 为 false，U2/A 之后视为数据网络；U2/A 为 ignore pin，其扇出排除在 CTS 之外。CTS 会在 U2/A 前加 guide buffer；后续数据通路优化可修 DRC。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}
+\textit{（原书 Figure 40：Specifying Exceptions on Pins Beyond the Clock Network）}
+\vspace{1.0cm}}}
+\caption{在时钟网络之外的引脚上指定例外}
+\label{fig:cts-beyond-net}
+\end{figure}
+
+若希望 CTS 用时钟树约束一直修到 FF3/D 的 DRC：
+\begin{enumerate}
+  \item 将 FF3/D 显式设为 ignore pin：
+\begin{lstlisting}
+fc_shell> set_clock_balance_points -clock [get_clocks CLK] \
+    -consider_for_balancing false -balance_points [get_pins FF3/D]
+\end{lstlisting}
+  \item 用 \cmd{set\_sense -clock\_leaf} 强制将其视为时钟网络引脚：
+\begin{lstlisting}
+fc_shell> set_sense -clock_leaf [get_pins FF3/D]
+\end{lstlisting}
+        该命令会：将扇入到该 clock leaf 的时钟分支上所有引脚的 \cmd{is\_clock\_used\_as\_clock} 设为 true；将该 leaf 扇出上所有引脚设为 false，且时钟不继续传播。\\
+        检查属性：
+\begin{lstlisting}
+fc_shell> get_attribute [get_pins FF3/D] is_clock_used_as_clock
+\end{lstlisting}
+\end{enumerate}
+
+\subsection{限制时钟网络上的优化}
+\subsubsection*{Restricting Optimization on the Clock Network}
+
+可通过以下方式限制时钟网络部分区域的优化：
+\begin{itemize}
+  \item \textbf{Don't touch}：标识不做 CTS/优化的部分，可防止特定引脚之外被修改、特定 net 被缓冲、特定单元被改尺寸。见「设置 Don't Touch」。
+  \item \textbf{Size-only}：仅允许单元改尺寸；除非 placement status 为 fixed，否则仍可搬移。见「设置 Size-Only」。
+\end{itemize}
+
+\subsubsection{设置 Don't Touch}
+\subsubsection*{Setting Don't Touch Settings}
+
+\begin{lstlisting}
+fc_shell> set_dont_touch_network -clock_only [get_pins pin_name]
+\end{lstlisting}
+\opt{-clock\_only} 仅作用于时钟网络；省略则同时作用于数据与时钟路径。清除：
+\begin{lstlisting}
+fc_shell> set_dont_touch_network -clock_only [get_pins pin_name] -clear
+\end{lstlisting}
+也可对具体对象用 \cmd{set\_dont\_touch}：
+\begin{lstlisting}
+fc_shell> set_dont_touch [get_cells cell_name] true
+fc_shell> set_dont_touch [get_nets -segments net_name] true
+\end{lstlisting}
+报告：\cmd{report\_dont\_touch -all}。
+\begin{noteBox}
+若单元 placement status 为 fixed，CTS 中按 don't touch 单元处理。
+\end{noteBox}
+
+\subsubsection{设置 Size-Only}
+\subsubsection*{Setting Size-Only Settings}
+
+\begin{lstlisting}
+fc_shell> set_size_only [get_cells cell_name] true
+fc_shell> report_size_only -all
+\end{lstlisting}
+
+\subsection{跨 Mode 复制时钟树例外}
+\subsubsection*{Copying Clock Tree Exceptions Across Modes}
+
+用 \cmd{set\_clock\_tree\_options} 的 \opt{-copy\_exceptions\_across\_modes}、\opt{-from\_mode}、\opt{-to\_mode}，指定将例外从某一 mode 复制到一个或多个等价 mode。例如将 M1 的例外复制到 M2、M3：
+\begin{lstlisting}
+fc_shell> set_clock_tree_options -copy_exceptions_across_modes \
+   -from_mode M1 -to_mode {M2 M3}
+\end{lstlisting}
+
+\subsection{由理想时钟延迟推导时钟树例外}
+\subsubsection*{Deriving Clock Tree Exceptions From Ideal Clock Latencies}
+
+若已对特定 sink 设置理想时钟延迟，可用 \cmd{derive\_clock\_balance\_points} 将其转换为时钟树例外：把 \cmd{set\_clock\_latency} 在 sink 上的理想延迟转为 \cmd{set\_clock\_balance\_points}。应在设计仍为理想时钟、CTS 之前运行。
+
+默认行为：
+\begin{itemize}
+  \item 为所有启用 setup/hold（或两者）的 active scenario 中的所有理想 primary clock 生成 balance point；不为 generated clock 生成。可用 \opt{-clocks}/\opt{-corners} 限定。
+  \item 计算每个 primary ideal clock 的参考延迟 $=$ \cmd{set\_clock\_latency} 在时钟上指定的理想 source 延迟 $+$ network 延迟。可用 \opt{-reference\_latency} 指定不同参考值。
+  \item 将推导的约束应用到设计；用 \opt{-output} 可改为输出含 \cmd{set\_clock\_balance\_points} 的文件。
+\end{itemize}
+
+推导的 balance point 按时钟与 corner 区分。须确保 CTS 所用各 mode、至少 worst corner 上对所有时钟正确设置了 \cmd{set\_clock\_latency}。
+
+公式：
+\[
+\text{sink 处 clock balance point 延迟} = \text{时钟参考延迟} - \text{sink 处总理想时钟延迟}
+\]
+其中总理想延迟 $=$ 时钟 source latency $+$ sink 的理想 network latency。
+
+示例约束：
+\begin{lstlisting}
+fc_shell> set_clock_latency -source 0.5 [get_clocks clk]
+fc_shell> set_clock_latency 1.0 [get_clocks clk]
+fc_shell> set_clock_latency 1.5 [get_pins reg1/CK]
+fc_shell> set_clock_latency 0.5 [get_pins reg2/CK]
+\end{lstlisting}
+运行 \cmd{derive\_clock\_balance\_points} 后得到：
+\begin{lstlisting}
+fc_shell> set_clock_balance_points -delay -0.5 \
+   -balance_points [get_pins reg1/CK] -clock clk -corners worst
+fc_shell> set_clock_balance_points -delay 0.5 \
+   -balance_points [get_pins reg2/CK] -clock clk -corners worst
+\end{lstlisting}
+为避免冲突，不要对已用该命令推导 balance point 的时钟再手动施加 balance point。
+
+\subsection{处理存在平衡冲突的端点}
+\subsubsection*{Handling Endpoints With Balancing Conflicts}
+
+某些 block 中存在结构上无法平衡的端点。工具可自动检测并推导 ignore pin 以解决冲突。对 \cmd{synthesize\_clock\_trees} 与 \cmd{clock\_opt} 默认启用；设 \appopt{cts.common.enable\_auto\_exceptions} 为 \cmd{false} 可关闭。
+
+可检测并修复的冲突类型：
+\begin{itemize}
+  \item \textbf{含组合时钟路径模块的内部 sink}：若模块同时含内部 sink 与组合时钟路径，无法平衡内部 sink；工具将其定义为 ignore pin。例如图~\ref{fig:cts-comb-mod}(a) 网表对应 (b) 中带 check pin 的 ETM：ETM 内部 check pin 延迟来自 ETM 时序库，CTS 视其为 sink 并与顶层其他 sink 平衡；若到 check pin 为最短路径，顶层 CTS 无法在最短路径上插缓冲，导致大 skew。将其设为 ignore 可解决。
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}
+\textit{（原书 Figure 41：Module With Combinational Clock Path）}
+\vspace{1.0cm}}}
+\caption{含组合时钟路径的模块}
+\label{fig:cts-comb-mod}
+\end{figure}
+  \item \textbf{无法同时平衡的 sink}：两时钟驱动公共 sink，且其一因 generated clock 成为另一 sink 的 parent 时，无法同时将 parent、child 与公共 sink 平衡。工具将 parent 时钟引脚定义为 ignore pin。例如图~\ref{fig:cts-unbal} 中，工具将 FF\_gen/CLK 定义为 clkb 的 ignore pin。
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}
+\textit{（原书 Figure 42：Clock Pins That Cannot Be Balanced Simultaneously）}
+\vspace{1.0cm}}}
+\caption{无法同时平衡的时钟引脚}
+\label{fig:cts-unbal}
+\end{figure}
+\end{itemize}
+
+% ============================================================
+\section{验证时钟树}
+\subsection*{Verifying the Clock Trees}
+
+综合前用 \cmd{check\_clock\_trees} 验证定义。例如：
+\begin{lstlisting}
+fc_shell> check_clock_trees -clocks [get_clocks CLK]
+\end{lstlisting}
+未指定 \opt{-clock} 时检查当前 block 全部时钟。检查项包括：
+\begin{itemize}
+  \item 无 sink 的时钟（master 或 generated）；
+  \item 时钟网络成环；
+  \item 重叠时钟使多时钟到达同一寄存器，但未启用 multiple-clocks-per-register 传播；
+  \item 被忽略的时钟树例外；
+  \item 在输出引脚上定义的 stop/float pin；
+  \item 时钟树 reference 中使用了具有多条时序弧的缓冲器；
+  \item 导致空缓冲列表的情形；
+  \item generated clock 无有效 master-clock 源，包括：
+        \begin{itemize}
+          \item \cmd{create\_generated\_clock} 中指定的 master 不存在；
+          \item master 未驱动 generated clock 的源引脚；
+          \item 源引脚由多时钟驱动，但部分 master 未在 \cmd{create\_generated\_clock} 中指定。\\
+                例如图~\ref{fig:cts-invalid-master}：GEN\_REG/Q 由 CLKA、CLKB 驱动，若仅指定 CLKA 为 master，则 GEN\_CLK 无有效 master。
+        \end{itemize}
+\end{itemize}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}
+\textit{（原书 Figure 43：Generated Clock With Invalid Master Clock Source）}
+\vspace{1.0cm}}}
+\caption{master 源无效的 generated clock}
+\label{fig:cts-invalid-master}
+\end{figure}
+
+对多角多模（MCMM）设计，还检查：
+\begin{itemize}
+  \item 冲突的 per-clock 例外设置；
+  \item 冲突的 balancing 设置。
+\end{itemize}
+实现前应手动修复报告问题；每条消息有 man 页说明修复方法。修复全部问题可改善时钟树与时序 QoR。
+
+% ============================================================
+\section{设置时钟树设计规则约束}
+\subsection*{Setting Clock Tree Design Rule Constraints}
+
+CTS 支持以下设计规则约束：
+\begin{itemize}
+  \item \textbf{最大电容}：用 \cmd{set\_max\_capacitance} 的 \opt{-clock\_path} 指定。未指定时 CTS 默认为 0.6~pF。
+  \item \textbf{最大转换时间}：用 \cmd{set\_max\_transition} 的 \opt{-clock\_path} 指定。未指定时 CTS 默认为 0.5~ns。
+\end{itemize}
+
+默认作用于当前 mode 关联的所有 corner。对特定 mode：用 \cmd{get\_clocks -mode}；对特定 corner：用约束命令的 \opt{-corners}。须跨 mode 及其 corner 正确施加。
+
+例如对当前 mode 所有 corner 的 CLK 路径设最大转换 0.20~ns：
+\begin{lstlisting}
+fc_shell> set_max_transition 0.20 -clock_path [get_clocks CLK]
+\end{lstlisting}
+
+对不同 corner 设不同值：
+\begin{lstlisting}
+fc_shell> set_max_transition 0.15 -corners corner1 \
+   -clock_path [get_clocks -mode mode1]
+fc_shell> set_max_transition 0.10 -corners corner2 \
+   -clock_path [get_clocks -mode mode1]
+\end{lstlisting}
+
+对 mode 关联的不同 corner 设相同最大电容：
+\begin{lstlisting}
+fc_shell> set_max_capacitance 0.6 \
+    -clock_path [get_clocks -mode mode2] \
+   -corners [get_corner \
+      [get_attribute [get_modes mode2] associated_corners]]
+\end{lstlisting}
+
+% ============================================================
+\section{指定 CTS 设置}
+\subsection*{Specifying the Clock Tree Synthesis Settings}
+
+CTS 选项指导时钟树实现，包括以下主题：
+\begin{itemize}
+  \item 指定时钟树 References
+  \item 设置 Skew 与 Latency 目标
+  \item 启用局部 Skew 优化
+  \item 指定 CTS 主 Corner
+  \item 阻止综合特定时钟
+  \item 保留既有时钟树
+  \item 启用时钟树降功耗技术
+  \item 启用线长感知的功耗驱动搬移
+  \item 降低电迁移（EM）
+  \item 处理不准确约束
+  \item 定义时钟单元间距规则
+  \item 创建 Skew Groups
+  \item 定义时钟单元名前缀
+  \item 初始 CTS 使用全局路由器
+  \item 为时钟网络指定约束
+  \item 为特定端点构建更快时钟树
+  \item 改进延迟驱动的时钟门分裂
+  \item 降低时钟网络上的信号完整性影响
+  \item 指定时钟延迟调整设置
+  \item 报告时钟树设置
+\end{itemize}
+
+\subsection{指定时钟树 References}
+\subsubsection*{Specifying the Clock Tree References}
+
+可用于构建时钟树的缓冲器/反相器，以及既有门的 reference cell，称为时钟树 references。用 \cmd{set\_lib\_cell\_purpose -include cts} 指定。列表须满足：
+\begin{itemize}
+  \item 至少含一个缓冲器或一个反相器；
+  \item 包含既有门的库单元（否则无法在 CTS/优化中对其改尺寸）。可用 \cmd{derive\_clock\_cell\_references} 自动推导非缓冲/反相既有单元的等价单元，见「为既有门推导 References」；
+  \item 多电压且需 always-on 缓冲时，列表须含 always-on 单元；
+  \item 列表中的库单元不得有 \cmd{dont\_touch}（即便列入 reference 也不会被 CTS 使用）。
+\end{itemize}
+
+为确保仅使用指定单元、且这些单元不被 CTS 以外的优化使用：
+\begin{lstlisting}
+fc_shell> set cts_cells list_of_cells
+fc_shell> set_lib_cell_purpose -exclude cts [get_lib_cells]
+fc_shell> set_lib_cell_purpose -include none [get_lib_cells $cts_cells]
+fc_shell> set_lib_cell_purpose -include cts [get_lib_cells $cts_cells]
+\end{lstlisting}
+
+\subsubsection{为既有门推导 References}
+\subsubsection*{Deriving Clock Tree References for Preexisting Gates}
+
+须将等价单元指定为 clock references，否则影响 QoR。\cmd{derive\_clock\_cell\_references} 会为非缓冲/反相的既有时钟单元在等价库单元上设置 \cmd{valid\_purpose}；不推导缓冲器与反相器的等价单元，须手动指定：
+\begin{lstlisting}
+fc_shell> set_lib_cell_purpose -include cts \
+   {tech_lib/clk_buf* tech_lib/clk_inv*}
+fc_shell> derive_clock_cell_references
+fc_shell> synthesize_clock_trees
+\end{lstlisting}
+
+用 \opt{-output} 可生成 Tcl 脚本而非直接应用：
+\begin{lstlisting}
+fc_shell> derive_clock_cell_references -output cts_leq_cells.tcl
+fc_shell> set_lib_cell_purpose -include cts \
+   {tech_lib/clk_buf* tech_lib/clk_inv*}
+fc_shell> source cts_leq_cells.tcl
+fc_shell> synthesize_clock_trees
+\end{lstlisting}
+
+\subsubsection{限制所用目标库}
+\subsubsection*{Restricting the Target Libraries Used}
+
+用 \cmd{set\_target\_library\_subset -clock} 可限制顶层或逻辑层次下级所用库；须将 \appopt{opt.common.enable\_target\_library\_subset\_opt} 设为 1。例如全局允许 HVT/LVT 的 buf，但 TSK\_BLK 仅用 LVT\_lib：
+\begin{lstlisting}
+fc_shell> set_lib_cell_purpose -include cts \
+   {HVT_lib/buf1 HVT_lib/buf2 LVT_lib/buf1 LVT_lib/buf2}
+fc_shell> set_target_library_subset -clock {LVT_lib} \
+       -objects [TOP/TSK_BLK]
+fc_shell> set_app_options \
+  -name opt.common.enable_target_library_subset_opt -value 1
+\end{lstlisting}
+
+\subsection{设置 Skew 与 Latency 目标}
+\subsubsection*{Setting Skew and Latency Targets}
+
+默认 CTS 追求所有时钟的最佳 skew 与 latency，对低频时钟可能带来面积、功耗与运行时间开销。
+\begin{itemize}
+  \item skew 目标：\cmd{set\_clock\_tree\_options -target\_skew}
+  \item latency 目标：\cmd{set\_clock\_tree\_options -target\_latency}
+\end{itemize}
+默认作用于所有时钟与所有 corner；用 \opt{-clocks}/\opt{-corners} 限定。报告：\cmd{report\_clock\_tree\_options}。移除：\cmd{remove\_clock\_tree\_options}（\opt{-all} 或相应选项）。
+
+\subsection{启用局部 Skew 优化}
+\subsubsection*{Enabling Local Skew Optimization}
+
+默认最小化全局 skew（最长与最短时钟路径之差）。若最长/最短路径寄存器之间无时序路径，优化全局 skew 未必改善 QoR；优化局部 skew（时序路径 launch/capture 寄存器间最坏 skew）可改善 QoR。局部 skew 优化针对所有违例的 setup/hold 路径。
+
+对 \cmd{synthesize\_clock\_trees} 与 \cmd{clock\_opt} 的综合与优化阶段启用：
+\begin{lstlisting}
+fc_shell> set_app_options -list {cts.compile.enable_local_skew true}
+fc_shell> set_app_options -list {cts.optimize.enable_local_skew true}
+\end{lstlisting}
+启用后默认由工具推导有助于 QoR 的 skew 目标，并忽略 \cmd{set\_clock\_tree\_options -target\_skew}。若要阻止自动推导：
+\begin{lstlisting}
+fc_shell> set_app_options \
+ -name cts.common.enable_auto_skew_target_for_local_skew -value false
+\end{lstlisting}
+
+\subsection{指定 CTS 主 Corner}
+\subsubsection*{Specifying the Primary Corner for Clock Tree Synthesis}
+
+初始 CTS 默认识别时钟延迟最差的 corner，并在该 corner 的所有 mode 中插入缓冲以平衡延迟。用 \appopt{cts.compile.primary\_corner} 指定主 corner。
+
+\subsection{阻止综合特定时钟}
+\subsubsection*{Preventing Specific Clocks From Being Synthesized}
+
+默认综合所有 \cmd{create\_clock}/\cmd{create\_generated\_clock} 定义的时钟。用 \appopt{cts.common.skip\_cts\_clocks} 排除：
+\begin{lstlisting}
+fc_shell> set_app_options \
+   -name cts.common.skip_cts_clocks -value CK_B
+\end{lstlisting}
+
+\subsection{保留既有时钟树}
+\subsubsection*{Preserving Preexisting Clock Trees}
+
+默认 CTS 会移除所有既有时钟缓冲器与反相器。将 \appopt{cts.compile.remove\_existing\_clock\_trees} 设为 \cmd{false} 可阻止。要保留特定既有缓冲/反相器，对其施加 don't touch 或 size-only 例外。
+
+\subsection{启用时钟树降功耗技术}
+\subsubsection*{Enabling Clock Tree Power Reduction Techniques}
+
+用 \appopt{cts.compile.power\_opt\_mode} 启用，见表~\ref{tab:cts-power-opt}。
+
+\begin{table}[htbp]
+\centering
+\caption{\appopt{cts.compile.power\_opt\_mode} 设置}
+\label{tab:cts-power-opt}
+\begin{tabularx}{\textwidth}{@{}l X@{}}
+\toprule
+\textbf{目的} & \textbf{设置} \\
+\midrule
+将 clock-gating 单元移近驱动以缩短高翻转输入网线长 & \cmd{gate\_relocation} \\
+用聚类技术改善功耗 & \cmd{low\_power\_targets} \\
+同时使用门控搬移与聚类 & \cmd{all} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{启用线长感知的功耗驱动搬移}
+\subsubsection*{Enabling Wire Length Aware Power-Driven Relocation}
+
+工具支持改进的活动驱动时钟门搬移：控制线长劣化，并在搬移前考虑功耗影响。将 \appopt{cts.compile.power\_opt\_mode} 设为 \cmd{all} 或 \cmd{gate\_relocation}。下列情况不搬移：
+\begin{itemize}
+  \item 搬移 ICG 功耗收益很小或恶化功耗，同时恶化线长；
+  \item 搬移线长影响大而功耗收益小。
+\end{itemize}
+
+\subsection{降低电迁移}
+\subsubsection*{Reducing Electromigration}
+
+时钟单元功耗较高；局部聚集会提高电源轨电流密度，增加 EM 风险。可通过设置时钟单元间距，避免沿标准单元电源轨在垂直 strap 之间局部堆积：
+\begin{enumerate}
+  \item 用 \cmd{set\_clock\_cell\_spacing} 定义反相器、缓冲器、ICG 的间距规则（见「定义时钟单元间距规则」）；
+  \item 用 \cmd{synthesize\_clock\_trees} 或 \cmd{clock\_opt} 执行 CTS；
+\begin{noteBox}
+\cmd{balance\_clock\_groups} 也遵守时钟单元间距规则。见「平衡不同时钟树之间的 Skew」。
+\end{noteBox}
+  \item 用 \cmd{check\_legality -verbose} 检查间距违例；设置合适约束后应无违例。
+\end{enumerate}
+
+\subsection{处理不准确约束}
+\subsubsection*{Handling Inaccurate Constraints During Clock Tree Synthesis}
+
+实现早期约束可能不准确或过严，直接 CTS 可能导致长运行时间或差 QoR。可设：
+\begin{lstlisting}
+fc_shell> set_app_options \
+   -name cts.common.enable_dirty_design_mode -value true
+\end{lstlisting}
+此时工具会：
+\begin{itemize}
+  \item 忽略时钟网上的 \cmd{dont\_touch}/\cmd{dont\_touch\_network}；
+  \item 移除过紧的最大转换/最大电容约束；
+  \item 移除小于 50~microns 的最大网长约束；
+  \item 若水平间距 $>$ 3$\times$ site height 或垂直间距 $>$ 20$\times$ site height，忽略时钟单元间距规则；
+  \item 若 NDR 的 width+spacing $>$ 10$\times$（默认 width+spacing），忽略 NDR；
+  \item 报告大到足以增加时钟插入延迟的 balance point 延迟值。
+\end{itemize}
+
+\subsection{定义时钟单元间距规则}
+\subsubsection*{Defining Clock Cell Spacing Rules}
+
+用 \cmd{set\_clock\_cell\_spacing}；至少指定 x 或 y 方向最小间距（通常两者都指定）。
+\begin{itemize}
+  \item \opt{-x\_spacing}：微米，通常依赖驱动强度与时钟频率；
+  \item \opt{-y\_spacing}：通常小于半行高。
+\end{itemize}
+\begin{noteBox}
+间距过大因单元远离目标 sink 簇而增加 skew。
+\end{noteBox}
+默认作用于所有时钟单元；用 \opt{-lib\_cells}/\opt{-clocks} 限定。相邻两单元若同方向都有规则，间距为两者之和。可将 \appopt{cts.placement.cell\_spacing\_rule\_style} 设为 \cmd{maximum}，改为取较大值而非求和。
+
+\cmd{synthesize\_clock\_trees}、\cmd{balance\_clock\_groups}、\cmd{clock\_opt} 均遵守这些规则。报告：\cmd{report\_clock\_cell\_spacings}。移除：\cmd{remove\_clock\_cell\_spacings}（默认全部；\opt{-lib\_cells} 可限定）。
+
+\subsection{创建 Skew Groups}
+\subsubsection*{Creating Skew Groups}
+
+若希望一组 sink 仅在组内平衡，用 \cmd{create\_clock\_skew\_group}，以 \opt{-objects} 指定 sink。可选：\opt{-clock}、\opt{-mode}（默认当前 mode）、\opt{-name}。例如：
+\begin{lstlisting}
+fc_shell> create_clock_skew_group -name sg1 \
+   -objects {reg1/CP reg2/CP reg3/CP}
+\end{lstlisting}
+报告：\cmd{report\_clock\_skew\_groups}。移除：\cmd{remove\_clock\_skew\_groups}。
+
+\subsection{定义时钟单元名前缀}
+\subsubsection*{Defining a Name Prefix for Clock Cells}
+
+用 \appopt{cts.common.user\_instance\_name\_prefix}：
+\begin{lstlisting}
+fc_shell> set_app_options \
+   -name cts.common.user_instance_name_prefix -value "CTS_"
+\end{lstlisting}
+数据网上优化（含 \cmd{clock\_opt}）的单元前缀用 \appopt{opt.common.user\_instance\_name\_prefix}。
+
+\subsection{初始 CTS 使用全局路由器}
+\subsubsection*{Using the Global Router During Initial Clock Tree Synthesis}
+
+默认初始 CTS 用虚拟路由器；复杂 floorplan 可能产生拥塞热点并在时钟布线后劣化 QoR。将 \appopt{cts.compile.global\_route\_aware\_buffering} 设为 \cmd{true}，可在 \cmd{synthesize\_clock\_trees}/\cmd{clock\_opt} 的初始 CTS 阶段使用全局路由器。
+
+\subsection{为时钟网络指定约束}
+\subsubsection*{Specifying Constraints for Clock Nets}
+
+默认用默认布线规则与可用布线层。可按「指定布线资源」设置时钟网最小/最大布线层，用于 RC 估计、拥塞分析与布线。为降低线延迟，可用宽线与高层金属（NDR）；须先定义规则并赋给时钟网（见「使用非默认布线规则」）。
+
+\subsection{为特定端点构建更快时钟树}
+\subsubsection*{Constructing Faster Clock Tree to Specific Endpoints}
+
+可为指定端点构建无额外绕线/延迟平衡的更快时钟树以改善 latency。须先为所需端点创建用户 skew group，再运行 \cmd{synthesize\_clock\_trees} 或 \cmd{clock\_opt} 的 \cmd{build\_clock} 阶段：
+\begin{lstlisting}
+fc_shell> create_clock_skew_group -objects <endpoints>
+\end{lstlisting}
+\begin{noteBox}
+\begin{itemize}
+  \item 若快速端点之间有平衡要求，须放入同一 skew group；
+  \item 若无平衡要求，须为每个端点单独建 skew group；
+  \item 所需 skew group 端点的上游时钟逻辑与默认组或其他用户 skew group 共享，可能导致为平衡其他组端点而绕线。
+\end{itemize}
+\end{noteBox}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}
+\textit{（原书 Figure 44：Faster Clock Tree to Specific Endpoints）}
+\vspace{1.0cm}}}
+\caption{到特定端点的更快时钟树}
+\label{fig:cts-faster}
+\end{figure}
+
+若一门同时驱动 skew group 与非 skew group 端点，skew group 端点可能因非组端点的平衡要求而变慢。除建 skew group 外，还须用 \cmd{split\_clock\_cells -to} 沿路径克隆门，以从时钟源到目标端点建立独立路径（在 CTS 之前）：
+\begin{lstlisting}
+fc_shell> split_clock_cells -to $endpoints
+\end{lstlisting}
+也可用 \cmd{split\_clock\_cells -to <\$sinks> -latency\_driven} 自动识别最优克隆方案；端点须同时用 \cmd{create\_clock\_skew\_group} 建组。
+
+\subsection{改进延迟驱动的时钟门分裂}
+\subsubsection*{Improving Latency-Driven Clock-Gate Splitting}
+
+延迟驱动的 CG 分裂现可自动识别并评估不同克隆搬移，以改善插入延迟并满足最大级数约束。启用：
+将 \appopt{cts.icg.latency\_driven\_cloning} 设为 \cmd{true}。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}
+\textit{（原书 Figure 45：Latency Driven Clock-Gate Splitting）}
+\vspace{1.0cm}}}
+\caption{延迟驱动的时钟门分裂}
+\label{fig:cts-cg-split}
+\end{figure}
+
+\subsection{降低时钟网络上的信号完整性影响}
+\subsubsection*{Reducing Signal Integrity Effects on Clock Nets}
+
+可通过推导更大间距的 NDR 并赋给无拥塞区域的时钟网改善时序。启用：
+\begin{lstlisting}
+fc_shell> set_app_options \
+   -name cts.optimize.enable_congestion_aware_ndr_promotion -value true
+\end{lstlisting}
+新 NDR 间距取决于原规则：
+\begin{itemize}
+  \item 原 NDR 间距 $\leq$ 2$\times$ 默认间距：加倍，名称加后缀 \texttt{\_ext\_spacing}；
+  \item 原 NDR 间距 $>$ 2$\times$ 默认：增加一个默认间距，后缀同上；
+  \item 默认规则：间距加倍，新名为 \cmd{default\_rule\_equivalent\_ndr\_double\_spacing}。
+\end{itemize}
+
+\subsection{指定时钟延迟调整设置}
+\subsubsection*{Specifying Settings for Clock Latency Adjustments}
+
+I/O 端口通常由真实或虚拟时钟约束。CTS 后须更新约束 I/O 的时钟延迟以保持边界约束准确。用 \cmd{clock\_opt} 时工具自动更新；可用 \cmd{set\_latency\_adjustment\_options} 控制。例如按 PC\_CLK 更新 VCLK1/VCLK2，排除 VCLK3：
+\begin{lstlisting}
+fc_shell> set_latency_adjustment_options \
+   -reference_clock PC_CLK -clocks_to_update {VCLK1 VCLK2} \
+   -exclude_clocks VCLK3
+\end{lstlisting}
+用 \cmd{synthesize\_clock\_trees} 时不会自动更新；CTS 后运行 \cmd{compute\_clock\_latency}（遵守上述设置）。
+
+\subsection{报告时钟树设置}
+\subsubsection*{Reporting the Clock Tree Settings}
+
+用 \cmd{report\_clock\_settings}。默认报告当前 block 所有时钟的配置（DRC、目标 skew/latency）、references、单元间距规则、NDR。用 \opt{-clock} 限定时钟；用 \opt{-type}：
+\begin{itemize}
+  \item \cmd{configurations}：DRC、目标 skew/latency；
+  \item \cmd{references}：时钟树 references；
+  \item \cmd{spacing\_rules}：单元间距；
+  \item \cmd{routing\_rules}：时钟网 NDR。
+\end{itemize}
+
+
+
+% ============================================================
+\section{实现时钟树并执行 CTS 后优化}
+\subsection*{Implementing Clock Trees and Performing Post-CTS Optimization}
+
+执行 CTS 前应保存 block，以便必要时以同一起点 refinement 目标后重跑。可用方法：
+\begin{itemize}
+  \item 独立 CTS（\cmd{synthesize\_clock\_trees}）
+  \item 用 \cmd{clock\_opt} 综合、优化并布线时钟树
+  \item 控制并发时钟与数据（CCD）优化
+  \item 分裂时钟单元
+  \item 平衡不同时钟树之间的 Skew
+  \item 使用机器学习数据的基于全局布线优化
+  \item 布线时钟树
+  \item 在 CTS、优化与时钟布线中插入 Via Ladder
+  \item CTS 后将时钟标记为 propagated
+  \item 执行布线后时钟树优化
+  \item 执行电压优化
+  \item 将时钟树标记为已综合
+  \item 移除时钟树
+\end{itemize}
+
+\subsection{独立时钟树综合}
+\subsubsection*{Performing Standalone Clock Trees Synthesis}
+
+\begin{lstlisting}
+fc_shell> synthesize_clock_trees
+\end{lstlisting}
+该命令执行：
+\begin{enumerate}
+  \item \textbf{CTS}：此前对时钟网做虚拟布线并用 RC 估计确定时序；
+  \item \textbf{时钟树优化}：此前对时钟网做全局布线并用 RC 提取；优化中对被修改的时钟网做增量全局布线。
+\end{enumerate}
+\begin{noteBox}
+该命令不对时钟树做详细布线。
+\end{noteBox}
+默认作用于所有为 setup/hold 启用的 active scenario 中的全部时钟。用 \opt{-clock} 限定，例如：
+\begin{lstlisting}
+fc_shell> synthesize_clock_trees -clocks [get_clocks CLK]
+\end{lstlisting}
+CTS 后，工具将所有 active scenario 各 mode 中的时钟设为 propagated。
+
+\subsection{用 clock\_opt 综合、优化并布线时钟树}
+\subsubsection*{Synthesizing, Optimizing, and Routing Clock Trees With the clock\_opt Command}
+
+\cmd{clock\_opt} 用一条命令完成综合、布线与进一步优化，阶段为：
+\begin{enumerate}
+  \item \cmd{build\_clock}：综合并优化所有 active scenario 各 mode 的全部时钟；之后设为 propagated；
+  \item \cmd{route\_clock}：对已综合时钟网做详细布线；
+  \item \cmd{final\_opto}：进一步优化、时序驱动布局与合法化，然后全局布线并做广泛的基于全局布线的优化（含增量合法化与 route patching）。
+\end{enumerate}
+用 \opt{-from}/\opt{-to} 限制连续阶段；省略 \opt{-from} 从 \cmd{build\_clock} 开始，省略 \opt{-to} 跑到 \cmd{final\_opto} 完成。例如仅综合优化并详细布线：
+\begin{lstlisting}
+fc_shell> clock_opt -to route_clock
+\end{lstlisting}
+
+因 \cmd{final\_opto} 做全局布线，运行前应设好所有路由器相关设置（布线规则、route guide、工艺节点应用选项等）。每个 block 应只跑一次 \cmd{final\_opto}；完成后信号网均已全局布线，后续 \cmd{route\_auto}/\cmd{route\_global}/\cmd{route\_group} 会跳过全局布线。为避免后续 track assignment/详细布线出错，\cmd{clock\_opt} 后不要改动任何全局布线形状。
+
+\subsubsection{CTS 中考虑压降信息}
+\subsubsection*{Considering Voltage Drop Information During Clock Tree Synthesis}
+
+默认 \cmd{clock\_opt} 插入时钟缓冲时不考虑压降，可能把缓冲放在高 PG 电阻处。可用 RedHawk Fusion 分析 PG 网络：
+\begin{enumerate}
+  \item \cmd{analyze\_rail -min\_path\_resistance}；
+  \item \cmd{open\_rail\_result} 加载结果；
+  \item 将 \appopt{clock\_opt.flow.enable\_voltage\_drop\_aware} 设为 \cmd{true}；
+  \item 运行 \cmd{clock\_opt}。
+\end{enumerate}
+
+\subsubsection{优化中对关键网络使用 NDR}
+\subsubsection*{Using Nondefault Routing Rules for Critical Nets During Optimization}
+
+布线前优化中可对时序关键网使用 NDR，并以软约束引导路由器。对 \cmd{clock\_opt} 启用：
+\begin{lstlisting}
+fc_shell> set_app_options -name clock_opt.flow.optimize_ndr \
+    -value true
+\end{lstlisting}
+
+\subsubsection{在 clock\_opt 中执行 CCD 优化}
+\subsubsection*{Performing Concurrent Clock and Data Optimization During the clock\_opt Command}
+
+在数据通路优化中利用正松弛调整寄存器时钟到达时间以改善时序 QoR，称为并发时钟与数据（CCD）优化。\cmd{clock\_opt} 默认启用；将 \appopt{clock\_opt.flow.enable\_ccd} 设为 \cmd{false} 可关闭。可选控制步骤：限制延迟调整值、排除边界路径、排除特定 path group/scenario/sink、控制时序/hold 优化努力、控制 I/O 时钟延迟调整、用 \cmd{report\_ccd\_timing} 分析效果（详见「控制 CCD 优化」各小节）。
+
+\subsubsection{控制 clock\_opt 中的多比特优化}
+\subsubsection*{Controlling Multibit Optimization Performed During the clock\_opt Command}
+
+\begin{itemize}
+  \item \textbf{混合驱动强度多比特单元重连}：违例路径经过较弱驱动位时，可重连使路径走较强驱动位。启用：\appopt{clock\_opt.flow.enable\_multibit\_rewiring}=\cmd{true}。
+  \item \textbf{CTS 后多比特 debanking}：在 \cmd{final\_opto} 阶段，若不会引入 hold 违例则可 debank 以改善 QoR。启用：\appopt{clock\_opt.flow.enable\_multibit\_debanking}=\cmd{true}。
+\end{itemize}
+
+\subsubsection{在时钟网络上执行功耗或面积回收}
+\subsubsection*{Performing Power or Area Recovery on the Clock Network}
+
+启用 CCD 时，工具在 \cmd{final\_opto} 对时钟单元与寄存器做时钟功耗回收。未启用 CCD 时可：
+\begin{lstlisting}
+fc_shell> set_app_options \
+   -name clock_opt.flow.enable_clock_power_recovery \
+   -value power
+\end{lstlisting}
+此前须：用 \cmd{set\_scenario\_status} 的 \opt{-dynamic\_power}/\opt{-leakage\_power} 启用功耗优化 scenario；（可选）用 \cmd{read\_saif} 提供翻转活动，否则用默认活动做动态功耗回收。面积回收则将值设为 \cmd{area}。
+
+\subsubsection{在 clock\_opt 中执行 IR-Drop 感知布局}
+\subsubsection*{Performing IR-Drop-Aware Placement During the clock\_opt Command}
+
+\begin{enumerate}
+  \item \cmd{clock\_opt -to route\_clock}；
+  \item 配置 RedHawk Fusion 并用 \cmd{analyze\_rail -voltage\_drop} 做静态/动态压降分析；
+  \item 将 \appopt{place.coarse.ir\_drop\_aware} 设为 \cmd{true}；
+  \item （可选）按「控制 IR-Drop 感知布局」做附加设置；
+  \item \cmd{clock\_opt -from final\_opto}。
+\end{enumerate}
+
+\subsection{控制并发时钟与数据优化}
+\subsubsection*{Controlling Concurrent Clock and Data Optimization}
+
+CCD 对 \cmd{place\_opt} 与 \cmd{clock\_opt} 默认启用；对 \cmd{route\_opt} 须将 \appopt{route\_opt.flow.enable\_ccd} 设为 \cmd{true}。可控制：
+\begin{itemize}
+  \item 限制延迟调整值
+  \item 排除边界路径 / 特定 path group / scenario / sink
+  \item 控制时序与 hold 优化努力
+  \item 控制 I/O 时钟延迟调整
+  \item 在 \cmd{route\_opt} 中做动态压降驱动的 CCD
+  \item 在布线前/布线后阶段指定优化目标
+  \item 布线后启用缓冲移除
+  \item 报告 CCD 时序；将 CCD offset 缩放到新 scenario
+  \item 对 latch 与离散时钟门一并 skew
+\end{itemize}
+
+\subsubsection{限制延迟调整值}
+\subsubsection*{Limiting the Latency Adjustment Values}
+
+\begin{itemize}
+  \item 提前量上限：\appopt{ccd.max\_prepone}
+  \item 推迟量上限：\appopt{ccd.max\_postpone}
+\end{itemize}
+无默认值，单位为库时序单位。例如：
+\begin{lstlisting}
+fc_shell> set_app_options -list {ccd.max_prepone 0.2}
+fc_shell> set_app_options -list {ccd.max_postpone 0.1}
+\end{lstlisting}
+
+\subsubsection{排除边界路径}
+\subsubsection*{Excluding Boundary Paths}
+
+默认对 block 内所有路径做 CCD。边界寄存器为输入端口传递扇出、输出端口传递扇入中的寄存器。将 \appopt{ccd.optimize\_boundary\_timing} 设为 \cmd{false} 可排除边界路径。可用 \appopt{ccd.ignore\_ports\_for\_boundary\_identification} 使部分端口的边界路径仍参与 CCD：
+\begin{lstlisting}
+fc_shell> set_app_options -name ccd.optimize_boundary_timing \
+   -value false
+fc_shell> set_app_options \
+   -name ccd.ignore_ports_for_boundary_identification \
+   -value {IN_A OUT_A}
+\end{lstlisting}
+即便禁用边界寄存器 CCD，若改善共享时钟路径的内部寄存器 QoR，工具仍可优化其时钟树扇入锥。将 \appopt{ccd.optimize\_boundary\_timing\_upstream} 设为 \cmd{false} 可阻止，但会严重限制 CCD 范围。上述设置影响 \cmd{place\_opt}/\cmd{clock\_opt}/\cmd{route\_opt}。
+
+\subsubsection{排除特定 Path Groups / Scenarios / Sinks}
+\subsubsection*{Excluding Specific Path Groups, Scenarios, and Sinks}
+
+\begin{lstlisting}
+fc_shell> set_app_options -name ccd.skip_path_groups \
+   -value {CLK1 {CLK2 scnA}}
+fc_shell> set_app_options -name ccd.ignore_scenarios \
+   -value {scnB}
+\end{lstlisting}
+
+排除特定 sink：
+\begin{enumerate}
+  \item 对 sink 设 \cmd{cts\_fixed\_balance\_pin}：
+\begin{lstlisting}
+fc_shell> set_attribute -objects reg21/CK \
+   -name cts_fixed_balance_pin -value true
+\end{lstlisting}
+  \item 将 \appopt{ccd.respect\_cts\_fixed\_balance\_pins} 设为 \cmd{true}（阻止调整这些 sink 的延迟；其他 sink 的 CCD 仍可能间接改变其延迟）。设为 \cmd{upstream} 可阻止从这些 sink 到时钟根的时钟路径被改动。
+\end{enumerate}
+
+\subsubsection{控制时序与 Hold 优化努力}
+\subsubsection*{Controlling Timing and Hold Optimization Effort}
+
+\begin{itemize}
+  \item \appopt{ccd.timing\_effort}：\cmd{low}/\cmd{high}，默认 \cmd{medium}（影响 \cmd{clock\_opt} 的 \cmd{final\_opto} 与 \cmd{route\_opt}）；
+  \item \appopt{ccd.hold\_control\_effort}：\cmd{medium}/\cmd{high}/\cmd{ultra}，默认 \cmd{low}。提高 hold 优先级会减少可修复的 setup 违例，仅在 hold 关键时使用。
+\end{itemize}
+
+\subsubsection{控制 I/O 时钟延迟调整}
+\subsubsection*{Controlling the Adjustment of I/O Clock Latencies}
+
+\cmd{clock\_opt} 做 CCD 时默认调整约束边界端口的 I/O 时钟延迟；随后运行 \cmd{compute\_clock\_latency} 时也使用 CCD 技术。不更新的情形包括：\appopt{ccd.adjust\_io\_clock\_latency}=\cmd{false}、禁用边界路径 CCD、用 \appopt{ccd.skip\_path\_groups} 排除对应 path group、用 \cmd{set\_latency\_adjustment\_options -exclude\_clocks} 排除特定 I/O 时钟。
+
+\subsubsection{route\_opt 中动态压降驱动的 CCD}
+\subsubsection*{Performing Dynamic-Voltage-Drop-Driven CCD During route\_opt}
+
+将 \appopt{route\_opt.flow.enable\_voltage\_drop\_opt\_ccd} 设为 \cmd{true}。工具用 RedHawk Fusion 识别动态压降热点与可搬移的 cell row，在优化中搬移或缩小尺寸以降低峰值动态压降且不伤害时序 QoR。可选阈值：
+\begin{itemize}
+  \item \appopt{ccd.voltage\_drop\_voltage\_threshold}：相对供电电压的压降百分比；
+  \item \appopt{ccd.voltage\_drop\_population\_threshold}：按最差违例选取的单元数百分比。
+\end{itemize}
+另可将 \appopt{route\_opt.flow.enable\_irdrivenopt} 与上述选项同时设为 \cmd{true}，启用 IR 驱动 sizing（用更小漏电单元替换）。
+
+\subsubsection{布线前阶段指定优化目标}
+\subsubsection*{Specifying Optimization Targets at the Preroute Stage}
+
+对 \cmd{place\_opt}/\cmd{clock\_opt} 的 CCD，可提高下列目标的 WNS 优先级：
+\begin{itemize}
+  \item 特定 path group：\appopt{ccd.targeted\_ccd\_path\_groups}（若同时在 \appopt{ccd.skip\_path\_groups} 中则仍跳过）；
+  \item 端点文件：\appopt{ccd.targeted\_ccd\_end\_points\_file}（同时指定 path group 与端点时，仅优化指定组内的指定端点）；
+  \item 最差 300 条路径：\appopt{ccd.enable\_top\_wns\_optimization}=\cmd{true}。
+\end{itemize}
+
+\subsubsection{布线后阶段指定优化目标}
+\subsubsection*{Specifying Optimization Targets at the Postroute Stage}
+
+\begin{enumerate}
+  \item 将 \appopt{route\_opt.flow.enable\_targeted\_ccd\_wns\_optimization} 设为 \cmd{true}；
+  \item 用 \appopt{ccd.targeted\_ccd\_path\_groups} 和/或 \appopt{ccd.targeted\_ccd\_end\_points\_file} 指定目标（至少其一）；
+  \item （可选）\appopt{ccd.targeted\_ccd\_select\_optimization\_moves}：\cmd{auto}（默认，含 buffering）、\cmd{size\_only}、\cmd{equal\_or\_smaller\_sizing}、\cmd{footprint\_sizing}；
+  \item （可选）\appopt{ccd.targeted\_ccd\_wns\_optimization\_effort}：\cmd{high}（默认）/\cmd{medium}/\cmd{low}；
+  \item （可选）\appopt{ccd.targeted\_ccd\_threshold\_for\_nontargeted\_path\_groups}：非目标 path group 可被劣化的松弛阈值（默认正松弛可劣化至零）。
+\end{enumerate}
+可同时启用常规 CCD（\appopt{route\_opt.flow.enable\_ccd}）与 targeted CCD；此时先常规后 targeted。示例脚本（设计已布线并做过布线后优化）：
+\begin{lstlisting}
+open_lib design1
+open_block blk.post_route
+set_app_options -name route_opt.flow.enable_ccd -value false
+set_app_options \
+  -name route_opt.flow.enable_targeted_ccd_wns_optimization -value true
+set_app_options -name ccd.targeted_ccd_path_groups -value clkA
+set_app_options -name ccd.targeted_ccd_end_points_file -value clkA_ep.txt
+set_app_options \
+   -name ccd.targeted_ccd_select_optimization_moves -value size_only
+set_app_options -name ccd.targeted_ccd_wns_optimization_effort \
+   -value medium
+route_opt
+\end{lstlisting}
+
+\subsubsection{布线后启用缓冲移除}
+\subsubsection*{Enabling Buffer Removal at the Postroute Stage}
+
+\begin{lstlisting}
+fc_shell> set_app_options -name route_opt.flow.enable_ccd -value true
+fc_shell> set_app_options -name ccd.post_route_buffer_removal -value true
+fc_shell> route_opt
+\end{lstlisting}
+
+\subsubsection{报告 CCD 时序}
+\subsubsection*{Reporting Concurrent Clock and Data Timing}
+
+用 \cmd{report\_ccd\_timing}。默认报告 block 中五个最关键端点寄存器的最差 capture（D-slack）与 launch（Q-slack）的 setup/hold。\opt{-type}：\cmd{fanin}/\cmd{fanout}、\cmd{stage}、\cmd{chain}（见图~\ref{fig:cts-ccd-stages}）。默认报告 setup；\opt{-hold} 报告 hold。\opt{-scenarios} 限定 scenario；\opt{-pins} 限定端点。可用 \opt{-prepone}/\opt{-postpone} 与 \opt{-annotate\_cell\_delay}/\opt{-annotate\_net\_delay} 做 what-if 分析（仅报告，不保存）。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}
+\textit{（原书 Figure 46：Previous, Current, and Next Path Stages）}
+\vspace{1.0cm}}}
+\caption{前一、当前与下一路径阶段}
+\label{fig:cts-ccd-stages}
+\end{figure}
+
+\subsubsection{将 CCD Offset 缩放到新 Scenario}
+\subsubsection*{Scaling CCD Offsets to New Scenarios for Reporting Timing}
+
+用 \cmd{copy\_useful\_skew} 将 CCD offset 复制到新 scenario，以获得一致的时序/QoR 报告。当 pin 的 CTS balance point offset 仅在部分 active scenario 中推导时，用该命令复制到无 offset 的 inactive/active scenario，并确保在计算新 offset 的所有 pin 与 scenario 上设置相应 \cmd{set\_clock\_latency}。先对有 balance point offset 的 scenario 取平均，再按各 scenario corner 的缩放因子缩放。
+
+\subsubsection{对 Latch 与离散时钟门一并 Skew}
+\subsubsection*{Skewing Latch and Discrete Clock Gates}
+
+在 \cmd{compile\_fusion} 或 \cmd{place\_opt} 的 \cmd{final\_opto} 前将 \appopt{ccd.skew\_opt\_merge\_dcg\_cells\_by\_driver} 设为 \cmd{true}（默认 \cmd{false}），使 latch 与门控元件使用相同 offset，保持同级并改善离散时钟门的 hold。
+
+\subsection{分裂时钟单元}
+\subsubsection*{Splitting Clock Cells}
+
+\begin{lstlisting}
+fc_shell> split_clock_cells -cells [get_cells U1/ICG*]
+\end{lstlisting}
+不分裂的情形：无 DRC 违例；有 don't-touch/size-only/fixed-placement；须在电源域或 \cmd{set\_freeze\_ports} 标识的 block 边界 punch port。分裂后新单元命名为 \texttt{<原名>\_split\_<整数>}，并复制原单元全部设置与约束。也可用 \opt{-loads} 指定由同一驱动驱动的负载集合：
+\begin{lstlisting}
+fc_shell> set loads1 [get_pins I1/reg*/CK]
+fc_shell> set loads2 [get_pins I2/reg*/CK]
+fc_shell> split_clock_cells -loads [list $loads1 $loads2]
+\end{lstlisting}
+
+\subsection{平衡不同时钟树之间的 Skew}
+\subsubsection*{Balancing Skew Between Different Clock Trees}
+
+参与延迟平衡的时钟集合称为 clock balance group；可定义多个组，并为组内时钟定义延迟 offset；合称 interclock delay balancing 约束。
+\begin{noteBox}
+工具无法在 generated clock 与其他时钟之间平衡 skew。
+\end{noteBox}
+步骤：生成约束（手动或自动）→ 运行平衡。
+
+\subsubsection{定义 Interclock 延迟平衡约束}
+\subsubsection*{Defining the Interclock Delay Balancing Constraints}
+
+用 \cmd{create\_clock\_balance\_group}：至少 \opt{-name} 与 \opt{-objects}（可用 \cmd{get\_clocks -mode}）。默认目标为零 offset，以组内最长插入延迟平衡。用 \opt{-offset\_latencies} 指定相对 offset；\opt{-corner} 限定 corner。例如 clk3 比 clk1/clk2 少 100：
+\begin{lstlisting}
+fc_shell> create_clock_balance_group -name group3 \
+   -objects [get_clocks {clk1 clk2 clk3}] \
+   -offset_latencies {0 0 -100}
+\end{lstlisting}
+报告：\cmd{report\_clock\_balance\_groups}。移除：\cmd{remove\_clock\_balance\_groups}（指定组或 \opt{-all}）。
+
+\subsubsection{自动生成约束}
+\subsubsection*{Generating Interclock Delay Balancing Constraints Automatically}
+
+\begin{lstlisting}
+fc_shell> derive_clock_balance_constraints
+\end{lstlisting}
+将有 interclock 时序路径的时钟放入同一 balance group。可用 \opt{-slack\_less\_than} 仅考虑松弛小于阈值的路径，例如：
+\begin{lstlisting}
+fc_shell> derive_clock_balance_constraints -slack_less_than -0.2
+\end{lstlisting}
+
+\subsubsection{运行 Interclock 延迟平衡}
+\subsubsection*{Running Interclock Delay Balancing}
+
+\begin{lstlisting}
+fc_shell> balance_clock_groups
+\end{lstlisting}
+对 MCMM，对所有 active scenario 执行。
+
+\subsection{使用机器学习数据的基于全局布线优化}
+\subsubsection*{Performing Global-Route-Based Optimization Using Machine Learning Data}
+
+对布线前/布线后时序相关性差的设计，可在 CTS 后用详细布线后得到的 ML 数据做优化。术语：Labels（预测输出）、Features（影响输入）、Model（映射关系）、Training（学习过程）。
+
+\textbf{迭代 N（采集与训练）：}
+\begin{enumerate}
+  \item 完成 \cmd{clock\_opt} 的 \cmd{build\_clock} 与 \cmd{route\_clock}；
+  \item 设 \appopt{est\_delay.ml\_delay\_opto\_dir} 为输出目录；
+  \item 将 \appopt{est\_delay.ml\_delay\_gre\_mode} 设为 \cmd{feature}；
+  \item \cmd{clock\_opt -from final\_opto}；
+  \item 详细布线；
+  \item 详细布线后、布线后优化前：\cmd{estimate\_delay -training\_labels}；
+  \item \cmd{estimate\_delay -train\_model}；
+  \item 继续布线后优化与后续流程。
+\end{enumerate}
+
+\textbf{迭代 N+1（应用模型）：} 同样完成时钟综合与布线 → 指定 ML 目录 → 将 \appopt{est\_delay.ml\_delay\_gre\_mode} 设为 \cmd{enable} → \cmd{clock\_opt -from final\_opto} → 详细布线 → \cmd{estimate\_delay -disable\_model} → 继续流程。
+
+须保证各步骤/迭代中 active scenario 相同；设计、环境或流程变更时须重建模型。
+
+\subsection{布线时钟树}
+\subsubsection*{Routing Clock Trees}
+
+\begin{lstlisting}
+fc_shell> route_group -all_clock_nets -reuse_existing_global_route true
+\end{lstlisting}
+\opt{-reuse\_existing\_global\_route true} 使详细路由器使用既有时钟全局布线，相关性更好。或：
+\begin{lstlisting}
+fc_shell> clock_opt -from route_clock -to route_clock
+\end{lstlisting}
+
+\subsection{在 CTS、优化与时钟布线中插入 Via Ladder}
+\subsubsection*{Inserting Via Ladders During CTS, Optimization, and Clock Routing}
+
+Via ladder 是从引脚层堆叠到上层、供路由器连接的通孔叠层，可降低通孔电阻，改善性能与 EM 鲁棒性。流程：
+\begin{enumerate}
+  \item 定义 via ladder 规则；
+  \item 用 \cmd{set\_via\_ladder\_candidate} 指定库引脚可用的 via ladder；
+  \item 用 \cmd{set\_via\_ladder\_rules} 定义约束；
+  \item 将 \appopt{opt.common.enable\_via\_ladder\_insertion} 设为 \cmd{true}；
+  \item \cmd{clock\_opt -to build\_clock}；
+  \item \cmd{insert\_via\_ladders}；
+  \item \cmd{clock\_opt -from route\_clock}。
+\end{enumerate}
+
+\subsection{CTS 后将时钟标记为 Propagated}
+\subsubsection*{Marking Clocks as Propagated After Clock Tree Synthesis}
+
+运行 \cmd{synthesize\_clock\_trees} 或 \cmd{clock\_opt} 后，工具移除所有 active scenario 中已综合时钟的 ideal 设置，并将对应寄存器时钟引脚设为 propagated。若有 CTS 前未设为 active 的 scenario：
+\begin{lstlisting}
+fc_shell> set_scenario_status -active true [all_scenarios]
+fc_shell> synthesize_clock_trees -propagate_only
+\end{lstlisting}
+\opt{-propagate\_only} 仅移除 ideal 设置，不执行 CTS。
+
+\subsection{执行布线后时钟树优化}
+\subsubsection*{Performing Postroute Clock Tree Optimization}
+
+详细布线时钟/信号网后，因全局布线与详细布线差异以及耦合/串扰，时钟 QoR 可能下降。用 \cmd{synthesize\_clock\_trees -postroute}，并以 \opt{-routed\_clock\_stage} 指明布线阶段：
+\begin{lstlisting}
+fc_shell> synthesize_clock_trees -postroute \
+   -routed_clock_stage detail
+fc_shell> synthesize_clock_trees -postroute \
+   -routed_clock_stage detail_with_signal_routes
+\end{lstlisting}
+\begin{noteBox}
+启用 CCD（含用该技术的功耗/面积回收）时，布线后时钟树优化不优化 latency/skew，仅修复时钟网络上的逻辑 DRC。
+\end{noteBox}
+
+\subsection{执行电压优化}
+\subsubsection*{Performing Voltage Optimization}
+
+电压优化尝试在更低电压下获得更好的 PPA。需要：不同电压的 scaled library panes；以及带 scaled library 设置的 signoff 方法。高层流程：
+\begin{enumerate}
+  \item 原电压 \cmd{place\_opt}；
+  \item 原电压 \cmd{clock\_opt}；
+  \item \cmd{define\_scaling\_lib\_group} 关联相关 library panes；
+  \item \cmd{set\_vopt\_range} 指定 corner 电压范围；
+  \item \cmd{set\_vopt\_target} 指定 TNS/功耗目标与容差（可用 \opt{-excludeIO}）；
+  \item \cmd{voltage\_opt}；
+  \item 优化电压下 \cmd{route\_auto}；
+  \item 优化电压下 \cmd{route\_opt}。
+\end{enumerate}
+
+\subsection{将时钟树标记为已综合}
+\subsubsection*{Marking Clock Trees as Synthesized}
+
+用 \cmd{mark\_clock\_trees} 防止工具修改既有时钟树，见表~\ref{tab:mark-cts}。工具遍历时钟树直至遇到例外引脚或默认 sink。
+
+\begin{table}[htbp]
+\centering
+\caption{使用 \cmd{mark\_clock\_trees} 命令}
+\label{tab:mark-cts}
+\begin{tabularx}{\textwidth}{@{}l X@{}}
+\toprule
+\textbf{目的} & \textbf{选项} \\
+\midrule
+仅标记特定时钟（默认标记所有 active scenario 各 mode 中 \cmd{create\_clock}/\cmd{create\_generated\_clock} 定义的时钟） & \opt{-clocks} \\
+标记为已综合（默认） & \opt{-synthesized} \\
+清除 synthesized 属性 & \opt{-clear} \\
+施加 \cmd{dont\_touch} & \opt{-dont\_touch} \\
+清除 \cmd{dont\_touch} & \opt{-clear -dont\_touch} \\
+传播 \cmd{set\_clock\_routing\_rules} 的 NDR & \opt{-routing\_rules} \\
+传播 \cmd{set\_clock\_cell\_spacing} 间距规则 & \opt{-clock\_cell\_spacing} \\
+将 sink 标记为 fixed & \opt{-fix\_sinks} \\
+冻结时钟网布线 & \opt{-freeze\_routing} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{移除时钟树}
+\subsubsection*{Removing Clock Trees}
+
+\cmd{remove\_clock\_trees} 从根到 sink 遍历并移除缓冲器与反相器（保留带 \cmd{dont\_touch}/\cmd{size\_only} 的单元）。例外之外的单元仍视为时钟树一部分；clock-to-data 引脚之外视为数据通路不移除。同时重置 CTS 相关属性。
+\begin{noteBox}
+\cmd{remove\_clock\_trees} 不支持 clock mesh 网。
+\end{noteBox}
+默认移除所有 mode 的所有时钟树；用 \opt{-clocks} 限定（默认当前 mode；可用 \cmd{get\_clocks -mode}）。结构对移除的影响见表~\ref{tab:rm-cts}。默认同时移除被删时钟网的详细布线形状；可将网的 \cmd{shape\_use} 设为 \cmd{user\_route} 以保留。
+
+\begin{table}[htbp]
+\centering
+\caption{时钟树移除行为}
+\label{tab:rm-cts}
+\begin{tabularx}{\textwidth}{@{}l X@{}}
+\toprule
+\textbf{对象} & \textbf{对移除的影响} \\
+\midrule
+Boundary cell & 移除 \\
+Don't touch net 上的单元 & 保留 \\
+Don't touch / Fixed cell & 保留 \\
+Generated clock & 若定义在缓冲/反相器引脚上则保留；遍历与移除继续穿过 \\
+Guide buffer & 移除 \\
+ICG & 保留；遍历继续穿过 \\
+Block abstraction model & 保留；遍历继续穿过 \\
+Inverter & 仅成对移除；单独反相器不移除 \\
+Isolation / Level shifter & 保留 \\
+Three-state buffer & 保留；遍历在此停止 \\
+例外之外添加的缓冲/反相器 & 移除 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+% ============================================================
+\section{实现多源时钟树}
+\subsection*{Implementing Multisource Clock Trees}
+
+本节介绍多源时钟树结构类型及实现流程：
+\begin{itemize}
+  \item 多源时钟树结构简介
+  \item 实现常规多源时钟树
+  \item 使用集成 Tap Assignment 的常规多源时钟树
+  \item 仅含 H-Tree 全局结构的常规多源时钟树
+  \item 实现 MSCTS 多重 H-Tree
+  \item 实现功耗感知柔性 H-Tree
+  \item 实现结构型多源时钟树（SMSCTS）
+  \item 使用集成子树综合的 SMSCTS
+  \item 改善 SMSCTS 与 CCD 的相关性
+  \item 插入时钟驱动器；综合全局时钟树；创建时钟 strap；布线到 strap；分析 clock mesh
+  \item 自动 Tap 插入与 H-Tree 综合；指定 Tap Assignment 选项；构建本地子树
+\end{itemize}
+
+\subsection{多源时钟树结构简介}
+\subsubsection*{Introduction to Multisource Clock Trees Structures}
+
+多源时钟树对片上偏差更宽容，跨 corner 性能优于传统结构，由以下组成：
+\begin{itemize}
+  \item \textbf{全局时钟结构}：时钟根、通常为 H-tree 的全局时钟树、mesh drivers、clock mesh；
+  \item \textbf{本地子树}，驱动方式可为：
+        \begin{itemize}
+          \item 由连接到 mesh 的预定义 tap drivers 驱动（图~\ref{fig:mscts-reg}）——子树用常规 CTS（\cmd{synthesize\_clock\_trees}/\cmd{clock\_opt}）构建，称\textbf{常规多源时钟树}；
+          \item 直接从 mesh 多点驱动（图~\ref{fig:mscts-str}）——保留用户结构并通过合并/分裂优化，称\textbf{结构型多源时钟树}。
+        \end{itemize}
+\end{itemize}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}
+\textit{（原书 Figure 47：Regular Multisource Clock Tree）}
+\vspace{1.0cm}}}
+\caption{常规多源时钟树}
+\label{fig:mscts-reg}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}
+\textit{（原书 Figure 48：Structural Multisource Clock Tree）}
+\vspace{1.0cm}}}
+\caption{结构型多源时钟树}
+\label{fig:mscts-str}
+\end{figure}
+
+\subsection{实现常规多源时钟树}
+\subsubsection*{Implementing a Regular Multisource Clock Tree}
+
+\begin{enumerate}
+  \item 指定时钟树约束与设置；
+  \item 多电压设计：启用 \appopt{cts.multisource.enable\_full\_mv\_support}；启用 \appopt{opt.common.allow\_physical\_feedthrough}；运行 \cmd{check\_mv\_design} 并修复；
+  \item 启用 \appopt{cts.multisource.cell\_em\_aware}；
+  \item \cmd{create\_clock\_drivers} 插入 tap drivers；
+  \item \cmd{create\_clock\_straps} 创建 clock mesh；
+  \item \cmd{create\_clock\_drivers} 插入 mesh drivers；
+  \item \cmd{synthesize\_multisource\_global\_clock\_trees} 构建全局树；
+  \item \cmd{route\_clock\_straps} 连接 mesh 与 tap；
+  \item \cmd{analyze\_subcircuit} 分析 mesh；
+  \item 指定 tap assignment 选项；
+  \item \cmd{synthesize\_multisource\_clock\_taps}（合并等价时钟单元、将端点赋给最近 tap、沿路径分裂、复制 UPF/SDC/属性）；
+  \item \cmd{clock\_opt -from build\_clock -to route\_clock} 构建由 tap 驱动的本地子树，并修复 ignore 例外之外的 DRC；
+  \item 分析时钟树结果。
+\end{enumerate}
+
+\subsection{使用集成 Tap Assignment 的常规多源时钟树}
+\subsubsection*{Implementing a Regular Multisource Clock Tree Using Integrated Tap Assignment}
+
+若在 \cmd{place\_opt} 前插入 tap drivers，工具可在布局优化中分配 sink 以改善总体时序与时钟门控路径。流程与常规类似，但在 mesh 分析后：将 \appopt{place\_opt.flow.enable\_multisource\_clock\_trees} 设为 \cmd{true} 并运行 \cmd{place\_opt}，再 \cmd{clock\_opt -from build\_clock -to route\_clock}。
+
+\subsection{仅含 H-Tree 全局结构的常规多源时钟树}
+\subsubsection*{Implementing a Regular Multisource Clock Tree With an H-Tree-Only Global Clock Tree Structure}
+
+全局结构无 mesh，H-tree 直接驱动 tap（图~\ref{fig:mscts-htree-only}）。用 \cmd{set\_regular\_multisource\_clock\_tree\_options} 与 \cmd{synthesize\_regular\_multisource\_clock\_trees} 完成 tap 插入与 H-tree 综合，再做 tap assignment 与 \cmd{clock\_opt}。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}
+\textit{（原书 Figure 49：Regular Multisource Clock Tree With an H-Tree-Only Global Clock Structure）}
+\vspace{1.0cm}}}
+\caption{仅含 H-Tree 全局结构的常规多源时钟树}
+\label{fig:mscts-htree-only}
+\end{figure}
+
+\subsection{实现 MSCTS 多重 H-Tree}
+\subsubsection*{Implementing MSCTS Multiple H-Tree}
+
+用 \cmd{set\_regular\_multisource\_clock\_tree\_options} 的 \opt{-htree\_sections} 在 floorplan 不同区域构建多个全局树（图~\ref{fig:mscts-multi-h}），可用对称 tap 配置或坐标指定 tap 位置。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}
+\textit{（原书 Figure 50/51：MSCTS Multiple H-Tree）}
+\vspace{1.0cm}}}
+\caption{MSCTS 多重 H-Tree}
+\label{fig:mscts-multi-h}
+\end{figure}
+
+\subsection{实现功耗感知柔性 H-Tree}
+\subsubsection*{Implementing Power Aware Flexible H-Tree}
+
+在柔性 H-Tree 综合中加入功耗感知以优化总时钟功耗与总体 latency。须至少有一个动态功耗 scenario 在 H-tree 综合时为 active；多 scenario 时取最差 active scenario 做功耗代价。初始 tap 配置基于 floorplan、sink 分布、布局与布线约束等估计各子树 latency/功耗并比较。启用：\appopt{cts.multisource.power\_aware\_flexible\_htree\_synthesis}=\cmd{true}。
+
+\subsection{实现结构型多源时钟树}
+\subsubsection*{Implementing a Structural Multisource Clock Tree}
+
+子树由 mesh 或预定义驱动直接驱动；通过合并、分裂、改尺寸与搬移优化，同时保留用户定义的级数结构。主要步骤：MV/EM 设置 → \cmd{create\_clock\_straps} → 插入 mesh drivers → 综合全局树 → 用 \cmd{set\_annotated\_delay}/\cmd{set\_annotated\_transition} 建模 mesh 延迟（避免子树综合时看到过大延迟）→ \cmd{synthesize\_multisource\_clock\_subtrees} → \cmd{route\_clock\_straps} → \cmd{analyze\_subcircuit} → \cmd{clock\_opt -from build\_clock -to route\_clock}。
+
+\subsection{使用集成子树综合的 SMSCTS}
+\subsubsection*{Implementing a Structural Multisource Clock Tree Using Integrated Subtree Synthesis}
+
+用 \cmd{place\_opt} 综合优化本地子树可改善时序 QoR。额外注意：可启用 \appopt{cts.multisource.enable\_multi\_corner\_support}；用 \cmd{set\_multisource\_clock\_subtree\_options} 指定 \opt{-clock}、\opt{-driver\_objects} 及可选的 \opt{-dont\_merge\_cells}、\opt{-balance\_levels}/\opt{-target\_level}、\opt{-max\_total\_wire\_delay}、\opt{-enable\_icg\_reordering} 等；启用 \appopt{place\_opt.flow.enable\_multisource\_clock\_trees} 后运行 \cmd{place\_opt}；布线到 strap 并分析 mesh 后，启用 \appopt{clock\_opt.flow.enable\_multisource\_clock\_trees} 再跑 \cmd{clock\_opt} 以增量优化子树。
+
+\subsection{改善 SMSCTS 与 CCD 的相关性}
+\subsubsection*{Improving the Correlation Between the SMSCTS and CCD}
+
+将 \appopt{cts.multisource.enable\_subtree\_synthesis\_aware\_ccd} 设为 \cmd{true}，可在 \cmd{place\_opt} 与 \cmd{clock\_opt} 的 \cmd{build\_clock} 阶段改善 CCD balance point 实现与 SMSCTS 后时序，降低长短路径违例。
+
+\subsection{插入时钟驱动器}
+\subsubsection*{Inserting Clock Drivers}
+
+插入前：指定全部 CTS 设置（含布线规则）；可将 \appopt{cts.multisource.enable\_clock\_driver\_snapping} 设为 \cmd{true} 使驱动与 mesh strap 对齐。\cmd{create\_clock\_drivers} 可用于 mesh drivers（常规/结构型）与 tap drivers（常规）。要点：
+\begin{itemize}
+  \item \opt{-loads}：负载网或同网引脚/端口；
+  \item \opt{-location} 精确位置，或 \opt{-boxes} 网格（可配 \opt{-boundary}）；
+  \item \opt{-lib\_cells} 或 \opt{-template}；
+  \item mesh drivers 用 \opt{-short\_outputs} 将输出短接驱动 mesh；
+  \item \opt{-configuration} 可插入多层驱动形成 H-tree（图~\ref{fig:mscts-drivers}）。
+\end{itemize}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}
+\textit{（原书 Figure 52：Clock Drivers Placed in an H-Tree Structure）}
+\vspace{1.0cm}}}
+\caption{按 H-Tree 结构放置的时钟驱动器}
+\label{fig:mscts-drivers}
+\end{figure}
+
+插入后驱动标记为 fixed 与 don't touch；避免与 fixed 单元、blockage、宏重叠，但可与非 fixed 单元重叠。命令不做合法化，需 \cmd{legalize\_placement}（多次插入后统一合法化以节省时间）。布线 H-tree 时使用时钟网规则允许的最高层；为防驱动置于预布线下方导致引脚可达性问题，会为同层预布线创建临时 placement blockage，布线后删除。多行高单元放置困难时可将 \appopt{cts.multisource.enable\_pin\_accessibility\_for\_global\_clock\_trees} 设为 \cmd{false}。移除用 \cmd{remove\_clock\_drivers}。
+
+多级物理层次：用 \cmd{set\_editability} 启用下级编辑；设 \appopt{cts.multisource.enable\_mlph\_flow}=\cmd{true}；插入驱动；用 \cmd{synthesize\_multisource\_global\_clock\_trees -roots -leaves -use\_zroute\_for\_pin\_connections} 布线。下级优先复用既有时钟端口，否则在允许时创建新端口（\cmd{set\_freeze\_ports}）。
+
+\subsection{综合全局时钟树}
+\subsubsection*{Synthesizing the Global Clock Trees}
+
+\cmd{synthesize\_multisource\_global\_clock\_trees} 综合并详细布线 H-tree 风格全局树，尽量最小化端点 skew。须指定 \opt{-nets} 与 \opt{-lib\_cells}。默认用 Custom Router；引脚连接 DRC 难解时用 \opt{-use\_zroute\_for\_pin\_connections}；\opt{-skip\_pin\_connections} 可在靠近引脚的最高可用金属层停止。也可仅对已综合结构做详细布线（\opt{-roots}/\opt{-leaves}）。移除用 \cmd{remove\_multisource\_global\_clock\_trees}。
+
+\subsection{创建时钟 Strap}
+\subsubsection*{Creating Clock Straps}
+
+\cmd{create\_clock\_straps} 创建单层直线金属形状，可实现：
+\begin{itemize}
+  \item \textbf{Clock mesh}：水平与垂直层上的二维网格，交叉点用 via 连接（图~\ref{fig:cts-mesh}）；
+  \item \textbf{Clock spine}：一维或二维；二维由一维 spine 连接正交方向多条 stripe，不同 spine 的 stripe 不相连，最小间距称 backoff（图~\ref{fig:cts-spine}）。
+\end{itemize}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}
+\textit{（原书 Figure 53：Clock Mesh Structure）}
+\vspace{1.0cm}}}
+\caption{Clock Mesh 结构}
+\label{fig:cts-mesh}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}
+\textit{（原书 Figure 54：Clock Spine Structure）}
+\vspace{1.0cm}}}
+\caption{Clock Spine 结构}
+\label{fig:cts-spine}
+\end{figure}
+
+主要选项：\opt{-net}、\opt{-boundary}、\opt{-keepouts}（\opt{-allow\_splitting false} 可禁止跨越 keepout 时分裂）、\opt{-layers}、\opt{-width}、\opt{-grid}（单条距离或 start/end/step 迭代列表）、\opt{-margins}、\opt{-create\_ends}、\opt{-allow\_floating}、\opt{-type}（\cmd{user\_route}/\cmd{stripe}/\cmd{detect}）、spine 的 \opt{-length}/\opt{-backoff}/\opt{-spine\_direction}、屏蔽相关 \opt{-bias}/\opt{-bias\_to\_nets}/\opt{-bias\_margins}、\opt{-clear}。
+
+Mesh 示例：
+\begin{lstlisting}
+fc_shell> create_clock_straps -nets [get_nets clk1_mesh] \
+   -layers {M7 M8} -widths {2.4 2.4} -types {stripe stripe} \
+   -grids {{20 1200 100} {60 980 150}} -boundary {{0 0} {1200 980}}
+\end{lstlisting}
+
+\subsection{布线到时钟 Strap}
+\subsubsection*{Routing to Clock Straps}
+
+\cmd{route\_clock\_straps -nets} 将驱动与负载连到 \cmd{shape\_use}=\cmd{stripe} 的 strap（不连 \cmd{user\_route}）。\opt{-topology}：
+\begin{itemize}
+  \item \cmd{fishbone}（默认）：各驱动单独连最近 stripe；多负载用 comb 连到 finger 再连 stripe（图~\ref{fig:fishbone}）。可设 \opt{-fishbone\_fanout}/\opt{-fishbone\_span}/\opt{-fishbone\_sub\_span}/\opt{-fishbone\_layers}（图~\ref{fig:fish-fanout}、\ref{fig:fish-span}）。
+  \item \cmd{comb}：每引脚直接连最近 stripe；曼哈顿距离超过 comb distance（默认两全局布线格，可用 \appopt{route.common.comb\_distance}）时用 Steiner 连最近 net shape（图~\ref{fig:comb-topo}）。适合大量引脚直接位于 stripe 下，但堆叠 via 可能引起物理 DRC（图~\ref{fig:comb-via}）。
+  \item \cmd{sub\_strap}：在中间层创建平行于 stripe 的附加 strap，减少堆叠 via（图~\ref{fig:substrap}）。须 \opt{-sub\_strap\_layers}；可选 \opt{-sub\_strap\_max\_delay}（默认 2~ps）。
+\end{itemize}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{0.8cm}\textit{（原书 Figure 55：Fishbone Topology）}\vspace{0.8cm}}}
+\caption{Fishbone 拓扑}
+\label{fig:fishbone}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{0.8cm}\textit{（原书 Figure 56：Fanout of a Finger）}\vspace{0.8cm}}}
+\caption{Fishbone finger 的扇出}
+\label{fig:fish-fanout}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{0.8cm}\textit{（原书 Figure 57：Span and Subspan）}\vspace{0.8cm}}}
+\caption{Fishbone 的 span 与 subspan}
+\label{fig:fish-span}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{0.8cm}\textit{（原书 Figure 58：Comb Topology）}\vspace{0.8cm}}}
+\caption{Comb 拓扑}
+\label{fig:comb-topo}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{0.8cm}\textit{（原书 Figure 59：Vias in the Comb Topology）}\vspace{0.8cm}}}
+\caption{Comb 拓扑中的 Via}
+\label{fig:comb-via}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{0.8cm}\textit{（原书 Figure 60：Vias in the Substrap Topology）}\vspace{0.8cm}}}
+\caption{Substrap 拓扑中的 Via}
+\label{fig:substrap}
+\end{figure}
+
+\subsection{分析 Clock Mesh}
+\subsubsection*{Analyzing the Clock Mesh}
+
+Mesh 需要比传统结构更高的时序精度。用 \cmd{analyze\_subcircuit} 做晶体管级仿真并回标时序。前提：mesh 已详细布线；有门级电路模型与晶体管模型；可访问 NanoSim/FineSim/HSPICE。须指定 \opt{-net}（或 \opt{-to}）与 \opt{-name}；多时钟时用 \opt{-clock}。可选在端口/起点标注转换（时钟须为 propagated）。步骤：RC 提取 → 生成 SPICE → 仿真 → 生成含 \cmd{set\_disable\_timing}/\cmd{set\_annotated\_delay}/\cmd{set\_annotated\_transition} 的注释文件（多驱动 mesh 禁用除 anchor driver 外的驱动）→ 应用注释。各步可用独立选项单独运行。
+
+\subsection{自动 Tap 插入与 H-Tree 综合}
+\subsubsection*{Performing Automated Tap Insertion and H-Tree Synthesis}
+
+\begin{enumerate}
+  \item 用 \cmd{set\_regular\_multisource\_clock\_tree\_options} 指定 \opt{-clock}、\opt{-topology htree\_only}、\opt{-tap\_boxes}、\opt{-tap\_lib\_cells}、\opt{-htree\_lib\_cells} 等（库单元须已 \cmd{set\_lib\_cell\_purpose -include cts}）。可报告/移除对应 options。
+  \item （可选）启用柔性 H-tree：\appopt{cts.multisource.flexible\_htree\_synthesis}=\cmd{true}；对称 tap：\appopt{cts.multisource.tap\_selection}=\cmd{symmetric}。
+  \item \cmd{synthesize\_regular\_multisource\_clock\_trees}（阶段 \cmd{tap\_synthesis} 与 \cmd{htree\_synthesis}；可用 \opt{-from}/\opt{-to}）。
+\end{enumerate}
+
+\subsection{指定 Tap Assignment 选项与设置}
+\subsubsection*{Specifying Tap Assignment Options and Settings}
+
+运行 \cmd{synthesize\_multisource\_clock\_taps} 前：
+\begin{enumerate}
+  \item 移除不必要的 dont\_touch/size\_only/fixed/locked，以免阻碍合并/分裂；
+  \item 用 \cmd{set\_multisource\_clock\_tap\_options} 指定 \opt{-clock}、\opt{-driver\_objects}、\opt{-num\_taps}（须等于驱动数）等；
+  \item （可选）用 \cmd{create\_multisource\_clock\_sink\_group} 保持 skew group 对象在同一 tap 下；
+  \item （可选）设置合并/分裂命名相关的 \appopt{cts.multisource.subtree\_*} 前缀/后缀。
+\end{enumerate}
+
+\subsection{构建本地时钟子树结构}
+\subsubsection*{Building the Local Clock Subtree Structures}
+
+结构型多源树中，用 \cmd{synthesize\_multisource\_clock\_subtrees} 综合由 mesh 直接驱动的本地子树。前置：建好全局结构；用真实 annotated delay/transition 建模 mesh；清除不必要的保护属性；用 \cmd{set\_multisource\_clock\_subtree\_options} 配置。可选：多角优化、忽略驱动上 max\_cap/max\_fanout（\appopt{cts.multisource.ignore\_drc\_on\_subtree\_driver}）、fishbone 子树布线（\appopt{cts.multisource.subtree\_routing\_mode}）等。
+
+命令步骤：合并等价单元 → 分裂/改尺寸/搬移并 snap 第一级到 strap → 布线（默认可全局布线；启用 fishbone 则混合详细 fishbone 与全局 comb，见图~\ref{fig:fish-detail}）→ 基于布线细化。可用 \opt{-from}/\opt{-to} 运行 \cmd{merge}/\cmd{optimize}/\cmd{route\_clock}/\cmd{refine}。由此构建的结构型子树在后续 CTS 命令中不会被更改或移除。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}
+\textit{（原书 Figure 61：Detail Fishbone Routes and Global Comb Routes）}
+\vspace{1.0cm}}}
+\caption{详细 Fishbone 布线与全局 Comb 布线}
+\label{fig:fish-detail}
+\end{figure}
+
+% ============================================================
+\section{分析时钟树结果}
+\subsection*{Analyzing the Clock Tree Results}
+
+综合后分析是否满足要求，通常包括：生成时钟树 QoR 报告；分析时钟时序；在 GUI 中验证时钟实例布局。
+
+\subsection{生成时钟树 QoR 报告}
+\subsubsection*{Generating Clock Tree QoR Reports}
+
+用 \cmd{report\_clock\_qor}，可生成：
+\begin{itemize}
+  \item \textbf{Summary}（默认）：latency、skew、DRC、面积、缓冲计数；
+  \item \textbf{Latency}（\opt{-type latency}）：每时钟最长/最短路径；
+  \item \textbf{DRC violators}（\opt{-type drc\_violators}）；
+  \item \textbf{Robustness}（\opt{-type robustness}，须 \opt{-robustness\_corner}）：当前 corner 与指定 robustness corner 的 latency 比；
+  \item \textbf{Balance groups}（\opt{-type balance\_groups}）：含指定与实际 latency offset；
+  \item \textbf{Local skew}（\opt{-type local\_skew}）：每时钟/skew group 汇总及最大/最小局部 skew；
+  \item \textbf{Power}（\opt{-type power}）：按时钟/scenario 的漏电、内部、sink、网络翻转、动态与总功耗。
+\end{itemize}
+可用 \opt{-csv}/\opt{-output} 输出 CSV。直方图类型：\opt{-histogram\_type} 为 \cmd{latency}/\cmd{transition}/\cmd{capacitance}/\cmd{local\_skew}/\cmd{robustness}/\cmd{wire\_delay\_fraction}。可用 \opt{-from}/\opt{-to}/\opt{-through}、\opt{-clock}、\opt{-skew\_group}、\opt{-mode}、\opt{-corner}、\opt{-scenario} 限定范围（\opt{-scenario} 与 \opt{-mode}/\opt{-corner} 互斥）。
+
+\subsection{报告时钟树功耗}
+\subsubsection*{Reporting Clock Tree Power}
+
+用 \cmd{report\_clock\_power}。可用 \opt{-clocks}/\opt{-modes}/\opt{-corners}/\opt{-scenario} 限定；\opt{-type per\_segment} 或 \opt{-type per\_subtree}：
+\begin{itemize}
+  \item \textbf{Segment}：从一个 ICG 输出到其扇出中下一 ICG 或 sink 的缓冲树；
+  \item \textbf{Subtree}：从 ICG 一直到其扇出全部 sink 的时钟树（图~\ref{fig:seg-sub}）。
+\end{itemize}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}
+\textit{（原书 Figure 62：Segments and Subtrees of a Clock Tree）}
+\vspace{1.0cm}}}
+\caption{时钟树的 Segment 与 Subtree}
+\label{fig:seg-sub}
+\end{figure}
+
+\subsection{创建时钟网络引脚集合}
+\subsubsection*{Creating Collections of Clock Network Pins}
+
+\cmd{get\_clock\_tree\_pins} 默认返回所有 scenario 全部时钟网上的引脚。可用 \opt{-clocks}、\opt{-scenarios}/\opt{-modes}/\opt{-corners}、\opt{-from}/\opt{-through}/\opt{-to}、\opt{-filter} 限定。例如：
+\begin{lstlisting}
+fc_shell> set clk1_icg_pin \
+   [get_clock_tree_pins -filter is_on_ICG -clocks clk1]
+\end{lstlisting}
+
+\subsection{分析时钟时序}
+\subsubsection*{Analyzing Clock Timing}
+
+用 \cmd{report\_clock\_timing}，须指定 \opt{-type}：
+\begin{itemize}
+  \item \cmd{skew}：单时钟局部 skew；
+  \item \cmd{interclock\_skew}：时钟间 skew；
+  \item \cmd{latency}：延迟；
+  \item \cmd{transition}：转换时间。
+\end{itemize}
+
+\subsection{在 GUI 中分析时钟树}
+\subsubsection*{Analyzing Clock Trees in the GUI}
+
+Fusion Compiler GUI 提供 Clock Tree Visual Mode，可将时钟树信息叠加到版图视图，或在原理图视图中查看结构。详见 \textit{Fusion Compiler Graphical User Interface User Guide} 中的 Using Map and Visual Modes。

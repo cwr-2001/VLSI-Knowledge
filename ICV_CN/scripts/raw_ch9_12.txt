@@ -1,0 +1,2433 @@
+                                                                                        Feedback
+
+
+
+
+9
+Dynamic-Link Library Support
+
+     This chapter explains using the dynamic-link feature of the IC Validator tool.
+
+     Use the dynamic-link feature specifically for device extraction. This feature allows you to
+     pass measurement data to C libraries that are external to the IC Validator tool, and then
+     return the results from the C libraries back to the IC Validator tool. The C libraries must be
+     shared (dynamic) libraries.
+     Dynamic-link library support is described in the following sections:
+      • Dynamic-Link Functions
+      • Using the Dynamic-Link Functions
+
+
+Dynamic-Link Functions
+     The following IC Validator functions support the dynamic-link library feature:
+      • dev_dlink_library_close() function
+      • dev_dlink_library_open() function
+      • dev_dlink() utility function
+      • dev_dlink_library() utility function
+      • dlink_libraries argument of all device configuration functions, such as the
+        capacitor() function.
+
+
+
+
+IC Validator User Guide                                                                         244
+X-2025.06
+                                                                                       Feedback
+Chapter 9: Dynamic-Link Library Support
+Using the Dynamic-Link Functions
+
+
+
+Using the Dynamic-Link Functions
+     To use dynamic linking:
+      1. In your IC Validator runset,
+          a. Open the C library using the dev_dlink_library_open() function.
+          b. Specify the library handles in the IC Validator runset using the dlink_libraries
+             argument in the device configuration functions.
+          c. Close the library using the dev_dlink_library_close() function.
+         For example,
+         dlink_handle = dev_dlink_library_open("library_name");
+
+         nmos(
+            property_function=my_mos_func,
+            dlink_libraries = {dlink_handle}
+         );
+
+         dev_dlink_library_close(dlink_handle);
+
+      2. Define the calculations for the device measurement data using the utility functions. The
+         dynamic-link remote function is typically organized like this:
+         my_mos_func : function(void) returning void {
+            //(1) Get measurement data for the device using the
+            //    device utility functions
+            //(2) Encode the measurement data into a 1-dimensional array
+            //(3) Retrieve dynamic-link library file handle using the
+            //    dev_dlink_library() utility function
+            //(4) Call user-defined dynamic-link function using the dev_dlink()
+            //    utility function, and pass essential information to the
+            //    external shared libraries
+                  IC Validator data
+         }
+
+      3. The user-defined wrapper function, written in the C language, has this typical flow:
+         customer_wrapper_function() {
+            //(1) Decode the measurement data into customers' format
+            //(2) Decide function pointer according to string parameter
+            //(3) Call internal function
+            //(4) Return computed results
+         }
+
+
+
+
+IC Validator User Guide                                                                         245
+X-2025.06
+                                                                                         Feedback
+
+
+
+
+10
+Unified Fill
+
+     Using the functions and PXL, the programming language of the IC Validator tool, you can
+     create both simple and complex procedures to meet your fill requirements. This chapter
+     describes the basics of how to use the unified_fill() function, an application-oriented,
+     fill insertion function. This chapter also shows several usage models for runsets using the
+     unified fill feature.
+
+     Note:
+         The Unified Fill function is described in the IC Validator Reference Manual.
+     A fill pattern defined in the unified_fill() function can have either a single fill layer or
+     multiple fill layers. That is, the function can output more than one polygon layer. Each fill-
+     layer definition can have a single rectangle or any number of nonrectangular polygons.
+     Additionally, every pattern can be viewed as a structure that is repeated inside the target
+     region as defined by the spacing constraints.
+     The unified fill feature is described in the following sections:
+      • Overview
+      • Types of Fill Patterns
+      • Fill-to-Fill Spacing
+      • Target Region and Fill-to-Signal Spacing
+      • Range and Width Dependent Spacing
+      • Polygon Grouping
+      • Signal Aligned Fills
+      • Improving Pattern Insertion
+      • Pitch Aligned Fills
+      • Criteria Analysis
+      • Output Layers
+      • Layer Compression
+
+
+IC Validator User Guide                                                                          246
+X-2025.06
+                                                                                                   Feedback
+Chapter 10: Unified Fill
+Overview
+
+
+
+Overview
+      The unified_fill() function provides a high level of automation and flexibility in
+      developing a fill procedure. The fill requirement might be as simple as generating an array
+      of rectangular patterns inside a layer, or as complex as filling a design with a variety of
+      patterns to meet a certain density target.
+      The unified_fill() function supports many options that you can configure in different
+      ways for the desired fill requirement. Some of the high level features of this function are
+       • Ability to define different types of patterns
+       • Ability to define fill insertion sequences that use fill cells read from an external
+         database
+       • Equation-based criteria analysis
+       • Layer coloring
+       • Signal-aligned fills
+       • Automated target layer creation
+      Table 63 defines the terms used for the unified fill feature.
+Table 63           Unified Fill Terminology
+
+      Term                                Definition
+
+      Design layer and                    Existing layer in the design
+      Signal layer
+
+      Fill cell                           Fill pattern definition that is imported to an IC Validator
+                                          runset from an external layout database
+
+      Fill layer                          Polygon layer output generated by the unified_fill()
+                                          function
+
+      Target region and                   Region where fill can be added
+      Fillable region
+
+      Keepout region and                  Region where fill must not be added
+      Exclusion region
+
+      Fill pattern and                    Fill configuration composed of one or more fill layers. A
+      Fill structure                      pattern can be defined as either
+                                           • A single fill layer
+                                           • Multiple fill layers
+
+
+
+
+IC Validator User Guide                                                                                  247
+X-2025.06
+                                                                                                   Feedback
+Chapter 10: Unified Fill
+Types of Fill Patterns
+
+
+Table 63        Unified Fill Terminology (Continued)
+
+      Term                              Definition
+
+      Fill-to-signal spacing            Spacing from the fill pattern, or from the fill layer, to the
+                                        design layer
+
+      Fill-to-fill spacing              Spacing between fill patterns or between fill layers
+
+
+      Figure 56 summarizes the features that are available for each type of fill pattern.
+
+Figure 56       Fill Pattern Overview
+
+
+
+
+Types of Fill Patterns
+      The unified_fill() function supports the following types of fill pattern definitions:
+       • Polygon Fill Patterns
+       • Adjustable Rectangle Fill Patterns
+       • Stack Fill Patterns
+       • Cell Fill Patterns
+
+
+
+
+IC Validator User Guide                                                                                  248
+X-2025.06
+                                                                                              Feedback
+Chapter 10: Unified Fill
+Types of Fill Patterns
+
+
+       • Expandable Fill Cell Patterns
+       • Stripe Fill Patterns
+
+
+      Polygon Fill Patterns
+      A polygon fill pattern is a coordinate based definition of a fill pattern. For this type of fill
+      pattern, set the type option to UF_POLYGON.
+      The fill pattern can have any number of fill layers. For a multilayer pattern definition, each
+      fill layer has its own layer definition. As shown in Example 2, a fill layer is identified with
+      the name specified in the output_layer_key option of the layers option.
+
+Example 2      Single Layer Pattern Definition With Single Rectangle
+      DATA_M1_fill : list of list of coordinate_s = {
+            { {0.0, 0.0}, {1.0, 0.0}, {1.0, 1.0}, {0.0, 1.0} }
+      };
+      SHAPE_M1_fill : polygon_layer_s = {
+            layer_spec = {output_layer_key = "M1_fill"}
+            polygons = DATA_M1_fill,
+      };
+
+      fill_patterns = {{
+            type = UF_POLYGON,
+            polygon_fill = {
+               layers = {SHAPE_M1_fill}
+            }
+      }}
+
+      Single Layer Pattern Definition With Multiple Rectangles
+      The pattern definition shown in Example 3 and Figure 57 has one fill layer, M1_fill,
+      that is defined by two rectangles. The dashed line indicates the bounding box of the
+      layer definition. This pattern is repeated inside the target region defined by the spacing
+      constraints. The bounding box of the pattern is the same as that of the layer definition
+      because the pattern consists of only one layer.
+
+Example 3      One Fill-Layer Example Using a Fill Pattern of Type UF_POLYGON
+      DATA_M1_fill : list of list of coordinate_s = {
+            { {0.0, 0.0}, {1.0, 0.0}, {1.0, 2.0}, {0.0, 2.0} },
+            { {2.0, 0.0}, {3.0, 0.0}, {3.0, 2.0}, {2.0, 2.0} }
+      };
+
+      SHAPE_M1_fill : polygon_layer_s = {
+            layer_spec = {output_layer_key = "M1_fill"}
+            polygons = DATA_M1_fill,
+      };
+
+      fill_patterns = {{
+
+
+IC Validator User Guide                                                                                  249
+X-2025.06
+                                                                                       Feedback
+Chapter 10: Unified Fill
+Types of Fill Patterns
+
+
+              type = UF_POLYGON,
+              polygon_fill = {
+                 layers = {SHAPE_M1_fill}
+              }
+      }}
+
+Figure 57      One Fill-Layer Example
+
+
+
+
+      Multilayer Pattern Definition
+      The pattern definition shown in Example 4 and Figure 58 has two fill layers, M1_fill and
+      M2_fill. The dashed line indicates the bounding box of the pattern definition. This pattern
+      is repeated inside the target region as defined by the spacing constraints. In this example,
+      bounding box of the pattern is not same as that of the individual layer definitions. When
+      repeating the pattern, the bounding box of the pattern as a whole is considered.
+
+Example 4      Two Fill-Layer Example Using a Fill Pattern of Type UF_POLYGON
+      DATA_M1_fill : list of list of coordinate_s = {
+            { {1.0, 0.0}, {2.0, 0.0}, {2.0, 3.0}, {1.0, 3.0} }
+      };
+
+      SHAPE_M1_fill : polygon_layer_s = {
+            layer_spec = {output_layer_key = "M1_fill"}
+            polygons = DATA_ M1_fill,
+      };
+
+      DATA_M2_fill : list of list of coordinate_s = {
+            { {0.0, 1.0}, {3.0, 1.0}, {3.0, 2.0}, {0.0, 2.0} }
+      };
+
+      SHAPE_M2_fill : polygon_layer_s = {
+            layer_spec = {output_layer_key = "M2_fill"}
+            polygons = DATA_ M2_fill,
+      };
+
+      fill_patterns = {{
+            type = UF_POLYGON,
+            polygon_fill = {
+               layers = {SHAPE_M1_fill,
+                         SHAPE_M2_fill}
+            }
+      }}
+
+
+
+
+IC Validator User Guide                                                                        250
+X-2025.06
+                                                                                          Feedback
+Chapter 10: Unified Fill
+Types of Fill Patterns
+
+
+Figure 58      Two Fill-Layer Example
+
+
+
+
+      Multiple Fill Pattern Definition
+      You can specify multiple pattern definitions in the unified_fill() function. The input
+      target region is processed for each fill pattern definition in the order specified. Figure 60
+      and Figure 59 show a fill procedure that first inserts the multilayer pattern, M1 and M2,
+      followed by the single layer pattern, M1, in the remaining target region.
+
+Example 5      Multiple Patterns Example Using fill_patterns Option of unified_fill() Function
+      DATA_M1_fill : list of list of coordinate_s = {
+            { {1.0, 0.0}, {2.0, 0.0}, {2.0, 3.0}, {1.0, 3.0} }
+      };
+
+      SHAPE_M1_fill : polygon_layer_s = {
+            layer_spec = {output_layer_key = "M1_fill"}
+            polygons = DATA_ M1_fill,
+      };
+
+      DATA_M2_fill : list of list of coordinate_s = {
+            { {0.0, 1.0}, {3.0, 1.0}, {3.0, 2.0}, {0.0, 2.0} }
+      };
+
+      SHAPE_M2_fill : polygon_layer_s = {
+            layer_spec = {output_layer_key = "M2_fill"}
+            polygons = DATA_ M2_fill,
+      };
+
+      fill_patterns = {
+              {type = UF_POLYGON,
+                polygon_fill = {
+                   layers = {SHAPE_M1_fill,
+                             SHAPE_M2_fill}
+                }
+              },
+              {type = UF_POLYGON,
+                polygon_fill = {
+                   layers = {SHAPE_M1_fill}
+                }
+              }
+      }
+
+
+
+
+IC Validator User Guide                                                                           251
+X-2025.06
+                                                                                        Feedback
+Chapter 10: Unified Fill
+Types of Fill Patterns
+
+
+Figure 59      Multiple Patterns Example
+
+
+
+
+      Adjustable Rectangle Fill Patterns
+      An adjustable rectangle fill pattern is a single-layer rectangle pattern definition that can
+      automatically stretch or shrink the dimensions of the rectangle to maximize the density of
+      the fill. For this type of fill pattern, set the type option to UF_ADJUSTABLE.
+      You can start with a specific rectangle dimension and choose to either grow or shrink all
+      the shapes along the boundary of the target region. Growing and shrinking is done in user-
+      specified increment values. Adjustment of the fill shapes is done only to the shapes along
+      the boundary of the target region.
+      Example 6 defines a minimum rectangle of dimension 1 μm x 1 μm. Rectangles along the
+      boundary of the target region are grown in the x-direction, in increments of 0.05 μm, to
+      fit the maximum possible shape. As shown in Figure 60, the maximum possible shape is
+      4 μm x 1 μm.
+
+Example 6 Adjustable Rectangle Fill Pattern Example Using a Fill Pattern of Type
+UF_ADJUSTABLE
+      fill_patterns = {{
+            type = UF_ADJUSTABLE,
+            adjustable_fill = {
+               layer_spec = {output_layer_key = "M1_Fill"}
+               width = 1.0,
+               height = 1.0,
+               width_bound = 4.0,
+               width_delta = 0.05,
+            }
+      }}
+
+
+
+
+IC Validator User Guide                                                                         252
+X-2025.06
+                                                                                                Feedback
+Chapter 10: Unified Fill
+Types of Fill Patterns
+
+
+Figure 60      Adjustable Rectangle Fill Pattern Example
+
+
+
+
+      Stack Fill Patterns
+      A stack fill pattern is similar to the UF_POLYGON pattern type but with more automation in
+      developing a fill procedure. For this type of fill pattern, set the type option to UF_STACK.
+      You can use the UF_STACK type for applications that require multiple variations of a
+      multilayer pattern to be inserted in sequence without having to explicitly define all the
+      different variations. Using the options of the unified_fill() function, you provide a
+      single pattern definition, consisting of multiple fill layers. Based on the fillable region, the
+      tool tries to insert different variations of the fill pattern, starting with the original definition
+      that contains all of the layers, and then proceeding to other variations of the pattern that
+      contain a subset of the layers.
+      The goal is to find a variation of the pattern with the highest number of layers that can fit in
+      a given fillable area. Use the required_layer_keys option of the stack_fill option to
+      define dependencies between the fill layers, for example, via1 requires metal1 and metal2.
+      Example 7 shows an example.
+
+Example 7      Stack Fill Pattern Example Using stack_fill Option of unified_fill() Function
+      SHAPE_M1_fill : stack_layer_s = {
+            layer_spec = {output_layer_key = "M1_fill"}
+            polygons = DATA_M1_fill,
+      };
+      SHAPE_M2_fill : stack_layer_s = {
+            layer_spec = {output_layer_key = "M2_fill"}
+            polygons = DATA_M2_fill,
+      };
+      SHAPE_M3_fill : stack_layer_s = {
+            layer_spec = {output_layer_key = "M3_fill"}
+            polygons = DATA_M3_fill,
+      };
+      SHAPE_V1_fill : stack_layer_s = {
+
+
+
+IC Validator User Guide                                                                                  253
+X-2025.06
+                                                                                      Feedback
+Chapter 10: Unified Fill
+Types of Fill Patterns
+
+
+               layer_spec = {output_layer_key = "V1_fill"},
+               polygons = DATA_V1_fill,
+               required_layer_keys = {"M1_fill", "M2_fill"}
+      };
+      SHAPE_V2_fill : stack_layer_s = {
+            layer_spec = {output_layer_key = "V2_fill"},
+            polygons = DATA_V2_fill,
+            required_layer_keys = {"M2_fill", "M3_fill"}
+      };
+
+      fill_patterns = {{
+            type = UF_STACK,
+            stack_fill = {
+               layers = {SHAPE_M1_fill,
+                         SHAPE_V1_fill,
+                         SHAPE_M2_fill,
+                         SHAPE_V2_fill,
+                         SHAPE_M3_fill},
+               min_stack = 1,
+               max_stack = 5
+            }
+      }}
+
+      SHAPE_M1_fill, SHAPE_V1_fill, SHAPE_M2_fill, SHAPE_V2_fill, and SHAPE_M3_fill are
+      individual layer definitions of a single multilayer pattern. The unified_fill() function
+      processes the fillable region with the following patterns in the order shown:
+          M1-V1-M2-V2-M3
+          M1-V1-M2
+          M2-V2-M3
+          M1
+          M2
+          M3
+      The previous UF_STACK example is equivalent to writing multiple pattern definitions of the
+      UF_POLYGON type, as shown in Figure 63.
+
+Example 8      Writing Multiple Pattern Definitions Using the UF_POLYGON Type
+      fill_patterns = {
+           {type = UF_POLYGON,
+            polygon_fill = {      // First pattern for insertion
+               layers = {SHAPE_M1_fill,
+                         SHAPE_V1_fill,
+                         SHAPE_M2_fill,
+                         SHAPE_V2_fill,
+                         SHAPE_M3_fill}
+            }
+
+
+IC Validator User Guide                                                                       254
+X-2025.06
+                                                                                         Feedback
+Chapter 10: Unified Fill
+Types of Fill Patterns
+
+
+             },
+             {type = UF_POLYGON,
+               polygon_fill = {      // Second pattern for insertion
+                  layers = {SHAPE_M1_fill,
+                            SHAPE_V1_fill,
+                            SHAPE_M2_fill}
+               }
+             },
+             {type = UF_POLYGON,
+               polygon_fill = {     // Third pattern for insertion
+                  layers = {SHAPE_M2_fill,
+                            SHAPE_V2_fill,
+                            SHAPE_M3_fill}
+               }
+             },
+             {type = UF_POLYGON,
+               polygon_fill = {     // Fourth pattern for insertion
+                  layers = {SHAPE_M1_fill}
+               }
+             },
+             {type = UF_POLYGON,
+               polygon_fill =       // Fifth pattern for insertion
+                 {layers = {SHAPE_M2_fill}
+               }
+             },
+             {type = UF_POLYGON,
+               polygon_fill =       // Sixth pattern for insertion
+                 {layers = {SHAPE_M3_fill}
+               }
+             }
+      }
+
+      The order of the individual layer definitions determines the order of pattern variations that
+      are placed. If the layers are defined as shown in Example 9.
+
+Example 9      Order of Individual Layer Definitions Example
+      fill_patterns = {{
+               type = UF_STACK,
+               stack_fill = {
+                  layers = {SHAPE_M3_fill,
+                            SHAPE_V2_fill,
+                            SHAPE_M2_fill,
+                            SHAPE_V1_fill,
+                            SHAPE_M1_fill},
+                  min_stack = 1,
+                  max_stack = 5
+               }
+      }}
+
+
+
+
+IC Validator User Guide                                                                          255
+X-2025.06
+                                                                                         Feedback
+Chapter 10: Unified Fill
+Types of Fill Patterns
+
+
+      The order of pattern insertion sequence is changed to:
+          M1-V1-M2-V2-M3
+          M2-V2-M3
+          M1-V1-M2
+          M3
+          M2
+          M1
+      The number of variations of a pattern that can be constructed by the tool depends on the
+      values of the min_stack and max_stack options.
+       • The min_stack value specifies the minimum number of fill layers required in any
+         variation.
+       • The max_stack value specifies the maximum number of fill layers allowed in a
+         variation.
+      Figure 61 shows an example of all pattern variations for a fill application in which the
+      pattern definition consists of 5 metals and 4 vias as the fill layers. In this example,
+      max_stack = 9, min_stack = 5
+
+Figure 61      Example of All Pattern Variations for a Fill Application
+
+
+
+
+      Depending on the layer definitions in the pattern, the bounding box of the pattern might
+      be larger than the individual bounding box of each layer definition. In such cases, the
+      bounding box of the smaller variations of the pattern might be different from that of the
+      complete pattern definition, which consists of all the layers.
+
+
+
+
+IC Validator User Guide                                                                           256
+X-2025.06
+                                                                                       Feedback
+Chapter 10: Unified Fill
+Types of Fill Patterns
+
+
+      By default, the unified_fill() function retains the bounding box of the complete pattern
+      for all of its variations. All automatic variations of the pattern by default align with the
+      bounding box of the complete pattern, as shown in Figure 61.
+      Example 10 and Figure 63 show an example where the full pattern is a structure with
+      two fill layers, M1_fill and M2_fill, which are shown in Figure 62. There are two variations
+      of this pattern, a pattern with only M1_fill and a pattern with only M2_fill. However, all
+      patterns have the same bounding box as that of the full pattern. As a result, it might
+      appear that the individual rectangles on M1_fill are spaced farther apart than the specified
+      spacing value. This is because the spacing is based on the bounding box.
+
+Figure 62      Two Fill Layers Example
+
+
+
+
+Example 10 Pattern Structure With Two Fill Layers Using stack_fill Option of unified_fill()
+Function
+      fill_patterns = {{
+            type = UF_STACK,
+            stack_fill = {
+               pattern_spec = {space_x = 0.1,
+                               space_y = 0.1},
+               layers = {SHAPE_M1_fill,
+                         SHAPE_M2_fill},
+               min_stack = 1,
+               max_stack = 2
+            }
+      }}
+
+
+
+
+IC Validator User Guide                                                                        257
+X-2025.06
+                                                                                         Feedback
+Chapter 10: Unified Fill
+Types of Fill Patterns
+
+
+Figure 63      Pattern Structure With Two Fill Layers
+
+
+
+
+      By default, the unified_fill() function retains the bounding box of the complete pattern
+      for all of its variations.
+      You can change this alignment behavior by setting the separate_patterns option to
+      true. In that case, every pattern variation has its own bounding box based on the extents
+      of the subset of layers in it. When inserting a pattern variation, the bounding box of that
+      specific pattern variation is used instead of the bounding box of the complete pattern.
+      In Figure 64, the two variations of the full pattern have their own bounding box. As
+      a result, they appear to be placed closer when compared to the behavior when the
+      separate_patterns option is false.
+
+Figure 64      Pattern Structure With Two Fill Layers With separate_patterns Option True
+
+
+
+
+IC Validator User Guide                                                                             258
+X-2025.06
+                                                                                              Feedback
+Chapter 10: Unified Fill
+Types of Fill Patterns
+
+
+      When the separate_patterns option is false,
+       • The fill_context, iterations, and shift_factor options are ignored.
+       • The min_stack and max_stack values are ignored. In other words, the tool works with
+         all possible variations of the pattern.
+
+
+      Cell Fill Patterns
+      A cell fill pattern lets you import patterns from an external database instead of manually
+      defining them in the runset. For this type of fill pattern, set the type option to UF_CELL.
+      The UF_CELL type provides an additional interface to import a cell, from an external GDSII
+      or OASIS library, into the runset and map the layers in that cell to the fill layers. All other
+      functionality is the same as with the UF_POLYGON and UF_STACK types. The imported
+      pattern definition can be used either as is, as with the UF_POLYGON type, or chosen to be
+      broken down to smaller patterns, as with the UF_STACK type.
+      A fill cell or a library of fill cells can be maintained along with the fill runset. These fill cells
+      contain the fill layers that the runset can import and insert in the target region based on the
+      specified constraints. See the import_gds_cell() and import_oasis_cell() functions
+      in the IC Validator Reference Manual for information about importing a cell into the runset.
+      In Example 11, the M1_fill, V1_fill, M2_fill, V2_fill and M3_fill layer definitions are imported
+      from the FillCell cell in the Fill_Cell.gds file. For example, Layer (1;0) in Fill_Cell.gds
+      is designated for the M1_fill layer. See Stack Fill Patterns for examples of additional
+      functionality that are conceptually equivalent.
+
+Example 11 Cell Fill Pattern Example
+      Fill_Cell_lib = gds_library("./Fill_Cell.gds");
+      Fill_Cell = import_gds_cell(Fill_Cell_lib, "FillCell");
+
+      STACK_metal_fill : cell_fill_s =
+      {
+         cell = Fill_Cell
+         layers = {         // Map Individual layers of the cell to Fill layers
+             {ldt_list = {{1, 0}},layer_spec = {output_layer_key = "M1_fill"}},
+             {ldt_list = {{2, 0}},layer_spec = {
+                                     output_layer_key = "V1_fill"},
+                                     required_layer_keys = {"M1", "M2"}},
+             {ldt_list = {{3, 0}},layer_spec = {output_layer_key = "M2_fill"}},
+             {ldt_list = {{4, 0}},layer_spec = {
+                                     output_layer_key = "V2_fill"},
+                                     required_layer_keys = {"M2", "M3"}},
+             {ldt_list = {{5, 0}},layer_spec = {output_layer_key = "M3_fill"}}
+         },
+         min_stack = 1,
+         max_stack = 5,
+         rotation = NONE,
+
+
+IC Validator User Guide                                                                                259
+X-2025.06
+                                                                                             Feedback
+Chapter 10: Unified Fill
+Types of Fill Patterns
+
+
+           reflection = false
+      };
+
+      Note:
+           Depending on your requirements, the UF_STACK type provides more automation
+           in developing a fill procedure over the UF_POLYGON type. Similarly, the UF_CELL
+           type provides more automation over the UF_STACK and UF_POLYGON types.
+      Figure 65 shows an example usage model for the UF_CELL type.
+
+Figure 65      Usage Model for the UF_CELL Type
+
+
+
+
+      Expandable Fill Cell Patterns
+      An expandable fill-cell pattern lets you insert fill cells that get expanded along the
+      boundaries of a fill target area. For this type of fill pattern, set the type option to either
+      UF_EXPANDABLE or UF_EXPANDABLE_CELL.
+
+      The UF_EXPANDABLE_CELL type provides an additional interface to import a cell, from an
+      external GDSII or OASIS library, into the runset and map the layers in that cell to the fill
+      layers. All other functionality is the same as with the UF_EXPANDABLE type.
+      To use an expandable fill-cell type pattern, first define a base fill cell with incremental
+      unit cells. For example, as shown in Figure 66, a simple base cell is made up of three
+      incremental units. In this example, only the middle unit is repeatable.
+
+
+
+
+IC Validator User Guide                                                                                260
+X-2025.06
+                                                                                        Feedback
+Chapter 10: Unified Fill
+Types of Fill Patterns
+
+
+Figure 66      Repeatable Cell Example
+
+
+
+
+      Figure 67 shows the expansion of a fill cell. The top half of the figure shows the base cell
+      being inserted before the expansion. The bottom half of the figure shows the base cells
+      that were expanded by repeating the middle unit.
+
+Figure 67      Expansion of a Fill Cell
+
+
+
+
+      Example 12 shows how to program the UF_EXPANDABLE type.
+       1. Define the layers used in each incremental unit.
+       2. Declare the actual three incremental unit cells that make up the base cell.
+       3. Call the unified_fill() function and retrieve the output layers.
+
+Example 12 UF_EXPANDABLE Type Example
+// Define the layers used in each incremental unit
+EXPAND_CELL_LEFT_LAYER_1 : polygon_layer_s = {
+   layer_spec = {output_layer_key = "OUTPUT_EXPAND_CELL_LEFT_LAYER_1"},
+   polygons = {{ {0.045, 0.193}, {0.261, 0.103}, {0.261, 0.287}, {0.058, 0.247
+} }}
+};
+EXPAND_CELL_LEFT_LAYER_2 : polygon_layer_s = {
+   layer_spec = {output_layer_key = "OUTPUT_EXPAND_CELL_LEFT_LAYER_2"},
+
+
+
+IC Validator User Guide                                                                         261
+X-2025.06
+                                                                      Feedback
+Chapter 10: Unified Fill
+Types of Fill Patterns
+
+
+   polygons = {{ {0.045, 0.128}, {0.191, 0.128}, {0.191, 0.432}, {0.155, 0.232
+} }}
+};
+EXPAND_CELL_MIDDLE_LAYER_1 : polygon_layer_s = {
+   layer_spec = {output_layer_key = "OUTPUT_EXPAND_CELL_MIDDLE_LAYER_1"},
+   polygons = {{ {0.045, 0.193}, {0.261, 0.103}, {0.261, 0.287}, {0.058, 0.247
+} }}
+};
+EXPAND_CELL_MIDDLE_LAYER_2 : polygon_layer_s = {
+   layer_spec ={ output_layer_key = "OUTPUT_EXPAND_CELL_MIDDLE_LAYER_2"},
+   polygons = {{ {0.045, 0.128}, {0.191, 0.128}, {0.191, 0.432}, {0.155, 0.232
+} }}
+};
+EXPAND_CELL_RIGHT_LAYER_1 : polygon_layer_s = {
+   layer_spec = {output_layer_key = "OUTPUT_EXPAND_CELL_RIGHT_LAYER_1"},
+   polygons = {{ {0.045, 0.193}, {0.261, 0.103}, {0.261, 0.287}, {0.058, 0.247
+} }}
+};
+EXPAND_CELL_RIGHT_LAYER_2 : polygon_layer_s = {
+   layer_spec = {output_layer_key = "OUTPUT_EXPAND_CELL_RIGHT_LAYER_2"},
+   polygons = {{ {0.045, 0.128}, {0.191, 0.128}, {0.191, 0.432}, {0.155, 0.232
+} }}
+};
+// Declare the actual three incremental unit cells that make up the base cell
+cell_A_left : base_cell_s = {
+   layers = {EXPAND_CELL_LEFT_LAYER_1, EXPAND_CELL_LEFT_LAYER_2 },
+   repeatable = false
+};
+cell_B_middle : base_cell_s = {
+   layers = { EXPAND_CELL_MIDDLE_LAYER_1, EXPAND_CELL_MIDDLE_LAYER_2 },
+   repeatable = true,
+   maximum = 10
+};
+cell_C_right : base_cell_s = {
+   layers = { EXPAND_CELL_RIGHT_LAYER_1, EXPAND_CELL_RIGHT_LAYER_2 },
+   repeatable = false
+};
+// Call unified_fill()
+expand_fill_cell_output = unified_fill(
+   fill_patterns = {
+      {type = UF_EXPANDABLE,
+        expandable_polygon_fill = {
+           pattern_spec = {
+              space_x = 0.12,
+              space_y = 0.06,
+              stagger_x = 0.2 },
+           base_cell = {cell_A_left, cell_B_middle, cell_C_right} }
+      }
+   },
+   fill_boundary = { type = LAYER, layer = REGION_CELL2_CORE }
+);
+// Retrieve the output layers
+expand_fill_cell_layer_1 =
+      expand_fill_cell_output ["OUTPUT_EXPAND_CELL_LEFT_LAYER_1"][0]
+   or expand_fill_cell_output ["OUTPUT_EXPAND_CELL_MIDDLE_LAYER_1"][0]
+   or expand_fill_cell_output ["OUTPUT_EXPAND_CELL_RIGHT_LAYER_1"][0]
+
+
+IC Validator User Guide                                                     262
+X-2025.06
+                                                                                              Feedback
+Chapter 10: Unified Fill
+Types of Fill Patterns
+
+
+
+expand_fill_cell_layer_2 =
+      expand_fill_cell_output ["OUTPUT_EXPAND_CELL_LEFT_LAYER_2"][0]
+   or expand_fill_cell_output ["OUTPUT_EXPAND_CELL_MIDDLE_LAYER_2"][0]
+   or expand_fill_cell_output ["OUTPUT_EXPAND_CELL_RIGHT_LAYER_2"][0]
+
+
+      Stripe Fill Patterns
+      A stripe fill pattern lets you insert a stripe-shape fill across target areas. For this type of fill
+      pattern, set the type option to UF_STRIPE. You specify the direction, width, and spacing of
+      the stripes, as shown in Example 13 .
+
+Figure 68      Stripe Fill Patterns
+
+
+
+
+      When symmetry is specified for stripe fill, the unified_fill() function
+       1. Gets the bounding box
+       2. Finds the center of the bounding box
+       3. Places the first stripe with its center line on the center of the bounding box
+       4. Places subsequent stripes at equal distances from the center stripe
+       5. Saves only full width stripes
+
+
+IC Validator User Guide                                                                                263
+X-2025.06
+                                                                                           Feedback
+Chapter 10: Unified Fill
+Fill-to-Fill Spacing
+
+
+      Figure 69 shows the result of symmetry for stripes.
+
+Figure 69      Symmetry of Stripes
+
+
+
+
+      Example 13 shows a unified_fill() call using the UF_STRIPE type.
+
+Example 13 UF_STRIPE Type Example
+      result = unified_fill(
+         fill_patterns = {
+            {type = UF_STRIPE,
+              stripe_fill = {
+                 layer_spec = {
+                    output_layer_key = "DM1_FILL",
+                 },
+                 direction = HORIZONTAL,
+                 width = 0.1,
+                 spacing = 0.2,
+              }
+            }
+         },
+
+           fill_boundary = {
+              type = LAYER,
+              layer = M1
+           },
+           extents_output = {
+              {output_layer_key = "OUTPUT_DM_EXTENTS"}
+           }
+      );
+
+
+
+Fill-to-Fill Spacing
+      As described earlier in this chapter, you can configure the Unified Fill function to insert
+      different types of patterns into specified given target regions. By providing a list of pattern
+      definitions, you instruct the tool to fill the target region by repeating each pattern definition
+      in sequential steps.
+
+
+
+
+IC Validator User Guide                                                                            264
+X-2025.06
+                                                                                          Feedback
+Chapter 10: Unified Fill
+Fill-to-Fill Spacing
+
+
+      The fill-to-fill spacing feature lets you define:
+       • Spacing Between Instances of the Same Patterns
+       • Spacing Between Different Patterns
+
+
+      Spacing Between Instances of the Same Patterns
+      Spacing between instances of the same pattern is controlled by the space_x, space_y,
+      stagger_x and stagger_y options in the pattern_spec option.
+
+      Note:
+          These values can be negative in certain conditions to support overlap of pattern
+          placements.
+      Additionally, for the spacing between fill polygons and patterns that are placed inside
+      different target regions, you can set the spacing between patterns by using the
+      pattern_spacing option inside the pattern_spec option, or you can set the spacing
+      between individual fill layers by using the fill_to_fill_spacing option inside the
+      layer_spec option. The options are:
+
+       • allowed_spacing_x
+       • allowed_spacing_y
+       • min_space_corner
+       • extension
+      See the Unified Fill function for descriptions of these options. Use these options to
+      trigger more complex layer-specific spacing checks during fill treatment. The space_x,
+      space_y, stagger_x, and stagger_y options apply to the bounding box of the entire
+      pattern definition in accordance with the separate_patterns option.
+      By design, the unified_fill() function makes sure that no two patterns get closer
+      than the space_x and space_y values. In Example 14, space_x and space_y values are
+      specified for the multilayer pattern definition. If patterns falling in adjacent polygons of
+      the target region come too close, one of them is not inserted to meet the fill-to-fill spacing
+      constraint, as shown in Figure 70.
+
+Example 14 Spacing Between Same Patterns Using the space_x and space_y Options
+      SHAPE_M1_fill : polygon_layer_s = {
+         layer_spec = {output_layer_key = "M1_fill"}
+         polygons = DATA_ M1_fill,
+      };
+      SHAPE_M2_fill : polygon_layer_s = {
+         layer_spec = {output_layer_key = "M2_fill"}
+         polygons = DATA_ M2_fill,
+
+
+
+IC Validator User Guide                                                                           265
+X-2025.06
+                                                                                   Feedback
+Chapter 10: Unified Fill
+Fill-to-Fill Spacing
+
+
+      };
+
+      fill_patterns = {{
+         type = UF_POLYGON,
+         polygon_fill = {
+            pattern_spec = {space_x = 0.1,
+                            space_y = 0.1},
+            layers = {SHAPE_M1_fill,
+                      SHAPE_M2_fill}
+         }
+      }}
+
+Figure 70      Spacing Between Same Patterns Example
+
+
+
+
+      In Example 15, the allowed_spacing_x and allowed_spacing_y values are specified
+      in the pattern_spacing option for the multilayer pattern definition. This ensures the
+      necessary spacing between pattern instances from different target areas. As shown
+      in Figure 71, both pattern instances are placed because the spacing in the x- and y-
+      directions respects the allowed_spacing_x and allowed_spacing_y values.
+
+Example 15 Spacing Between Multilayer Patterns With Allowed Spacing Values Smaller Than
+Space Values
+      fill_patterns = {{
+         type = UF_POLYGON,
+         polygon_fill = {
+            pattern_spec = {space_x = 0.1, space_y = 0.1,
+                            pattern_spacing = {
+                               allowed_spacing_x = {>= 0.02},
+                               allowed_spacing_y = {>= 0.02}
+                            }
+            },
+            layers = {SHAPE_M1_fill,
+                      SHAPE_M2_fill}
+         }
+      }}
+
+
+
+IC Validator User Guide                                                                       266
+X-2025.06
+                                                                                     Feedback
+Chapter 10: Unified Fill
+Fill-to-Fill Spacing
+
+
+Figure 71   Spacing Between Multilayer Patterns With Allowed Spacing Values Smaller Than
+Space Values Example
+
+
+
+
+      In Example 16, the allowed_spacing_x and allowed_spacing_y values are specified
+      in the fill_to_fill_spacing option for the M1_fill fill layer. Even though the space
+      between the bounding boxes violates the space_x and space_y values, the tool does not
+      remove patterns if the individual layers inside the pattern satisfy the allowed_spacing_x
+      and allowed_spacing_y values, as shown in Figure 72.
+
+Example 16 Using the Allowed Spacing Values in the fill_to_fill_spacing Option
+      SHAPE_M1_fill : polygon_layer_s = {
+         layer_spec = {
+            output_layer_key = "M1_fill",
+            fill_to_fill_spacing = {
+               allowed_spacing_x = {>= 0.02},
+               allowed_spacing_y = {>= 0.02}
+            }
+         }
+         polygons = DATA_ M1_fill,
+      };
+      fill_patterns = {{
+         type = UF_POLYGON,
+         polygon_fill = {
+            pattern_spec = {space_x = 0.1, space_y = 0.1},
+            layers = {SHAPE_M1_fill,
+                      SHAPE_M2_fill}
+      }}
+
+
+
+
+IC Validator User Guide                                                                      267
+X-2025.06
+                                                                                        Feedback
+Chapter 10: Unified Fill
+Fill-to-Fill Spacing
+
+
+Figure 72      Using the Allowed Spacing Values in the fill_to_fill_spacing Option Example
+
+
+
+
+      Spacing Between Different Patterns
+      When processing a list of fill patterns, you can specify spacing values between different
+      patterns using the other_pattern_spacing option. This option is a hash of integer to
+      double constraint where the integer represents the order of the pattern within the list of
+      patterns. The integer 0 represents the first pattern. For example, to set the spacing to the
+      third pattern to be 0.5 or greater, write
+      other_pattern_spacing = {2 => >= 0.5}
+
+      Note:
+          The spacing is always applied to the bounding box of every pattern.
+      Figure 73 shows an application that uses 3 patterns, A, B, and C. The spacing between
+      the patterns is expected to be as follows:
+      Pattern A:
+       • Space to Pattern B = 2
+       • Space to Pattern C = 1
+      Pattern B:
+       • Space to Pattern A = 2
+       • Space to Pattern C = 3
+      Pattern C:
+       • Space to Pattern A = 1
+       • Space to Pattern B = 3
+
+
+IC Validator User Guide                                                                         268
+X-2025.06
+                                                                                  Feedback
+Chapter 10: Unified Fill
+Fill-to-Fill Spacing
+
+
+Figure 73      Spacing Between Different Patterns Example
+
+
+
+
+      Use the appropriate indexes in the other_pattern_spacing option, shown in
+      Example 17, to set spacing from the current pattern to other patterns.
+
+Example 17 Using the other_pattern_spacing Option
+      fill_patterns = {
+      // First Pattern A
+         {type = UF_POLYGON,
+          polygon_fill = {
+             pattern_spec = {
+                space_x = 0.1, space_y = 0.1,
+                other_pattern_spacing = {1 => >= 2, 2 => >= 1}
+             },
+             layers = {SHAPE_A}
+          }
+         },
+
+      // Second Pattern B
+         {type = UF_POLYGON,
+          polygon_fill = {
+             pattern_spec = {
+                space_x = 0.1, space_y = 0.1,
+                other_pattern_spacing = { 0 => >= 2, 2 => >= 3}
+             },
+             layers = {SHAPE_B}
+          }
+         },
+
+      // Third Pattern C
+         {type = UF_POLYGON,
+           polygon_fill = {
+              pattern_spec = {
+                 space_x = 0.1, space_y = 0.1,
+                 other_pattern_spacing = {0 => >= 1, 1 => >= 3}
+              },
+              layers = {SHAPE_C}
+           }
+         }
+      }
+
+
+
+IC Validator User Guide                                                                 269
+X-2025.06
+                                                                                        Feedback
+Chapter 10: Unified Fill
+Fill-to-Fill Spacing
+
+
+
+      Rules and Restrictions for Spacing Options
+      The following rules and restrictions apply for the spacing options:
+       • The allowed_spacing_x and allowed_spacing_y values can be set in both the
+         layer_spec and pattern_spacing options at the same time.
+
+       • The allowed_spacing_x and allowed_spacing_y values in the layer_spec option
+         do not support multiple space ranges. That is, the list can only have one value. Only
+         the > and >= constraints are supported.
+       • The allowed_spacing_x and allowed_spacing_y values in the pattern_spacing
+         option support multiple space ranges. The < and <= constraints are not supported.
+       • The allowed_spacing_x, allowed_spacing_y and min_space_corner options do not
+         support negative values.
+       • When the allowed_spacing_x and allowed_spacing_y values are not specified,
+         valid fill-to-fill spacing is any distance greater than or equal to (>=) the space_x and
+         space_y values. The tool makes sure that patterns or fill layers in adjacent fill-region
+         polygons have the minimum spacing of the space_x and space_y values.
+       • When the allowed_spacing_x and allowed_spacing_y values are specified, the
+         tool makes sure that patterns or fill layers in adjacent target layer polygons have the
+         minimum spacing of the allowed_spacing_x and allowed_spacing_y values.
+       • When the fill_context option is PARTITION_CONTEXT, patterns or fill layers in
+         adjacent partitions use the allowed_spacing_x and allowed_spacing_y values, if
+         specified.
+       • The other_pattern_spacing option does not apply to variations of a pattern when
+         the type option is UF_STACK or UF_CELL. In this case, the minimum space between
+         different variations of a given pattern is based on the space_x and space_y values.
+       • By default, the unified_fill() function performs corner checking between patterns
+         in different polygons of the fill region that do not share any common projection.
+       • When the type option is UF_STACK, the unified_fill() function does not apply either
+         the pattern_spacing or fill_to_fill_spacing option between patterns of different
+         permutations.
+       • The space_x and space_y values can be less than or equal to 0 (<= 0) if
+         the type option is UF_POLYGON, UF_STACK or UF_CELL, UF_EXPANDABLE, or
+         UF_EXPANDABLE_CELL. In addition for UF_STACK and UF_CELL, the separate_patterns
+         option must be false, and the grouping option must be NONE.
+       • Corner checking, using the min_space_corner and extension options, is disabled if
+         either the space_x or space_y option is negative. By default, a corner spacing check
+         between fill patterns in different fill regions is based on max(space_x, space_y).
+
+
+IC Validator User Guide                                                                            270
+X-2025.06
+                                                                                        Feedback
+Chapter 10: Unified Fill
+Target Region and Fill-to-Signal Spacing
+
+
+
+Target Region and Fill-to-Signal Spacing
+      The unified_fill() function does not require you to explicitly derive the target
+      region in the runset. The target region is automatically constructed by the tool using
+      the various fill-to-signal spacing constraints. Specify these spacing values using the
+      fill_to_signal_spacing option either in the definition of an individual fill layer or in the
+      definition of the fill pattern.
+      In Example 18, the M1_Fill fill layer is kept away from the aM1 design layer by 0.1 μm.
+      Similarly, the
+      • Minimum space from the M1_fill fill layer to the aM1_fill design layer is 0.5 μm
+      • Minimum space from the M2_fill fill layer to the aM2 design layer is 0.1 μm
+      • Minimum space from the M2_fill fill layer to the aM2_fill design layer is 0.5 μm
+      • Minimum space from the (M1_fill, M2_fill) multilayer pattern to BLKG_1 is 0.3 μm
+      • Minimum space from the (M1_fill, M2_fill) multilayer pattern to BLKG_2 is 0.2 μm
+
+Example 18 fill_to_signal_spacing Option Example
+      DATA_M1_fill : list of list of coordinate_s = {
+         { {1.0, 0.0}, {2.0, 0.0}, {2.0, 3.0}, {1.0, 3.0} }
+      };
+      SHAPE_M1_fill : polygon_layer_s = {
+         layer_spec = {
+            output_layer_key = "M1_fill",
+            fill_to_signal_spacing = {
+               {aM1,      min_space = 0.1},
+               {aM1_FILL, min_space = 0.5}
+            }
+         }
+         polygons = DATA_ M1_fill,
+      };
+
+      DATA_M2_fill : list of list of coordinate_s = {
+            { {0.0, 1.0}, {3.0, 1.0}, {3.0, 2.0}, {0.0, 2.0} }
+      };
+      SHAPE_M2_fill : polygon_layer_s = {
+         layer_spec = {
+            output_layer_key = "M2_fill",
+            fill_to_signal_spacing = {
+               {aM2,      min_space = 0.1},
+               {aM2_FILL, min_space = 0.5}
+            }
+         }
+         polygons = DATA_M2_fill,
+      };
+
+
+
+
+IC Validator User Guide                                                                         271
+X-2025.06
+                                                                                       Feedback
+Chapter 10: Unified Fill
+Target Region and Fill-to-Signal Spacing
+
+
+      fill_patterns = {{
+         type = UF_POLYGON,
+         polygon_fill = {
+            layers = {SHAPE_M1_fill,
+                      SHAPE_M2_fill},
+            fill_to_signal_spacing = {
+               {aBLKG_1, min_space = 0.3},
+               {aBLKG_2, min_space = 0.2}
+            }
+         }
+      }}
+
+      For fill patterns of UF_POLYGON type, the multilayer pattern is not broken down to smaller
+      variations of the pattern. As shown in Figure 74, the pattern is repeated in the target
+      region by keeping a minimum distance from the design layers as specified in the
+      fill_to_signal_spacing option.
+
+      By default, the unified_fill() function measures spacing from the edge of the design
+      layer to the bounding box of the pattern. The keepout region for the pattern is constructed
+      using all constraints of the fill_to_signal_spacing option defined for this pattern, as
+      well as for every individual layer definition in that pattern.
+      There are two methods of measuring spacing between fill and signal layers. The
+      spacing_context option controls which method of measurement is used for a given fill
+      pattern:
+      • When set to UF_PATTERN, spacing is measured from the signal to the bounding box of a
+        fill pattern.
+      • When set to UF_LAYER, spacing is measured from the signal to individual polygons of a
+        layer inside the pattern.
+      Note:
+         When the space_x and space_y values are negative, the spacing_context
+         option setting of UF_PATTERN is not supported.
+
+
+
+
+IC Validator User Guide                                                                        272
+X-2025.06
+                                                                                    Feedback
+Chapter 10: Unified Fill
+Target Region and Fill-to-Signal Spacing
+
+
+Figure 74      spacing_context = UF_PATTERN Example
+
+
+
+
+      As shown in Figure 75, when the spacing_context option is UF_LAYER, the
+      unified_fill() function measures fill-to-signal spacing from the edge of the design layer
+      to the bounding box of an individual layer definition.
+
+Figure 75      spacing_context = UF_LAYER Example
+
+
+
+
+      Example 19 and Figure 76 illustrate the behavior of the spacing_context option.
+
+Example 19 fill_to_signal_spacing in Fill Layer Definition
+      SHAPE_M1_fill : polygon_layer_s = {
+         layer_spec = {
+            output_layer_key = "M1_fill",
+            fill_to_signal_spacing = {
+               {aM1, min_space = 5.0}
+            }
+         }
+
+
+IC Validator User Guide                                                                    273
+X-2025.06
+                                                                                           Feedback
+Chapter 10: Unified Fill
+Target Region and Fill-to-Signal Spacing
+
+
+         polygons = DATA_ M1_fill,
+      };
+      SHAPE_M2_fill : polygon_layer_s = {
+         layer_spec = {
+            output_layer_key = "M2_fill",
+            fill_to_signal_spacing = {
+               {aM2, min_space = 0.1}
+            }
+         }
+         polygons = DATA_M2_fill,
+      };
+
+      fill_patterns = {{
+         type = UF_POLYGON,
+         polygon_fill = {
+            layers = {SHAPE_M1_fill,
+                      SHAPE_M2_fill}
+         }
+      }}
+
+Figure 76      spacing_context Behavior
+
+
+
+
+      For the UF_POLYGON, UF_STACK, UF_CELL, UF_EXPANDABLE, and UF_EXPANDABLE_CELL
+      pattern types, it is possible to specify the fill_to_signal_spacing option at both the
+      layer_spec level and the pattern level. When the fill_to_signal_spacing option is
+      specified at both levels, the most restrictive value is used. In Example 20, the M1_fill fill
+      layer is kept away from the aM1 design layer by a minimum distance of 0.5 μm.
+
+Example 20 fill_to_signal_spacing Defined Both in the layer_spec Option and in the Pattern
+      SHAPE_M1_fill : polygon_layer_s = {
+         layer_spec = {
+            output_layer_key = "M1_fill",
+
+
+
+IC Validator User Guide                                                                               274
+X-2025.06
+                                                                                        Feedback
+Chapter 10: Unified Fill
+Target Region and Fill-to-Signal Spacing
+
+
+              fill_to_signal_spacing = {
+                 {aM1, min_space = 0.5}
+              }
+           }
+           polygons = DATA_ M1_fill,
+      };
+
+      fill_patterns = {{
+         type = UF_POLYGON,
+         polygon_fill = {
+            layers = {SHAPE_M1_fill,},
+            fill_to_signal_spacing = {
+               {aM1, min_space = 0.1}
+            }
+      }
+      }}
+
+      In Example 21, as shown in Figure 77, multiple design layers are used with
+      fill_to_signal_spacing values at different places in the fill layer definitions and the fill
+      pattern definition.
+
+Example 21 fill_to_signal_spacing With spacing_context and Multiple Design Layers
+      SHAPE_M1_fill : polygon_layer_s = {
+         layer_spec = {
+            output_layer_key = "M1_fill",
+            fill_to_signal_spacing = {
+               {aM1, min_space = 1.0}
+            }
+         }
+         polygons = DATA_ M1_fill,
+      };
+      SHAPE_M2_fill : polygon_layer_s = {
+         layer_spec = {
+            output_layer_key = "M2_fill",
+            fill_to_signal_spacing = {
+               {aM2, min_space = 2.0}
+            }
+         }
+         polygons = DATA_M2_fill,
+      };
+
+      fill_patterns = {{
+         type = UF_POLYGON,
+         polygon_fill = {
+            layers = {SHAPE_M1_fill,
+                      SHAPE_M2_fill},
+            fill_to_signal_spacing = {
+               {aBLKG, min_space = 5.0}
+            }
+      }
+      }}
+
+
+
+IC Validator User Guide                                                                         275
+X-2025.06
+                                                                                       Feedback
+Chapter 10: Unified Fill
+Range and Width Dependent Spacing
+
+
+Figure 77       spacing_context Behavior With Multiple Design Layers
+
+
+
+
+Range and Width Dependent Spacing
+     Apart from a fixed minimum space value in the fill_to_signal_spacing option, fill-to-
+     signal spacing ranges from a fill layer to a design layer can also be specified. You can
+     specify a list of lower bound and upper bound constraints to indicate the allowed spacing
+     of the fill layers from the design layer. Fill patterns are placed only within these space
+     constraints. Additionally, a list of spacing constraints can be specified based on the width
+     of the design layer polygons.
+     In Example 22 spacing of the M1_fill fill layer to the aM1 design layer is
+      • Minimum space from M1_fill to aM1:
+            ◦ aM1 width > 0.1
+            ◦ space = 0.1
+      • Allowed space from M1_fill to aM1:
+            ◦ aM1 > 0.3
+            ◦ 0.2 < space < 0.5 or space >= 1.0
+              That is, M1_fill is not allowed to be placed next to aM1 with
+              space <= 0.2 or 0.5 <= space < 1.0
+
+
+IC Validator User Guide                                                                        276
+X-2025.06
+                                                                                          Feedback
+Chapter 10: Unified Fill
+Polygon Grouping
+
+
+Example 22 Range and Width Dependent Spacing Example
+           layer_spec = {
+              output_layer_key = "M1_fill",
+              fill_to_signal_spacing = {
+                 {aM1, {
+                     {width > 0.1, {>= 0.1}},
+                     {width > 0.3, {(0.2, 0.5), >= 1.0}}
+                 }},
+              }
+           }
+           polygons = DATA_M1_fill,
+      };
+
+      fill_patterns = {{
+         type = UF_POLYGON,
+         polygon_fill = {
+            layers = {SHAPE_M1_fill}
+         }
+      }}
+
+
+
+Polygon Grouping
+      For UF_STACK and UF_CELL fill types, the unified_fill() function can break the pattern
+      definition into smaller permutations. If a pattern definition has two fill layers, for example,
+      M1_fill and M2_fill, there can be three permutations:
+       • Complete pattern
+       • Pattern with only M1_fill
+       • Pattern with only M2_fill
+      When an individual layer definition of a fill layer has multiple polygons, you can configure
+      the unified_fill() function to break the layer definition further, so that either all or none
+      of the fill-layer polygons are retained when pattern placements cause spacing violations.
+      When multiple polygons constitute a layer definition in a pattern, the unified_fill()
+      function retains, by default, all polygons that meet fill-to-signal spacing in every repetition
+      of the pattern.
+      As shown in Figure 78, a multilayer pattern, indicated by dashed lines, is repeated inside
+      a target region. The spacing_context option is UF_LAYER. The pattern consists of two fill
+      layers, each composed of two rectangles. Based on fill-to-signal spacing of the fill layer
+      to the design layer, every instance might have either all of the polygons or a partial set of
+      polygons. Polygons causing spacing violations are removed.
+
+
+
+
+IC Validator User Guide                                                                           277
+X-2025.06
+                                                                                         Feedback
+Chapter 10: Unified Fill
+Polygon Grouping
+
+
+Figure 78      Multilayer Pattern Repeated Inside a Target Region
+
+
+
+
+      Alternatively, you can configure the unified_fill() function in such way that if any
+      polygon of a fill layer inside a pattern repetition causes spacing violations, then all
+      polygons of that fill layer are removed from that specific pattern repetition. For this
+      behavior, set the grouping option to ALL in the definition of the fill layer. For example, as
+      shown in Example 23 and Figure 79, both polygons of the M1_fill fill layer are removed
+      from the top right pattern repetition, even though only one polygon violates the spacing.
+
+Example 23 grouping = ALL Example
+      SHAPE_M1_fill : polygon_layer_s = {
+         layer_spec = {
+            output_layer_key = "M1_fill",
+            grouping = ALL,
+            fill_to_signal_spacing = {
+               {aM1, min_space = 1.0}
+            }
+         }
+         polygons = DATA_ M1_fill,
+      };
+
+
+
+
+IC Validator User Guide                                                                          278
+X-2025.06
+                                                                                       Feedback
+Chapter 10: Unified Fill
+Signal Aligned Fills
+
+
+Figure 79      Layer Removed From Top Right Pattern Repetition Example
+
+
+
+
+      The following rules and restrictions apply for polygon grouping:
+       • If the spacing_context option is UF_PATTERN, the grouping option setting of NONE
+         does not apply because fill-to-signal spacing is measured from the bounding box of
+         the pattern but not from the individual polygons. When the spacing_context option is
+         UF_PATTERN, the grouping option is automatically ALL.
+
+       • When the space_x and space_y values are negative, the grouping option setting of
+         ALL is not supported.
+
+       • The grouping option does not apply to the UF_POLYGON and UF_ADJUSTABLE types.
+
+
+Signal Aligned Fills
+      For applications that require design layers to be protected by placing fill shapes alongside
+      the design layer polygon, use the signal option in the unified_fill() function. This
+      feature inserts fill shapes around the design layer shapes in the form of a ring such that
+      the major axis of the fill shape aligns with the edge of the design layer shape. Figure 80
+      shows an example.
+
+
+
+
+IC Validator User Guide                                                                        279
+X-2025.06
+                                                                                        Feedback
+Chapter 10: Unified Fill
+Signal Aligned Fills
+
+
+Figure 80      Fill with ring_count = 2
+
+
+
+
+      Use the signal option only with the UF_ADJUSTABLE and UF_POLYGON types. With the
+      UF_POLYGON type, the pattern must be a single layer with single shape. You must set
+      the fill_context option to SIGNAL_CONTEXT in the definition of the fill_patterns
+      argument. With the ring_count option of the signal option, you can control the number
+      of rings of fill pattern shapes that surround each design layer shape. In Figure 80, the ring
+      count is 2. Figure 81 and Example 24 show an example with a ring count of 4.
+
+Figure 81      Fill with ring_count = 4
+
+
+
+
+Example 24 Fill with ring_count = 4
+      DATA_M1_fill : list of list of coordinate_s = {
+         { {0.0, 0.0}, {2.0, 0.0}, {2.0, 1.0}, {0.0, 1.0} }
+
+
+IC Validator User Guide                                                                         280
+X-2025.06
+                                                                                       Feedback
+Chapter 10: Unified Fill
+Signal Aligned Fills
+
+
+      };
+      SHAPE_M1_fill : polygon_layer_s = {
+         layer_spec = {
+            output_layer_key = "M1_fill",
+            fill_to_signal_spacing = {
+               {aM1, min_space = 0.1},
+            }
+         }
+         polygons = DATA_M1_fill,
+      };
+
+      fill_patterns = {{
+         type = UF_POLYGON,
+         polygon_fill = {
+            pattern_spec = {space_x = 0.1,
+                            space_y = 0.1},
+            layers = {SHAPE_M1_fill},
+            fill_context = SIGNAL_CONTEXT,
+            signal = {layer = aM1,
+                      ring_count = 4}
+         }
+      }}
+
+      You can use the signal option with the width-dependent spacing functionality that is
+      described in the Range and Width Dependent Spacing section. Use this functionality in
+      applications that require the fill shapes to be kept away from the design layer shape by
+      different minimum space values that depend on the width of the design layer shape. Fill
+      pattern rings are generated using all spacing constraints.
+      The following rules and restrictions apply for signal aligned fills:
+       • The signal option cannot be used with the UF_STACK or UF_CELL type.
+       • The signal option cannot be used when pattern definitions have multiple fill layers or if
+         the fill-layer definition has multiple polygons.
+       • The stagger_y option is not supported with the signal option. The stagger_y option
+         is ignored.
+       • The fill_context option must be SIGNAL_CONTEXT. With this setting, the partition,
+         insertion, and pitch options are ignored.
+
+       • The width_based_spacing option is not supported for the design layer specified in
+         the signal option. Use the min_space option in fill_to_signal_spacing to set the
+         minimum spacing between the fill layer and the design layer specified in the signal
+         option.
+
+
+
+
+IC Validator User Guide                                                                          281
+X-2025.06
+                                                                                           Feedback
+Chapter 10: Unified Fill
+Signal Aligned Fills
+
+
+
+      Defining the Fill Pattern for Signal Aligned Fills
+      When you define a fill pattern using the coordinate list, make sure that the dimensions of
+      the pattern in the x- and y-directions meet your requirements. The signal option in the
+      unified_fill() function treats the x-direction as the major axis of the pattern. The tool
+      aligns this edge of the pattern with the shapes on the design layer.
+       • To align the long edge of the fill pattern rectangle with the design layer shape, make
+         sure that the dimension of the pattern in the x-direction is greater than the dimension in
+         the y-direction.
+       • To align the short edge of the fill pattern rectangle with the design layer shape, make
+         sure that the dimension of the pattern in the x-direction is less than the dimension in
+         the y-direction.
+      Figure 82 illustrates the two scenarios. For simplicity, not all fill pattern placements are
+      shown. For this example, the coordinate data is:
+      DATA_M1_fill_V : list of list of coordinates_s = {
+         { {0.0, 0.0}, {1.0, 0.0}, {1.0, 5.0}, {0.0, 5.0} }
+      };
+
+Figure 82      Aligning Short or Long Edge of the Fill Pattern
+
+
+
+
+IC Validator User Guide                                                                              282
+X-2025.06
+                                                                                       Feedback
+Chapter 10: Unified Fill
+Improving Pattern Insertion
+
+
+
+Improving Pattern Insertion
+      Similar to the fill_patterns argument, the default starting point for pattern placement in
+      the unified_fill() function is at the lower-left corner of the bounding box of the polygon
+      on the target layer. When the polygons on the target layer are complex, nonrectangular
+      shapes, the default placement might not always result in maximum insertion. Figure 83
+      shows how several patterns could not be placed in such a situation.
+
+Figure 83      Default Placement That Is Not Maximum Insertion
+
+
+
+
+      The unified_fill() function provides several optional configurations to change the
+      default starting point and allow more flexibility in pattern placement. These changes might
+      improve the insertion rate.
+      Example 25 shows how to use the iteration option to improve the insertion rate.
+
+Example 25 Using the iteration Option
+      fill_patterns = {{
+         type = UF_POLYGON,
+         polygon_fill = {
+            pattern_spec = {space_x = 0.1,
+                            space_y = 0.1},
+            layers = {SHAPE_M1_fill},
+            insertion = {iterations = 3}
+         }
+      }}
+
+      For a detailed description of the insertion option, see the unified_fill() function in
+      the IC Validator Reference Manual.
+
+
+Pitch Aligned Fills
+      From the fill_pattern() function, you can control the location of the pattern grid with
+      the grid_mode option.
+
+
+
+
+IC Validator User Guide                                                                         283
+X-2025.06
+                                                                                         Feedback
+Chapter 10: Unified Fill
+Pitch Aligned Fills
+
+
+       • Specify GLOBAL to place the fill shapes by using the lower-left of the entire database
+         extents as the reference.
+       • Specify LOCAL to place fill shapes by allowing every polygon on the input layer to
+         have its own unique reference grid point.
+      The reference grid point is the lower-left of the bounding box of every individual polygon
+      belonging to the input layer.
+      With the unified_fill() function, in addition to the GLOBAL and LOCAL grid modes, you
+      can enforce more complex control over the location of the pattern grid by referencing
+      another layer. Along with the target layer, you can also specify a context layer. When a
+      context layer is used, fill patterns are placed inside the target layer polygons in such a way
+      that the lower-left vertex of the bounding box of the fill patterns aligns with the grid points
+      originating from the lower-left vertex of the bounding box of each individual polygon on the
+      context layer as the reference grid point. A context layer polygon can encompass multiple
+      polygons on the target layer.
+      Figure 84 shows a comparison of the grid_mode argument of the fill_pattern()
+      function with the fill_context option of the unified_fill() function.
+
+Figure 84      Pitch Aligned Fills Comparison
+
+
+
+
+      Example 26 and Figure 85 show the behavior of the pitch option of the unified_fill()
+      function. In this example, the pitch option is applied only to the y-direction grid point. The
+      fill patterns in a given target layer polygon are placed starting from the grid point that is
+      closest to the lower-left vertex of the bounding box of the specific target layer polygon,
+      satisfying the specified pitch value.
+
+Example 26 Applying the Pitch Option Only in the Y-Direction
+      fill_patterns = {{
+         type = UF_POLYGON,
+         polygon_fill = {
+
+
+IC Validator User Guide                                                                          284
+X-2025.06
+                                                                                           Feedback
+Chapter 10: Unified Fill
+Pitch Aligned Fills
+
+
+               pattern_spec = {space_x = 0.1,
+                               space_y = 0.1},
+               layers = {SHAPE_M1_fill},
+               pitch = {y = 0.1,
+                        context_layer = aFILL_CONTEXT_LAYER}
+           }
+      }}
+
+Figure 85       Applying the Pitch Option Only in the Y-Direction
+
+
+
+
+      The following rules and restrictions apply for pitch-aligned fills:
+       • Target layer polygons that are completely outside the context layer are discarded
+           Fill patterns are not inserted in these polygons.
+       • If a target layer polygon overhangs context layer polygons, only fill-pattern polygons
+         that are fully enclosed by the context layer are inserted
+       • Fill patterns are not inserted in regions of the target layer that interact with multiple
+         polygons on the context layer
+       • When the pitch option is used, the fill_context option is ignored if it is set to
+         CHIP_CONTEXT or REGION_CONTEXT because these settings are not relevant in this
+         case
+       • The pitch value must correlate with the pattern dimension and the space_x and
+         space_y values
+
+           For example, the following value must be a multiple of the pitch value; otherwise, the
+           resultant fill might be missing patterns:
+           ((pattern dimension in x-direction) + space_x)
+
+
+IC Validator User Guide                                                                              285
+X-2025.06
+                                                                                         Feedback
+Chapter 10: Unified Fill
+Criteria Analysis
+
+
+      For a higher insertion rate, you can increase the shift_factor value of the insertion
+      option. The unified_fill() function automatically adjusts the fill patterns inside the
+      target layer polygons such that they align with the grid lines of the context layer polygon.
+      The shift_factor option is useful when polygons on the target layer are complex,
+      nonrectangular shapes. Example 27 shows how to use the shift_factor option.
+
+Example 27 Using the shift_factor Option
+      fill_patterns = {{
+         type = UF_POLYGON,
+         polygon_fill = {
+            pattern_spec = {space_x = 0.1,
+                            space_y = 0.1},
+            layers = {SHAPE_M1_fill},
+            insertion = {shift_factor = 5}
+            pitch = {y = 0.1,
+                     context_layer = aFILL_CONTEXT_LAYER},
+         }
+      }}
+
+
+
+Criteria Analysis
+      With the unified_fill() function, you can customize the fill procedure for metrics such
+      as density. The tool supports equation-based criteria analysis to meet requirements such
+      as density ranges, target density, and uniform gradient density across the design. The
+      unified_fill() function uses the same algorithms as the density() function, ensuring
+      that the fill results meet the postfill design rule requirements.
+      Use the following arguments of the unified_fill() function to configure the fill
+      procedure to meet your requirements:
+          criteria
+
+          delta_window
+
+          delta_x
+
+          delta_y
+
+          window_layer
+
+          boundary
+
+      The criteria option supports the following options to configure the fill procedure:
+          target
+
+          gradient
+
+          fill_layer_keys
+
+
+
+IC Validator User Guide                                                                          286
+X-2025.06
+                                                                                            Feedback
+Chapter 10: Unified Fill
+Criteria Analysis
+
+
+          design_layers
+
+          design_layers_hash
+
+          window_function
+
+      The string names specified in the output_layer_key option of the pattern definition are
+      used to identify the fill layers used in criteria equations. You can specify any number of
+      criteria equations in the criteria argument. If you have multiple criteria equations for
+      the same fill layer, the tool ensures that at least one of the equations is met. If there are
+      multiple criteria equations for different fill layers (for example, aM1_FILL and aM2_FILL
+      each have a criteria equation defined), then the tool addresses all the equations.
+      When the criteria argument is specified without a window function, the tool evaluates
+      a default equation to check against the criteria value. This default equation is evaluated
+      for every delta window and checked against the target and gradient values of the
+      criteria argument. The fill patterns are evaluated to converge the evaluated value to the
+      specified value. The default equation is:
+      [(Area of fill layers) + (Area of design layers)] / (Area of delta window)
+      Where,
+       • Area of fill layers is the sum of areas within the current delta window of all polygon data
+         on all the fill layers that are specified in the fill_layer_keys option.
+       • Area of design layers is the sum of areas within the current delta window of all polygon
+         data on all the design layers that are specified in the design_layers option.
+      Note:
+          Pattern definitions must generate fill output that allows the criteria to contribute.
+          For example, the tool cannot meet a higher target density when the provided
+          pattern definitions are composed of narrow, widely-spaced rectangles.
+      Example 28 shows a fill specification for two fill layers, M1_fill and M2_fill, that have their
+      own criteria equations. The cumulative density of the existing aM1 design layer and M1_fill
+      fill layer should be between 25 percent and 45 percent with a target of 35 percent, when
+      measured in 100 μm x 100 μm windows stepped across the design in increments of 50 μm
+      along the x- and y-directions. The M2_fill fill layer has a similar fill specification with the
+      same density values.
+
+Example 28 Fill Specification With Two Criteria Equations
+      DATA_M1_fill : list of list of coordinate_s = {
+         { {1.0, 0.0}, {2.0, 0.0}, {2.0, 3.0}, {1.0, 3.0} }
+      };
+
+      SHAPE_M1_fill : polygon_layer_s = {
+         layer_spec = {output_layer_key = "M1_fill"}
+         polygons = DATA_ M1_fill,
+
+
+IC Validator User Guide                                                                           287
+X-2025.06
+                                                                                       Feedback
+Chapter 10: Unified Fill
+Criteria Analysis
+
+
+      };
+
+      DATA_M2_fill : list of list of coordinate_s = {
+         { {0.0, 1.0}, {3.0, 1.0}, {3.0, 2.0}, {0.0, 2.0} },
+      };
+
+      SHAPE_M2_fill : polygon_layer_s = {
+         layer_spec = {output_layer_key = "M2_fill"}
+         polygons = DATA_ M2_fill,
+      };
+
+      fill_patterns_m1_m2 = {{
+         type = UF_POLYGON,
+         polygon_fill = {
+            layers = {SHAPE_M1_fill,
+                      SHAPE_M2_fill}
+         }
+      }}
+
+      M1_density_criteria : fill_criteria_s =
+      {
+         target = {range = [0.25, 0.45], target = 0.35},
+         fill_layer_keys = {"M1_fill"},
+         design_layers = {aM1}
+      };
+      M2_density_criteria : fill_criteria_s =
+      {
+         target = {range = [0.25, 0.45], target = 0.35},
+         fill_layer_keys = {"M2_fill"},
+         design_layers = {aM2}
+      };
+      uf_fill_output_h = unified_fill(
+         fill_patterns = fill_patterns_m1_m2,
+         criteria = {M1_density_criteria,
+                     M2_density_criteria},
+         delta_window = {100, 100},
+         delta_x = 50,
+         delta_y = 50,
+         fill_boundary = {type = LAYER, layer = data_extent},
+         window_layer = aWINDOW,
+         grid = 0.001,
+         boundary = ALIGN
+      );
+      M1_fill_output = uf_fill_output_h["M1_fill"][0];
+      M2_fill_output = uf_fill_output_h["M2_fill"][0];
+
+      Example 29 is another fill example that uses multiple design layers and fill layers in the
+      same criteria equation. The sum of the densities in every window of M1, M2, and M3 for
+      both design and fill should be greater than or equal to 105 percent.
+      Note:
+           For simplicity, Example 29 shows only the criteria equations.
+
+
+IC Validator User Guide                                                                        288
+X-2025.06
+                                                                                           Feedback
+Chapter 10: Unified Fill
+Criteria Analysis
+
+
+Example 29 Fill Specification With Multiple Layers in the Same Criteria Equation
+      M1_M2_density_criteria : fill_criteria_s =
+      {
+         target = {range = >= 1.05},
+         fill_layer_keys = {"M1_fill", "M2_fill", "M3_fill"},
+         design_layers = {aM1, aM2, aM3}
+      };
+
+      For a specific fill layer, when there is more than one fill pattern specified, the
+      unified_fill() function sequentially inserts the fill patterns in the order that the
+      patterns are declared in the function. When a criteria is specified, it is possible that the
+      unified_fill() function does not make use of all the fill pattern definitions. That is, the
+      unified_fill() function stops inserting fill as soon as the criteria is met regardless of
+      whether all the fill patterns have been used.
+      In Example 30, the procedure for the M1_fill fill layer is composed of two insertion
+      sequences. After inserting the first pattern, if the criteria is met, the tool does not perform
+      the second sequence.
+
+Example 30 Sequence of Pattern Definitions
+      fill_patterns_m1 = {
+      {
+         type = UF_POLYGON,
+         polygon_fill = {layers = {SHAPE_M1_fill_TYPE1}}
+      },
+      {
+         type = UF_POLYGON,
+         polygon_fill = {layers = {SHAPE_M1_fill_TYPE2}}
+      }}
+      M1_density_criteria : fill_criteria_s =
+      {
+         target = {range = [0.25, 0.45], target = 0.35},
+         fill_layer_keys = {"M1_fill"},
+         design_layers = {aM1}
+      };
+      uf_fill_output_h = unified_fill(
+         fill_patterns = fill_patterns_m1,
+         criteria = {M1_density_criteria},
+         delta_window = {100, 100},
+         delta_x = 50,
+         delta_y = 50,
+         fill_boundary = {type = LAYER, layer = data_extent},
+         window_layer = aWINDOW,
+         grid = 0.001,
+         boundary = ALIGN
+      );
+      M1_fill_output = uf_fill_output_h["M1_fill"][0];
+
+      Instead of using the default criteria equation, you can specify your own criteria by defining
+      the window function as shown in Example 31.
+
+
+IC Validator User Guide                                                                            289
+X-2025.06
+                                                                                        Feedback
+Chapter 10: Unified Fill
+Criteria Analysis
+
+
+Example 31 Customized Criteria Equation
+      design_layers : layer_groups_h = {
+         "aM1" => aM1
+      };
+      M1_density_criteria_func : function ( void ) returning void
+      {
+         da_aM1 = uf_area(DESIGN, "aM1");
+         fa = uf_area(FILL, "M1_fill");
+
+      check_value : double = (da_aM1 + fa)) / uf_window_area();
+         uf_save_window(check_value);
+      };
+      M1_density_criteria : fill_criteria_s =
+      {
+         target = {[0.25, 0.45]},
+         fill_layer_keys = {"M1_fill"},
+         design_layers_hash = design_layers,
+         window_function = M1_density_criteria_func
+      };
+
+      See the Unified Fill Utility Functions section in the “Utility Functions” chapter of the
+      IC Validator Reference Manual for more information about the utility functions you can use
+      in the window function.
+      The following rules and restrictions apply:
+       • Multiple fill layers cannot be used in a single window function
+       • If target is not specified, the unified_fill() function uses the midpoint of the range
+         as its internal target
+       • A valid constraint that converges must be specified. For example, the following
+         constraint is not allowed
+          target = {range = <0.50}
+
+      The following examples show the behavior based for several scenarios:
+       • target = {range = >0.50}
+
+          The unified_fill() function tries to achieve a target density greater than 50 percent.
+       • target = {range = [0.45, 0.55]}
+
+          The unified_fill() function assumes an internal target density of 50 percent. Fill
+          patterns are not added to those windows for which the initial density is already greater
+          than 50 percent. Otherwise, the tool works toward reaching a target density of 50
+          percent, but not exceeding 50 percent.
+       • target = {range = [0.45, 0.55], target = 0.48}
+
+
+
+
+IC Validator User Guide                                                                         290
+X-2025.06
+                                                                                         Feedback
+Chapter 10: Unified Fill
+Output Layers
+
+
+          The unified_fill() function works toward achieving a target density of 48 percent.
+          If the initial density in a window is 46 percent, the tool works toward reaching a density
+          48 percent, but not exceeding 48 percent.
+       • target = {range = >0.30, target = 0.50}
+
+          The allowed range is greater then 30 percent and less than or equal to 100 percent.
+          The tool works toward achieving a target density of 50 percent, but not exceeding 50
+          percent.
+
+
+Output Layers
+      The unified_fill() function returns a hash containing layer lists, with each list having
+      three polygon layers:
+
+      Index          Polygon layer
+
+      0              Uncolored
+
+      1              Color 1 (The color option must be true to get this layer.)
+
+      2              Color 2 (The color option must be true to get this layer.)
+
+
+      To retrieve a list of polygon layers, you specify the output_layer_key value that was
+      used by the layer_spec option of the fill pattern definition. If the color option is false,
+      only uncolored data is generated on index 0. If the color option is true, then the two
+      colored output layers are returned on indexes 1 and 2, respectively. For example,
+      M1_fill_ALL = M1_fill_h["M1_fill"][0];
+      M1_fill_COLOR1 = M1_fill_h["M1_fill"][1];
+      M1_fill_COLOR2 = M1_fill_h["M1_fill"][2];
+
+      Example 32 is a procedure for two fill layers, M1_fill and M2_fill, that shows how the fill
+      layers are accessed from the output hash generated by the unified_fill() function.
+
+Example 32 Accessing Fill Layers From Hash
+      fill_patterns_m1_m2 = {{
+         type = UF_POLYGON,
+         polygon_fill = {
+            layers = {SHAPE_M1_fill,      //output_layer_key is "M1_fill"
+                      SHAPE_M2_fill}      //output_layer_key is "M2_fill"
+         }
+      }}
+      uf_fill_output_h = unified_fill(
+         fill_patterns = fill_patterns_m1_m2
+      );
+
+
+
+
+IC Validator User Guide                                                                             291
+X-2025.06
+                                                                                           Feedback
+Chapter 10: Unified Fill
+Output Layers
+
+
+
+      M1_fill_output = uf_fill_output_h["M1_fill"][0];
+      M2_fill_output = uf_fill_output_h["M2_fill"][0];
+
+      Example 33 shows a fill specification for the M1_fill fill layer that has two pattern insertion
+      steps. Each pattern definition has a specified color. The unified_fill() function creates
+      fill shapes in each pattern insertion step by coloring them as individual sets. Furthermore,
+      both pattern insertion steps use the same string name in the output_layer_key option
+      to designate the fill layer. The unified_fill() function accumulates all polygon data
+      from different pattern definitions into the same polygon layer list element in the output hash
+      key of that fill layer. In this example, the value of list index 0 of the M1_fill output hash key
+      has complete polygon data from both pattern insertion steps. The value of list index 1 has
+      complete color 1 polygon data from both pattern insertion steps. Similarly, the value of list
+      index 2 has complete color 2 polygon data from both pattern insertion steps.
+
+Example 33 Pattern Insertion Using the color Option
+      SHAPE_M1_fill_TYPE1 : polygon_pattern_s = {
+         layer_spec = {
+              output_layer_key = "M1_fill",
+         }
+         polygons = DATA_M1_fill_TYPE1,
+      };
+      SHAPE_M1_fill_TYPE2 : polygon_pattern_s = {
+         layer_spec = {
+              output_layer_key = "M1_fill",
+         }
+         polygons = DATA_M1_fill_TYPE2,
+      };
+      M1_fill_h = unified_fill(
+         fill_patterns = {
+            {type = UF_POLYGON,
+              polygon_fill = {
+                 layers = {SHAPE_M1_fill_TYPE1},
+                 color = true
+              }
+            },
+            {type = UF_POLYGON,
+              polygon_fill = {
+                 layers = {SHAPE_M1_fill_TYPE2},
+                 color = true
+              }
+            }
+         },
+
+           fill_boundary = {type = LAYER, layer = data_extent}
+      );
+
+      M1_fill_ALL    = M1_fill_h["M1_fill"][0];
+      M1_fill_COLOR1 = M1_fill_h["M1_fill"][1];
+      M1_fill_COLOR2 = M1_fill_h["M1_fill"][2];
+
+
+
+IC Validator User Guide                                                                            292
+X-2025.06
+                                                                                          Feedback
+Chapter 10: Unified Fill
+Output Layers
+
+
+      Apart from the fill layers, you can also retrieve the bounding box, that is, the extents,
+      of one or more output fill layers by specifying one or more of the appropriate
+      output_layer_key values. Example 34 and Figure 86 show the usage of the
+      extents_output option.
+
+Example 34 Using the extents_output Option
+      SHAPE_M1_fill : polygon_pattern_s = {
+         layer_spec = {
+            output_layer_key = "M1_fill",
+         }
+         polygons = DATA_M1_fill_TYPE1,
+      };
+
+      M1_fill_h = unified_fill(
+         fill_patterns = {{
+            {type = UF_POLYGON,
+              polygon_fill = {
+                 layers = {SHAPE_M1_fill},
+                 color = true
+              }
+            }
+         },
+
+           extents_output = {
+             {output_layer_key = "M1_fill_boundary",
+               fill_layer_keys = {"M1_fill"}
+             }
+           }
+      );
+
+      M1_fill   = M1_fill_h["M1_fill"][0];
+      M1_fill_E = M1_fill_h["M1_fill_boundary"][0];
+
+Figure 86      Using the extents_output Option
+
+
+
+
+      When the output_layer_key option is not specified in the extents_output option, the
+      bounding box of the pattern is constructed by considering all the fill layers present in the
+
+
+
+IC Validator User Guide                                                                           293
+X-2025.06
+                                                                                     Feedback
+Chapter 10: Unified Fill
+Layer Compression
+
+
+      pattern placement. For patterns that are generated by the UF_STACK or UF_CELL type, the
+      extents_output option works in accordance with the separate_patterns option.
+
+
+
+Layer Compression
+      The geometry data on output polygon layers generated by the unified_fill() function
+      can be grouped hierarchically to reduce the size of the output file created by functions
+      such as write_gds() and write_milkyway(). Layer compression can be achieved in
+      two ways in an IC Validator runset:
+       • Specify the hierarchical_fill option inside pattern definitions of the
+         unified_fill() function.
+
+       • Use the compress_fill option in the write_gds() and write_milkyway() functions.
+      The hierarchical_fill option in the unified_fill() function is similar to the
+      output_aref option in the fill_pattern() function. However, for optimum output file
+      size, use the compress_fill argument in the write_gds() and write_milkyway()
+      functions for all the individual polygon layers.
+
+
+
+
+IC Validator User Guide                                                                     294
+X-2025.06
+                                                                                    Feedback
+
+
+
+
+11
+Working With Edges
+
+     This chapter gives a brief overview of using edges in IC Validator runsets. The edge
+     functions are described in the IC Validator Reference Manual.
+
+     The IC Validator tool provides for
+      • Associating Edge Layers With a Parent Layer
+      • Topological Operations
+      • Logical Operations
+      • Edge Manipulation
+
+
+
+
+IC Validator User Guide                                                                     295
+X-2025.06
+                                                                                       Feedback
+Chapter 11: Working With Edges
+Associating Edge Layers With a Parent Layer
+
+
+
+Associating Edge Layers With a Parent Layer
+     Edge layers can have a parent polygon layer.
+      • All edge selection operations maintain the connection between an edge layer and the
+        polygon layer from which it was derived.
+      • All edge creation operations result in “orphan” edge layers, that is, edge layers without
+        a parent polygon layer.
+      • The parent polygon layer provides a more intuitive output by influencing dimensional
+        function behavior for edges.
+     For example, Figure 87 shows edge association with a parent layer.
+     red = edge_derived_from_blue;
+     @ "red edge min width rule";
+     internal1(red, spacing < x);
+
+     The IC Validator tool detects the violation from e2 to e3 and avoids the violation from e1 to
+     e3.
+
+Figure 87     Edge Association With a Parent Layer
+
+
+
+
+Topological Operations
+     Topological operations use the complete edges selected and do not add new endpoints.
+     These operations include
+      • adjacent_edge() and not_adjacent_edge()
+      • angle_edge() and not_angle_edge()
+
+
+IC Validator User Guide                                                                        296
+X-2025.06
+                                                                           Feedback
+Chapter 11: Working With Edges
+Logical Operations
+
+
+      • inside_point_touching_edge() and not_inside_point_touching_edge()
+      • inside_touching_edge() and not_inside_touching_edge()
+      • interacting_edge() and not_interacting_edge()
+      • length_edge() and not_length_edge()
+      • outside_point_touching_edge() and not_outside_point_touching_edge()
+      • outside_touching_edge() and not_outside_touching_edge()
+      • point_touching_edge() and not_point_touching_edge()
+      • touching_edge() and not_touching_edge()
+      • vertices_edge() and not_vertices_edge()
+     Figure 88 shows an example of touching edges:
+     green = touching_edge (layer1 = blue, layer2 = red);
+
+Figure 88     Touching Edges Example
+
+
+
+
+Logical Operations
+     Logical operations generate new endpoints. These operations include
+      • coincident_edge() and not_coincident_edge()
+      • coincident_inside_edge() and not_coincident_inside_edge()
+
+
+IC Validator User Guide                                                          297
+X-2025.06
+                                                                      Feedback
+Chapter 11: Working With Edges
+Edge Manipulation
+
+
+      • coincident_outside_edge() and not_coincident_outside_edge()
+      • and_edge()
+      • not_edge()
+      • or_edge()
+      • xor_edge()
+     Figure 89 shows an example of coincident edges:
+     green = coincident_edge (layer1 = blue, layer2 = red);
+
+Figure 89     Coincident Edges Example
+
+
+
+
+Edge Manipulation
+     These functions create edges, which are always orphan edges:
+      • move_edge()
+      • snap_edge()
+      • extend_edge()
+      • copy_edge()
+     This function creates polygons from edges:
+      • edge_size()
+
+
+IC Validator User Guide                                                     298
+X-2025.06
+

@@ -1,0 +1,1469 @@
+                                                                                      Feedback
+
+
+
+
+6
+Constraining the Design
+     To learn about constraining the inputs and outputs of the design, see these topics:
+     •   Timing Constraints
+     •   Input Delays
+     •   Output Delays
+     •   Drive Characteristics at Input Ports
+     •   Port Capacitance
+     •   Wire Load Models
+     •   Slew Propagation
+     •   Design Rule Constraints
+     •   Ideal Networks
+     •   Checking the Constraints
+
+
+Timing Constraints
+     Before you begin timing analysis, you need to specify the timing constraints on the design.
+     A timing constraint (also called a timing assertion) limits the allowed range of time that a
+     signal can arrive at a device input or be valid at a device output.
+
+
+
+
+PrimeTime® User Guide                                                                         174
+T-2022.03
+                                                                                        Feedback
+Chapter 6: Constraining the Design
+Input Delays
+
+
+Figure 23       Design-level timing constraints
+
+                   Data arrival times                                     Data required times
+
+            CLK                                                        CLK
+
+                    set_input_delay                                     set_output_delay
+
+
+                         Delay                                                Delay
+
+                                 ...              Design                   ...
+                                                   under
+                                 ...              analysis                 ...
+
+
+                                        CLK
+                create_clock
+
+      CLK
+
+
+            0        2           4        6
+
+
+
+
+Input Delays
+     To do constraint checking at the inputs of the design, the tool needs information about the
+     arrival times of signals at the inputs. To specify the timing of external paths leading to an
+     input port, use the set_input_delay command. The tool uses this information to check
+     for timing violations at the input port and in the transitive fanout from that input port. With
+     this command, you specify the minimum and maximum amount of delay from a clock edge
+     to the arrival of a signal at a specified input port
+     Applying the set_drive or set_driving_cell commands to the port causes the port
+     to have a cell delay that is the load-dependent value of the external driving-cell delay. To
+     prevent this delay from being counted twice, estimate the load-dependent delay of the
+     driving cell, then subtract that amount from the input delays on the port.
+     The input delay should equal the path length from the clock pin of the source flip-flop to
+     the output pin of the driving cell, minus the load-dependent portion of the driving cell’s
+     delay. The following example shows the external path for the L1 clock port to port IN1.
+
+
+
+
+PrimeTime® User Guide                                                                             175
+T-2022.03
+                                                                                          Feedback
+Chapter 6: Constraining the Design
+Input Delays
+
+
+Figure 24     Two-phase clocking example for setting port delays
+
+                                                                  4.3
+                            4.5          Design
+                   L1
+
+                                                  OUT1
+            PHI1                        IN1
+                   L2
+                                                                            PHI1
+                                  2.3   PHI1      OUT2
+
+            PHI2
+
+                                                                           off_chip_clk
+                                        IN2
+                                        PHI2
+            PHI2
+
+
+     When you use the set_input_delay command, you can specify whether the delay value
+     includes the network latency or source latency.
+     Example 1
+     If the delay from L1 clock port to IN1 (minus the load-dependent delay of the driving cell) is
+     4.5, this set_input_delay command applies:
+     pt_shell> set_input_delay 4.5 -clock PHI1 {IN1}
+
+     Example 2
+     If paths from multiple clocks or edges reach the same port, specify each one using the
+     -add_delay option. If you omit the -add_delay option, existing data is removed. For
+     example:
+     pt_shell> set_input_delay 2.3 -clock PHI2 -add_delay {IN1}
+
+     If the source of the delay is a level-sensitive latch, use the -level_sensitive option. This
+     allows PrimeTime to determine the correct single-cycle timing constraint for paths from this
+     port. Use the -clock_fall option to denote a negative level-sensitive latch; otherwise, the
+     -level_sensitive option implies a positive level-sensitive latch.
+
+     To see input delays on ports, use the report_port -input_delay command.
+     To remove input delay information from ports or pins in the current design set using the
+     set_input_delay command, use the remove_input_delay command. The default is to
+     remove all input delay information in the port_pin_list option.
+
+
+
+
+PrimeTime® User Guide                                                                           176
+T-2022.03
+                                                                                         Feedback
+Chapter 6: Constraining the Design
+Output Delays
+
+
+
+     Using Input Ports Simultaneously for Clock and Data
+     PrimeTime allows an input port to behave simultaneously as a clock and data port. You
+     can use the timing_simultaneous_clock_data_port_compatibility variable to
+     enable or disable the simultaneous behavior of the input port as a clock and data port.
+     When this variable is false, the default, simultaneous behavior is enabled and you can
+     use the set_input_delay command to define the timing requirements for input ports
+     relative to a clock. In this situation, the following applies:
+     •   If you specify the set_input_delay command relative to a clock defined at the same
+         port and the port has data sinks, the command is ignored and an error message is
+         issued. There is only one signal coming to port, and it cannot be at the same time data
+         relative to a clock and the clock signal itself.
+     •   If you specify the set_input_delay command relative to a clock defined at a different
+         port and the port has data sinks, the input delay is set and controls data edges
+         launched from the port relative to the clock.
+     •   Regardless of the location of the data port, if the clock port does not fanout to data
+         sinks, the input delay on the clock port is ignored and you receive an error message.
+     When you set the timing_simultaneous_clock_data_port_compatibility variable to
+     true, the simultaneous behavior is disabled and the set_input_delay command defines
+     the arrival time relative to a clock. In this situation, when an input port has a clock defined
+     on it, PrimeTime considers the port exclusively as a clock port and imposes restriction on
+     the data edges that are launched. PrimeTime also prevents setting input delays relative to
+     another clock.
+     To control the clock source latency for any clocks defined on an input port, you must use
+     the set_clock_latency command.
+
+
+Output Delays
+     To do constraint checking at the outputs of the design, the tool needs information about
+     the timing requirements at the outputs. To specify the delay of an output port to a register,
+     use the set_output_delay command.
+     With this command, you specify the minimum and maximum amount of delay between the
+     output port and the external sequential device that captures data from that output port.
+     This setting establishes the times at which signals must be available at the output port to
+     meet the setup and hold requirements of the external sequential element:
+     •   Maximum-_output_delay = length-_of_longest_path_to-_register_data_pin +
+         setup_time_of_the_register
+     •   Minimum_output_delay = length_of_shortest_path_to_register_data_pin – hold_time
+
+
+
+PrimeTime® User Guide                                                                            177
+T-2022.03
+                                                                                           Feedback
+Chapter 6: Constraining the Design
+Drive Characteristics at Input Ports
+
+
+Figure 25      Two-phase clocking example for setting port delays
+
+                                                                   4.3
+                             4.5          Design
+                   L1
+
+                                                   OUT1
+            PHI1                         IN1
+                   L2
+                                                                             PHI1
+                                   2.3   PHI1      OUT2
+
+            PHI2
+
+                                                                            off_chip_clk
+                                         IN2
+                                         PHI2
+            PHI2
+
+
+      In the preceding example, this command sets an output delay of 4.3 relative to the rising
+      edge of clock PHI1 on port OUT1:
+      pt_shell> set_output_delay 4.3 -clock PHI1 {OUT1}
+
+      To show output delays associated with ports, use the report_port -output_delay
+      command.
+      To remove output delay from output ports or pins set through the set_output_delay
+      command, use the remove_output_delay command. By default, all output delays on
+      each object in the port or pin list are removed. To restrict the removed output delay values,
+      use the -clock, -clock_fall, -min, -max, -rise, or -fall option.
+
+
+Drive Characteristics at Input Ports
+      To accurately time a design, you need to define the drive capability of the external cell
+      driving each input port. PrimeTime uses this information to calculate the load-dependent
+      cell delay for the port and to produce an accurate transition time for calculating cell delays
+      and transition times for the following logic stages.
+
+
+
+
+PrimeTime® User Guide                                                                            178
+T-2022.03
+                                                                                            Feedback
+Chapter 6: Constraining the Design
+Drive Characteristics at Input Ports
+
+
+Figure 26      Driving cells
+
+
+
+                                                   Design
+            set_driving_cell                        under
+                                                   analysis
+
+
+
+
+      The set_driving_cell command can specify a library cell arc for the driving cell so that
+      timing calculations are accurate even if the capacitance changes. This command causes
+      the port to have the transition time calculated as if the given library cell were driving the
+      port.
+      For less precise calculations, you can use the set_drive or set_input_transition
+      command. The most recent drive command has precedence. If you issue the set_drive
+      command on a port and then use the set_driving_cell command on the same port,
+      information from the set_drive command is removed.
+
+
+      Setting the Port Driving Cell
+      The set_driving_cell command directs PrimeTime to calculate delays as though the
+      port were an instance of a specified library cell. The port delay is calculated as a cell delay
+      that consists of only the load-dependent portion of the port.
+      The transition time for the port is also calculated as though an instance of that library
+      cell were driving the net. The delay calculated for a port with information from the
+      set_driving_cell command takes advantage of the actual delay model for that library
+      cell, whether it is nonlinear or linear. The input delay specified for a port with a driving cell
+      or drive resistance should not include the load-dependent delay of the port.
+      To display port transition or drive capability information, use the report_port command
+      with the -drive option.
+      With the set_driving_cell command you can specify the input rise and fall transition
+      times for the input of a driving cell using the -input_transition_rise or the
+      -input_transition_fall option. If no input transition is specified, the default is 0.
+
+
+
+
+PrimeTime® User Guide                                                                                179
+T-2022.03
+                                                                                               Feedback
+Chapter 6: Constraining the Design
+Drive Characteristics at Input Ports
+
+
+
+      Setting the Port Drive Resistance
+      The set_drive command defines the external drive strength or resistance for input and
+      inout ports in the current design. In the presence of wire load models, the transition time
+      and delay reported for the port are equal to Rdriver * Ctotal. PrimeTime uses this transition
+      time in calculating the delays of subsequent logic stages.
+      You can use the set_drive command to set the drive resistance on the top-level ports
+      of the design when the input port drive capability cannot be characterized with a cell in
+      the logic library. However, this command is not as accurate for nonlinear delay models
+      compared to the set_driving_cell command. The set_drive command is useful
+      when you cannot specify a library cell (for example, when the driver is a custom block not
+      modeled as a Synopsys library cell).
+
+
+      Setting a Fixed Port Transition Time
+      The set_input_transition command defines a fixed transition time for input ports. The
+      port has zero cell delay. PrimeTime uses the specified transition time only in calculating
+      the delays of logic driven by the port.
+      A fixed transition time setting is useful for
+      •   Comparing the timing of a design to another tool that supports only input transition
+          time.
+      •   Defining transition for ports at the top level of a chip, where a large external driver
+          and a large external capacitance exist. In this case, the transition time is relatively
+          independent of capacitance in the current design.
+
+
+      Displaying Drive Information
+      To display drive information, you can use the report_port command with the -drive
+      option.
+
+
+      Removing Drive Information From Ports
+      To remove drive information from ports, use the following commands.
+
+      Command                          Description
+
+      remove_driving_cell              Removes driving cell information from specified ports
+
+      reset_design                     Removes drive data and all user-specified data, such as clocks,
+                                       input and output delays
+
+
+
+
+PrimeTime® User Guide                                                                                180
+T-2022.03
+                                                                                     Feedback
+Chapter 6: Constraining the Design
+Port Capacitance
+
+
+      Command                        Description
+
+      set_drive 0.0                  Removes drive resistance
+
+      set_input_transition 0.0       Removes input transition
+
+
+
+
+Port Capacitance
+     To accurately time a design, you need to describe the external load capacitance of
+     nets connected to top-level ports, including the pin and wire capacitances, by using the
+     set_load command.
+
+Figure 27     Output load
+
+
+
+
+                              Design                            set_load
+                               under
+                              analysis
+
+
+
+
+     Example 1
+     To specify the external pin capacitance of ports, enter
+     pt_shell> set_load -pin_load 3.5 {IN1 OUT1 OUT2}
+
+     You also need to account for wire capacitance outside the port. For prelayout, specify
+     the external wire load model and the number of external fanout points. This process is
+     described in Setting Wire Load Models Manually.
+     Example 2
+     For postlayout, specify the external annotated wire capacitance as wire capacitance on the
+     port. For example:
+     pt_shell> set_load -wire_load 5.0 {OUT3}
+
+     To remove port capacitance values, use the remove_capacitance command.
+
+
+
+
+PrimeTime® User Guide                                                                           181
+T-2022.03
+                                                                                        Feedback
+Chapter 6: Constraining the Design
+Wire Load Models
+
+
+
+Wire Load Models
+     To accurately calculate net delays, PrimeTime needs information about the parasitic
+     loads of the wire interconnections. Before placement and routing have been completed,
+     PrimeTime estimates these loads by using wire load models provided in the logic library.
+     Logic library vendors supply statistical wire load models to support estimating wire loads
+     based on the number of fanout pins on a net. You can set wire load models manually or
+     automatically.
+
+
+     Setting Wire Load Models Manually
+     To manually set a named wire load model on a design, instance, list of cells, or list of
+     ports, use the set_wire_load_model command.
+     For example, consider this design hierarchy:
+        TOP
+          MID (instance u1)
+            BOTTOM (instance u5)
+          MID (instance u2)
+            BOTTOM (instance u5)
+
+     To set a model called 10x10 on instances of BOTTOM, a model called 20x20 on instances
+     of MID, and a model called 30x30 on nets at the top level, use these commands:
+     pt_shell> set_wire_load_mode enclosed
+
+     pt_shell> set_wire_load_model -name 10x10 \
+               [all_instances BOTTOM]
+
+     pt_shell> set_wire_load_model -name 20x20 \
+               [all_instances MID]
+
+     pt_shell> set_wire_load_model -name 30x30
+
+     To capture the external part of a net that is connected to a port, you can set an external
+     wire load model and a number of fanout points. For example, to do this for port Z of the
+     current design:
+     pt_shell> set_wire_load_model -name 70x70 [get_ports Z]
+     pt_shell> set_port_fanout_number 3 Z
+
+     To calculate delays, PrimeTime assumes that port Z has a fanout of 3 and uses the 70x70
+     wire load model.
+     To see wire load model settings for the current design or instance, use the
+     report_wire_load command. To see wire load information for ports, use the
+
+
+
+PrimeTime® User Guide                                                                             182
+T-2022.03
+                                                                                         Feedback
+Chapter 6: Constraining the Design
+Wire Load Models
+
+
+     report_port command with -wire_load option. To remove user-specified wire load
+     model information, use the remove_wire_load_model command.
+
+
+     Automatic Wire Load Model Selection
+     PrimeTime can set wire loads automatically when you update the timing information for
+     your design. If you do not specify a wire load model for a design or block, PrimeTime
+     automatically selects the models based on the wire load selection group, if specified.
+     If you do not apply a wire load model or selection group but the library defines a
+     default_wire_load model, PrimeTime applies the library-defined model to the design.
+     Otherwise, the values for wire resistance, capacitance, length, and area are all 0.
+     Automatic wire load selection is controlled by selection groups, which
+     map the block sizes of the cells to wire load models. If you specify the
+     set_wire_load_selection_group command on the top design, or if the main logic library
+     defines a default_wire_load_selection_group, PrimeTime automatically enables wire
+     load selection.
+     When wire load selection is enabled, the wire load is automatically selected for
+     hierarchical blocks larger than the minimum cell area, based on the cell area of the block.
+     To set the minimum block size for automatic wire load selection, enter
+     pt_shell> set_wire_load_min_block_size size
+
+     In this command, size is the minimum block size for automatic wire load selection, in
+     library cell area units. The specified size must be greater than or equal to 0.
+     The auto_wire_load_selection environment variable specifies automatic wire load
+     selection. The default setting is true, enabling automatic wire load selection if a selection
+     group is associated with the design. To disable automatic wire load selection, enter
+     pt_shell> set auto_wire_load_selection false
+
+     To remove the wire load selection group setting, use the
+     remove_wire_load_selection_group command.
+
+
+     Setting the Wire Load Mode
+     The current wire load mode setting, which can be set with the set_wire_load_mode
+     command, determines the wire load models used at different levels of the design
+     hierarchy. There are three possible mode settings: top, enclosed, or segmented.
+     If the mode for the top-level design is top , the top-level wire load model is used to
+     compute wire capacitance for all nets within the design, at all levels of hierarchy. If the
+     mode for the top-level design is either enclosed or segmented, wire load models on
+
+
+
+PrimeTime® User Guide                                                                              183
+T-2022.03
+                                                                                        Feedback
+Chapter 6: Constraining the Design
+Wire Load Models
+
+
+      hierarchical cells are used to calculate wire capacitance, resistance, and area for nets
+      inside these blocks.
+      If the enclosed mode is set, PrimeTime determines net values using the wire load model
+      of the hierarchical cell that fully encloses the net. If the segmented mode is set, PrimeTime
+      separately determines net values for segments of the net in each level of hierarchy, and
+      then obtains the total net value from the sum of all segments of the net.
+      If you do not specify a mode, the default_wire_load_mode setting of the main logic
+      library is used. The enclosed mode is often the most accurate. However, your ASIC
+      vendor might recommend a specific mode.
+      To set the wire load mode to enclosed on the current design, enter
+      pt_shell> set_wire_load_mode enclosed
+
+      This design example sets the following wire load models:
+      set_wire_load_model -name Big (the current design)
+      set_wire_load_model -name Medium (instances U1 and U2)
+      set_wire_load_model -name Small (instance U2/U1)
+
+Figure 28     Design example for wire load mode settings
+
+             Design
+
+                 U1                                      U2
+                                                               U1
+
+                             n1          n2         n3    n4    n5         n6
+
+
+                                                                        Small
+                             Medium                                   Medium
+
+                                                  Big
+
+
+      The following table lists the resulting wire load modes and models that apply to the nets in
+      the design example.
+      Table 11        Wire load models
+
+Wire load setting      Wire load model        Applies to these nets
+
+top                    Big                    All nets
+
+enclosed               Big                    n3, U1/n2, U2/n4, U2/U1/n5
+
+
+
+
+PrimeTime® User Guide                                                                            184
+T-2022.03
+                                                                                       Feedback
+Chapter 6: Constraining the Design
+Slew Propagation
+
+
+     Table 11          Wire load models (Continued)
+
+Wire load setting       Wire load model      Applies to these nets
+
+                        Medium               U1/n1
+
+                        Small                U2/U1/n6
+
+segmented               Big                  n3
+
+                        Medium               U1/n1, U1/n2, U2/n4
+
+                        Small                U2/U1/n5, U2/U1/n6
+
+
+
+     Reporting Wire Load Models
+     To obtain wire load reports from PrimeTime, use these commands:
+     •   report_wire_load
+
+     •   report_port -wire_load
+
+
+
+Slew Propagation
+     At a pin where multiple timing arcs meet or merge, PrimeTime computes the slew per
+     driving arc at the pin, then selects the worst slew value at the pin to propagate along. Note
+     that the slew selected might not be from the input that contributes to the worst path, so the
+     calculated delay from the merge pin could be pessimistic.
+
+Figure 29     Maximum slew propagation
+                  S1
+
+
+             S2
+                              Maximum (S1, S2, S3)
+             S3
+
+
+
+     Minimum slew propagation is similar to maximum slew propagation. In other words,
+     PrimeTime selects minimum slew based on the input with the best delay at the merge
+     point.
+
+
+
+
+PrimeTime® User Guide                                                                          185
+T-2022.03
+                                                                                         Feedback
+Chapter 6: Constraining the Design
+Design Rule Constraints
+
+
+
+Design Rule Constraints
+     PrimeTime checks for violations of design rule constraints that are defined in the library or
+     by PrimeTime commands. These rules include
+     •   Maximum limit for transition time
+     •   Maximum and minimum limits for capacitance
+     •   Maximum limit for fanout
+     To report design rule constraint violations in a design, use the report_constraint
+     command.
+
+
+     Maximum Transition Time
+     The maximum transition time in PrimeTime is treated in a similar fashion as the slew.
+     In this topic, slew is first discussed in the context of thresholds and derating, then the
+     discussion is extended to maximum transition time.
+     You can represent a SPICE waveform as a floating-point number in Liberty tables. In the
+     following figure,
+     •   SPICE waveform is measured 10-90
+     •   SPICE waveform is showing in blue line
+     •   SPICE measured transition time with slew threshold 10-90 is 10 ps
+     •   Linearized waveform measuring transition time with slew threshold 0-100 is 12.5 ps =
+         10 * (100-0) / (90-10)
+     •   Representation as single float with slew threshold 30-70 is 5 ps = 12.5 * (70-30) /
+         (100-0)
+
+
+
+
+PrimeTime® User Guide                                                                             186
+T-2022.03
+                                                                                       Feedback
+Chapter 6: Constraining the Design
+Design Rule Constraints
+
+
+Figure 30     SPICE waveform
+
+
+
+
+     The SPICE waveform can thus be represented as a floating-point number in Liberty tables
+     or in PrimeTime report as follows:
+     •   A: 10-ps slew threshold as 10-90 with slew derating 1.0
+     •   B: 12.5-ps slew threshold as 10-90 with slew derating 0.8
+     •   C: 5-ps slew threshold as 10-90 with derating 2.0
+     Note that slew threshold in library is always the threshold used for SPICE measurement.
+     Case A is the native representation, measured in Liberty. Cases B and C are rescaled to
+     the slew threshold 0-100 and 30-70, respectively.
+
+     Multiple Threshold and Derating Values in Libraries
+     Liberty allows an arbitrary slew threshold to minimize the error due to slew linearization
+     for various process technologies. Therefore, whenever slew information from a library
+     interacts with another library (or even a pin of the same library with different slew
+     threshold), a conversion to a common base is required.
+     Assume that you have a library L1 with thresholds TL1-TH1, derate SD1, and L2 with TL2-
+     TH2, derate SD2. Note that L1, L2 are just entities that have their own local thresholds,
+     such as library, design, and library pin.
+     Assume S1 - slew in local thresholds and a derate of L1, and S2 - slew in local thresholds
+     and a derate of L2. The same conversion rule applies if maximum transition is considered
+     instead of slews.
+     You can then obtain slews expressed in the local thresholds and derate of the other object
+     as follows:
+     Equivalent slew S2_1, which is slew S2 expressed in the local derate /threshold of L1:
+     S2_1 = S2 * (SD2 / (TH2 - TL2)) * ((TH1 - TL1)/ SD1)
+
+
+
+PrimeTime® User Guide                                                                             187
+T-2022.03
+                                                                                            Feedback
+Chapter 6: Constraining the Design
+Design Rule Constraints
+
+
+     The meaning of S2_1 is a float number that represents a waveform of slew S2 but
+     measured in the context of L1. The S1 and S2_1 can be directly compared; the S1 and S2
+     cannot.
+     Note that in the presence of detailed RC, slew is computed appropriately in the context of
+     threshold and derate.
+     To learn how maximum transition constraint is handled in the context of thresholds and
+     derate, see Specifying the Maximum Transition Constraint.
+
+     Specifying the Maximum Transition Constraint
+     Maximum transition constraints can come from a user input, library, and library pin. User-
+     specified maximum transition constraints are expressed with the main library derate and
+     slew threshold of PrimeTime.
+     The set_max_transition command sets a maximum limit on the transition time for
+     all specified pins, ports, designs, or clocks. When specified on clocks, pins in the clock
+     domain are constrained. Within a clock domain, you can optionally restrict the constraint
+     further to only clock paths or data paths, and to only rising or falling transitions.
+     By default, during constraint checking on a pin or port, the most restrictive constraint
+     specified on a design, pin, port, clock (if the pin or port is in that clock domain), or library is
+     considered. This is also true where multiple clocks launch the same path.
+     To change the default behavior, set the timing_enable_max_slew_precedence to true.
+     In that case, where the constraint is set determines the priority, irrespective of the relative
+     constraint values, as follows:
+     1. Pin or port level
+     2. Library-derived constraint
+     3. Clock or design level
+     The set_max_transition command places the max_transition attribute, which is a
+     design rule constraint, on the specified objects. In PrimeTime, the slews and maximum
+     transition constraint attributes are reported in the local threshold and derate of each
+     pin or library. For example, the maximum transition time set in the context of the design
+     threshold and derate is scaled to that of the design pin's threshold and derate. The scaling
+     of transition time for slew threshold is on by default.
+
+
+
+
+PrimeTime® User Guide                                                                               188
+T-2022.03
+                                                                                                      Feedback
+Chapter 6: Constraining the Design
+Design Rule Constraints
+
+
+Table 12       Converting slews between different slew thresholds and derating factors
+
+      Object            Main library    Local library Library pin          Design             Cell instance
+                        (L1)                                                                  pin
+
+      Threshold and Yes                 Yes              Yes for slew      Uses main          The more local
+      derate source                                      threshold.        library derate     trip points
+                                                         Inherits derate   and slew           have higher
+                                                         of the library    threshold          precedence than
+                                                                                              the more general
+                                                                                              ones
+
+      Limit             Yes             Yes              Yes               Yes - in main     The most
+      (maximum                                                             library threshold restrictive limit
+      transition)                                                          and derate        applies
+
+      Thresholds        20/80           40/60            30/70 (rise/fall) Uses main         30/70 (rise/fall)
+                        (rise/fall)     (rise/fall)                        library threshold
+
+      Derate            0.5 (defined)   0.6 (defined)    0.6 (inherited)   0.5 (inherited)    0.6 (inherited)
+
+      PrimeTime or      10 ps           10 ps            10 ps             10 ps              10 ps
+      Liberty value
+      (slew or limit)
+
+      Linearized        80              60               70                80                 80
+      SPICE                                                                %                  %
+                                        40               30
+      waveform:         20                                                 20                 20
+                                                                           %                  %
+      (rise) Similar            5               6                6                 5                  6
+      for fall
+
+      Expressed in      10 ps           10 * (0.6 / (0.6 10 * (0.6 / (0.7 10 * 0.5 / (0.8     10 * 0.6 / (0.7
+      derate and                        – 0.4)) * ( (0.8 – 0.3)) * ((0.8 – – 0.2) * ((0.8 –   – 0.3) * ((0.8 –
+      threshold                         – 0.2)/0.5)      0.2)/ / 0.5)      0.2) / 0.5)        0.2) / 0.5)
+      of the main
+      library
+
+      PrimeTime or      10 ps           -                -                 -                  -
+      Liberty value
+      (slew or limit)
+
+      Main            10 ps             10 * (0.5/(0.8   10 * (0.5/(0.8 – 10*(0.5/((0.8 –     10 * (0.5/(0.8 –
+      library limit                     -.02)) * ((.6    0.2)) * ((0.7 – 0.2)) * ((0.8 –      0.2)) * ((0.7 –
+      expressed in                      -.4)/.6)         0.3) / 0.6)      0.2)/0.5)           0.3)/0.6)
+      local threshold
+      and derate
+
+
+     To apply a global derating factor to max_transition values, set the
+     timing_max_transition_derate variable.
+
+
+
+
+PrimeTime® User Guide                                                                                            189
+T-2022.03
+                                                                                          Feedback
+Chapter 6: Constraining the Design
+Design Rule Constraints
+
+
+     To see the capacitance constraint evaluations, run the report_constraint
+     -max_capacitance command. To see port capacitance limits, run the report_port
+     -design_rule command. To see the default capacitance settings for the current design,
+     run the report_design command. To remove user-specified capacitance limits, run the
+     remove_max_capacitance command.
+
+     Evaluating the Maximum Transition Constraint
+     To view the maximum transition constraint evaluations, use the report_constraint
+     -max_transition command. PrimeTime reports all constraints and slews in the threshold
+     and derate of the pin of the cell instance, and the violations are sorted based on the
+     absolute values (that is, they are not expressed in that of design threshold and derate).
+     You can also use the report_constraint command to report constraint calculations only
+     for maximum capacitance and maximum transition for a specified port or pin list. Use the
+     object_list option to specify a list of pins or ports in the current design that you want to
+     display constraint related information.
+     To see the port maximum transition limit, use the report_port -design_rule
+     command. To see the default maximum transition setting for the current design, use the
+     report_design command. To undo maximum transition limits previously set on ports,
+     pins, designs, or clocks, use remove_max_transition.
+     Example 1: Setting a Maximum Transition Limit
+     To set a maximum transition limit of 2.0 units on the ports of OUT*, enter
+     pt_shell> set_max_transition 2.0 [get_ports "OUT*"]
+
+     To set the default maximum transition limit of 5.0 units on the current design, enter
+     pt_shell> set_max_transition 5.0 [current_design]
+
+     To set the maximum transition limit of 4.0 units on all pins in the CLK1 clock domain, for
+     rising transitions in data paths only, enter
+     pt_shell> set_max_transition 4.0 [get_clocks CLK1] -data_path -rise
+
+     Example 2: Scaling the Maximum Transition by Slew Threshold
+     Consider library lib1 having a slew threshold of 10/90. The design has a maximum
+     transition limit set by you at 0.3 ns. The main library slew threshold for rise and fall
+     is 30/70. By using the report_constraint -max_transition -all_violators
+     -significant_digits 4 command, you get:
+                     Required       Actual
+     Pin             Transition    Transition        Slack
+      ---------------------------------------------------------
+     FF1/D           0.6000         0.4000           0.2000
+
+
+
+
+PrimeTime® User Guide                                                                           190
+T-2022.03
+                                                                                       Feedback
+Chapter 6: Constraining the Design
+Design Rule Constraints
+
+
+     Example 3: Scaling the Maximum Transition by Derating
+     Consider library lib1 having a slew derating factor of 0.5 and a slew threshold for rise
+     and fall of 30/70. You set a maximum transition on the design at 0.3 ns. The main
+     library slew threshold for rise and fall is 30/70 and slew derate is 1.0. By using the
+     report_constraint -max_transition -all_violators -significant_digits 4
+     command, you see:
+                     Required       Actual
+     Pin            Transition    Transition        Slack
+     ----------------------------------------------------------
+     FF1/D           0.6000        0.4000           0.2000
+
+
+     Minimum Capacitance
+     To specify a minimum capacitance limit on specific ports or on the entire design, run the
+     set_min_capacitance command. Setting a capacitance limit on a port applies to the net
+     connected to that port. Setting a capacitance limit on a design sets the default capacitance
+     limit for all nets in the design.
+     The set_min_capacitance command applies the min_capacitance attribute (a design
+     rule constraint) on the specified objects. Capacitance constraint checks are only applicable
+     for output pins. During a constraint check, the most restrictive constraint is considered.
+     To see the capacitance constraint evaluations, run the report_constraint
+     -min_capacitance command. To see port capacitance limits, run the report_port
+     -design_rule command. To see the default capacitance settings for the current design,
+     run the report_design command. To remove user-specified capacitance limits, run the
+     remove_min_capacitance command.
+
+     To set a minimum capacitance limit of 0.2 units on the ports of OUT*, enter
+     pt_shell> set_min_capacitance 0.2 [get_ports "OUT*"]
+
+     To set the default minimum capacitance limit of 0.1 units on the current design, enter
+     pt_shell> set_min_capacitance 0.1 [current_design]
+
+
+     Maximum Capacitance
+     To specify a maximum capacitance limit, run the set_max_capacitance command.
+     Setting a capacitance limit on a port applies to the net connected to that port. Setting a
+     capacitance limit on a design sets the default capacitance limit for all nets in the design.
+     You have the option to additionally specify a maximum capacitance limit on pins or clocks.
+     When specified on clocks, the pins in the clock domain are constrained. Within a clock
+     domain, you can optionally restrict the constraint further to only clock paths or data paths
+     and only to rising or falling capacitance.
+
+
+
+PrimeTime® User Guide                                                                           191
+T-2022.03
+                                                                                              Feedback
+Chapter 6: Constraining the Design
+Design Rule Constraints
+
+
+     The set_max_capacitance command applies the max_capacitance attribute (a design
+     rule constraint) on the specified objects. Capacitance constraint checks are only applicable
+     for output pins. During a constraint check, the most restrictive constraint is considered.
+     To apply a global derating factor to max_capacitance values, set the
+     timing_max_capacitance_derate variable.
+
+     To see the capacitance constraint evaluations, run the report_constraint
+     -max_capacitance command. To see port capacitance limits, run the report_port
+     -design_rule command. To see the default capacitance settings for the current design,
+     run the report_design command. To remove user-specified capacitance limits, run the
+     remove_max_capacitance command.
+
+     Constraining Rise and Fall Maximum Capacitance
+     To constrain rise and fall maximum capacitance at the output of the driver pins in the clock
+     path and data path for clocks in the design, use the set_max_capacitance command.
+     The tool applies maximum capacitance constraints on a clock to all pins in the clock
+     network (clock path) and the pins in the launching path of the clock (data path of the
+     clock). Optionally, you can restrict constraints on a clock to a clock path, data path, rise,
+     and fall capacitance.
+
+Figure 31     Restrict constraints
+
+                                                    Q
+               D
+                                          FF
+              clk
+                                                                   Launching path (data path)
+
+                                 Clock network (clock path)
+
+
+     If the list of objects is a clock list, you can optionally restrict the constraint to only certain
+     path types or transition types by using the -clock_path, -data_path, -rise, or -fall
+     options.
+     If a pin (port) is subject to different maximum capacitance constraints specified on the
+     design, library, clock (and port), the most restrictive constraint has priority. The tool reports
+     the slack at a pin as the difference between the most restrictive constraint and the total
+     capacitance at the pin (port).
+     This feature is applicable to generated clocks. To report the constraint violations, use the
+     report_constraint command.
+
+
+
+
+PrimeTime® User Guide                                                                                 192
+T-2022.03
+                                                                                         Feedback
+Chapter 6: Constraining the Design
+Design Rule Constraints
+
+
+     Frequency-Based Maximum Capacitance Checks
+     A library can contain lookup tables that specify frequency-based max_capacitance values
+     for each driver pin. The pin frequency is the maximum frequency of all clocks that launch
+     signals arriving at the pin.
+     By default, the tool considers the max_capacitance values from frequency-based lookup
+     tables if available. Design rule constraint (DRC) checking for attribute reporting, the
+     report_constraint command, extracted timing model (ETM) generation, and ECO fixing
+     use the smallest of the following max_capacitance values:
+     •   The max_capacitance value from the lookup table in the library
+     •   The library-cell max_capacitance value
+     •   All user-specified max_capacitance values defined at the pin, port, clock, and design
+         levels
+     To completely ignore any max_capacitance values from the lookup table, set the
+     timing_enable_library_max_cap_lookup_table variable to false.
+
+     To give precedence to the max_capacitance value from the lookup table over the library-
+     cell max_capacitance value, set the timing_library_max_cap_from_lookup_table
+     variable to true.
+     The following table shows how the variable settings affect the selection of the
+     max_capacitance values.
+
+     Table 13       Variables that affect the max_capacitance value selection
+
+                            timing_library_max_cap_from_loo timing_library_max_cap_from_loo
+                            kup_table = false (the default) kup_table = true
+
+timing_enable_library_ma DRC checking uses the minimum of DRC checking uses the minimum of
+x_cap_lookup_table =     • All user-specified                  • All user-specified
+true (default)             max_capacitance values defined        max_capacitance values defined
+                           at the pin, port, clock, and design   at the pin, port, clock, and design
+                           levels                                levels
+                         • The max_capacitance value from • The max_capacitance value
+                           the lookup table                      from the lookup table; if this value
+                         • The cell-level max_capacitance        does not exist, the cell-level
+                           value defined in the library          max_capacitance value defined
+                                                                 in the library is considered instead
+
+timing_enable_library_ma DRC checking uses the minimum of DRC checking uses the minimum of
+x_cap_lookup_table =     • All user-specified                  • All user-specified
+false                      max_capacitance values defined        max_capacitance values defined
+                           at the pin, port, clock, and design   at the pin, port, clock, and design
+                           levels                                levels
+                         • The cell-level max_capacitance      • The cell-level max_capacitance
+                           value defined in the library          value defined in the library
+
+
+
+PrimeTime® User Guide                                                                             193
+T-2022.03
+                                                                                       Feedback
+Chapter 6: Constraining the Design
+Design Rule Constraints
+
+
+     Maximum Capacitance Checking With Case Analysis
+     By default, maximum capacitance checking is not performed on pins in the path of
+     constant propagation. To enable maximum capacitance checking on the constant
+     propagation path, set the timing_enable_max_capacitance_set_case_analysis
+     variable to true.
+
+
+     Maximum Fanout Load
+     The set_max_fanout command sets a maximum fanout load for specified output ports
+     or designs. This command sets the max_fanout attribute (a design rule constraint) on the
+     specified objects.
+     Setting a maximum fanout load on a port applies to the net connected to that port. Setting
+     a maximum fanout load on a design sets the default maximum for all nets in the design. In
+     case of conflict between these two values, the more restrictive value applies.
+     Library cell pins can have a max_fanout value specified. PrimeTime uses the more
+     restrictive of the limit you set or the limit specified in the library.
+     To see maximum fanout constraint evaluations, use the report_constraint
+     -max_fanout command. To see port maximum fanout limits, use the report_port
+     -design_rule command. To see the default maximum fanout setting for the current
+     design, use the report_design command.
+     To undo maximum fanout limits you set on ports or designs, use the remove_max_fanout
+     command.
+     To set a maximum fanout limit of 2.0 units on the ports IN*, enter the following syntax:
+     pt_shell> set_max_fanout 2.0 [get_ports "IN*"]
+
+     To set the default maximum fanout limit of 5.0 units on the current design, enter the
+     following syntax:
+     pt_shell> set_max_fanout 5.0 [current_design]
+
+     Fanout Load Values for Output Ports
+     The fanout load for a net is the sum of fanout_load attributes for the input pins and
+     output ports connected to the net. Output pins can have maximum fanout limits, specified
+     in the library or set through the set_max_fanout command. By default, ports are
+     considered to have a fanout load of 0.0. The set_fanout_load command specifies the
+     expected fanout load for output ports in the current design.
+     To set the fanout load on ports matching OUT* to 3.0, enter the following syntax:
+     pt_shell> set_fanout_load 3.0 "OUT*"
+
+
+
+
+PrimeTime® User Guide                                                                           194
+T-2022.03
+                                                                                        Feedback
+Chapter 6: Constraining the Design
+Ideal Networks
+
+
+     For more information, see the Synopsys Timing Constraints and Optimization User Guide.
+
+
+Ideal Networks
+     PrimeTime allows you to create ideal networks, on which no design rule constraints
+     are checked. During the pre-layout design stages, you might prefer to ignore large
+     unoptimized networks with high fanout and capacitance, and focus instead on violations
+     arising from other sources. Using ideal networks reduces runtime because PrimeTime
+     uses “ideal timing” rather than internally calculated timing. In this way, ideal networks are
+     similar to ideal clock networks, but they can also be applied to data networks.
+     Ideal networks — sets of connected ports, pins, nets, and cells — are exempt from
+     timing updates and design rule constraint fixing. That is, ideal networks ignore
+     max_capacitance, max_fanout, and max_transition design rule checks. When you
+     specify the source of the ideal network, the pins, ports, nets, and cells contained therein
+     are treated as ideal objects. You or ideal propagation must mark ideal objects.
+     To learn more about ideal networks, see
+     •   Propagating Ideal Network Properties
+     •   Using Ideal Networks
+     •   Using Ideal Latency
+     •   Using Ideal Transition
+     •   Reporting of Ideal Clocks in Full Clock Expanded Mode
+
+
+     Propagating Ideal Network Properties
+     When you specify the source objects (ports, leaf-level pins) of an ideal network, the nets,
+     cells, and pins in the transitive fanout of the source objects can be treated as ideal.
+     Propagation of the ideal network property is governed by the following rules:
+     •   Pin is marked as ideal if it is one of the following:
+         ◦   Pin is specified in the object list of the set_ideal_network command
+         ◦   Driver pin and its cell are ideal
+         ◦   Load pin attached to an ideal net
+     •   Net is marked as ideal if all its driving pins are ideal.
+
+
+
+
+PrimeTime® User Guide                                                                           195
+T-2022.03
+                                                                                           Feedback
+Chapter 6: Constraining the Design
+Ideal Networks
+
+
+     •   Combinational cell is marked as ideal if either all input pins are ideal or it is attached to
+         a constant net and all other input pins are ideal.
+         Note:
+            Ideal network propagation can traverse combinational cells, but it stops at
+            sequential cells.
+     PrimeTime propagates the ideal network during a timing update and propagates again
+     from ideal source objects as necessary to account for changes in the design, for example,
+     ECOs.
+
+
+     Using Ideal Networks
+     Using the set_ideal_network command, specify which networks you want set as ideal.
+     Indicate the sources of the ideal network with the object_list argument. For example,
+     the following command sets the ideal network property on the input port P1, which is
+     propagated along the nets, cells, and pins in the transitive fanout of P1:
+     pt_shell> set_ideal_network P1
+
+     Use the -no_propagate option to limit the propagation of the ideal network for only the
+     nets and pins that are electrically connected to the ideal network source. If, for example,
+     you enter
+     pt_shell> set_ideal_network -no_propagate net1
+
+     only the net, net1, its driver pins, and its load pins are marked as ideal. No further
+     propagation is performed.
+     If you do not use the -no_propagate option with this command, PrimeTime sets the ideal
+     property on the specified list of pins, ports, or nets and propagates this property according
+     to the propagation rules defined in Propagating Ideal Network Properties.
+     To remove an ideal network, use the remove_ideal_network command. To report ideal
+     ports, pins, nets, or cells, use the report_ideal_network command, as shown in the
+     following example:
+     pt_shell> report_ideal_network -timing -load_pin -net -cell
+     ...
+
+     Source ports    Latency                    Transition
+     and pins        Rise       Fall            Rise       Fall
+                     min max    min max         min max    min max
+     ---------------------------------------------------------------
+     middle/p_in      -- --    --    --         --   --    --   --
+
+     Internal pins            Latency                         Transition
+     with ideal timing        Rise           Fall             Rise       Fall
+                              min max        min max          min max    min max
+
+
+PrimeTime® User Guide                                                                              196
+T-2022.03
+                                                                                          Feedback
+Chapter 6: Constraining the Design
+Ideal Networks
+
+
+     ---------------------------------------------------------------
+     n3_i/B             5.62 5.62 --    --      --   --    --   --
+     n0_i/Z             1.34 --    1.34 --      --   --    --   --
+
+     Boundary pins      Latency                 Transition
+                        Rise       Fall         Rise       Fall
+                        min max    min max      min max    min max
+     ---------------------------------------------------------------
+     middle/p_out       --   --    --   --      --   --    --   --
+     Nets
+     ---------------------------------------------------------------
+     p_in
+     p_out
+     n2
+     n1
+     n0
+
+     Cells
+     ---------------------------------------------------------------
+     n3_i
+     n2_i
+     n1_i
+     n0_i
+
+
+     Using Ideal Latency
+     By default, the delay of an ideal network is zero. You can specify ideal latency on pins and
+     ports in an ideal network by using the set_ideal_latency command. Ideal latency is
+     accumulated along a path in the same way as a delay value.Note that ideal latency takes
+     effect only if the object is ideal. If it is not in an ideal network, PrimeTime issues a warning
+     to that effect in the report_ideal_network command.Remove latency from a pin or port
+     by using the remove_ideal_latency command.
+
+
+     Using Ideal Transition
+     The transition time of an ideal network is zero by default. You can, however, specify an
+     ideal transition time value with the set_ideal_transition command.
+     If you set an ideal transition value on an object, the value is propagated from that object
+     along the ideal network either to the network boundary pins or until another ideal transition
+     value is encountered.
+     Ideal transitions you have annotated on pins or ports take effect only if the object is ideal.
+     If the object is not ideal, PrimeTime issues a warning in the report_ideal_network
+     command informing you of this. Use the remove_ideal_transition command to remove
+     the transition time you set on a port or pin.
+
+
+
+
+PrimeTime® User Guide                                                                             197
+T-2022.03
+                                                                                        Feedback
+Chapter 6: Constraining the Design
+Checking the Constraints
+
+
+
+     Reporting of Ideal Clocks in Full Clock Expanded Mode
+     By default, when you use the report_timing -path_type full_clock_expanded
+     command, the report does not show the clock path through an ideal clock network.
+     Instead, it shows a single line with the ideal clock latency at the clock arrival point.
+     You might want to know the topological path through the ideal clock network. For example,
+     you might want to find out which ideal clock path is reaching a register where you did not
+     expect it.
+     To report clock paths through ideal clock networks, set the following control variable:
+     pt_shell> set_app_var timing_report_trace_ideal_clocks true
+     true
+     pt_shell> report_timing -path_type full_clock_expanded...
+       ...
+       Point                                                 Incr       Path
+       -----------------------------------------------------------------------
+       clock CLK0' (rise edge)                               4.00       4.00
+       clock source latency                                  0.00       4.00
+       CLK0 (in)                                             0.00 &     4.00 f
+       C_D950/C_CLK/U142/Z (AN2P)                            0.61 &     4.61 f
+       C_D950/C_CLK/C_DCLKA_GEN_DMA_CLK/I16/Z (DLY6)         0.57 &     5.18 f
+       C_D950/C_CLK/C_DCLKA_GEN_DMA_CLK/I20/Z (IV)           0.08 &     5.26 r
+        ... full clock path ...
+       C_DMA/i0/i2/U5xI_7_00/Z (ITSENX4)                     0.68 &     8.43 r
+       C_DMA/i0/i2/U5xCBUF_GCKB_EN/G0 (CBUF01X8)             0.35 &     8.78 r
+       C_DMA/i0/i2/GCKB_EN_I/U5xCBUF_GCKB_EN_L1/Z (BF2T8)    0.02 &     8.80 r
+       propagated network delay removal                     -4.80       4.00
+       clock network delay (ideal)                           1.00       5.00
+       C_DMA/i0/i9/IOE2_reg/I6/CP (FD1S)                     0.00 &     5.00 r
+       C_DMA/i0/i9/IOE2_reg/I6/QN (FD1S)                     0.37 &     5.37 f
+        ... full data path ...
+
+
+     With the timing_report_trace_ideal_clocks variable set to true, the report shows
+     the full ideal clock path and potential incremental delay along the path. At the clock arrival
+     point, the report applies an adjustment to negate the propagated delay calculation and
+     obtain the ideal clock edge time. It then applies the ideal clock network delay.
+     This option similarly controls reporting of paths by the report_clock_timing -verbose
+     and report_min_pulse_width -path_type full_clock_expanded commands.
+
+
+Checking the Constraints
+     Before you begin a full analysis, it is a good idea to check your design characteristics and
+     constraints. Paths that are incorrectly constrained might not appear in the violation reports,
+     possibly causing you to overlook paths with violations.
+
+
+
+PrimeTime® User Guide                                                                           198
+T-2022.03
+                                                                                                Feedback
+Chapter 6: Constraining the Design
+Checking the Constraints
+
+
+
+     Design Reports
+     Before running a full timing analysis, you can check the design with the commands in the
+     following table. After running timing analysis, these commands can also help you to debug
+     violations in the design.
+     Table 14       Design reporting commands
+
+Command                         Description
+
+report_bus                      Reports information about buses (pins or ports) in the current
+                                instance or current design.
+
+report_cell                     Lists the cells used and cell information such as the library
+                                name, input names, output names, net connections, cell area,
+                                and cell attributes.
+
+report_clock                    Reports the clocks defined for the design, showing for
+                                each clock the name, period, rise and fall times, and timing
+                                characteristics such as latency and uncertainty.
+
+report_design                   Lists the attributes of the design, including the chosen operating
+                                conditions, wire load information, design rules, and derating
+                                factors.
+
+report_disable_timing           Reports disabled timing arcs.
+
+report_hierarchy                Generates a hierarchical list of submodules and leaf-level cells in
+                                the current design.
+
+report_lib                      Reports a specified library showing the time units of the library,
+                                capacitance units, wire load information, defined operating
+                                conditions, logic trip-point thresholds, and names of library cells.
+
+report_net                      Lists the nets and shows net information such as the fanin,
+                                fanout, capacitance, wire resistance, number of pins, net
+                                attributes, and connections.
+
+report_path_group               Reports the path groups. PrimeTime organizes timing paths into
+                                groups based on the conditions at the path endpoints.
+
+report_port                     Lists the ports and shows port information such as the direction,
+                                pin capacitance, wire capacitance, input delay, output delay,
+                                related clock, design rules, and wire load information.
+
+report_reference                Lists hierarchical references, showing for each submodule the
+                                reference name, unit area, number of occurrences, total area,
+                                and cell attributes.
+
+report_transitive_fanin         Reports the logic that fans in to specified pins, ports, or nets.
+
+report_transitive_fanout        Reports the logic that fans out from specified pins, ports, or nets.
+
+
+
+PrimeTime® User Guide                                                                                  199
+T-2022.03
+                                                                                             Feedback
+Chapter 6: Constraining the Design
+Checking the Constraints
+
+
+     Table 14       Design reporting commands (Continued)
+
+Command                         Description
+
+report_units                    Shows the units of measurement for current, capacitance,
+                                resistance, time, and voltage used in the current design.
+
+report_wire_load                Shows the wire load models set on the current design or on
+                                specified cells.
+
+
+
+     Constraint Checking With the check_timing Command
+     To check for constraint problems such as undefined clocking, undefined input arrival
+     times, and undefined output constraints, use the check_timing command. This command
+     also provides information about potential problems related to minimum clock separation
+     (for master-slave clocking), ignored timing exceptions, combinational feedback loops,
+     and latch fanout. You can correct unconstrained paths by adding constraints, such as
+     create_clock, set_input_delay , and set_output_delay .
+
+     The following example shows a typical check_timing report:
+     pt_shell> check_timing
+
+     Information: Checking 'no_clock'.
+     Warning: There are 4 register clock pins with no clock.
+     Information: Checking 'no_input_delay'.
+     Information: Checking 'unconstrained_endpoints'.
+     Information: Checking 'generic'.
+     Information: Checking 'latch_fanout'.
+     Warning: There are 2 level-sensitive latches which fanout to
+     themselves.
+     Information: Checking 'loops'.
+     Warning: There are 6 timing loops in the design.
+     Information: Checking 'generated_clocks'.
+
+     By default, the check_timing command performs several types of constraint checking
+     and issues a summary report like the one shown in the preceding example. To get a
+     detailed report, use the -verbose option. To add to or subtract from the default list
+     of checks, use the -include or -exclude option of the check_timing command or
+     set the timing_check_defaults variable to specify the list of checks for subsequent
+     check_timing commands. For a list of all checks performed by the check_timing
+     command, see the man page.
+     Warnings reported by the check_timing command do not necessarily indicate true design
+     problems. To obtain more information, you can use a variety of report commands to get
+     information about the characteristics of the design and the timing constraints that have
+     been placed on the design.
+
+
+
+PrimeTime® User Guide                                                                              200
+T-2022.03
+                                                                                     Feedback
+Chapter 6: Constraining the Design
+Checking the Constraints
+
+
+Figure 32      Multiple clock fanin
+
+
+              clk1
+
+              clk2
+
+            Select
+
+
+
+Figure 33      Self-looping latch
+
+
+
+                                    D   Q
+
+                                    G
+
+
+
+
+Figure 34      Latch fanout to another latch of the same clock
+
+                           L1                               L2
+                       D        Q       Combinational   D        Q
+                                           logic
+                       G                                G
+
+             phi1
+
+
+
+     Note:
+         If timing paths are unconstrained, the check_timing command only reports
+         the unconstrained endpoints, not the unconstrained startpoints. Similarly, for
+         paths constrained only by set_max_delay, set_min_delay, or both rather than
+         set_input_delay and set_output_delay, the check_timing command only
+         reports any unconstrained endpoints, not unconstrained startpoints.
+
+
+     Detailed Constraint Checking and Debugging
+     To report incorrect constraints or other potential problems, use the detailed constraint
+     checking and debugging capabilities of the tool. This constraint checking capability
+     provides a broad set of predefined rules that cover problems in clocks, exceptions, cases,
+     and design rules, such as blocked timing paths and missing clock definitions.
+
+
+
+PrimeTime® User Guide                                                                       201
+T-2022.03
+                                                                                       Feedback
+Chapter 6: Constraining the Design
+Checking the Constraints
+
+
+     To run constraint checking from the PrimeTime shell,
+     1. (Optional) Specify the constraint checking setup in the .synopsys_gca.setup file.
+     2. Specify the current design by using the current_design command. For example:
+         pt_shell> current_design top
+
+     3. (Optional) Specify a constraint checking rule file that contains user-defined violation
+        waivers and custom rules by setting the gca_setup_file variable. For example:
+         pt_shell> set_app_var gca_setup_file ./top_rules.tcl
+
+     4. Perform constraint analysis by using the check_constraints command. For example:
+         pt_shell> check_constraints
+
+     5. To perform constraint analysis on another design, repeat steps 2 to 4. You can
+        optionally specify a different rule file. For example:
+         pt_shell> current_design block
+         pt_shell> set_app_var gca_setup_file ./block_rules.tcl
+         pt_shell> check_constraints
+         ...
+         ****************************************
+         Report : check_constraints
+         ...
+         ****************************************
+
+         Scenario Violations Count Waived Description
+         ---------------------------------------------------------------------
+         Design: counter
+         default                 30    0   Default scenario violations
+           error                 5     0
+             CAP_0001            5     0   Output/inout port 'port' has zero
+                                             or incomplete capacitance values.
+               1 of 5                  0   Output/inout port 'QA' has zero
+                                             or incomplete capacitance values.
+               2 of 5                  0   Output/inout port 'QB' has zero
+                                             or incomplete capacitance values.
+         ...
+         ---------------------------------------------------------------------
+         Total Error Messages       6    0
+         Total Warning Messages     25   0
+         Total Info Messages        0    0
+         Maximum memory usage for this GCA flow: 25.27 MB
+         CPU usage for this GCA flow: 0 seconds
+
+     To view the constraint checking results in the GUI, choose Constraints > View Constraint
+     Checking Results.
+
+
+
+
+PrimeTime® User Guide                                                                             202
+T-2022.03
+                                                                                      Feedback
+Chapter 6: Constraining the Design
+Checking the Constraints
+
+
+Figure 35     Constraint Checking Results Displayed in the GUI
+
+
+
+
+     Alternatively, you can perform constraint analysis in a separate constraint checking shell,
+     ptc_shell. For details, see Constraint Consistency.
+
+
+
+
+PrimeTime® User Guide                                                                         203
+T-2022.03
+

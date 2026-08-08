@@ -1,0 +1,640 @@
+CHAPTER 19 — Timing File Creation Using Apache Timing Engine (ATE)          RedHawk User Manual     | 517
+Introduction
+
+
+                                          Chapter 19
+                   Timing File Creation Using Apache
+                                 Timing Engine (ATE)
+Introduction
+
+              For accurate static and dynamic analysis in RedHawk, the Apache Timing Engine (ATE)
+              provides timing information such as clock domains, slew (transition times) and timing
+              windows. This information is provided through the timing file (also called the STA file).
+              In static analysis, RedHawk uses the timing file for deriving the frequency and transition
+              time information, which is then used for calculating the average power for the design
+              during the power calculation step. RedHawk also uses the clock network information to
+              determine the total clock network power. For dynamic analysis, RedHawk uses timing
+              window information from STA file. The timing window represents the earliest and latest
+              (min/max) timing events for a particular instance pin. It is not needed for static analysis,
+              but is needed for dynamic analysis in order to calculate switching time for each instance in
+              the design. ATE uses multi-threaded Verilog processing.
+              The timing file contains the following information:
+               • Clock domains and their frequency
+               • Min/max rise/fall slews for instance pins
+               • Min/max rise/fall arrival times for instance pins
+               • Constant instance pins (pins which are not switching)
+               • Clock domain associated with instance pins
+               • Clock tree identification
+              For timing file syntax refer to section "Timing Data File", page C-762.
+              In static analysis, if power values are imported using the ‘import power’ command, the
+              STA file is not used.
+              In dynamic analysis, if VCD data is being used and it is in “true time” mode, meaning it
+              contains timing information, timing windows from STA file are not used, since they are
+              derived from VCD. The slew and clock tree information is still derived from the STA file.
+              If a timing file is not provided to RedHawk:
+               • In static analysis, INPUT_TRANSITION and FREQUENCY GSR keywords are used
+                 to get slew and frequency values for all instances in calculating power. If the
+                 CLOCK_ROOTS GSR keyword is used, clock tree and instance frequency values are
+                 obtained from this, which can affect power calculation and static IR drop results.
+               • In dynamic analysis, frequency, slew and clock tree information can also be assigned
+                 using GSR keywords the same as in static analysis. However, RedHawk cannot
+                 determine switching times associated with each instance in the design unless true
+                 time VCD is used.
+
+Overview
+
+              The data flow in Figure 19-1 shows the input files, analysis steps and corresponding
+              content of the STA file.
+
+
+
+ANSYS, Inc.
+CHAPTER 19 — Timing File Creation Using Apache Timing Engine (ATE)             RedHawk User Manual   | 518
+Setting up ATE
+
+
+
+
+                     Input files                    Analysis steps                       STA file
+
+                    Verilog / DEF           Identify design’s logical topology
+
+
+                        SPEF                Annotate physical wire parasitics
+
+
+                        SDC                       Constraint the design                   CLOCK
+
+
+                       Liberty                Calculate cell and wire delays                SL
+
+
+                                                 Calculate timing events                    TW
+
+
+
+              Figure 19-1        ATE data flow
+
+              ATE is integrated into RedHawk and can be launched by setting the GSR ENABLE_ATE
+              keyword to 1. The SPEF files are parsed using the ATE engine and annotated to the DEF.
+              Advantage of the ATE spef parser is that it can annotate the SPEF data to instance/nets
+              in the DEF irrespective of hierarchy limitations (that are present in the default RedHawk
+              spef parser) and hence provide the best coverage/annotation for the SPEF input data.
+              The standard output from ATE is in adsRpt/ate.log. Other ATE files go to .apache/ATE/.
+              ATE-based SPEF import is more accurate in handling various corner cases related to
+              DEF/SPEF hierarchy mismatches. The only additional files needed are SDC files
+              specified using the GSR keyword ATE_CONSTRAINT_FILES.
+
+              PJX - Fast Fullchip Clock Jitter Analysis
+              RedHawk has a fast fullchip flow for Clock Jitter Analysis, with the following features:
+               • uses RedHawk voltages to derate per instance timing.
+               • uses SPICE-based APL characterization models to perform cell delay derating.
+               • uses STA to calculate clock arrival times at each clock pin.
+               • calculates differences in clock arrival time with N per cycle voltages per instance.
+               • provides text/GUI trace reports to identify the source of jitter.
+               • built into the multi-threaded Apache Timing Engine (ATE).
+               • the TCL command “perform full_chip_jitter” is available after multi-cycle voltage drop
+                 analysis.
+
+
+
+Setting up ATE
+
+
+
+
+ANSYS, Inc.
+CHAPTER 19 — Timing File Creation Using Apache Timing Engine (ATE)                RedHawk User Manual       | 519
+Setting up ATE
+
+              Configuration File
+
+              The ATE configuration file contains a list of file pointers to the design and library data. It
+              must be named <top_design_name>.ate. ATE automatically finds it in the current
+              directory based on its suffix and derives the top design name from its prefix. The file
+              format is as follows:
+                         set synopsys_lib {
+                              <list of Liberty files>
+                         }
+                         set verilog_netlist {
+                              <list of Verilog files>
+                         }
+                         set spef {
+                              <list of signal SPEF files>
+                         }
+                         set timing_constraints {
+                              <list of SDC files>
+                         }
+              ATE also can take a DEF netlist as input instead of using a Verilog netlist. In order to
+              specify DEF files as the design netlist, the 'def_netlist' keyword is used instead of
+              'verilog_netlist'.
+              The order of files in the above lists is not important except that the first file in Liberty list is
+              used for obtaining default settings about libraries (for example, reporting time unit,
+              operating condition, and slew thresholds). Therefore typically the main library is listed
+              first.
+              Furthermore, since the unit conventions are based on the first Liberty file, the unit
+              convention used in it must match the unit convention used in SDC files. For example, if
+              SDC time values are based on 'ns', the first Liberty file should be the one that has 'ns' as
+              its time_unit, or SDC values are incorrectly interpreted. SDC generators typically insert a
+              'set_units' command into the SDC file to allow the SDC reader to sanity check the
+              convention, but this command does not change the unit convention.
+              After top design name is derived from the configuration file name, the corresponding
+              module is found from the list of netlist files and the rest of the modules are linked to it.
+              The hierarchy levels of the netlist and SPEF files do not have to be same. ATE's SPEF
+              stitching handles arbitrary combinations.
+              ATE uses the 'DESIGN' keyword inside SPEF files to find corresponding reference cells in
+              the design, so there is no need to specify a block name for the SPEF files. For example :
+                        set synopsys_lib {
+                             /path/to/lib/file1.lib
+                             /path/to/lib/file2.lib
+                             /path/to/lib/file3.lib
+                        }
+                        set verilog_netlist {
+                             /path/to/verilog/fileA.v
+                             /path/to/verilog/fileB.v
+                             /path/to/verilog/fileC.v
+                             /path/to/verilog/fileD.v
+                        }
+                        set spef {
+                             /path/to/spef/fileK.spef.gz
+                             /path/to/spef/fileL.spef.gz
+
+
+ANSYS, Inc.
+CHAPTER 19 — Timing File Creation Using Apache Timing Engine (ATE)           RedHawk User Manual      | 520
+Setting up ATE
+
+                             /path/to/spef/fileM.spef.gz
+                             /path/to/spef/fileN.spef.gz
+                             /path/to/spef/fileO.spef.gz
+                        }
+                        set timing_constraints {
+                            /path/to/sdc/fileX.sdc
+                            /path/to/sdc/fileY.sdc
+                        }
+
+              In some cases it may be necessary to override the 'DESIGN' keyword in SPEF files to
+              assign a particular SPEF file to a particular reference cell. To do so, the 'cell_spef'
+              keyword can be used in the configuration file instead of 'spef'. For example:
+                        set cell_spef {
+                             { cell1_name /path/to/spef/fileK.spef.gz }
+                             { cell2_name /path/to/spef/fileL.spef.gz }
+                        }
+              In some cases it may be necessary to assign a particular SPEF file to a particular
+              instance. To do this the 'inst_spef' keyword can be used in the configuration file instead of
+              'spef'. For example:
+                         set inst_spef {
+                             { inst1_name /path/to/spef/fileK.spef.gz }
+                             { inst2_name /path/to/spef/fileL.spef.gz }
+                         }
+              A mixture of SPEF, cell_spef and inst_spef keywords can be used. Precedence is given
+              first to instance level definitions, then to cell level ,and then to the 'DESIGN' keyword in
+              the SPEF file.
+              The appropriate case analysis and constraints must be set up in the SDC file. Case
+              analysis is required to get the correct operating conditions for clock gating or muxing.
+
+              Command File
+
+              The following is a typical command file, which in most cases can be used as shown:
+
+                   set errorAction           continue
+
+                   LoadGeneralParam
+
+                   DataPreparation      -files all
+                   LoadLibrary          -error_action $errorAction
+                   LoadNetlist          -error_action $errorAction
+                   LoadTimingConstraint -error_action $errorAction
+                   LoadParasiticFile    -error_action $errorAction -ground_coupled_caps
+
+                   ta_set_clock_delay        -propagated [get_clocks *]
+
+                   getSTA * -gz
+
+
+              Above sequence of commands loads the library and design data, marks all clocks as
+              propagated and then launches ‘getSTA’, which does analysis and then generates the STA
+              timing file.
+
+
+
+ANSYS, Inc.
+CHAPTER 19 — Timing File Creation Using Apache Timing Engine (ATE)            RedHawk User Manual     | 521
+Setting up ATE
+
+              Clocks are marked as propagated, since otherwise clock pins at instances receive ideal
+              clocks, which creates inaccurate RedHawk simulations.
+
+              PJX flow uses STA voltage as nominal and control on threshold voltage
+
+              The RedHawk-PJX flow can control the generation of Timing Delay derating factors
+              (early/late) by a user-specified voltage threshold value, and also by using STA/LIB voltage
+              as nominal in cases of mismatches between STA and GSR voltages. The following
+              keywords are used to enable this:
+
+                  Threshold value
+                        ta_ppx_derate_factors_threshold_voltage <voltage>
+                    Specifies the threshold value for creating Timing Delay Derate Factors. The
+                    instances that have Effective Voltage (Veff for non min-max mode, and Vmin-Vmax
+                    for min max mode) above this threshold do not have Derate Factors in the
+                    derate_factors file.
+                      Example:
+                       setvar ta_ppx_derate_factors_threshold_voltage 0.95
+                    Default: Nominal Voltage is the threshold if no value is provided.
+
+                  Derate factors file
+                        ta_ppx_derate_factors_domain_threshold_file <domain_threshold_file>
+                    Specifies a file that contains Voltage Domain Threshold values for PJX to consider
+                    when creating Timing Delay Derate Factors. The thresholds can be linked to the
+                    VDD domain or VDD-GND pairs. The threshold specified using VDD-GND has a
+                    higher priority than thresholds specified using VDD domain.
+                      Example:
+                       setvar ta_ppx_derate_factors_domain_threshold_file threshold.txt
+                      Example file threshold.txt contents:
+                       vdd1 gnd1 1.14
+                       vdd1 0.95
+
+                  STA nominal voltage
+                        ta_ppx_use_sta_nominal_voltage [0|1]
+                    Specifies PJX to use STA Voltage as Nominal in case of conflict between STA
+                    Nominal Voltage (specified through STA environment - .lib/SDC) and RedHawk
+                    Nominal Voltage (specified through VDD_NETS keyword). The Timing Delay
+                    Derate Factors created are used to scale the instance cell delays from STA
+                    Nominal Voltage to the Effective Voltage annotated to the instance after RedHawk
+                    Static/Dynamic analysis.
+                      Example:
+                       setvar ta_ppx_use_sta_nominal_voltage 1
+                    Default: false. Nominal voltage specified in RedHawk environment is considered as
+                    reference.
+
+              Handling Ideal Clocks
+
+              If there are ideal clocks in the design (that is, clock tree synthesis at some clocks is not
+              completed and the root clock driver drives many instances directly), they should not be
+              marked as propagated. Otherwise, since the clock driver has a very large fanout,
+
+
+
+
+ANSYS, Inc.
+CHAPTER 19 — Timing File Creation Using Apache Timing Engine (ATE)            RedHawk User Manual      | 522
+Setting up ATE
+
+              RedHawk results would be very pessimistic. To not propagate ideal clocks while
+              propagating other, the following can be inserted before the ‘getSTA’ command above:
+                       ta_set_clock_delay -propagated [get_clocks *]
+                       ta_set_clock_delay -ideal [get_clocks clkA]
+                       set ADS_ALLOW_IDEAL_CLOCKS 1
+              In the example above, all clocks are marked as “propagated” except clkA, which is set as
+              “ideal”.
+              By default getSTA errors out if there are ideal clocks in the design. Therefore,
+              'ADS_ALLOW_IDEAL_CLOCKS' is set to 1.
+              If there are ideal clocks, ignoring their drivers is recommended during RedHawk analysis
+              by using the IGNORE_INSTANCES keyword. You can also limit the maximum load cap
+              on such driver cells using the GSR keyword setting ‘USE_LIB_MAX_CAP 1’.
+
+              Multi-threading
+
+              ATE by default runs in multi-threaded mode, utilizing all available processors. If it is
+              necessary to limit the number of processors that ATE should use, the following can be
+              added at the beginning of command file:
+                        setvar max_threads <number_of_processors>
+              If the number specified is less than two, ATE runs in single-threaded mode.
+
+              Special ATE Variables
+
+              Special ATE variables are used in the ATE command file to set parameter values and
+              functionality, and are described in this section. Default values for the variables have been
+              set to give optimal accuracy and performance. If necessary, they can be set before
+              invoking getSTA, using the syntax:
+                         set <variable_name> <value>
+               ADS_ALLOW_IDEAL_CLOCKS [ 0 | 1 ]
+                      0 : does not generate a timing file if clocks are ideal. Generating a timing file with
+                           ideal clocks yields inaccurate RedHawk results, since the registers driven by
+                           this clock do not see clock tree latency. Default.
+                      1: the timing file is generated even if clocks are ideal.
+               ADS_ALLOWED_PCT_OF_NON_CLOCKED_REGISTERS <percent_registers>
+                      If more than the specified percent of registers in the design are not clocked, ATE
+                      errors out, since all combinational logic following such registers do not get a TW,
+                      and this reduces the accuracy of dynamic analysis. Default: 5 percent.
+               ADS_CELLS_NEED_INPUT_TW { null | <ref_cell1> <ref_cell2> ... } | ALL
+                      Specifies cells requiring an input timing window. Wild cards are allowed to specify
+                      cell names.
+                      { } : A TW for non-clock input pins is not generated in order to save runtime and
+                            disk space, since they are not used by RedHawk. However, if the design
+                            contains power switches (header and footer switches), RedHawk needs a
+                            TW for their control pins for ramp-up analysis. Default.
+                      <ref_cell1> ... : a TW is generated for all pins of all instances of specified
+                          reference cells. Wildcards using “*” can be used for names.
+                      ALL: a TW is generated for all pins.
+
+
+
+
+ANSYS, Inc.
+CHAPTER 19 — Timing File Creation Using Apache Timing Engine (ATE)            RedHawk User Manual      | 523
+Setting up ATE
+
+               ADS_INPUT_PINS_NEED_TW {null | <pin_1> <pin_2> ... }
+                      Specifies input pints requiring a timing window. This variable is mutually exclusive
+                      with ADS_PINS_NO_TW. Wild cards are allowed to specify pin names.
+                      { } : when processing non-clock input pins of cells listed using variable
+                            ADS_CELLS_NEED_INPUT_TW, creates a TW for all input pins of those
+                            cells. Default.
+                      { pin_1 pin_2 … } : when processing non-clock input pins of the cells using
+                           ADS_CELLS_NEED_INPUT_TW, creates a TW only specified input pins of
+                           those cells. A typical situation for using this keyword includes handling
+                           memories with internal power switches. Memories often have a large number
+                           of input pins, such as DATA, ADDRESS, and power switch control pin(s).
+                           Wildcards using “*” can be used for names.
+               ADS_PINS_NO_TW { null | <pin_1> <pin_2> ... }
+                      Specifies pins for which no TW is created. This variable is mutually exclusive with
+                      ADS_INPUT_PINS_NEED_TW.
+                      {} : when processing non-clock input pins of the cells specified using
+                            ADS_CELLS_NEED_INPUT_TW, creates a TW for all input pins of those
+                            cells. Default.
+                      { pin_1 pin_2 … } : when processing non-clock input pins of the cells specified
+                           using ADS_CELLS_NEED_INPUT_TW, do not create a TW for specified
+                           pins of those cells. Note: this variable should not be used to exclude output
+                           pins, since TWs for output pins are required for Redhawk Dynamic Analysis,
+                           except for output pins of power switch cells.
+
+              getSTA Command Options
+
+              The syntax for the getSTA command in the ATE shell is:
+                       getSTA <net_pattern> [<optional_arguments>]
+                    where
+                      <net_pattern> is usually set to '*', meaning that timing information should be
+                          generated for all nets.
+              Timing information for specific net patterns can be generated using wildcard characters,
+              such as:
+                        getSTA block1/*
+              Optional arguments are as follows:
+                      -output <file> : timing file name (default: <top_design_name>.timing)
+                      -block : print timing window for primary IO ports
+                      -compact : generate the file in sta-compact format (default)
+                      -nocompact : generate the file in legacy format
+                      -gz : generate the file in gzip format
+              Using sta-compact format (default) is recommended to save disk space, to create a
+              significantly smaller timing file without loss of information, and with negligible impact on
+              ATE runtime, as well as saving runtime when RedHawk loads the timing file later on. See
+              section "Timing Data File", page C-762, for the syntax of the timing file. Using the '-gz'
+              gzip option further reduces file size. There is no runtime penalty for this unless multi-
+              threading has been disabled.
+              If ATE is run at block level, as opposed to the top level, the ‘-block’ option should be used,
+              which generates timing windows for primary input/output ports also.
+
+
+
+
+ANSYS, Inc.
+CHAPTER 19 — Timing File Creation Using Apache Timing Engine (ATE)         RedHawk User Manual      | 524
+Invoking ATE
+
+Invoking ATE
+
+              The environment variable APACHEROOT should be defined before running ATE. For
+              example:
+                       setenv APACHEROOT /install_dir/apacheda/<RedHawk_release>
+                       set path = ($APACHEROOT/bin $path)
+              Then invoke:
+                       ate ate.cmd >& ate.log
+
+
+              ATE Command Line Options
+
+              The following options are available on the ATE command line:
+                      -lmwait : waits for license, if not available
+                      -v : displays ATE version
+
+Output Files
+
+              ATE creates the following files and directories:
+                      <top_design_name>.timing : timing file
+                      ads_non_clocked_registers.rpt : list of unclocked registers
+                      .ate/ : directory for temporary internal files
+                      In multi-threaded runs, ATE stores the output of the LoadParasiticFile stage in the
+                          ./LoadParasiticFile.log file, to avoid overwriting its output.
+                      <top_design_name>.html : provides high-level run statistics, such as tabular
+                          runtime/memory breakdown for each task and subtask of the session,
+                          version, and host. This should be the first file to look at when evaluating ATE
+                          performance. An example of one of the tables is given in Figure 19-2.
+
+
+
+
+              Figure 19-2      ATE performance table
+
+
+
+
+ANSYS, Inc.
+CHAPTER 19 — Timing File Creation Using Apache Timing Engine (ATE)              RedHawk User Manual      | 525
+Specifying the STA file in RedHawk
+
+Specifying the STA file in RedHawk
+
+              The timing file can be specified in RedHawk using the STA_FILE GSR keyword:
+                        STA_FILE {
+                              <top_design_name> <file>
+                        }
+              See section "STA_FILES", page C-610, for more details. RedHawk then imports the file
+              during the ‘setup design’ stage.
+              Alternatively, the timing file can be imported using the ‘import sta’ TCL command, which
+              allows for incremental analysis using different timing files. For example:
+                         import gsr design.gsr
+                         setup design
+                         perform pwrcalc
+                         perform extraction -power -ground -c
+                         perform dynamic
+                         import sta new.timing
+                         perform dynamic
+
+ATE Validation
+
+              Ensuring Correct Creation and Use of the Timing File
+
+              In order to effectively review timing file creation and use, consider the data flow in Figure
+              19-3, which shows the input files, related ATE tasks for STA analysis steps, and the
+              corresponding content of the STA file.
+
+
+
+                    Input files                      ATE Tasks                           STA
+
+                   Verilog / DEF               Data Prep and Load Netlist
+
+
+
+                       SPEF                       Load Parasitics File
+
+
+
+                       SDC                      Load Timing Constraints                    CLOCK
+
+
+                      Liberty              Data Prep, Load Library and getSTA                SL
+
+
+                                                        getSTA                               TW
+
+
+
+                Is the setup OK?                  Did ATE run fine?                  Is STA file good?
+
+
+
+              Figure 19-3       ATE data flow and tasks
+
+              Do a quick check of tasks using this flow, so that basic setup issues, such as using the
+              wrong files or missing clock definitions, can be resolved quickly, without having to
+              backtrack after generating incorrect RedHawk results.
+
+
+ANSYS, Inc.
+CHAPTER 19 — Timing File Creation Using Apache Timing Engine (ATE)             RedHawk User Manual       | 526
+ATE Validation
+
+              In addition, this flow can be used to reduce possible problems, without spending time with
+              unrelated input files or run logs. For example, if there are issues with CLOCK entries in
+              the STA file, the first place to look is the SDC file, and the messages coming from the
+              Load Timing Constraints task. Then you can systematically trace back to previous tasks in
+              the flow and the relevant input files.
+              Key checks of results are summarized in the following sections.
+
+              Is the setup OK?
+                1.   Confirm that all the files specified in configuration file exist. Any missing files are
+                     reported.
+                2.   Confirm that there is no behavioral Verilog file. STA is based on gate level Verilog
+                     files, and behavioral Verilog files trigger syntax errors.
+                3.   Confirm that there is not a significant number of cells with missing Liberty and/or
+                     Verilog module definitions. ATE converts such cells into a black-box to keep going
+                     and reports the following message for each cell with missing data:
+                        VLG-0027: Creating black box for …
+                     There should be no such message for cells that are required for RedHawk
+                     analysis.
+                4.   Confirm that input files are consistent (that is, from the same version of design
+                     database):
+                     • Verilog/DEF vs. SDC
+                     • Verilog/DEF vs. SPEF
+                     • Verilog/DEF given to ATE vs. DEF provided to RedHawk
+                     • Liberty, SPEF given to ATE vs. those provided to RedHawk
+                5.   Confirm that SDC files have proper TCL syntax. For example, the files should not
+                     refer to undefined variables, and they should not contain commands/variables
+                     specific to third-party tools. Standard TCL, SDC and collection commands are
+                     supported.
+                6.   Confirm that the SDC file contains all clock definitions in the ‘create_clock’ or
+                     ‘create_generated_clock’ statements.
+                7.   Confirm that if an SDC command refers to a library (the ‘-library’ option is used),
+                     that library is among the Liberty files given to ATE.
+                8.   Confirm that the library cells referred in SDC file (for example, at set_driving_cell
+                     command) exist in the Liberty files given to ATE.
+                9.   Confirm that the unit convention used in the first Liberty file matches the
+                     convention used in the SDC file. ATE displays a SHL-0661 message if the SDC file
+                     used the set_units command and a discrepancy is detected.
+                10. Confirm that there are no unintentional ideal clocks. If there are legitimate ideal
+                    clocks in the design, see the section "Handling Ideal Clocks", page 19-521. ATE
+                    displays a SHL-0628 message in the getSTA task for these cases.
+
+              Did ATE run properly?
+                1.   Review error messages starting from the first task. In most cases, resolving a prior
+                     error resolves some of the subsequent ones also.
+                2.   Check basic design statistics reported in the Load Netlist task, as in the following
+                     example:
+                        Info: SHL-0581: Number of instances : 133523773
+                        Info: SHL-0581: Number of nets                   : 136465158
+
+
+ANSYS, Inc.
+CHAPTER 19 — Timing File Creation Using Apache Timing Engine (ATE)           RedHawk User Manual      | 527
+ATE Validation
+
+                       Info: SHL-0581: Number of terminals : 1378
+               3.   Confirm that SPEF has been annotated for the majority of nets in the design, by
+                    reviewing the “RC annotation” table in the file LoadParasiticFile.log.
+               4.   Confirm that all SDC constraints that are required for STA file creation have been
+                    recognized. Review errors in the Load Timing Constraint task. If some clocks have
+                    not been created, see the SHL-0631 message in the getSTA task to check whether
+                    the number of unclocked registers is negligible.
+               5.   Review the HTML file to see if any subtask is causing a runtime/memory
+                    bottleneck. If there is, review the UTL-0031 and UTL-0032 messages coming from
+                    that task to identify the bottleneck.
+
+              Is the STA file good?
+               1.   Confirm that a majority of registers are connected to a clock. See the SHL-0631
+                    messages in the getSTA task.
+               2.   Confirm that all clocks have been captured in the CLOCK section of the timing file,
+                    with the correct parameters.
+               3.   Confirm that timing window entries have been created for a majority of instances
+                    by reviewing TIMING_WINDOW_OK metrics at the end of the file, as shown in the
+                    following example:
+                        # #####################################################
+                        #                      SUMMARY
+                        # #####################################################
+                        # Total processed pins : 510831
+                        # -
+                        # Pin statistics:
+                        # TIMING_WINDOW_OK            :      504915 (99%)
+                        # NO_TIMING_WINDOW            :         5278 (1%)
+                        # CONST                     :          638 (0%)
+                    For example, for an instance pin that has no timing window, there may be an entry
+                    as follows:
+                       #BlockA/InstB/Y NO_TW {}
+                    which could be caused by several things, including:
+                        • A flip-flop is not connected to a clock. All logic starting from this FF will not
+                           have a TW.
+                        • A black box in the timing path stops propagation of the TW. All instances
+                           after this black box will not have a TW.
+                        • Incorrect case analysis settings, leading to broken timing arcs in clock
+                           muxes.
+               4.   Check statistics reported by RedHawk, as in the following example:
+                      Instances (CONST/assigned/Total) 1340/30667/36232
+                      Nets (CONST/assigned/Total) 1675/35447/38885
+                      Pin slew (missing/assigned) 26893/105005
+                      Instance input/clock slew missing 2564 (use GSR default
+                      input_transition)
+                      Instance output slew missing 2850 (use average input slew)
+                      Total number of instances traced (CONST/STA/tracer) =
+                                 32007/0 (1340/30667/0)
+                      Total number of nets traced (CONST/STA/tracer) = 37122/0
+                                 (1675/35447/0)
+                      Total number of leaf clock nets = 394
+
+
+ANSYS, Inc.
+CHAPTER 19 — Timing File Creation Using Apache Timing Engine (ATE)            RedHawk User Manual      | 528
+ATE Validation
+
+                        Total number of CLK pins traced as clock = 6630 / 6635
+                        Active/Quiet Summary:
+                            Instance Summary:
+                                Total = 36232
+                                clock = 859 (active 859)(quiet 0)
+                                non-clock = 35373 (active 29808)(quiet 5565)
+                            Net Summary:
+                                Total = 38885
+                                clock = 867 (active 867)(quiet 0)
+                                non-clock = 38018 (active 34580)(quiet 3438)
+                5.   Check the files created by RedHawk in the adsRpt directory after STA import.
+                      apache.staBogus: list of instances in the STA file that cannot be mapped into the
+                           design (DEF netlist)
+                      apache.tw0: list of instances in the design not covered in the STA file.
+                      apache.twclk0: list of instances with clock pins not covered in the STA file.
+                      apache.twclkLate: list of instances for which the clock arrives later than the output
+                           signal.
+                      apache.clkPin0: list of instances for which the CLK pin is connected to a non-clock
+                           net.
+
+              Contacting Ansys Support
+              If you need Ansys AE Support, the following information is needed:
+               • command file
+               • configuration file
+               • standard output and LoadParasiticFile.log
+              If a crash has occurred, also send 'trace*' files generated in the run directory. If possible,
+              also send the design data used for the run.
+
+
+
+
+ANSYS, Inc.
+

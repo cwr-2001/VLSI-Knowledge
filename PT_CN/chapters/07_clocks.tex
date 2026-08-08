@@ -1,0 +1,749 @@
+% 第 7 章 Clocks
+\bichapter{时钟}{Clocks}
+\label{chap:clocks}
+
+时序分析的关键部分是准确指定时钟及时钟效应，如 latency（从时钟源的延迟）与 uncertainty（时钟边沿到达的 skew 或变化量）。要了解如何指定、报告与分析时钟，请参阅：
+\begin{itemize}
+  \item 时钟概述
+  \item 指定时钟
+  \item 指定时钟特性
+  \item 使用多个时钟
+  \item 时钟极性（Clock Sense）
+  \item 指定脉冲时钟
+  \item PLL 设计时序分析
+  \item 指定时钟门控 Setup 与 Hold 检查
+  \item 指定内部生成时钟
+  \item 生成时钟边沿特定源延迟传播
+  \item 时钟网格（Clock Mesh）分析
+\end{itemize}
+
+% ============================================================
+\section{时钟概述}
+\subsection*{Clock Overview}
+
+PrimeTime 支持以下类型的时钟信息：
+
+\textbf{多个时钟}：可定义具有不同波形与频率的多个时钟。时钟可在设计中有真实源（port 与 pin），也可为 virtual——virtual clock 在设计本身中无真实源。
+
+\textbf{时钟网络延迟与 skew}：指定相对于源的时钟网络延迟（clock latency）与时钟目的地到达时间变化（clock skew）。多时钟设计中可指定 interclock skew。可指定 ideal 时钟网络延迟（时钟树生成前分析），或指定由 PrimeTime 计算延迟（时钟树生成后分析）。PrimeTime 还支持沿时钟网络检查 minimum pulse width。
+
+\textbf{门控时钟（Gated clocks）}：可分析含门控时钟的设计。门控时钟是受门控逻辑控制的时钟信号（非简单缓冲或反相）。PrimeTime 对门控信号执行 setup 与 hold 检查。
+
+\textbf{生成时钟（Generated clocks）}：可分析含生成时钟的设计。生成时钟由设计中另一时钟信号经电路（如时钟分频器）产生。
+
+\textbf{时钟转换时间}：可在寄存器时钟引脚指定时钟信号 transition time——信号从一个逻辑状态变到另一逻辑状态所需时间。
+
+% ============================================================
+\section{指定时钟}
+\subsection*{Specifying Clocks}
+
+需指定设计中使用的所有时钟。时钟信息包括：周期与波形、latency（insertion delay）、uncertainty（skew）、分频与内部生成时钟、时钟门控检查、不完整时钟网络的固定 transition time。
+
+PrimeTime 支持分析设计的同步部分，分析寄存器或 port 之间的路径。多交互时钟设计中，PrimeTime 确定 startpoint 与 endpoint 时钟间的相位关系。时钟可为单相、多相或多频时钟。
+
+\subsection{创建时钟}
+\subsubsection*{Creating Clocks}
+
+必须用 \cmd{create\_clock} 指定设计中所有时钟。该命令在指定源创建时钟，源可定义在设计输入 port 或内部 pin。PrimeTime 自动追踪时钟网络，使时钟到达其源传递扇出中的所有寄存器。
+
+\cmd{create\_clock} 创建的时钟具有 ideal 波形，忽略时钟网络延迟效应。创建时钟后须描述时钟网络以进行准确时序分析（见「指定时钟特性」）。
+
+\cmd{create\_clock} 创建与时钟同名的 path group，包含所有由该时钟计时的 endpoint 路径。见第~\ref{chap:paths}~章「时序路径组」。
+
+在端口 C1 与 CK2 上创建周期 10、上升沿 2、下降沿 4 的时钟：
+\begin{lstlisting}
+pt_shell> create_clock -period 10 -waveform {2 4} {C1 CK2}
+\end{lstlisting}
+
+生成的时钟以第一个列出源命名（C1），波形如下。
+
+\figplaceholder{Figure 36: C1 clock waveform}{C1 时钟波形}{fig:c1-waveform}
+
+PrimeTime 支持分析传播到单个寄存器的多个时钟。可用 \cmd{create\_clock} 的 \opt{-add} 选项在同一 port 或 pin 上定义多个时钟。
+
+\subsection{创建虚拟时钟}
+\subsubsection*{Creating a Virtual Clock}
+
+可用 \cmd{create\_clock} 定义与外部（片外）时钟器件接口信号的 virtual clock。Virtual clock 在当前设计中无实际源，但可用于设置 input 或 output delay。
+
+创建名为 vclk 的 virtual clock：
+\begin{lstlisting}
+pt_shell> create_clock -period 8 -name vclk -waveform {2 5}
+\end{lstlisting}
+
+\figplaceholder{Figure 37: vclk clock waveform}{vclk 时钟波形}{fig:vclk-waveform}
+
+\subsection{选择时钟对象}
+\subsubsection*{Selecting Clock Objects}
+
+\cmd{get\_clocks} 为命令选择时钟对象，例如确保命令作用于 CLK 时钟而非 CLK port。
+
+报告名称以 PHI1 开头且周期 $\leq 5.0$ 的时钟属性：
+\begin{lstlisting}
+pt_shell> report_clock [get_clocks -filter "period <= 5.0" PHI1*]
+\end{lstlisting}
+
+\subsection{将命令应用于所有时钟}
+\subsubsection*{Applying Commands to All Clocks}
+
+\cmd{all\_clocks} 等价于 \cmd{get\_clocks *}，返回表示 clock 对象集合的 token，不打印实际时钟名。
+
+禁用所有时钟的 time borrowing：
+\begin{lstlisting}
+pt_shell> set_max_time_borrow 0 [all_clocks]
+\end{lstlisting}
+
+\subsection{移除时钟对象}
+\subsubsection*{Removing Clock Objects}
+
+用 \cmd{remove\_clock} 移除时钟对象列表。
+
+\begin{noteBox}
+\cmd{reset\_design} 除移除时钟外，还移除其他信息。
+\end{noteBox}
+
+移除名称以 CLKB 开头的所有时钟：
+\begin{lstlisting}
+pt_shell> remove_clock [get_clocks CLKB*]
+pt_shell> remove_clock -all
+\end{lstlisting}
+
+
+% ============================================================
+\section{指定时钟特性}
+\subsection*{Specifying Clock Characteristics}
+
+\cmd{create\_clock} 创建的时钟具有完美波形，忽略时钟网络延迟效应。要准确时序分析，须描述时钟网络。时钟网络主要特性为 latency 与 uncertainty。
+
+Latency 包含 clock source latency 与 clock network latency。Clock source latency 是时钟信号从 ideal 波形原点传播到设计中时钟定义点的时间。Clock network latency 是时钟信号（上升或下降）从设计中时钟定义点传播到寄存器时钟引脚的时间。
+
+Clock uncertainty 是同一 clock domain 内寄存器间或不同 domain 间时钟信号到达的最大差异，也称 skew。因 clock uncertainty 可含额外裕量以收紧 setup 或 hold 检查，可对同一路径的 setup 与 hold 检查指定不同 uncertainty。
+
+\subsection{设置时钟延迟}
+\subsubsection*{Setting Clock Latency}
+
+PrimeTime 提供两种表示 clock latency 的方法：
+\begin{itemize}
+  \item 允许 PrimeTime 沿时钟网络传播 delay 计算 latency——非常准确，但仅在时钟树综合完成后可用；
+  \item 估算并显式指定各时钟 latency，可在单个 port 或 pin 上指定，影响这些对象传递扇出中的所有寄存器时钟引脚，覆盖 clock 对象上的任何值——通常用于时钟树综合前。
+\end{itemize}
+
+\subsubsection{设置传播延迟}
+PrimeTime 可沿时钟网络自动传播 delay 确定 clock latency，在时钟树综合与布局后（cell 与 net delay 均已 back-annotate 或已计算 net parasitic）产生高精度结果。使用 propagated clock 的寄存器边沿时间因从时钟源到寄存器时钟引脚的路径 delay 而 skew。设计有实际时钟树且 delay 或 parasitic 已标注时适用。
+
+传播时钟网络 delay 并自动确定各寄存器时钟引脚 latency：
+\begin{lstlisting}
+pt_shell> set_propagated_clock [get_clocks CLK]
+\end{lstlisting}
+
+可在 clock、port 或 pin 上设置 propagated clock 属性。设置在 port 或 pin 上时，影响对象传递扇出中的所有寄存器时钟引脚。移除 propagated clock 规格：\cmd{remove\_propagated\_clock}。
+
+\subsubsection{指定时钟源延迟}
+可为 ideal 或 propagated clock 指定 clock source latency。Source latency 是从 ideal 波形到源 pin 或 port 的 latency。寄存器时钟引脚 latency 为 clock source latency 与 clock network latency 之和。
+
+对内部生成时钟，若 generated clock 的 master clock 有 propagated latency 且未用户指定 generated clock source latency，PrimeTime 可自动计算 clock source latency。
+
+Prelayout 设计中 propagated latency 计算通常不准确（parasitic 未知）。可对各时钟估算 latency 并用 \cmd{set\_clock\_latency} 直接设置——ideal clocking，PrimeTime 中表示 clock latency 的默认方法。
+
+\cmd{set\_clock\_latency} 为一个或多个 clock、port 或 pin 设置 latency。对 source latency 指定 external uncertainty，使用 \opt{-early} 与 \opt{-late} 选项。
+
+\figplaceholder{Figure 38: External source latency}{外部源延迟}{fig:external-source-latency}
+
+\begin{lstlisting}
+pt_shell> create_clock -period 10 [get_ports CLK]
+pt_shell> set_clock_latency 1.5 -source -early [get_clocks CLK]
+pt_shell> set_clock_latency 2.5 -source -late [get_clocks CLK]
+\end{lstlisting}
+
+PrimeTime 对每个由该时钟计时的 startpoint 与 endpoint 使用更保守的 source latency 值（early 或 late）。Setup 分析：startpoint 用 late 值，endpoint 用 early 值。Hold 分析：startpoint 用 early 值，endpoint 用 late 值。
+
+\figplaceholder{Figure 39: Early and late source latency waveforms}{早/晚源延迟波形}{fig:early-late-source-latency}
+
+设置 CLK 预期上升 latency 1.2、下降 latency 0.9：
+\begin{lstlisting}
+pt_shell> set_clock_latency -rise 1.2 [get_clocks CLK]
+pt_shell> set_clock_latency -fall 0.9 [get_clocks CLK]
+\end{lstlisting}
+
+移除用户指定的 clock network 或 source clock latency：\cmd{remove\_clock\_latency}。
+
+\subsubsection{时钟源延迟的动态效应}
+可用 \cmd{set\_clock\_latency} 的 \opt{-dynamic} 选项建模 clock source latency 的动态效应（如 PLL clock jitter）。该选项允许指定 clock source latency 的动态分量。Clock reconvergence pessimism removal（CRPR）以与 PrimeTime SI delta delay 相同方式处理 clock latency 动态分量。
+
+也可用 \cmd{set\_clock\_uncertainty} 建模 clock jitter，但 clock uncertainty 设置不影响 crosstalk arrival window 计算，CRPR 也不考虑。\cmd{set\_clock\_latency} 允许将 clock jitter 指定为 dynamic source clock latency，正确影响 arrival window 计算，静态与动态部分由 CRPR 正确处理。
+
+\begin{lstlisting}
+pt_shell> set_clock_latency -early -source 3.0 [get_ports CLK]
+pt_shell> set_clock_latency -late -source 5.0 [get_ports CLK]
+pt_shell> set_clock_latency -early -source 2.5 -dynamic -0.5 [get_clocks CLK]
+pt_shell> set_clock_latency -source -late 5.5 -dynamic 0.5 [get_clocks CLK]
+\end{lstlisting}
+
+\cmd{report\_timing} 分别报告 clock latency 的静态与动态分量。\cmd{report\_crpr} 报告静态与动态条件下计算的 CRP 值及实际用于悲观移除的选择。
+
+\subsection{设置时钟不确定性}
+\subsubsection*{Setting Clock Uncertainty}
+
+可用 setup 或 hold 及 rise 或 fall uncertainty 值建模 prelayout 设计的预期 uncertainty（skew）。PrimeTime 在 setup 检查（最大路径）时从 data required time 减去 setup uncertainty；在 hold 检查（最小路径）时向 data required time 加上 hold uncertainty。若指定单一 uncertainty 值，setup 与 hold 检查均使用该值。
+
+用 \cmd{set\_clock\_uncertainty} 指定时钟 uncertainty 或 skew 特性，捕获实际或预测的 clock uncertainty。
+
+可指定 simple clock uncertainty 或 interclock uncertainty。Simple uncertainty 是连续时钟边沿相对于精确名义时间的生成变化，指定一个或多个对象（clock、port 或 pin），uncertainty 值应用于所有由指定 clock 计时的 capturing latch 或其时钟引脚在指定 port/pin 扇出中的 latch。
+
+Interclock uncertainty 更具体灵活，支持不同 clock domain 间不同 uncertainty——不同时钟边沿间 skew 变化。用 \opt{-from}、\opt{-rise\_from} 或 \opt{-fall\_from} 指定「from」时钟，用 \opt{-to}、\opt{-rise\_to} 或 \opt{-fall\_to} 指定「to」时钟。Interclock uncertainty 适用于从「from」时钟启动、在「to」时钟捕获的路径。
+
+\figplaceholder{Figure 40: Example of interclock uncertainty}{时钟间不确定性示例}{fig:interclock-uncertainty}
+
+Setup 或 hold 检查时，PrimeTime 根据最差可能的时钟边沿时间差调整 timing check。Setup 检查示例：从 data required time 减去 uncertainty，要求数据更早到达，以计入 late launch 与 early capture 的最差 clock skew。
+
+若路径同时有 simple clock uncertainty 与 interclock uncertainty，使用 interclock uncertainty 值。
+
+\begin{lstlisting}
+pt_shell> set_clock_uncertainty 5 [get_clocks CLKA]
+pt_shell> set_clock_uncertainty 2 -from [get_clocks CLKB] -to [get_clocks CLKA]
+\end{lstlisting}
+
+从 CLKA 到 CLKB 与从 CLKB 到 CLKA 的路径须分别指定 uncertainty，即使值相同：
+\begin{lstlisting}
+pt_shell> set_clock_uncertainty 2 -from [get_clocks CLKA] -to [get_clocks CLKB]
+pt_shell> set_clock_uncertainty 2 -from [get_clocks CLKB] -to [get_clocks CLKA]
+\end{lstlisting}
+
+对 U1/FF*/CP 计时的 endpoint 设置 simple clock uncertainty 0.45：
+\begin{lstlisting}
+pt_shell> set_clock_uncertainty 0.45 [get_pins U1/FF*/CP]
+\end{lstlisting}
+
+对 CLK1 设置 setup uncertainty 0.21、hold uncertainty 0.33：
+\begin{lstlisting}
+pt_shell> set_clock_uncertainty -setup 0.21 [get_clocks CLK1]
+pt_shell> set_clock_uncertainty -hold 0.33 [get_clocks CLK1]
+\end{lstlisting}
+
+在 clock port 或 pin 上设置 simple uncertainty 时，uncertainty 应用于时钟引脚在指定对象传递扇出中的 capturing latch。若多个 port/pin 传播不同 uncertainty 值到 clock MUX 输入，最差 uncertainty 设置应用于整个 MUX 扇出，即使 MUX 处关联 clock 被禁用。为确保正确使用 uncertainty，应在 clock 对象而非 clock port/pin 上设置 uncertainty。
+
+移除 clock uncertainty：\cmd{remove\_clock\_uncertainty}。
+
+\subsection{设置时钟抖动}
+\subsubsection*{Setting the Clock Jitter}
+
+在 master clock 上设置 clock jitter，运行 \cmd{set\_clock\_jitter}。该命令在指定 master clock 生成的所有 clock 上设置相同 jitter 属性。未指定 master clock 时，在所有 clock 上设置 jitter。
+
+\subsection{移除时钟抖动}
+\subsubsection*{Removing the Clock Jitter}
+
+\cmd{remove\_clock\_jitter} 自动从 generated clock 移除 jitter 属性。未指定 master clock 时，从所有 clock 移除 jitter。
+
+\subsection{报告时钟抖动}
+\subsubsection*{Reporting the Clock Jitter}
+
+\cmd{report\_clock\_jitter} 报告 cycle jitter、duty-cycle jitter 及 generated clock 使用的带 jitter 的 master clock。
+
+\subsection{估计时钟引脚转换时间}
+\subsubsection*{Estimating Clock Pin Transition Time}
+
+Transition time 通常为时钟网络中 port、cell 与 net 计算。若时钟网络不完整，寄存器时钟引脚 transition time 可能不准确（例如单缓冲驱动 10000 个寄存器时钟引脚，时钟树未构建）。
+
+可用 \cmd{set\_clock\_transition} 估计整个时钟网络的 clock transition time：
+\begin{lstlisting}
+pt_shell> set_clock_transition 0.64 -fall [get_clocks CLK1]
+\end{lstlisting}
+
+Transition time 值应用于直接馈送指定 clock 计时时序元件的所有网络。可用 \opt{-rise}、\opt{-fall}、\opt{-min}、\opt{-max} 分别指定仅上升/下降边沿或最小/最大工作条件下的 transition time。移除估计的 clock pin transition time：\cmd{remove\_clock\_transition}。
+
+\subsection{检查最小脉冲宽度}
+\subsubsection*{Checking the Minimum Pulse Width}
+
+Minimum pulse width 检查对确保时序电路正确工作很重要。原始时钟 pulse width 可能因门控逻辑或时钟网络 delay 特性而减小，导致：
+\begin{itemize}
+  \item 寄存器时钟引脚处时钟脉冲过小，器件可能无法正确捕获数据；库 cell pin 可有 minimum pulse width 限制，由 \cmd{report\_constraint} 检查；
+  \item 脉冲宽度在时钟网络某点缩小到无法继续传播的程度；PrimeTime 可检查整个时钟网络，确保脉冲不低于某阈值。
+\end{itemize}
+
+\figplaceholder{Figure 41: Clock network pulse width check}{时钟网络脉冲宽度检查}{fig:clock-pulse-width-check}
+
+对普通非 pulse generator 的 clock、cell、pin、port 与当前 design，用 \cmd{set\_min\_pulse\_width} 指定约束。对 pulse generator 网络，用 \cmd{set\_pulse\_clock\_min\_width} 与 \cmd{set\_pulse\_clock\_max\_width}。
+
+\begin{noteBox}
+\cmd{report\_constraint} 对寄存器时钟引脚与时钟网络检查 minimum pulse width。也可在库 cell 描述的 clock pin 上指定 minimum pulse width。
+\end{noteBox}
+
+移除时钟树或时序器件上时钟信号的 minimum pulse width 检查：\cmd{remove\_min\_pulse\_width}。
+
+默认 \cmd{set\_clock\_uncertainty} 指定的 clock uncertainty 应用于所有时序约束类型，包括 pulse width 检查。可选指定是否将 clock uncertainty 应用于 pulse width 检查及仅 setup、仅 hold 或两者：
+\begin{lstlisting}
+set_app_var timing_include_uncertainty_for_pulse_checks \
+  none | setup_only | hold_only | setup_hold
+\end{lstlisting}
+默认 \texttt{setup\_hold}。
+
+\subsubsection{脉冲宽度测量阈值}
+默认在电源电压 50\% 处测量脉冲宽度。可对 clock network pin 将测量阈值设为 0.0 到 1.0 之间任意电源电压比例。更保守的 minimum pulse width 检查：低脉冲阈值 $< 0.5$，高脉冲阈值 $> 0.5$。
+
+\figplaceholder{Figure 42: Minimum Pulse Width Checking Thresholds}{最小脉冲宽度检查阈值}{fig:min-pulse-width-thresholds}
+
+\subsubsection{电压摆幅检查}
+可对 clock network pin 执行 voltage swing 检查，确定高脉冲是否足够接近电源轨、低脉冲是否足够接近地轨。
+
+\figplaceholder{Figure 43: Voltage Swing Checking Thresholds}{电压摆幅检查阈值}{fig:voltage-swing-thresholds}
+
+Voltage swing 检查作为 minimum pulse width 检查的特殊情况执行，minimum width 设为 0.0，在指定电源电压比例处测量宽度。
+
+\subsection{最小周期检查}
+\subsubsection*{Minimum Period Checking}
+
+Minimum period 检查查找 cell pin 库中定义的 \texttt{min\_period} 约束违例，要求同类型（上升或下降）连续时钟边沿到达间隔至少为指定值。
+
+执行 minimum period 检查：
+\begin{itemize}
+  \item \cmd{report\_min\_period [-verbose] ...}
+  \item \cmd{report\_constraint -min\_period [-verbose] ...}
+  \item \cmd{report\_analysis\_coverage -check\_type min\_period}
+\end{itemize}
+
+报告中「open edge clock latency」为考虑时钟网络 cell 最大 delay 的第一边沿最晚到达时间；「close edge clock latency」为第二边沿最早到达时间，加回 CRPR，减去 clock uncertainty。「actual period」为 close edge 减 open edge。
+
+
+% ============================================================
+\section{使用多个时钟}
+\subsection*{Using Multiple Clocks}
+
+设计中定义多个时钟时，clock domain 间关系取决于时钟生成与使用方式。两时钟关系可为同步、异步或互斥。
+
+\figplaceholder{Figure 44: Synchronous, asynchronous, and exclusive clocks}{同步、异步与互斥时钟}{fig:sync-async-exclusive-clocks}
+
+要使 PrimeTime 正确分析不同 clock domain 间路径，可能需要指定时钟间 false path、排除分析中的时钟，或指定不同时钟间关系性质。
+
+\subsection{同步时钟}
+\subsubsection*{Synchronous Clocks}
+
+两时钟彼此同步，若它们共享共同源且具有固定相位关系。除非另行指定，PrimeTime 假设若存在由一时钟发射、由另一时钟捕获数据的路径，则两时钟同步。时钟波形在 \cmd{create\_clock} 定义的 time zero 处同步。
+
+\begin{lstlisting}
+pt_shell> create_clock -period 4 -name CK1 -waveform {0 2}
+pt_shell> create_clock -period 4 -name CK2 -waveform {1 3}
+pt_shell> create_clock -period 6 -name CK3 -waveform {2 3}
+\end{lstlisting}
+
+\figplaceholder{Figure 45: Synchronous clock waveforms}{同步时钟波形}{fig:sync-clock-waveforms}
+
+设计中可能存在由一时钟发射、由另一时钟捕获的路径。为测试不同时钟边沿间所有可能时序关系，PrimeTime 内部将时钟「展开」到所有同步时钟周期的最小公倍数（base period），创建具有多个上升/下降边沿的更长周期时钟。
+
+\figplaceholder{Figure 46: Expanded clock waveforms}{展开时钟波形}{fig:expanded-clock-waveforms}
+
+PrimeTime 检查展开时钟所有边沿间的时序路径。以最严格 setup 检查为例：CK2 下降沿到 CK3 上升沿，从 time=7 到 time=8。
+
+以与实际工作方式一致的方式定义多个时钟。声明非同步时钟，可用 case analysis 或 \cmd{set\_clock\_groups -logically\_exclusive}、\cmd{set\_false\_path} 等命令。
+
+\subsection{异步时钟}
+\subsubsection*{Asynchronous Clocks}
+
+两时钟异步，若它们在设计中不相互通信。例如片内自由运行振荡器与来自片外的系统时钟异步，两 clock domain 时钟边沿可任意相对发生。
+
+可声明两时钟关系为异步。PrimeTime 不检查由一时钟发射、由另一时钟捕获的时序路径，类似在两时钟间声明 false path。若进行 crosstalk 分析，PrimeTime SI 对两 clock domain 间 aggressor-victim 关系的网络赋予无限 arrival window。
+
+声明异步关系：\cmd{set\_clock\_groups -asynchronous}。
+
+\subsection{互斥时钟}
+\subsubsection*{Exclusive Clocks}
+
+两时钟互斥，若它们不相互交互。例如电路可能在时钟线上复用两个不同时钟信号——正常运行快时钟与低功耗慢时钟，任一时刻仅一个时钟使能，两时钟无交互。
+
+为防止 PrimeTime 花费时间检查互斥时钟间交互，可声明时钟间 false path，或用 \cmd{set\_clock\_groups -logically\_exclusive} 声明互斥。否则可用 case analysis 禁用当前分析中不需要的时钟。
+
+\begin{lstlisting}
+pt_shell> set_clock_groups -logically_exclusive -group {CK1} -group {CK2}
+\end{lstlisting}
+
+这使 PrimeTime 忽略从 CK1 domain 到 CK2 domain 或从 CK2 到 CK1 的时序路径，类似设置 CK1 到 CK2 与 CK2 到 CK1 的 false path，但 \cmd{report\_exceptions} 不报告该设置。查询已设置的 clock group：\cmd{report\_clock -groups}。
+
+避免在已声明互斥的 clock domain 间设置 false path（冗余）。\cmd{set\_clock\_groups -logically\_exclusive} 与 \cmd{-asynchronous} 均使互斥 clock domain 间已设置的 false path 失效。
+
+可在每组中指定多个时钟：
+\begin{lstlisting}
+pt_shell> set_clock_groups -logically_exclusive -group {CK1 CK2} -group {CK3 CK4}
+pt_shell> set_clock_groups -logically_exclusive -name EX1 -group {CK1 CK2} -group {CK3 CK4}
+\end{lstlisting}
+
+\cmd{set\_clock\_groups -asynchronous} 定义彼此异步的 clock 组，与互斥 clock group 赋值分开（尽管均用 \cmd{set\_clock\_groups} 定义）。Clock group 也可因时钟信号复用或物理分离而物理互斥，此时用 \opt{-physically\_exclusive} 而非 \opt{-logically\_exclusive}，防止工具尝试对 clock net 间执行 crosstalk 分析。
+
+报告时钟间关系：\cmd{get\_clock\_relationship \{CK1 CK2\}}。移除 clock grouping 声明：\cmd{remove\_clock\_groups}。
+
+\subsubsection{示例：四时钟与一选择信号}
+\figplaceholder{Figure 47: Four clocks and one selection signal}{四时钟与一选择信号}{fig:four-clocks-one-sel}
+
+可用 false path、case analysis、\cmd{set\_disable\_timing}、\cmd{set\_clock\_groups} 与 \cmd{set\_active\_clocks} 等方法防止检查无关时钟间路径。
+
+\subsubsection{复用时钟互斥点}
+现代芯片设计常用多个时钟在不同时刻施加到给定电路。MUX cell 常用于选择这些时钟。
+
+\figplaceholder{Figure 50: Multiplexed Clocks}{复用时钟}{fig:multiplexed-clocks}
+
+默认 PrimeTime 考虑所有 launch 与 capture clock 组合。但对如图所示复用的时钟，MUX cell 下游任一时刻仅一个时钟可操作——只要 MUX 控制信号在 launch 与 capture 间保持静态，它们为互斥时钟。
+
+一种指定互斥时钟的方法是在设计中仅一个时钟可传播的 pin 处设置「互斥点（exclusivity points）」。
+
+\figplaceholder{Figure 51: Multiplexed Clocks With Exclusivity Points}{带互斥点的复用时钟}{fig:exclusivity-points}
+
+手动设置互斥点：
+\begin{lstlisting}
+pt_shell> set_clock_exclusivity -type mux -output "U15/Z"
+pt_shell> set_clock_exclusivity -type mux -output "U23/Z"
+\end{lstlisting}
+
+设置 clock exclusivity point 后，任一时刻仅一个时钟可通过该 pin 传播，在 pin 传递扇出中的不同时钟间强制物理互斥关系。
+
+自动推断互斥点：
+\begin{lstlisting}
+pt_shell> set_app_var timing_enable_auto_mux_clock_exclusivity true
+\end{lstlisting}
+
+工具自动在 MUX cell 输出放置互斥点。禁用特定 MUX 的自动推断：
+\begin{lstlisting}
+pt_shell> set_disable_auto_mux_clock_exclusivity MUX32/Z
+\end{lstlisting}
+
+自动检测仅适用于 MUX cell（\texttt{is\_mux\_cell} 属性）。随机逻辑构建的复用功能不会自动检测，但可手动定义：
+\begin{lstlisting}
+pt_shell> set_clock_exclusivity -type user_defined \
+  -inputs "OR1/A OR1/B" -output OR1/Z
+\end{lstlisting}
+
+报告互斥点：\cmd{report\_clock -exclusivity}。查询 pin 互斥性：
+\begin{lstlisting}
+pt_shell> get_attribute -class pin [get_pins U53/Z] is_clock_exclusivity
+\end{lstlisting}
+
+除互斥点外，还可使用 false path、\cmd{set\_clock\_groups}、case analysis、\cmd{set\_disable\_timing} 等方法。
+
+\subsection{从分析中移除时钟}
+\subsubsection*{Removing Clocks From Analysis}
+
+默认 PrimeTime 分析设计中指定的所有时钟及不同 clock domain 间所有交互。多时钟设计中，常希望仅用特定时钟进行时序分析。
+
+一种方法是用 case analysis 为控制时钟选择的 port 或 pin 指定逻辑值：
+\begin{lstlisting}
+pt_shell> set_case_analysis 0 [get_ports SEL]
+\end{lstlisting}
+
+另一种方法是用 \cmd{set\_active\_clocks} 指定分析中活跃的 clock 列表，未列出的 clock 为 inactive：
+\begin{lstlisting}
+pt_shell> set_active_clocks {CK1 CK2}
+\end{lstlisting}
+
+若 generated clock 基于 inactive clock，generated clock 也变为 inactive。\cmd{set\_active\_clocks} 触发完整时序更新。使所有 clock 活跃（默认）：\cmd{set\_active\_clocks [all\_clocks]}。每次使用该命令覆盖先前设置。\cmd{set\_active\_clocks} 适用于标准时序分析，但不适用于 context characterization、model extraction 或 \cmd{write\_sdc}。
+
+
+% ============================================================
+\section{时钟极性}
+\subsection*{Clock Sense}
+
+工具追踪时钟树中的反相器与缓冲器，识别到达各寄存器时钟引脚的时钟信号正/负极性（sense）。仅含缓冲器与反相器的时钟树无需指定 sense，到达寄存器时钟引脚的时钟信号称为 unate。
+
+\textbf{Positive unate}：时钟源上升沿导致寄存器时钟引脚上升沿；时钟源下降沿导致寄存器时钟引脚下降沿。
+
+\textbf{Negative unate}：时钟源上升沿导致寄存器时钟引脚下降沿；时钟源下降沿导致寄存器时钟引脚上升沿。
+
+\figplaceholder{Figure 52: Positive and negative unate clock signals}{正/负 unate 时钟信号}{fig:unate-clock-signals}
+
+\textbf{Non-unate}：因时钟路径中存在 non-unate timing arc 导致 clock sense 不明确。例如通过 XOR 门的时钟 non-unate，取决于 XOR 另一输入状态，sense 可为正或负。
+
+\figplaceholder{Figure 53: Non-unate clock signals}{非 unate 时钟信号}{fig:non-unate-clock}
+
+对 non-unate 时钟网络中某 pin 指定正或负 clock sense 以消除歧义：
+\begin{lstlisting}
+set_sense -type clock -positive | -negative object_list
+pt_shell> set_sense -type clock -positive [get_pins xor1.z]
+\end{lstlisting}
+
+\cmd{set\_sense -type clock} 仅影响时钟网络 non-unate 部分。若在 unate 部分指定且请求 sense 与实际不符，PrimeTime 发出错误并忽略命令。
+
+可限制到特定时钟：
+\begin{lstlisting}
+pt_shell> set_sense -type clock -positive -clocks [get_clocks CLK] [get_pins mux1.z]
+\end{lstlisting}
+
+\figplaceholder{Figure 54: Clock sense examples}{时钟极性示例}{fig:clock-sense-examples}
+
+从特定 pin 或 cell timing arc 停止 clock 传播：
+\begin{lstlisting}
+pt_shell> set_sense -type clock -stop_propagation -clocks TESTCLK UMUX2/Z
+\end{lstlisting}
+
+在 clock network 叶 pin 停止传播，用 \opt{-clock\_leaf} 替代 \opt{-stop\_propagation}：
+\begin{lstlisting}
+pt_shell> set_sense -type clock -clock_leaf -clocks CLK3 UMUX3/Z
+\end{lstlisting}
+
+移除先前指定的 sense：\cmd{remove\_sense -type clock}。
+
+% ============================================================
+\section{指定脉冲时钟}
+\subsection*{Specifying Pulse Clocks}
+
+脉冲时钟（pulse clock）由另一时钟同一边沿触发的短脉冲序列组成。脉冲时钟常用于提升性能并降低功耗。
+
+分析含脉冲时钟的电路，PrimeTime 需要时钟时序特性信息。三种提供方式：
+\begin{itemize}
+  \item 使用在 .lib 描述中以 pulse generator 属性表征的 pulse generator cell；
+  \item 用 \cmd{create\_generated\_clock} 相对于源时钟描述脉冲时序；
+  \item 用 \cmd{set\_sense -type clock} 指定相对于源时钟的生成脉冲 sense。
+\end{itemize}
+
+最佳方法是在 .lib 库描述中已表征的 pulse generator cell，PrimeTime 中无需额外操作。若无表征 pulse generator cell，须在每个脉冲生成点用 \cmd{create\_generated\_clock} 或 \cmd{set\_sense -type clock} 指定特性。\cmd{create\_generated\_clock} 在脉冲生成点创建新 clock domain；\cmd{set\_sense -type clock} 不创建新 domain，仅指定现有时钟下游某点的 sense。
+
+\figplaceholder{Figure 56: Pulse clock specified as a generated clock}{指定为生成时钟的脉冲时钟}{fig:pulse-generated-clock}
+
+CLK 每个上升沿在 CLKP 上生成脉冲。指定生成脉冲时钟 CLKP：
+\begin{lstlisting}
+pt_shell> create_generated_clock -name CLKP -source CLK \
+          -edges {1 1 3} [get_pins and2/z]
+\end{lstlisting}
+
+重复边沿数字（而非脉冲边沿时间）确保源时钟与脉冲时钟间 delay 检查正确：
+\begin{itemize}
+  \item \opt{-edges \{1 1 3\}}——源上升沿触发高脉冲
+  \item \opt{-edges \{2 2 4\}}——源下降沿触发高脉冲
+  \item \opt{-edges \{1 3 3\}}——源上升沿触发低脉冲
+  \item \opt{-edges \{2 4 4\}}——源下降沿触发低脉冲
+\end{itemize}
+
+用 \cmd{set\_sense -type clock} 指定现有时钟 sense（不创建新 clock domain）：
+\begin{lstlisting}
+pt_shell> set_sense -type clock -pulse rise_triggered_high_pulse [get_pins and2/z]
+\end{lstlisting}
+
+生成脉冲标称宽度为零。实际脉冲宽度由 pulse generator 输出 pin 的不同 rise 与 fall latency 确定：
+\begin{itemize}
+  \item 高脉冲宽度 = fall network latency $-$ rise network latency
+  \item 低脉冲宽度 = rise network latency $-$ fall network latency
+\end{itemize}
+
+可用 \cmd{set\_clock\_latency} 显式指定 latency（从而指定脉冲宽度）：
+\begin{lstlisting}
+pt_shell> set_clock_latency -rise 0.6 and2/z
+pt_shell> set_clock_latency -fall 1.1 and2/z
+\end{lstlisting}
+
+\subsection{约束 Pulse Generator Cell 扇出中的脉冲宽度}
+用 \cmd{set\_pulse\_clock\_min\_width -transitive\_fanout} 与 \cmd{set\_pulse\_clock\_max\_width -transitive\_fanout} 约束 pulse generator 扇出中的脉冲宽度。若启用 CRPR，CRP 值作为 credit 应用于脉冲宽度。
+
+\figplaceholder{Figure 57: Sense propagation affects pulse width}{极性传播影响高/低脉冲宽度}{fig:sense-pulse-width}
+
+移除约束：\cmd{remove\_pulse\_clock\_min\_width}、\cmd{remove\_pulse\_clock\_max\_width}。报告：\cmd{report\_pulse\_clock\_min\_width}、\cmd{report\_constraint -pulse\_clock\_min\_width} 等。
+
+默认在 pulse clock network 应用更具体的 pulse clock 约束，其他地方应用通用 minimum pulse width 约束。将 \texttt{timing\_enable\_pulse\_clock\_constraints} 设为 \texttt{false} 可忽略更具体的 pulse clock 约束。
+
+\subsection{约束 Pulse Generator Cell 转换时间}
+\cmd{set\_pulse\_clock\_min\_transition} 约束 pulse generator 实例输入的最小 transition。\cmd{set\_pulse\_clock\_max\_transition -transitive\_fanout} 约束 pulse generator 扇出的最大 transition。移除：\cmd{remove\_pulse\_clock\_min\_transition}、\cmd{remove\_pulse\_clock\_max\_transition}。
+
+% ============================================================
+\section{PLL 设计时序分析}
+\subsection*{Timing PLL-Based Designs}
+
+锁相环（PLL）在高速设计中很常见，能几乎消除大时钟树 delay，实现更高片间通信速度。OCV 与信号完整性分析等效应需要完整准确的静态时序分析，包括 PLL。PLL 使 launch 与 capture 触发器处时钟 skew 接近零，使反馈 pin 处时钟相位与参考时钟相同。
+
+PrimeTime 支持 PLL cell 分析。PLL 库 model 以 cell pin 属性形式包含 reference clock pin、output pin 与 feedback pin 信息，用于在 PLL 输出定义 generated clock 时执行额外错误检查。时序更新时自动计算反馈路径时序并作为 PLL cell 上的相位校正应用。支持：
+\begin{itemize}
+  \item 多个 PLL
+  \item 多输出 PLL
+  \item PLL jitter 与长期漂移
+  \item PLL 路径 CRPR 计算
+  \item PrimeTime SI 分析
+  \item 反馈路径上的时序 cell
+  \item 基于路径分析中的 PLL 调整
+\end{itemize}
+
+\subsection{PLL 时序用法}
+用 \cmd{create\_generated\_clock} 的 \opt{-pll\_feedback} 与 \opt{-pll\_output} 选项创建各 PLL 生成时钟。\opt{-pll\_feedback} 指示用于时钟相位偏移校正的 PLL feedback pin；\opt{-pll\_output} 指定传播到 feedback pin 的 PLL 时钟输出 pin。
+
+单输出 PLL 中 \opt{-pll\_output} pin 与 generated clock 源 pin 相同。多输出 PLL 共享反馈路径时，\opt{-pll\_output} pin 可与源 pin 不同。
+
+定义 PLL 时仅特定选项可用，且须满足：\texttt{source\_objects} 为 PLL 时钟输出 pin 的单个 pin 对象；\texttt{master\_pin} 对应 PLL reference clock 输入 pin；\texttt{feedback\_pin} 对应 feedback 输入 pin；\texttt{output\_pin} 对应反馈路径起始 output pin；四个 pin 须属于同一 cell。PLL 输出时钟与到达 PLL reference pin 的 reference clock 须设为 propagated clock。
+
+\figplaceholder{Figure 58: Circuit example}{PLL 电路示例}{fig:pll-circuit}
+
+反馈路径有时序 cell 时，须在最后时序 cell 输出定义 generated clock。
+
+\subsection{PLL 漂移与抖动}
+用 \cmd{set\_clock\_latency} 的 \opt{-pll\_shift} 选项为 PLL 输出时钟定义 PLL drift 与 jitter。\opt{-pll\_shift} 表示指定 delay 加到 PLL generated clock 的基本 early/late latency 上，与通常覆盖 clock latency 的行为不同。Jitter 用 \opt{-pll\_shift} 与 \opt{-dynamic} 共同指定，须对连到 PLL feedback pin 的 PLL 输出上定义的 generated clock 指定。
+
+\subsection{PLL 路径 CRPR 计算}
+多输出 PLL 中，PrimeTime 将所有输出时钟视为同相位，CRPR 计算中将输出视为彼此不可区分。从 OUTCLK1 发射、OUTCLK2 捕获的路径，PrimeTime 移除直到 PLL 输出的 clock reconvergence pessimism，即使物理最后公共 pin 是 PLL reference pin。\cmd{report\_crpr} 演示该行为。
+
+\subsection{报告与时序检查}
+\cmd{check\_timing} 验证 PLL 时钟到达各 feedback pin。\cmd{report\_timing} 在 PLL 输出旁包含 PLL adjustment。
+
+\subsection{PLL 库 Cell 要求}
+PLL 库 cell 应有从 reference clock pin 到各输出的单一 positive unate timing arc。Reference pin、output clock pin 与 feedback pin 分别由 \texttt{is\_pll\_reference\_pin}、\texttt{is\_pll\_output\_pin}、\texttt{is\_pll\_feedback\_pin} 属性标识。可用 \texttt{is\_pll\_cell} 标识 PLL cell。
+
+
+% ============================================================
+\section{指定时钟门控 Setup 与 Hold 检查}
+\subsection*{Specifying Clock-Gating Setup and Hold Checks}
+
+门控时钟信号出现在时钟网络包含除反相器或缓冲器外的逻辑时。例如时钟信号作为逻辑 AND 一输入、控制信号作为另一输入，输出为门控时钟。
+
+PrimeTime 自动检查门控输入的 setup 与 hold 违例，确保时钟信号不被门断或削波。该检查仅对组合门执行——一信号为可传播时钟、门控信号非时钟。
+
+Clock-gating setup 检查确保控制数据信号在时钟激活前使能门。检查时钟引脚前沿到达时间与馈送 data pin 的任何数据信号两沿，防止时钟脉冲前沿 glitch 或削波脉冲。
+
+\figplaceholder{Figure 59: Clock-gating setup violations}{时钟门控 setup 违例}{fig:cg-setup-violations}
+
+Clock-gating hold 检查确保控制数据信号在时钟激活期间保持稳定。用 hold 方程检查时钟引脚后沿到达时间与馈送 data pin 的数据信号两沿。Hold 违例导致后沿 glitch 或削波脉冲。Clock-gating 检查要求 gating check 须到达 clock pin 才能成功。
+
+\figplaceholder{Figure 60: Clock-gating hold violations}{时钟门控 hold 违例}{fig:cg-hold-violations}
+
+默认 PrimeTime 检查门控时钟的 setup 与 hold 时间，setup 与 hold 时间设为 0.0（除非门库 cell 有 gating setup/hold timing arc）。可用 \cmd{set\_clock\_gating\_check} 指定非零 setup 或 hold 值。
+
+\cmd{set\_clock\_gating\_check} 仅影响指定 cell 或 pin 上存在的 clock-gating 检查。对整个 clock domain 网络应用参数，指定 clock 对象：
+\begin{lstlisting}
+pt_shell> set_clock_gating_check -setup 0.2 -hold 0.4 [get_clocks CLK1]
+pt_shell> set_clock_gating_check -setup 0.5 [get_cells and1]
+\end{lstlisting}
+
+\cmd{report\_clock\_gating\_check} 执行 clock-gating setup 与 hold 检查，识别违例。用 \opt{-auto\_inferred\_only} 仅报告工具自动推断的门，不报告 Power Compiler 插入或 clock-gating 库 cell 定义的检查。
+
+移除 \cmd{set\_clock\_gating\_check} 设置的检查：\cmd{remove\_clock\_gating\_check}。
+
+\subsection{禁用或恢复时钟门控检查}
+\cmd{set\_disable\_clock\_gating\_check objects} 禁用 cell 或 pin 上的 clock-gating 检查。\cmd{remove\_disable\_clock\_gating\_check objects} 恢复。未指定 objects 时禁用所有检查，等价于 \texttt{timing\_disable\_clock\_gating\_checks = true}。
+
+% ============================================================
+\section{指定内部生成时钟}
+\subsection*{Specifying Internally Generated Clocks}
+
+设计可能包含时钟分频器或其他从 master source clock 产生新时钟的结构。由片上逻辑从另一时钟产生的时钟称为 generated clock。
+
+\figplaceholder{Figure 61: Divide-by-2 clock generator}{二分频时钟发生器}{fig:divide-by-2-generator}
+
+PrimeTime 不考虑时钟发生器电路逻辑，须将 generated clock 行为指定为独立时钟。但可定义 master clock 与 generated clock 间关系，使 master clock 变更时 generated clock 特性自动变更。
+
+\cmd{create\_generated\_clock} 指定内部生成时钟特性。默认对现有 generated clock 对象使用 \cmd{create\_generated\_clock} 会覆盖该时钟。Generated clock 对象在分析时展开为 real clock，在 \cmd{report\_timing} 内自动发生，或显式用 \cmd{update\_timing}。
+
+可用 \opt{-divide\_by}、\opt{-multiply\_by} 或 \opt{-edges} 创建 generated clock。用 \opt{-combinational} 修改 generated clock 波形时，master clock 的 rise 与 fall 边沿须有有效路径传播到 generated clock 源 pin。
+
+\subsection{指定二分频生成时钟}
+\subsubsection*{Specifying a Divide-by-2 Generated Clock}
+
+用 \opt{-divide\_by} 指定分频因子：
+\begin{lstlisting}
+pt_shell> create_generated_clock -name DIVIDE \
+          -source [get_ports SYSCLK] -divide_by 2 [get_pins FF1/Q]
+\end{lstlisting}
+
+\opt{-source} 指定 master 源（port 或 pin，非 clock 名）；指定 pin 作为新 generated clock 创建点。Generated clock 边沿基于 master clock 源 pin 上升沿出现。若需基于 master 源 pin 下降沿，用 \opt{-edges} 而非 \opt{-divide\_by}。
+
+\subsection{基于边沿创建生成时钟}
+用 \cmd{create\_generated\_clock -edges} 以 master pin 上 master clock 波形边沿指定 generated clock。
+
+\figplaceholder{Figure 62: Divide-by-3 clock generator}{三分频时钟发生器}{fig:divide-by-3-generator}
+
+\begin{lstlisting}
+pt_shell> create_generated_clock -edges { 1 5 7 } \
+          -name DIV3A -source [get_ports SYSCLK] [get_pins U2/Q]
+\end{lstlisting}
+
+\subsection{为脉冲发生器创建时钟极性}
+Pulse generator 可改善性能并节省功耗。对不改变输入时钟频率的 pulse generator，可设置 \texttt{pulse\_clock} 属性为以下 sense，无需添加 generated clock：
+\begin{itemize}
+  \item \texttt{rise\_triggered\_high\_pulse}
+  \item \texttt{rise\_triggered\_low\_pulse}
+  \item \texttt{fall\_triggered\_high\_pulse}
+  \item \texttt{fall\_triggered\_low\_pulse}
+\end{itemize}
+
+\figplaceholder{Figure 63: Pulse clock types that do not change frequency}{不改变频率的脉冲时钟类型}{fig:pulse-no-freq-change}
+
+理想时钟宽度为 0。脉冲宽度计算：高脉冲 = fall\_network\_latency $-$ rise\_network\_latency；低脉冲 = rise\_network\_latency $-$ fall\_network\_latency。
+
+改变频率的 pulse generator（如倍频器）须用 \cmd{create\_generated\_clock}。
+
+\figplaceholder{Figure 64: Pulse clock types that change frequency}{改变频率的脉冲时钟类型}{fig:pulse-freq-change}
+
+\subsection{基于下降沿创建分频时钟}
+\figplaceholder{Figure 65: Generated divide-by-2 clocks based on different edges}{基于不同边沿的生成二分频时钟}{fig:div2-different-edges}
+
+DIV2A 基于 SYSCLK port 上升沿，可用 \opt{-divide\_by} 或 \opt{-edges}：
+\begin{lstlisting}
+pt_shell> create_generated_clock -name DIV2A \
+          -source [get_ports SYSCLK] -divide_by 2 [get_pins FF1/Q]
+pt_shell> create_generated_clock -name DIV2A \
+          -source [get_ports SYSCLK] -edges { 1 3 5 } [get_pins FF1/Q]
+\end{lstlisting}
+
+DIV2B 基于下降沿，不能用 \opt{-divide\_by}，但可用 \opt{-edges}：
+\begin{lstlisting}
+pt_shell> create_generated_clock -name DIV2B \
+          -source [get_ports SYSCLK] -edges { 2 4 6 } [get_pins FF2/Q]
+\end{lstlisting}
+
+\subsection{偏移生成时钟边沿}
+可用 \opt{-edge\_shift} 将 generated clock 边沿偏移指定时间量（不计为 clock latency）。
+
+\figplaceholder{Figure 66: Generated Divide-by-3 Clock With Shifted Edges}{边沿偏移的生成三分频时钟}{fig:div3-shifted-edges}
+
+\begin{lstlisting}
+pt_shell> create_generated_clock -edges { 3 5 9 } -edge_shift { 2.2 2.2 2.2 } \
+          -name DIV3C -source [get_ports SYSCLK] [get_pins U4/QN]
+\end{lstlisting}
+
+\begin{noteBox}
+\opt{-edge\_shift} 仅可与 \opt{-edges} 联用。
+\end{noteBox}
+
+\subsection{源引脚处的多个时钟}
+\cmd{create\_generated\_clock} 的 \opt{-source} 引脚可能接收多个时钟，可能需用 \opt{-master\_clock} 与 \opt{-source} 指定用于创建 generated clock 的时钟。
+
+\subsection{选择生成时钟对象}
+\cmd{get\_clocks} 可按命名约定或过滤选择 generated clock：
+\begin{lstlisting}
+pt_shell> set_false_path -from [get_clocks CLK_DIV*] -to [get_clocks CLKB]
+pt_shell> set_false_path -from [get_clocks CLK* -filter "is_generated==true"] \
+          -to [get_clocks CLKB]
+\end{lstlisting}
+
+\subsection{报告时钟信息}
+\cmd{report\_clock} 报告 clock 与 generated clock 信息。\cmd{report\_clock\_timing} 提供详细 clock network 报告。\cmd{report\_transitive\_fanout -clock\_tree} 显示设计中 clock network。
+
+\subsection{移除生成时钟对象}
+\cmd{remove\_generated\_clock CLK\_DIV2} 移除 generated clock 及其对应 clock 对象。
+
+% ============================================================
+\section{生成时钟边沿特定源延迟传播}
+\subsection*{Generated Clock Edge Specific Source Latency Propagation}
+
+PrimeTime 计算 generated clock 的 clock source latency 时考虑 master clock 与 generated clock 间边沿关系，寻找传播到 generated clock 指定边沿类型的最差路径。若路径存在但不满足所需边沿关系，PrimeTime 返回 UITE-461 错误（使用零 clock source latency）。
+
+% ============================================================
+\section{时钟网格分析}
+\subsection*{Clock Mesh Analysis}
+
+PrimeTime SI 提供用 SPICE 仿真以晶体管级精度分析 clock mesh 网络的简便方法。若时钟网络不变，可在后续 PrimeTime 时序与签核分析中复用仿真结果。
+
+\subsection{时钟网格分析概述}
+指定要分析的时钟网络根节点。PrimeTime SI 从该节点追踪整个时钟网络（含 clock mesh 与时序器件负载），调用外部 HSPICE 兼容电路仿真器仿真网络，确定时钟网络中各 cell arc 与 net arc 的精确时序，将测量 delay back-annotate 到设计，并对 clock mesh 结构执行 timing arc 缩减——保留单个 mesh driver，禁用其他 mesh driver 的 timing，被禁用 driver 的 timing arc 替换为从保留 driver 出发的等价 timing arc。
+
+\figplaceholder{Figure 67: Clock mesh analysis and circuit reduction}{时钟网格分析与电路缩减}{fig:clock-mesh-reduction}
+
+电路缩减目的：避免全 mesh 分析中大量 driver-load 组合，同时保持准确 driver-to-load 时序结果。n 个 driver、m 个 load 的 mesh 有 $n \times m$ 条 timing arc；缩减为单 driver 后仅 $m$ 条。
+
+为 CRPR，从 mesh driver 到最近 mesh load 的最短 delay 代表所有 driver-to-load timing arc 共享的 delay 量。PrimeTime SI 在 CRPR 公共点之前计入该共享 delay。
+
+\figplaceholder{Figure 68: CRPR From Mesh}{来自 Mesh 的时钟重汇聚悲观移除}{fig:crpr-from-mesh}
+
+\subsection{执行时钟网格分析}
+步骤 1：用 clock network simulation 命令生成 clock mesh model（一次性）。
+
+\figplaceholder{Figure 69: Generating the Clock Mesh Model}{生成时钟网格模型}{fig:gen-clock-mesh-model}
+
+步骤 2：在后续分析中复用生成的 clock mesh model。
+
+\figplaceholder{Figure 70: Reusing the Clock Mesh Model}{复用时钟网格模型}{fig:reuse-clock-mesh-model}
+
+用 \cmd{sim\_setup\_simulator} 设置 SPICE 仿真器；\cmd{sim\_setup\_library} 设置逻辑库 cell 关联的 SPICE 电路文件；可选 \cmd{sim\_validate\_setup} 检查设置；\cmd{sim\_analyze\_clock\_network} 执行仿真并将结果 back-annotate，仿真结果存入 Tcl 脚本文件。
+
+\begin{seeAlsoBox}
+时钟网络时序报告，见相关章节。Clock network simulation 命令详见 PrimeTime SI 文档。
+\end{seeAlsoBox}
+

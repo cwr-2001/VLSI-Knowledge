@@ -1,0 +1,1409 @@
+% 第 5 章
+\bichapter{布线与布线后优化}{Routing and Postroute Optimization}
+\label{chap:route}
+
+本章介绍 Fusion Compiler 路由器 Zroute 的布线能力，以及布线后优化功能。Zroute 面向多核硬件架构，可高效处理 45~nm 及以下先进工艺设计规则与可制造性设计（DFM）任务。
+
+本章包括以下主题：
+\begin{itemize}
+  \item Zroute 简介（Introduction to Zroute）
+  \item 基本 Zroute 流程（Basic Zroute Flow）
+  \item 布线前提条件（Prerequisites for Routing）
+  \item 定义 Via（Defining Vias）
+  \item 插入 Via Ladder（Inserting Via Ladders）
+  \item 检查可布线性（Checking Routability）
+  \item 布线约束（Routing Constraints）
+  \item 布线应用选项（Routing Application Options）
+  \item 时钟网络布线（Routing Clock Nets）
+  \item 关键网络布线（Routing Critical Nets）
+  \item 次级电源/地 pin 布线（Routing Secondary Power and Ground Pins）
+  \item 信号网络布线（Routing Signal Nets）
+  \item 网络屏蔽（Shielding Nets）
+  \item 执行布线后优化（Performing Postroute Optimization）
+  \item 分析并修复信号电迁移违例（Analyzing and Fixing Signal Electromigration Violations）
+  \item 执行 ECO 布线（Performing ECO Routing）
+  \item 在 GUI 中布线（Routing Nets in the GUI）
+  \item 清理已布线网络（Cleaning Up Routed Nets）
+  \item 分析布线结果（Analyzing the Routing Results）
+  \item 保存布线信息（Saving Route Information）
+  \item 推导掩模颜色（Deriving Mask Colors）
+  \item 插入与移除 Cut Metal 形状（Inserting and Removing Cut Metal Shapes）
+\end{itemize}
+
+% ============================================================
+\section{Zroute 简介}
+\subsection*{Introduction to Zroute}
+
+Zroute 包含五个布线引擎：全局布线（global routing）、轨道分配（track assignment）、详细布线（detail routing）、ECO 布线与布线验证。全局布线、轨道分配与详细布线可通过任务专用命令或自动布线命令调用；ECO 布线与布线验证则使用任务专用命令。
+
+Zroute 主要特性包括：
+\begin{itemize}
+  \item 全布线步骤（含全局布线、轨道分配、详细布线）支持多核多线程；
+  \item 真实连通模型：矩形相触即视为电气连通，无需导线中心线重合；
+  \item 动态迷宫网格：可 off-grid 连接 pin，同时保留网格路由器的速度优势；
+  \item 多边形管理器：识别多边形，并理解 DRC 面向多边形；
+  \item 详细布线阶段并发优化设计规则、天线规则、导线与 via；
+  \item 详细布线阶段并发插入冗余 via；
+  \item 全局/轨道/详细布线内建 soft rule 支持；
+  \item 时序与串扰驱动的全局布线、轨道分配、详细布线与 ECO 布线；
+  \item 智能设计规则处理（合并冗余违例、智能收敛）；
+  \item 带层约束与非默认布线规则（NDR）的 net group 布线；
+  \item 时钟布线；
+  \item 布线验证；
+  \item 以 soft rule 方式优化 DFM 与可制造性（DFY）；
+  \item 支持先进设计规则，如多重图案化（multiple patterning）。
+\end{itemize}
+
+% ============================================================
+\section{基本 Zroute 流程}
+\subsection*{Basic Zroute Flow}
+
+图~\ref{fig:basic-zroute-flow} 给出基本 Zroute 流程，包括时钟布线、信号布线、DFM 优化与布线验证。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 63：Basic Zroute Flow）}\\[0.3em]
+\small 请参阅原版 PDF 插图；可将截图放入 \texttt{figures/} 目录后用 \texttt{\textbackslash includegraphics} 替换。
+\vspace{1.5cm}}}
+\caption{基本 Zroute 流程}
+\label{fig:basic-zroute-flow}
+\end{figure}
+
+% ============================================================
+\section{布线前提条件}
+\subsection*{Prerequisites for Routing}
+
+运行 Zroute 前，block 与物理库须满足：
+\begin{itemize}
+  \item \textbf{库要求}：Zroute 从 technology file 获取全部设计规则信息，布线前须确保规则已在 technology file 中定义。详见 \textit{Synopsys Technology File and Routing Rules Reference Manual}。
+  \item \textbf{Block 要求}：
+  \begin{itemize}
+    \item 电源/地网络已在设计规划后、布局前布线完成（见 \textit{Fusion Compiler Design Planning User Guide}）；
+    \item 已完成时钟树综合与优化（见第~\ref{chap:cts}~章）；
+    \item 估计拥塞可接受；
+    \item 估计时序可接受（约 0~ns slack）；
+    \item 估计最大电容与 transition 无违例。
+  \end{itemize}
+\end{itemize}
+后三项可通过 \cmd{check\_routability} 验证布局可布线性（见「检查可布线性」）。
+
+% ============================================================
+\section{定义 Via}
+\subsection*{Defining Vias}
+
+路由器支持以下 via 定义类型：
+\begin{itemize}
+  \item \textbf{Simple via 与 simple via array}：simple via 为单 cut via，由 cut 层及 cut/金属层矩形的高宽指定；simple via array 为多 cut 的 simple via。可用于：带 NDR 的时钟/信号布线、冗余 via 插入、带先进 via 规则的 PG 布线。
+  \item \textbf{Custom via}：由任意 Manhattan 多边形集合构成的多 cut、异形 via；\textbf{仅}可用于冗余 via 插入。
+\end{itemize}
+
+Via 定义来源：
+\begin{itemize}
+  \item 设计库关联 technology file 的 \texttt{ContactCode} 段；
+  \item LEF 文件中的 via rule \texttt{GENERATE} 语句（定义 simple via array）；
+  \item 用户自定义 via（\cmd{create\_via\_def}）。
+\end{itemize}
+
+若希望 Zroute 将某 via 定义用于信号布线，须满足：\appopt{is\_default} 为 \cmd{true}，且 \appopt{is\_excluded\_for\_signal\_routing} 为 \cmd{false}。此外，Zroute 还会使用 technology file fat via table 或 \cmd{create\_routing\_rule} 所定义 NDR 中显式指定的非默认 via。
+
+\subsection{从 LEF 读取 Via 定义}
+\subsubsection*{Reading Via Definitions from a LEF File}
+
+使用 \cmd{read\_tech\_lef} 读取 LEF 中 via rule \texttt{GENERATE} 语句。支持如下 LEF 语法：
+\begin{lstlisting}
+via_rule_name GENERATE [DEFAULT]
+   LAYER lower_layer_name
+      ENCLOSURE lower_overhang1 lower_overhang2
+   LAYER upper_layer_name
+      ENCLOSURE upper_overhang1 upper_overhang2
+   LAYER cut_layer_name
+      RECT llx lly urx ury
+      SPACING x_spacing BY y_spacing
+\end{lstlisting}
+不支持 \texttt{WIDTH} 与 \texttt{RESISTANCE} 语句。
+
+\subsection{创建 Via 定义}
+\subsubsection*{Creating a Via Definition}
+
+使用 \cmd{create\_via\_def} 创建 via 定义；创建后可在设计中任意处使用（类似 technology file 的 \texttt{ContactCode}）。用户 via 定义保存在设计库中，仅该设计可用。可定义 simple via、simple via array 与 custom via。
+
+\subsubsection{定义 Simple Via}
+\subsubsection*{Defining Simple Vias}
+
+\begin{lstlisting}
+create_via_def
+   -cut_layer layer
+   -cut_size {width height}
+   -upper_enclosure {width height}
+   -lower_enclosure {width height}
+   [-min_rows number_of_rows]
+   [-min_columns number_of_columns]
+   [-min_cut_spacing distance]
+   [-cut_pattern cut_pattern]
+   [-is_default]
+   [-force]
+   via_def_name
+\end{lstlisting}
+
+无需指定 enclosure 层：工具根据 technology file 中与 via 层相邻的金属层自动确定。默认创建单 cut via；定义 via array 时指定 \opt{-min\_rows}/\opt{-min\_columns} 与 \opt{-min\_cut\_spacing}。默认 cut pattern 为满阵列；可用 \opt{-cut\_pattern} 修改。覆盖已有定义须用 \opt{-force}。
+
+\begin{lstlisting}
+fc_shell> create_via_def design_via1_HV \
+  -cut_layer VIA12 -cut_size {0.05 0.05} \
+  -lower_enclosure {0.02 0.0} -upper_enclosure {0.0 0.2}
+
+fc_shell> create_via_def design_via12 -cut_pattern "01 10"
+\end{lstlisting}
+
+用 \cmd{report\_via\_defs} 报告用户 via 定义。
+
+\subsubsection{定义 Custom Via}
+\subsubsection*{Defining Custom Vias}
+
+\begin{lstlisting}
+create_via_def
+   -shapes { {layer {coordinates} [mask_constraint]} ... }
+   [-lower_mask_pattern alternating | uniform]
+   [-upper_mask_pattern alternating | uniform]
+   [-force]
+   via_def_name
+\end{lstlisting}
+
+\opt{-shapes} 须为一个 via 层与两个金属 enclosure 层指定形状；每层可有多个形状。
+
+\begin{lstlisting}
+fc_shell> create_via_def design_H_shape_via \
+   -shapes { {VIA12 {0.035 -0.035} {0.100 0.035}}
+             {VIA12 {-0.100 -0.035} {-0.035 0.035}}
+             {METAL1 {-0.130 -0.035} {0.130 0.035}}
+             {METAL2 {-0.100 -0.065} {-0.035 0.065}}
+             {METAL2 {0.035 -0.065} {0.100 0.065}}
+             {METAL2 {-0.100 -0.035} {0.100 0.035}} }
+\end{lstlisting}
+
+双图案化时，可对形状或 enclosure 层分配 mask constraint，二者不可同时使用：
+\begin{itemize}
+  \item 对形状：在 \opt{-shapes} 中用 \cmd{mask\_one}/\cmd{mask\_two}/\cmd{mask\_three}；
+  \item 对 enclosure 层：用 \opt{-lower\_mask\_pattern}/\opt{-upper\_mask\_pattern}（\cmd{uniform} 或 \cmd{alternating}），创建 via 时再指定首个形状的 mask。
+\end{itemize}
+
+\begin{lstlisting}
+fc_shell> create_via_def VIA12 \
+   -shapes { {M1 {-0.037 -0.010} {-0.017 0.01} mask_two}
+             {M1 {0.017 -0.010} {0.037 0.01} mask_one}
+             {VIA1 {-0.037 -0.01} {0.037 0.01} mask_two}
+             {M2 {-0.044 -0.010} {0.044 0.010} mask_one} }
+fc_shell> create_via -net n1 -via_def VIA12 \
+   -origin {100.100 200.320}
+\end{lstlisting}
+
+% ============================================================
+\section{插入 Via Ladder}
+\subsection*{Inserting Via Ladders}
+
+Via ladder（亦称 via pillar）是自 pin 层向上堆叠至上层、供路由器连接的堆叠 via。Via ladder 可降低 via 电阻，改善性能与电迁移鲁棒性。
+
+使用 via ladder 前须：
+\begin{itemize}
+  \item 在设计的工艺数据中定义 via ladder 规则（见「定义 Via Ladder 规则」）；
+  \item 在全局布线\textbf{之前}插入 via ladder。
+\end{itemize}
+
+插入方法：
+\begin{itemize}
+  \item 布线前优化中的自动插入；
+  \item 基于约束的插入：\cmd{insert\_via\_ladders}；
+  \item 手动插入：\cmd{create\_via\_ladder}。
+\end{itemize}
+
+\begin{seeAlsoBox}
+查询 Via Ladder；移除 Via Ladder；控制 Via Ladder 连接。
+\end{seeAlsoBox}
+
+\subsection{定义 Via Ladder 规则}
+\subsubsection*{Defining Via Ladder Rules}
+
+Via ladder 规则定义各级的行数与每行 cut 数，可在 technology file 中定义，或用 \cmd{create\_via\_rule} 创建。以下三种方式可创建等价规则：
+
+\textbf{方式 1}：在 technology file 的 \texttt{ViaRule} 段中定义（含 \texttt{cutLayerNameTbl}、\texttt{numCutRowsTbl}、\texttt{numCutsPerRowTbl}、\texttt{upperMetalMinLengthTbl}、\texttt{cutXMinSpacingTbl}、\texttt{cutYMinSpacingTbl}、\texttt{maxNumStaggerTracksTbl}、\texttt{forHighPerformance}、\texttt{forElectromigration} 等）。详见 \textit{Synopsys Technology File and Routing Rules Reference Manual}。
+
+\textbf{方式 2}：命令行详细规格 + 属性：
+\begin{lstlisting}
+fc_shell> create_via_rule -name VL1 -cut_layer_names {VIA1 VIA2} \
+   -cut_names {CUT1A CUT2A} -cut_rows {2 2} -cuts_per_row {2 2}
+fc_shell> set_attribute [get_via_rules VL1] \
+   upper_metal_min_length_table {L1 L2}
+fc_shell> set_attribute [get_via_rules VL1] \
+   for_high_performance false
+fc_shell> set_attribute [get_via_rules VL1] \
+   for_electro_migration true
+\end{lstlisting}
+
+\textbf{方式 3}：先创建空规则再设属性（\appopt{cut\_layer\_name\_table\_size}、\appopt{cut\_layer\_name\_table}、\appopt{num\_cuts\_per\_row\_table} 等）。
+
+无论创建方式如何，工具对 via rule 一视同仁。可用 \cmd{get\_via\_rules}、\cmd{remove\_via\_rules}、\cmd{report\_via\_rules}、\cmd{list\_attributes -application -class via\_rule}，以及 \cmd{write\_tech\_file} 保存。
+
+\subsection{为电迁移 Via Ladder 生成规则}
+\subsubsection*{Generating Via Ladder Rules for Electromigration Via Ladders}
+
+可用 \cmd{generate\_via\_ladder\_template -config\_file} 根据 XML 配置生成规则与约束脚本，输出：
+\begin{itemize}
+  \item 模板脚本（默认 \texttt{auto\_gen\_via\_ladder\_template.tcl}，可用 \opt{-template\_file} 改名）：含 \cmd{create\_via\_rule} 与 \cmd{set\_attribute}；
+  \item 关联脚本（默认 \texttt{auto\_gen\_via\_ladder\_association.tcl}，可用 \opt{-association\_file} 改名）：含 \cmd{set\_via\_ladder\_candidate}，并将 pin 的 \appopt{is\_em\_via\_ladder\_required} 设为 \cmd{true}。
+\end{itemize}
+
+配置文件基本结构：
+\begin{lstlisting}
+<EmRule>
+   <Template name="rule_name">
+      <Layer name="layer_name" row_number="cuts_per_row"
+         [max_stagger_tracks="count"] ... />
+   </Template>
+   <Pin name="pin_name">
+      <Template name="rule_name"/>
+   </Pin>
+</EmRule>
+\end{lstlisting}
+
+工具从 technology file 推导 cut 层、cut 名与各金属层最小长度。
+
+\begin{noteBox}
+运行 \cmd{generate\_via\_ladder\_template} 前须打开 block，以确保可访问工艺数据。
+\end{noteBox}
+
+\begin{lstlisting}
+fc_shell> generate_via_ladder_template -config_file vl_config
+\end{lstlisting}
+
+\subsection{为性能 Via Ladder 生成规则}
+\subsubsection*{Generating Via Ladder Rules for Performance Via Ladders}
+
+使用 \cmd{setup\_performance\_via\_ladder} 生成性能 via ladder 规则与关联。默认：
+\begin{itemize}
+  \item 生成至 M5 的规则（\opt{-max\_layer} 可改）；输出 XML（默认 \texttt{auto\_perf\_via\_ladder\_rule.xml}）与规则脚本（默认 \texttt{auto\_perf\_via\_ladder\_rule.tcl}）；也可用 \cmd{generate\_via\_rules\_for\_performance}；
+  \item 将规则关联到无 \appopt{dont\_use} 的库单元 pin（\opt{-dont\_use} 可包含 dont\_use 单元；\opt{-lib\_pins} 可限定 pin）；输出关联脚本（默认 \texttt{auto\_perf\_via\_ladder\_association.tcl}）；也可用 \cmd{associate\_performance\_via\_ladder}；
+  \item 运行所生成的脚本。
+\end{itemize}
+
+\subsection{基于约束的 Via Ladder 插入}
+\subsubsection*{Constraint-Based Via Ladder Insertion}
+
+步骤：
+\begin{enumerate}
+  \item 定义 via ladder 规则；
+  \item 用 \cmd{set\_via\_ladder\_rules} / \cmd{set\_via\_ladder\_constraints} 定义约束；
+  \item \cmd{insert\_via\_ladders} 插入；
+  \item \cmd{verify\_via\_ladders} 验证。
+\end{enumerate}
+
+\subsubsection{定义 Via Ladder 约束}
+\subsubsection*{Defining Via Ladder Constraints}
+
+约束指定在哪些 pin 上插入何种模板；可定义全局与 instance 级约束，冲突时 instance 级优先。另可用 \cmd{set\_via\_ladder\_candidate} 为特定 pin 指定候选（布线前优化在时序关键路径上插入时使用）。用 \cmd{report\_via\_ladder\_constraints} 报告。
+
+\textbf{全局约束}（via ladder rules）：\cmd{set\_via\_ladder\_rules}。映射选项：\opt{-master\_pin\_map}/\opt{-master\_pin\_map\_file}（格式 \texttt{\{\{lib\_cell/pin \{via\_ladder\_list\}\}...\}}）、\opt{-default\_ladders}。作用范围：\opt{-all\_instances\_of}、\opt{-all\_clock\_outputs}、\opt{-all\_clock\_inputs}、\opt{-all\_pins\_driving}。报告/移除：\cmd{report\_via\_ladder\_rules}、\cmd{remove\_via\_ladder\_rules}。
+
+\textbf{Instance 级约束}：
+\begin{lstlisting}
+fc_shell> set_via_ladder_constraints -pins {u1/i1 u2/i2} \
+   {VL1 VL2 VL3}
+\end{lstlisting}
+移除用 \cmd{remove\_via\_ladder\_constraints}。
+
+\subsubsection{插入 Via Ladder}
+\subsubsection*{Inserting Via Ladders}
+
+\cmd{insert\_via\_ladders} 默认行为与常用选项：
+\begin{itemize}
+  \item 默认不删除已有 ladder；用 \opt{-clean true} 先清除；
+  \item 默认针对约束中全部 pin（信号与时钟）；用 \opt{-nets} 限定网络；
+  \item 每个目标 pin 插入一个 ladder；多模板时选用首个不导致 DRC 的模板；全导致 DRC 时默认选 DRC 代价最低者；
+  \item \opt{-ignore\_routing\_shape\_drcs true}：检查时忽略详细布线形状；
+  \item \opt{-relax\_line\_end\_via\_enclosure\_rule true}：放松线端 cut enclosure；
+  \item \opt{-relax\_pin\_layer\_metal\_spacing\_rules true}：ladder 完全包在 pin 内时放松 pin 层间距；
+  \item \opt{-allow\_drcs false}：禁止产生 DRC 的插入；
+  \item \opt{-strictly\_honor\_cut\_table true}：仅用模板中的 cut；
+  \item \opt{-shift\_vias\_on\_transition\_layers true}：过渡层 cut 偏离 track 以改善 DRC；
+  \item \opt{-ndr\_on\_top\_layer\_only true}：仅顶层遵循非默认宽度；
+  \item \opt{-connect\_within\_metal}/\opt{-connect\_within\_metal\_for\_via\_ladder}：要求 pin 层上方 via 完全落在 pin（含延伸）内；
+  \item \opt{-allow\_patching true}：允许 enclosure 打补丁以满足最小长度；
+  \item \opt{-auto\_stagger true}：规则未定义最大 stagger track 时仍允许 stagger；
+  \item \opt{-verbose true}/\opt{-user\_debug true}：报告插入状态与失败详情（内部/硬/软 DRC）。
+\end{itemize}
+
+\begin{noteBox}
+若 pin 过小无法容纳任一指定 ladder，则不插入。
+\end{noteBox}
+
+\subsubsection{保护 Via Ladder}
+\subsubsection*{Protecting Via Ladders}
+
+\begin{lstlisting}
+fc_shell> set_app_options -name design.enable_via_ladder_protection \
+   -value true
+\end{lstlisting}
+为 \cmd{true} 时，\cmd{remove\_shapes}、\cmd{remove\_vias}、\cmd{remove\_objects}、\cmd{set\_attribute}、\cmd{set\_via\_def}、\cmd{add\_to\_edit\_group} 仅处理不属于 via ladder 的对象；属于 ladder 的对象会警告并跳过。
+
+\subsubsection{验证与更新}
+\subsubsection*{Verifying and Updating Via Ladders}
+
+\cmd{verify\_via\_ladders} 检查 ladder 是否匹配约束并正确连到 pin；可用 \opt{-nets} 限定。若插入时用了 \opt{-shift\_vias\_on\_transition\_layers true}，验证时也须使用，否则会误报。\opt{-report\_all\_via\_ladders false} 可将每类报告限制为 40 条。
+
+更新方式：\cmd{refresh\_via\_ladders}；或在 \cmd{route\_group}/\cmd{route\_auto}/\cmd{route\_eco} 中由 \appopt{route.auto\_via\_ladder.update\_during\_route}（默认 \cmd{true}）自动更新。相关应用选项包括 \appopt{route.auto\_via\_ladder.connect\_within\_metal}、\appopt{route.auto\_via\_ladder.auto\_stagger}、\appopt{route.auto\_via\_ladder.report\_all\_via\_ladders}、\appopt{route.auto\_via\_ladder.update\_on\_route\_group\_nets\_only} 等。
+
+\subsubsection{手动插入}
+\subsubsection*{Manual Via Ladder Insertion}
+
+\begin{enumerate}
+  \item 用 \cmd{create\_shape}/\cmd{create\_via} 创建组成形状；
+  \item 用 \cmd{create\_via\_ladder -shapes} 创建 ladder（名称形如 \texttt{VIA\_LADDER\_n}）。
+\end{enumerate}
+可选属性选项：\opt{-via\_rule}、\opt{-electromigration}、\opt{-high\_performance}、\opt{-pattern\_must\_join}、\opt{-pin}。
+
+查询：\cmd{get\_via\_ladders}、\cmd{report\_via\_ladders}。移除：
+\begin{lstlisting}
+fc_shell> remove_via_ladders *
+\end{lstlisting}
+\opt{-nets} 可限定网络。
+
+% ============================================================
+\section{检查可布线性}
+\subsection*{Checking Routability}
+
+布局完成后，用 \cmd{check\_routability} 检查 block 是否具备详细布线条件。默认检查：
+\begin{itemize}
+  \item \textbf{被阻塞的标准单元端口}：物理 pin 均不可达则视为 blocked。可达判定：pin 内有伸向邻层的 via、pin 层上存在不少于搜索范围的路径，或较短路径止于邻层 via。默认搜索范围为 2 倍 layer pitch（\opt{-standard\_cell\_search\_range}，最大 10）。\opt{-connect\_standard\_cells\_within\_pins true} 检查 via 是否完全在 pin 内。\opt{-check\_standard\_cell\_blocked\_ports false} 可关闭。
+  \item \textbf{被阻塞的顶层/宏端口}：默认搜索距离为 10 倍 pitch（\opt{-blocked\_range}/\opt{-blocked\_range\_via\_side}，最大 40）。\opt{-obey\_direction\_preference true} 要求沿优选方向可达。\opt{-check\_non\_standard\_cell\_blocked\_ports false} 可关闭。
+  \item \textbf{越界 pin}（\opt{-check\_out\_of\_boundary false} 可关）；
+  \item \textbf{最小网格违例}（\opt{-check\_min\_grid false} 可关）；
+  \item \textbf{非法 via 定义}（未着色 via array 行列不超过 20；custom/非对称 simple via 不超过 1000 cut；via 定义总数不超过 65535——不可关闭）；
+  \item \textbf{非法 real metal via cut blockage}（\opt{-check\_via\_cut\_blockage false} 可关）；
+  \item \textbf{最小宽度设置}（NDR 最小宽/屏蔽宽不超过 technology 最大宽——不可关闭）。
+\end{itemize}
+
+可选检查（需显式打开）：\opt{-check\_pg\_blocked\_ports}、\opt{-check\_redundant\_pg\_shapes}、\opt{-check\_routing\_track\_space}、\opt{-check\_frozen\_net\_blocked\_ports}、\opt{-check\_no\_net\_pins}、\opt{-check\_real\_metal\_blockage\_overlap\_pin}、\opt{-check\_lib\_via\_cut\_blockage}、\opt{-check\_shield}、\opt{-via\_ladder}。
+
+Pin 连接控制：\opt{-obey\_access\_edges}、\opt{-access\_edge\_whole\_side}、\opt{-report\_no\_access\_edge}、\opt{-allow\_via\_rotation}。
+
+Blocked port 检查会考虑 \cmd{set\_ignored\_layers}/\cmd{set\_routing\_rule}/\cmd{set\_clock\_routing\_rules} 的软/硬层约束及 \appopt{route.common.freeze\_layer\_by\_layer\_name} 等；\opt{-honor\_layer\_constraints false} 可忽略层约束。
+
+错误数据默认名为 \texttt{check\_routability.err}（\opt{-error\_data} 可改），随 block 保存；可用 error browser 查看。
+
+% ============================================================
+\section{布线约束}
+\subsection*{Routing Constraints}
+
+布线约束在布线过程中提供指导。表~\ref{tab:routing-constraints} 概述各类约束。
+
+\begin{table}[htbp]
+\centering
+\caption{布线约束类型}
+\label{tab:routing-constraints}
+\begin{tabularx}{\textwidth}{@{}l X@{}}
+\toprule
+\textbf{指导内容} & \textbf{说明} \\
+\midrule
+控制布线层 & \cmd{set\_ignored\_layers} 等，见「指定布线资源」 \\
+更严格最小宽/间距 & 定义并应用 NDR（\cmd{create\_routing\_rule}） \\
+控制穿越 voltage area & 电压域布线规则 \\
+控制布线方向 & 层优选方向；区域用 preferred-direction-only / switch-preferred-direction routing guide \\
+限制非优选方向边数 & maximum-number-of-pattern routing guide \\
+控制 off-grid 布线 & 见「控制 Off-Grid 布线」 \\
+禁止特定 net 布线 & \appopt{physical\_status} 设为 \cmd{locked} \\
+禁止特定区域布线 & routing blockage \\
+为顶层布线预留空间 & corridor routing blockage \\
+限制布线到特定区域 & routing corridor \\
+区域优先级 & access preference routing guide \\
+控制布线密度 & utilization routing guide \\
+鼓励 river routing & single-layer river routing guide \\
+改善硬宏 pin 可布线性 & pin access routing guides \\
+控制 block 边界周围布线 & perimeter constraint objects \\
+Metal cut allowed/forbidden 规则 & boundary cell 插入时自动创建，或 \cmd{derive\_metal\_cut\_routing\_guides} \\
+控制 pin 连接 & must-join、pin connection 类型、pin tapering \\
+控制 via ladder 连接 & 见相关小节 \\
+限制重布线范围 & rerouting mode \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{定义 Routing Blockage}
+\subsubsection*{Defining Routing Blockages}
+
+Routing blockage 定义特定层上禁止布线的区域，Zroute 视其为硬约束。用 \cmd{create\_routing\_blockage} 创建，至少指定边界与层。
+
+\begin{itemize}
+  \item 矩形：\opt{-boundary \{ \{llx lly\} \{urx ury\} \}}；
+  \item 直角多边形：\opt{-boundary \{ \{x1 y1\} \{x2 y2\} ... \}}，也可由 geo\_mask 等物理对象并集生成（多连通则生成多个 blockage）；
+  \item 层：\opt{-layers}（金属、via 或 poly）。
+\end{itemize}
+
+默认名称 \texttt{RB\_objId}，阻止边界内所有网络；按 real metal 参与 RC 提取与 DRC，须满足最小间距。常用选项：\opt{-name}、\opt{-cell}、\opt{-zero\_spacing}（零间距且不作 real metal；防止 via 插入时须用此选项）、\opt{-net\_types}（\cmd{signal}/\cmd{clock}/\cmd{power}/\cmd{ground} 等）。
+
+\begin{lstlisting}
+fc_shell> create_routing_blockage \
+   -boundary { {0.0 0.0} {100.0 100.0} } \
+   -net_types signal -layers M1
+fc_shell> create_routing_blockage \
+   -boundary { {0.0 0.0} {100.0 100.0} } \
+   -net_types signal -layers V1 -zero_spacing
+fc_shell> create_routing_blockage \
+   -boundary { {0.0 0.0} {100.0 100.0} } \
+   -net_types {power ground} -layers M2
+\end{lstlisting}
+
+\textbf{为顶层布线预留空间}：创建时加 \opt{-reserve\_for\_top\_level\_routing}。块级实现时作普通 blockage；frame view 提取时移除以允许顶层布线。
+
+查询：\cmd{get\_routing\_blockages}、\cmd{get\_objects\_by\_location -classes routing\_blockage}。移除：\cmd{remove\_routing\_blockages}（\opt{-all} 移除全部 corridor）。
+
+\subsection{定义 Routing Guide}
+\subsubsection*{Defining Routing Guides}
+
+Routing guide 为区域提供布线指令。用户定义的 guide 由 Zroute 遵从，但 Advanced Route 工具不遵从。
+
+\begin{noteBox}
+用户定义的 routing guide 由 Zroute 遵从；Advanced Route 工具不遵从。
+\end{noteBox}
+
+用 \cmd{create\_routing\_guide} 创建，须指定矩形边界 \opt{-boundary \{\{llx lly\} \{urx ury\}\}} 及用途相关选项。表~\ref{tab:user-routing-guides} 列出用户定义类型。
+
+\begin{table}[htbp]
+\centering
+\caption{用户定义 Routing Guide}
+\label{tab:user-routing-guides}
+\begin{tabularx}{\textwidth}{@{}X l@{}}
+\toprule
+\textbf{用途} & \textbf{选项} \\
+\midrule
+仅在优选方向布线 & \opt{-preferred\_direction\_only} \\
+切换优选方向 & \opt{-switch\_preferred\_direction} \\
+限制特定布线模式出现次数 & \opt{-max\_patterns} \\
+控制布线密度 & \opt{-horizontal\_track\_utilization} / \opt{-vertical\_track\_utilization} \\
+区域优先级 & \opt{-access\_preference} \\
+鼓励 river routing & \opt{-river\_routing} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+默认名称 \texttt{RD\#n}；可用 \opt{-name}、\opt{-layers}、\opt{-cell}。
+
+\subsubsection{控制布线方向}
+\subsubsection*{Using Routing Guides to Control the Routing Direction}
+
+\begin{lstlisting}
+fc_shell> create_routing_guide -boundary {{0.0 0.0} {100.0 100.0}} \
+   -layers {M4} -preferred_direction_only
+fc_shell> create_routing_guide -boundary {{0.0 0.0} {100.0 100.0}} \
+   -layers {M1 M2} -switch_preferred_direction
+\end{lstlisting}
+
+\begin{noteBox}
+若 switch-preferred-direction 与 preferred-direction-only 重叠，前者优先。
+\end{noteBox}
+
+\subsubsection{限制非优选方向边数}
+\subsubsection*{Using Routing Guides to Limit Edges in the Nonpreferred Direction}
+
+\begin{lstlisting}
+fc_shell> create_routing_guide -boundary {{50 50} {200 200}} \
+   -max_patterns {{M2 non_pref_dir_edge 2} {M4 non_pref_dir_edge 3}} \
+   -layers {M2 M4}
+\end{lstlisting}
+当前支持的 pattern 为 \cmd{non\_pref\_dir\_edge}。超过阈值时 Zroute 报告违例。
+
+\subsubsection{控制密度与优先级、River Routing}
+\subsubsection*{Density, Access Preference, and River Routing}
+
+\begin{lstlisting}
+fc_shell> create_routing_guide -boundary {{0.0 0.0} {100.0 100.0}} \
+   -horizontal_track_utilization 50 -vertical_track_utilization 30
+fc_shell> create_routing_guide -boundary {{0 0} {300 300}} \
+   -access_preference {M1 {wire_access_preference {{0 0} {2 1}} 0.2}
+                          {via_access_preference {{0 0} {5 5}} 1.0}
+                          {via_access_preference {{40 40} {45 45}} 0.5}}
+fc_shell> create_routing_guide -boundary {{0.0 0.0} {100.0 100.0}} \
+   -river_routing -layers {M2}
+\end{lstlisting}
+
+强度 0--1；强度为 1 时视为硬约束，小于 1 的区域被忽略。用 \cmd{report\_routing\_guides} 报告。查询/移除：\cmd{get\_routing\_guides}、\cmd{remove\_routing\_guides -all}。
+
+\subsection{推导 Routing Guide}
+\subsubsection*{Deriving Routing Guides}
+
+\subsubsection{Pin Access Routing Guide}
+\subsubsection*{Deriving Pin Access Routing Guides}
+
+在更小工艺节点复用硬宏时，可用 \cmd{derive\_pin\_access\_routing\_guides} 改善宏 pin 可达性：
+
+\begin{lstlisting}
+fc_shell> derive_pin_access_routing_guides -cells myMacro \
+   -layers {M2 M3} -x_width 0.6 -y_width 0.7
+\end{lstlisting}
+
+为指定宏在指定层创建 routing guide，并在宏周围创建带 pin 开孔的 metal blockage 及相邻 via 层 blockage。默认仅在优选方向开孔；\opt{-nonpreferred\_direction} 可在非优选方向也开孔；\opt{-pin\_extension} 可延伸开孔。命令会将宏 pin 的 \appopt{is\_rectangle\_only\_rule\_waived} 设为 \cmd{true}。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.2cm}\textit{（原书 Figure 64：Pin Access Routing Guides and Blockages）}\vspace{1.2cm}}}
+\caption{Pin Access Routing Guide 与 Blockage}
+\label{fig:pin-access-guides}
+\end{figure}
+
+移动宏后须重新生成；不可手动修改。
+
+\subsubsection{Metal Cut Routing Guide}
+\subsubsection*{Deriving Metal Cut Routing Guides}
+
+若 technology file 定义了 metal cut allowed / forbidden preferred grid extension 规则且已有 boundary cell，可用：
+\begin{lstlisting}
+derive_metal_cut_routing_guides -add_metal_cut_allowed
+\end{lstlisting}
+\opt{-check\_only} 可检查；错误数据默认 \texttt{block\_name.err}（\opt{-error\_view} 可改）。
+
+\subsection{控制 Block 边界周围布线}
+\subsubsection*{Controlling Routing Around the Block Boundary}
+
+用 \cmd{derive\_perimeter\_constraint\_objects} 沿边界放置金属形状、routing guide 与 blockage。边界变更后须重新生成。
+
+\begin{itemize}
+  \item \opt{-perimeter\_objects metal\_preferred}：沿优选方向边插入浮空金属（连续形状或用 \opt{-stub} 的 metal stub）；
+  \item \opt{-short\_metal\_length}/\opt{-metal\_spacing}：垂直于非优选边的短金属；
+  \item \opt{-perimeter\_objects mprg\_nonpreferred}：沿非优选边插入最大 pattern guide（阈值为 0）；
+  \item 另可沿边界插入 routing blockage。
+\end{itemize}
+
+常用选项：\opt{-hierarchical}、\opt{-layers}、\opt{-spacing\_from\_boundary}、\opt{-width\_nonpreferred}、\opt{-spacing\_nonpreferred}、\opt{-check\_only}。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}\textit{（原书 Figure 65：Continuous Metal Shape Perimeter Constraint Objects）}\vspace{1.0cm}}}
+\caption{连续金属形状边界约束对象}
+\label{fig:perimeter-metal-cont}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}\textit{（原书 Figure 66：Metal Stub Perimeter Constraint Objects）}\vspace{1.0cm}}}
+\caption{Metal Stub 边界约束对象}
+\label{fig:perimeter-metal-stub}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}\textit{（原书 Figure 67：Metal Shape Perimeter Constraint Objects With Additional Short Shapes）}\vspace{1.0cm}}}
+\caption{带短金属的边界约束对象}
+\label{fig:perimeter-short-metal}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}\textit{（原书 Figure 68：Routing Guide Perimeter Constraint Objects）}\vspace{1.0cm}}}
+\caption{Routing Guide 边界约束对象}
+\label{fig:perimeter-guide}
+\end{figure}
+
+\subsection{在特定区域内布线（Routing Corridor）}
+\subsubsection*{Routing Nets Within a Specific Region}
+
+Routing corridor 将布线限制在指定区域。全局布线视其为硬约束；轨道分配与详细布线视其为软约束（为修 DRC 可能略微越界）。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}\textit{（原书 Figure 69：Using a Routing Corridor）}\vspace{1.0cm}}}
+\caption{使用 Routing Corridor}
+\label{fig:routing-corridor}
+\end{figure}
+
+用 \cmd{create\_routing\_corridor} 创建，\cmd{add\_to\_routing\_corridor} 将 net 加入，\cmd{check\_routing\_corridors} 检查。
+
+\subsection{使用非默认布线规则（NDR）}
+\subsubsection*{Using Nondefault Routing Rules}
+
+用 \cmd{create\_routing\_rule} 定义比 technology file 更严格的宽度、间距、via 间距、via 选择、mask、屏蔽等规则，再用 \cmd{set\_routing\_rule} 或 \cmd{set\_clock\_routing\_rules} 赋给网络。
+
+\subsubsection{最小线宽与间距}
+\subsubsection*{Defining Minimum Wire Width and Spacing Rules}
+
+\begin{lstlisting}
+create_routing_rule rule_name \
+   -widths {layer1 width1 ...} \
+   -spacings {layer1 spacing1 ...}
+\end{lstlisting}
+
+也可定义 soft spacing（带 weight）：
+\begin{lstlisting}
+-soft_spacings { {layer spacing weight} ... }
+\end{lstlisting}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}\textit{（原书 Figure 70：Ignoring Nondefault Spacing Rule Violations）}\vspace{1.0cm}}}
+\caption{忽略非默认间距规则违例}
+\label{fig:ignore-ndr-spacing}
+\end{figure}
+
+为 soft spacing 分配修复努力：
+\begin{lstlisting}
+fc_shell> set_app_options \
+   -name route.common.soft_rule_weight_to_effort_level_map \
+   -value { {low low} {medium medium} {high high} }
+\end{lstlisting}
+effort 取值：\cmd{off}/\cmd{low}/\cmd{medium}/\cmd{high}（\cmd{low} weight 不可用 medium/high effort）。
+
+\subsubsection{最小 Via 间距与非默认 Via}
+\subsubsection*{Via Spacing and Nondefault Vias}
+
+\begin{lstlisting}
+fc_shell> create_routing_rule via_spacing_rule \
+   -via_spacings {{V1 V1 2.3} {V1 V2 3.2}}
+\end{lstlisting}
+
+指定非默认 via：\opt{-cuts}（由工具按 technology 选择）或 \opt{-vias}（显式列出 via 类型、cut 数与方向 \cmd{R}/\cmd{NR}）。
+
+\subsubsection{Mask 约束与屏蔽规则}
+\subsubsection*{Mask Constraints and Shielding Rules}
+
+\begin{lstlisting}
+fc_shell> create_routing_rule clock_mask1 \
+   -mask_constraints {M4 mask_one M5 mask_one}
+fc_shell> create_routing_rule shield_rule \
+   -shield_widths {M1 0.1 M2 0.1 M3 0.1 M4 0.1 M5 0.1 M6 0.3} \
+   -shield_spacings {M1 0.1 M2 0.1 M3 0.1 M4 0.1 M5 0.1 M6 0.3}
+\end{lstlisting}
+
+\begin{noteBox}
+为确保 DRC 收敛，双图案化 mask 约束应仅用于极少数时序关键网络。
+\end{noteBox}
+
+报告：\cmd{report\_routing\_rules -verbose}（\opt{-output} 可写出 Tcl）。移除：\cmd{remove\_routing\_rules}。修改须先删后重建。
+
+\subsubsection{将 NDR 赋给网络}
+\subsubsection*{Assigning Nondefault Routing Rules to Nets}
+
+\begin{itemize}
+  \item \cmd{set\_clock\_routing\_rules}：CTS 前赋给时钟网，CTS 会传播到新建时钟网；
+  \item \cmd{set\_routing\_rule}：赋给信号网，或 CTS 后的时钟网。
+\end{itemize}
+
+表~\ref{tab:clock-ndr-restrict} 列出限制时钟规则分配的选项。
+
+\begin{table}[htbp]
+\centering
+\caption{限制时钟布线规则分配}
+\label{tab:clock-ndr-restrict}
+\begin{tabularx}{\textwidth}{@{}X l@{}}
+\toprule
+\textbf{赋给} & \textbf{选项} \\
+\midrule
+特定时钟树 & \opt{-clocks} \\
+连到 clock root 的网络 & \opt{-net\_type root} \\
+连到 clock sink 的网络 & \opt{-net\_type sink} \\
+时钟树内部网络 & \opt{-net\_type internal} \\
+特定时钟网络 & \opt{-nets} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}\textit{（原书 Figure 71：Root, Internal, and Sink Clock Net Types）}\vspace{1.0cm}}}
+\caption{Root / Internal / Sink 时钟网络类型}
+\label{fig:clock-net-types}
+\end{figure}
+
+\begin{lstlisting}
+fc_shell> set_clock_routing_rules -rules NDR1 -net_type root
+fc_shell> set_clock_routing_rules -rules NDR2 -net_type internal
+fc_shell> set_clock_routing_rules -rules NDR3 -net_type sink
+fc_shell> set_clock_tree_options -root_ndr_fanout_limit 300
+\end{lstlisting}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}\textit{（原书 Figure 72：Using a Fanout Limit for Selecting Root Nets）}\vspace{1.0cm}}}
+\caption{用扇出限制选择 Root 网络}
+\label{fig:root-fanout-limit}
+\end{figure}
+
+\begin{noteBox}
+较小的 \opt{-root\_ndr\_fanout\_limit} 会增加使用 root NDR 的时钟网数量，可能加剧拥塞。
+\end{noteBox}
+
+多条 NDR 时优先级：\cmd{set\_routing\_rule} $>$ \cmd{set\_clock\_routing\_rules -nets} $>$ \cmd{set\_clock\_routing\_rules -clocks} $>$ 全局 \cmd{set\_clock\_routing\_rules}。
+
+信号网示例：
+\begin{lstlisting}
+fc_shell> set_routing_rule -rule WideMetal [get_nets CLK]
+fc_shell> set_routing_rule -default_rule [get_nets CLK]
+\end{lstlisting}
+另有 \opt{-no\_rule}、\opt{-clear}。报告：\cmd{report\_routing\_rules -of\_objects}、\cmd{report\_clock\_routing\_rules}。
+
+\subsection{控制 Off-Grid 布线}
+\subsubsection*{Controlling Off-Grid Routing}
+
+默认仅当 technology 中 \texttt{onWireTrack}/\texttt{onGrid} 为 1 时才要求对齐 track。可用以下选项覆盖：
+\begin{lstlisting}
+fc_shell> set_app_options \
+   -name route.common.wire_on_grid_by_layer_name \
+   -value {{M2 true} {M3 true}}
+fc_shell> set_app_options \
+   -name route.common.via_on_grid_by_layer_name \
+   -value {{V2 true}}
+fc_shell> set_app_options \
+   -name route.common.extra_via_off_grid_cost_multiplier_by_layer_name \
+   -value {{M2 0.5}}
+\end{lstlisting}
+有效代价 $=$ 基础代价 $\times (1+\mathrm{multiplier})$，multiplier 范围 0.0--20.0。
+
+\subsection{Must-Join Pin 布线}
+\subsubsection*{Routing Must-Join Pins}
+
+Must-join pin 的各 terminal 作为同一网络连接。默认随机结构（图~\ref{fig:must-join-default}）；为改善电磁特性，可用 pattern-based must-join（经 via ladder 能力实现，图~\ref{fig:must-join-single}）。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}\textit{（原书 Figure 73：Default Must-Join Pin Connection）}\vspace{1.0cm}}}
+\caption{默认 Must-Join 连接}
+\label{fig:must-join-default}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}\textit{（原书 Figure 74：Single-Level Pattern-Based Must-Join Pin Connection）}\vspace{1.0cm}}}
+\caption{单层 Pattern-Based Must-Join}
+\label{fig:must-join-single}
+\end{figure}
+
+多层结构（图~\ref{fig:must-join-multi}）：将 \appopt{route.auto\_via\_ladder.pattern\_must\_join\_over\_pin\_layer} 设为 2。当库 pin 有 \appopt{pattern\_must\_join} 且运行 \cmd{route\_auto}/\cmd{route\_group}/\cmd{route\_eco} 时自动使用。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}\textit{（原书 Figure 75：Multi-Level Pattern-Based Must-Join Pin Connection）}\vspace{1.0cm}}}
+\caption{多层 Pattern-Based Must-Join}
+\label{fig:must-join-multi}
+\end{figure}
+
+\begin{lstlisting}
+fc_shell> set_app_options -name \
+   route.auto_via_ladder.pattern_must_join_max_number_stagger_tracks \
+   -value {3 0}
+\end{lstlisting}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}\textit{（原书 Figure 76：Pattern-Based Must-Join Pin Connection With Staggering）}\vspace{1.0cm}}}
+\caption{带 Stagger 的 Pattern-Based Must-Join}
+\label{fig:must-join-stagger}
+\end{figure}
+
+无法创建时报告 ``Needs pattern must join pin connection'' DRC。可用 \appopt{route.auto\_via\_ladder.update\_pattern\_must\_join\_during\_route} 控制是否在每次布线时更新。
+
+\subsection{控制 Pin 连接与 Tapering}
+\subsubsection*{Controlling Pin Connections and Pin Tapering}
+
+\begin{lstlisting}
+fc_shell> set_app_options \
+   -name route.common.connect_within_pins_by_layer_name \
+   -value {{M1 via_all_pins}}
+\end{lstlisting}
+
+Mode：\cmd{off}（默认）、\cmd{via\_standard\_cell\_pins}、\cmd{via\_wire\_standard\_cell\_pins}、\cmd{via\_all\_pins}、\cmd{via\_wire\_all\_pins}。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}\textit{（原书 Figure 77--79：Pin Connection Restrictions）}\vspace{1.0cm}}}
+\caption{Pin 连接限制示意（无限制 / via / via+wire）}
+\label{fig:pin-connect-modes}
+\end{figure}
+
+Pin tapering：默认基于距离；也可用层基 tapering（\opt{-taper\_over\_pin\_layers}/\opt{-taper\_under\_pin\_layers} 等）。二者互斥，同时指定时采用层基设置。相关应用选项：\appopt{route.detail.pin\_taper\_mode}、\appopt{route.detail.use\_wide\_wire\_effort\_level}、\appopt{route.detail.use\_wide\_wire\_to\_input\_pin} 等。
+
+Via ladder 连接：默认连到 ladder 最顶层。\appopt{route.detail.via\_ladder\_upper\_layer\_via\_connection\_mode}、\appopt{route.detail.allow\_default\_rule\_nets\_via\_ladder\_lower\_layer\_connection} 可调整。
+
+\subsection{设置重布线模式}
+\subsubsection*{Setting the Rerouting Mode}
+
+将 net 的 \appopt{physical\_status} 设为 \cmd{locked}（禁止重布）、\cmd{minor\_change}（仅小改）或 \cmd{unrestricted}（默认）。
+
+\begin{lstlisting}
+fc_shell> set_attribute -objects [get_nets net1] \
+   -name physical_status -value locked
+\end{lstlisting}
+
+% --- 补遗：走廊细节、层约束、天线与冗余 via ---
+
+\subsection{定义与使用 Routing Corridor（详述）}
+\subsubsection*{Defining and Using Routing Corridors}
+
+Routing corridor 将特定网络的全局布线限制在一组相连矩形所定义的区域内，并可对每个矩形指定最小/最大布线层。主要用于在信号布线前布关键网。若 routing guide 与 corridor 冲突，corridor 优先。
+
+\begin{lstlisting}
+fc_shell> create_routing_corridor -name corridor_a \
+   -boundary { {10 10} {20 35} } \
+   -min_layer_name M2 -max_layer_name M4
+fc_shell> create_routing_corridor_shape -routing_corridor corridor_a \
+   -boundary { {20 25} {40 35} } \
+   -min_layer_name M2 -max_layer_name M4
+fc_shell> add_to_routing_corridor corridor_a [get_nets {n1 n2}]
+fc_shell> check_routing_corridors RC_0
+\end{lstlisting}
+
+也可按路径创建：\opt{-path} + \opt{-width}；端帽样式 \opt{-start\_endcap}/\opt{-end\_endcap}（\cmd{flush}/\cmd{full\_width}/\cmd{half\_width}）。一个 net/supernet 只能属于一个 corridor，且 corridor 须覆盖其全部 pin。
+
+修改：\cmd{create\_routing\_corridor\_shape}、\cmd{remove\_routing\_corridor\_shapes}、\cmd{add\_to\_routing\_corridor}、\cmd{remove\_from\_routing\_corridor}。报告：\cmd{report\_routing\_corridors}（\opt{-output} 可写出 Tcl）、\cmd{get\_routing\_corridors -of\_objects}。移除：\cmd{remove\_routing\_corridors -all}。
+
+\subsection{布线层资源与冻结层（章内相关）}
+\subsubsection*{Routing Layer Resources and Freeze Layers}
+
+全局/网络/时钟的最小最大布线层分别由 \cmd{set\_ignored\_layers}、\cmd{set\_routing\_rule} 与 \cmd{set\_clock\_routing\_rules} 的 \opt{-min\_routing\_layer}/\opt{-max\_routing\_layer} 设置；软/硬模式由 \appopt{route.common.global\_min\_layer\_mode}、\appopt{route.common.net\_min\_layer\_mode} 等控制。冻结层由 \appopt{route.common.freeze\_layer\_by\_layer\_name} 与 \appopt{route.common.freeze\_via\_to\_frozen\_layer\_by\_layer\_name} 指定。电压域穿越与层优选方向的详细设置见第~2~章相关主题。
+
+\subsection{天线规则与冗余 Via（章内要点）}
+\subsubsection*{Antenna Rules and Redundant Vias}
+
+详细布线阶段并发处理天线规则，并在报告中给出天线违例与冗余 via 转换率。用 \cmd{check\_routes} 的 \opt{-antenna} 可启用/关闭天线检查。冗余 via 可在信号布线期间并发插入；详细布线结束报告含 ``Redundant via conversion report''（按层与 weight 的优化转换率）。更完整的天线修复与冗余 via 专项流程见原书交叉引用主题及第~6~章芯片收尾相关内容。
+
+% ============================================================
+\section{布线应用选项}
+\subsection*{Routing Application Options}
+
+工具提供影响全部三个布线引擎的选项，以及分别影响全局布线、轨道分配、详细布线的选项。详见 man 页：\texttt{route.common\_options}、\texttt{route.global\_options}、\texttt{route.track\_options}、\texttt{route.detail\_options}。
+
+执行布线命令时，已设置（或工具代设）的选项会写入布线日志。要显示全部布线选项（含未设置者）：
+\begin{lstlisting}
+fc_shell> set_app_options \
+   -name route.common.verbose_level -value 1
+\end{lstlisting}
+
+% ============================================================
+\section{时钟网络布线}
+\subsection*{Routing Clock Nets}
+
+在布线其余网络前先布时钟网，使用 \cmd{route\_group}：
+\begin{lstlisting}
+fc_shell> route_group -all_clock_nets
+\end{lstlisting}
+也可用 \opt{-nets} 指定部分时钟网。该命令对时钟网依次执行全局布线、轨道分配与详细布线。
+
+\begin{itemize}
+  \item 普通时钟网使用 A-tree 布线以最小化各 pin 到 driver 的距离；
+  \item 时钟 mesh 默认 Steiner；设 \appopt{route.common.clock\_topology} 为 \cmd{comb} 可改用 comb；
+  \item 默认忽略已有全局布线；\opt{-reuse\_existing\_global\_route true} 可增量复用；
+  \item 若已有详细布线则做增量详细布线；
+  \item 默认最多 40 次 search-and-repair；\opt{-max\_detail\_route\_iterations} 可改。
+\end{itemize}
+
+\begin{noteBox}
+若违例已全部修复或判定无法再修，Zroute 会在达到最大迭代前提前停止。
+\end{noteBox}
+
+% ============================================================
+\section{关键网络布线}
+\subsection*{Routing Critical Nets}
+
+\begin{lstlisting}
+fc_shell> route_group -nets collection_of_critical_nets
+fc_shell> route_group -from_file file_name
+\end{lstlisting}
+
+若网络关联 routing corridor，则在该区域内布线。全局布线视 corridor 为硬约束；轨道分配与详细布线视之为软约束。
+
+默认忽略已有全局布线，复用 dangling wire 与已有详细布线。\opt{-reuse\_existing\_global\_route true} 做增量全局布线（与 corridor 不兼容）；\opt{-utilize\_dangling\_wires false} 禁用 dangling 复用；\opt{-stop\_after\_global\_route true} 在全局布线后停止。
+
+默认不修 soft DRC；可设：
+\begin{lstlisting}
+fc_shell> set_app_options \
+   -name route.common.post_group_route_fix_soft_violations \
+   -value true
+\end{lstlisting}
+
+% ============================================================
+\section{次级电源与地 Pin 布线}
+\subsection*{Routing Secondary Power and Ground Pins}
+
+步骤：
+\begin{enumerate}
+  \item 确认标准单元 frame view 中次级 PG pin 属性正确；
+  \item 设置布线约束；
+  \item 用 \cmd{route\_group} 布线。
+\end{enumerate}
+
+\subsection{验证属性}
+\subsubsection*{Verifying the Secondary Power and Ground Pin Attributes}
+
+必需属性：\appopt{is\_secondary\_pg}=\cmd{true}；\appopt{port\_type}=\cmd{power} 或 \cmd{ground}。
+
+\begin{lstlisting}
+fc_shell> report_attributes -application \
+   [get_lib_pins -of_objects reflib/cell/frame -all \
+      -filter "name == attr_name"]
+\end{lstlisting}
+
+\subsection{设置约束并布线}
+\subsubsection*{Setting Constraints and Routing}
+
+可与信号布线类似设置层约束、单连接、\appopt{route.common.connect\_within\_pins\_by\_layer\_name}、\appopt{route.common.number\_of\_secondary\_pg\_pin\_connections}（簇内最大 pin 数，0 表示不限）、NDR 等。若要将次级 PG 与 tie-off 分离约束，设 \appopt{route.common.separate\_tie\_off\_from\_secondary\_pg} 为 \cmd{true}。
+
+Topology ECO 努力由 \appopt{route.detail.topology\_eco\_effort\_level} 控制：\cmd{off}（默认）/\cmd{low}（1 次）/\cmd{medium}（4 次）/\cmd{high}（8 次）。
+
+\begin{lstlisting}
+fc_shell> route_group -nets VDD1
+fc_shell> add_buffer {TOP/U1001/Z} {libA/BUFHVT} \
+   -new_cell_names mynewHVT
+fc_shell> legalize_placement
+fc_shell> connect_pg_net -automatic
+fc_shell> route_group -nets {VDD2}
+\end{lstlisting}
+
+% ============================================================
+\section{信号网络布线}
+\subsection*{Routing Signal Nets}
+
+信号布线前，全部时钟网须已布线且无违例。方法：
+\begin{itemize}
+  \item 独立命令：\cmd{route\_global}、\cmd{route\_track}、\cmd{route\_detail}（适合定制流程或大块分步）；每条命令开始读入、结束更新 block，\textbf{不}检查输入数据完整性；
+  \item 自动布线：\cmd{route\_auto}（依次全局、轨道、详细；适合验证收敛、拥塞与 DRC QoR）。
+\end{itemize}
+
+信号布线可插入冗余 via（见「在信号网上插入冗余 Via」）。
+
+\subsection{全局布线}
+\subsubsection*{Global Routing}
+
+布线前设置 \texttt{route.common\_options} 与 \texttt{route.global\_options}。默认非时序驱动。全局路由器将 block 划分为 global routing cell（默认宽度等于标准单元高度，与 row 对齐），按 blockage、pin、track 计算容量与需求，报告 overflow。
+
+先进节点可开 via 密度建模：
+\begin{lstlisting}
+set_app_options -name route.global.via_cut_modeling -value true
+\end{lstlisting}
+
+两阶段：phase 0 初始布线；随后多轮 rip-up/reroute 减拥塞。Effort：\cmd{minimum}/\cmd{low}/\cmd{medium}（默认，最多 3 轮）/\cmd{high}（4）/\cmd{ultra}（6）。\appopt{route.global.force\_full\_effort} 可强制跑满轮次。
+
+结束后库中保存 g-link/g-via（供后续步骤；轨道分配与详细布线后移除）与拥塞数据。默认仅硬拥塞；\appopt{route.global.export\_soft\_congestion\_maps}=\cmd{true} 可保存软拥塞。
+
+设计规划阶段探索：\cmd{route\_global -floorplan true}；层次化可用 \opt{-virtual\_flat all\_routing} 或 \cmd{top\_and\_interface\_routing\_only}。
+
+\subsubsection{时序驱动全局布线}
+\subsubsection*{Timing-Driven Global Routing}
+
+\begin{lstlisting}
+set_app_options -name route.global.timing_driven -value true
+\end{lstlisting}
+流程：算延时 $\rightarrow$ phase0 $\rightarrow$ 两轮减拥塞 $\rightarrow$ 更新时序 $\rightarrow$ 识别新关键网 $\rightarrow$ 再多轮重布关键网。Effort 与 \appopt{route.global.advance\_node\_timing\_driven\_effort}（\cmd{low}/\cmd{medium}/\cmd{high}）共同决定重布轮数（见表~\ref{tab:tdgr-phases}）。\appopt{route.global.timing\_driven\_effort\_level} 默认 \cmd{high}，偏重时序 QoR。
+
+\begin{table}[htbp]
+\centering
+\caption{时序驱动全局布线重布轮数（示意）}
+\label{tab:tdgr-phases}
+\begin{tabular}{@{}llll@{}}
+\toprule
+\cmd{-effort\_level} & advance=\cmd{low} & \cmd{medium} & \cmd{high}（默认） \\
+\midrule
+low & 2 & 2 & 2 \\
+medium（默认） & 3 & 3 & 5 \\
+high & 4 & 4 & 6 \\
+ultra & 6 & 6 & 8 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{串扰驱动与增量全局布线}
+\subsubsection*{Crosstalk-Driven and Incremental Global Routing}
+
+\begin{lstlisting}
+set_app_options -name route.global.crosstalk_driven -value true
+set_app_options -name time.si_enable_analysis -value true
+# 增量：
+route_global -reuse_existing_global_route true
+\end{lstlisting}
+
+\subsection{轨道分配}
+\subsubsection*{Track Assignment}
+
+须先完成全局布线。\cmd{route\_track} 为各全局布线分配实际 track，并重布重叠导线。完成后不再保留全局布线。
+
+\begin{noteBox}
+轨道分配用实际金属形状替换全局布线后，block 中不再包含全局布线。
+\end{noteBox}
+
+时序/串扰驱动：\appopt{route.track.timing\_driven}、\appopt{route.track.crosstalk\_driven}（及 \appopt{time.si\_enable\_analysis}）。
+
+\subsection{详细布线}
+\subsubsection*{Detail Routing}
+
+须先完成全局布线与轨道分配。详细路由器按分区查找 DRC，rip-up/reroute 修复，并并发处理天线规则、优化 via 数与线长。
+
+默认：整块布线（\opt{-coordinates} 可限区域）；首轮均匀分区、后续按违例分布调整；最多 40 轮（\opt{-max\_number\_iterations}）；非时序驱动。相关选项：\appopt{route.detail.optimize\_partition\_size\_for\_drc}、\appopt{route.detail.drc\_convergence\_effort\_level}、\appopt{route.detail.force\_max\_number\_iterations}、\appopt{route.detail.timing\_driven}、\appopt{route.common.rc\_driven\_setup\_effort\_level}、\appopt{route.detail.repair\_shorts\_over\_macros\_effort\_level}、\appopt{route.common.post\_detail\_route\_fix\_soft\_violations}。
+
+增量详细布线须用 \opt{-incremental true}（否则从 iteration 0 重开）：
+\begin{lstlisting}
+fc_shell> route_detail -incremental true
+\end{lstlisting}
+
+\begin{noteBox}
+增量详细布线不修复 open net；须用 ECO 布线（\cmd{route\_eco}）。
+\end{noteBox}
+
+Early mode：\cmd{set\_qor\_strategy -mode early -stage pnr}。可用 \appopt{route.detail.save\_after\_iterations} 在指定轮次保存 block。\appopt{route.detail.report\_ignore\_drc} 可从汇总中排除特定 DRC。
+
+\subsection{自动布线}
+\subsubsection*{Routing Signal Nets by Using Automatic Routing}
+
+\begin{lstlisting}
+fc_shell> route_auto
+\end{lstlisting}
+
+默认忽略已有全局布线，顺序执行全局、轨道、详细，步骤间不保存。选项：\opt{-reuse\_existing\_global\_route}、\opt{-stop\_after\_track\_assignment}、\opt{-max\_detail\_route\_iterations}、\opt{-save\_after\_global\_route}/\opt{-save\_after\_track\_assignment}/\opt{-save\_after\_detail\_route}、\opt{-save\_cell\_prefix}。
+
+时序驱动：将 \appopt{route.global.timing\_driven}、\appopt{route.track.timing\_driven}、\appopt{route.detail.timing\_driven} 均设为 \cmd{true}。串扰驱动：另开 \appopt{route.global.crosstalk\_driven}、\appopt{route.track.crosstalk\_driven} 与 \appopt{time.si\_enable\_analysis}。
+
+% ============================================================
+\section{网络屏蔽}
+\subsection*{Shielding Nets}
+
+Zroute 按屏蔽规则中的宽度与间距生成屏蔽导线。除同层屏蔽外，还可对上一层/下一层做同轴屏蔽（coaxial shielding，图~\ref{fig:coaxial-shield}），隔离更好但更耗布线资源。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.2cm}\textit{（原书 Figure 80：Coaxial Shielding）}\vspace{1.2cm}}}
+\caption{同轴屏蔽}
+\label{fig:coaxial-shield}
+\end{figure}
+
+\begin{itemize}
+  \item \textbf{布线前屏蔽}（preroute）：覆盖更好，但可能造成信号布线拥塞；常用于关键时钟；
+  \item \textbf{布线后屏蔽}（postroute）：对可布线性影响极小，保护较弱。
+\end{itemize}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.2cm}\textit{（原书 Figure 81：Zroute Shielding Flow）}\vspace{1.2cm}}}
+\caption{Zroute 屏蔽流程}
+\label{fig:shield-flow}
+\end{figure}
+
+\subsection{定义并分配屏蔽规则}
+\subsubsection*{Defining and Assigning Shielding Rules}
+
+用 \cmd{create\_routing\_rule} 的 \opt{-shield\_widths}/\opt{-shield\_spacings} 定义；时钟网用 \cmd{set\_clock\_routing\_rules}（仅 CTS 前），信号网用 \cmd{set\_routing\_rule}。建议仅对高频/关键时钟用屏蔽，低频时钟用双倍间距。
+
+\subsection{布线前屏蔽}
+\subsubsection*{Performing Preroute Shielding}
+
+时钟树布线后、信号布线前，用 \cmd{create\_shields} 按规则加屏蔽。默认：对所有有屏蔽规则且未 frozen 的网；忽略短于 4 pitch 的导线（\appopt{route.common.min\_shield\_length\_by\_layer\_name} 可按层改）；屏蔽接到地网（\opt{-with\_ground} 或 \appopt{route.common.shielding\_nets}）；同层屏蔽。
+
+同轴屏蔽：\opt{-coaxial\_above}/\opt{-coaxial\_below}，配合 \opt{-coaxial\_above\_skip\_tracks} 等或 \opt{-coaxial\_skip\_tracks\_on\_layers} 或用户间距选项（不可混用）。\opt{-align\_to\_shape\_end}、\opt{-preferred\_direction\_only} 等可进一步控制。
+
+\begin{lstlisting}
+fc_shell> create_shields -nets $clock_nets \
+   -coaxial_below true -coaxial_below_skip_tracks 0 \
+   -with_ground VSS
+\end{lstlisting}
+
+命令报告基于网络与线长的平均屏蔽率。若与 \cmd{report\_shields} 略有差异，以 \cmd{report\_shields} 为准（通常 $<$3\%，最多约 5\%）。
+
+\subsection{信号布线中的软屏蔽规则}
+\subsubsection*{Soft Shielding Rules During Signal Routing}
+
+有屏蔽规则但未预屏蔽的网，Zroute 在全局/轨道/详细全程预留屏蔽空间，详细布线结束报告 soft spacing (shielding) 违例；\textbf{并不}真正插入屏蔽，须事后再跑 \cmd{create\_shields}。仅预留同层屏蔽空间。若希望有 PG 可用时不预留，设 \appopt{route.common.allow\_pg\_as\_shield}=\cmd{true}。
+
+\subsection{布线后屏蔽与增量屏蔽}
+\subsubsection*{Postroute and Incremental Shielding}
+
+布线后同样用 \cmd{create\_shields}。若用 \opt{-nets} 且无 NDR，则用 technology 默认宽间距。产生 DRC 时自动做最多 5 轮详细布线；仍有违例可 \cmd{route\_detail -incremental true}；若破坏 tie-off，改用 \cmd{route\_eco}。
+
+增量屏蔽：将 \appopt{route.common.reshield\_modified\_nets} 设为 \cmd{unshield} 或 \cmd{reshield}（默认 \cmd{off}）。仅支持工具内修改的网络，DEF 外部修改不支持。
+
+查询屏蔽形状：\cmd{get\_shapes -shield\_only}。报告：\cmd{report\_shields}（\opt{-per\_layer true}）。布线中启用屏蔽检查：\appopt{route.common.check\_shield}=\cmd{true}。
+
+\begin{lstlisting}
+# 示例：时钟预屏蔽 + 关键网后屏蔽
+create_routing_rule shield_rule \
+  -shield_widths {M1 0.1 M2 0.1 M3 0.1 M4 0.1 M5 0.1 M6 0.3} \
+  -shield_spacings {M1 0.1 M2 0.1 M3 0.1 M4 0.1 M5 0.1 M6 0.3}
+set_clock_routing_rules -clocks CLK -rules shield_rule
+synthesize_clock_trees
+route_group -all_clock_nets -reuse_existing_global_route true
+create_shields -nets $clock_nets -with_ground VSS
+set_routing_rule -rule shield_rule $critical_nets
+route_auto
+create_shields -nets $critical_nets -with_ground VSS
+\end{lstlisting}
+
+% ============================================================
+\section{执行布线后优化}
+\subsection*{Performing Postroute Optimization}
+
+两类优化：
+\begin{itemize}
+  \item \textbf{逻辑优化}：改善时序/面积/功耗 QoR，修逻辑 DRC，并做合法化与 ECO 布线——\cmd{route\_opt}；
+  \item \textbf{可布线性优化}：加大单元间距以修 pin access 引起的布线 DRC——\cmd{optimize\_routability}。
+\end{itemize}
+若两者都跑，先逻辑后可布线性。
+
+\subsection{布线后逻辑优化}
+\subsubsection*{Performing Postroute Logic Optimization}
+
+前置：设计已完全布线并合法化，逻辑/布线 DRC 不过多。用 \cmd{check\_legality}、\cmd{check\_routes} 验证。推荐流程：
+\begin{enumerate}
+  \item \cmd{compute\_clock\_latency} 更新时钟延时；
+  \item 运行两次 \cmd{route\_opt}（第一次合法化/ECO 可能影响时序，第二次再优化）。
+\end{enumerate}
+
+\cmd{route\_opt} 步骤：提取并更新时序（默认 PrimeTime 延时引擎，需 O-2018.06 及以后 Library Manager 生成的库；可用 \cmd{check\_consistency\_settings}）$\rightarrow$ 启用的优化 $\rightarrow$ 合法化 $\rightarrow$ ECO 布线。
+
+默认优化 data path 的 setup/hold/面积/逻辑 DRC。额外优化见表~\ref{tab:route-opt-enable}。
+
+\begin{table}[htbp]
+\centering
+\caption{启用 \cmd{route\_opt} 额外优化的应用选项}
+\label{tab:route-opt-enable}
+\begin{tabularx}{\textwidth}{@{}X X@{}}
+\toprule
+\textbf{优化} & \textbf{应用选项} \\
+\midrule
+并发时钟与数据（CCD）及时钟逻辑 DRC & \appopt{route\_opt.flow.enable\_ccd}=\cmd{true} \\
+时钟逻辑 DRC（未开 CCD 时） & \appopt{route\_opt.flow.enable\_cto}=\cmd{true} \\
+时钟树面积回收 & \appopt{route\_opt.flow.enable\_clock\_power\_recovery}=\cmd{area} \\
+时钟树功耗回收 & 同上 $=\cmd{power}$ \\
+功耗优化 & \appopt{route\_opt.flow.enable\_power}=\cmd{true} \\
+机器学习路径优化 & \appopt{route\_opt.flow.enable\_ml\_opto}=\cmd{true} 且 PBA=\cmd{path} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{noteBox}
+\cmd{route\_opt} 仅遵从 \texttt{route\_opt} 应用选项；除 \appopt{opt.common.allow\_physical\_feedthrough} 外不遵从 \texttt{opt} 选项。
+\end{noteBox}
+
+PBA：\appopt{time.pba\_optimization\_mode}=\cmd{path}（推荐）或 \cmd{exhaustive}。ECO 阶段默认 5 轮详细布线（\appopt{route.detail.eco\_max\_number\_of\_iterations}）；\appopt{route\_opt.eco\_route.mode}=\cmd{track} 可改做轨道分配。
+
+签核时序违例可用 \cmd{set\_route\_opt\_target\_endpoints}（\opt{-setup\_timing}/\opt{-hold\_timing}）指定目标后跑 \cmd{route\_opt}，再 \opt{-reset}。Size-only 模式：\appopt{route\_opt.flow.size\_only\_mode} 取 \cmd{true\_footprint}/\cmd{footprint}/\cmd{equal}/\cmd{equal\_or\_smaller}。
+
+\subsection{使用 hyper\_route\_opt}
+\subsubsection*{Performing Postroute Optimization Using hyper\_route\_opt}
+
+可用单次 \cmd{hyper\_route\_opt} 减少迭代次数；设置与 \cmd{route\_opt} 相同。可选 Tcl 回调 \cmd{snps\_hyper\_route\_opt\_post\_eco} 控制 metal fill、PG augmentation 等。之后仍可用 \cmd{set\_route\_opt\_target\_endpoints}+\cmd{route\_opt} 收尾，或 \cmd{route\_detail -incremental} 修剩余布线 DRC。
+
+\subsection{修复 Pin Access 引起的 DRC}
+\subsubsection*{Fixing DRC Violations Caused by Pin Access Issues}
+
+\begin{lstlisting}
+optimize_routability
+# 预览：
+optimize_routability -check_drc_rules
+# 完成后移除 keepout：
+optimize_routability -remove_keepouts
+\end{lstlisting}
+
+分析邻接单元违例，在违例侧加 keepout（默认 site 宽，\opt{-keepout\_width} 可指定；\opt{-flip} 可尝试翻转）。须随后 \cmd{route\_eco} 或 \opt{-route}；\appopt{route.common.eco\_fix\_drc\_in\_changed\_area\_only}=\cmd{on} 可仅在变更区修 DRC。
+
+% ============================================================
+\section{分析并修复信号电迁移违例}
+\subsection*{Analyzing and Fixing Signal Electromigration Violations}
+
+信号电迁移由线宽缩小与高速开关导致电流密度升高引起，可造成短路或开路。流程：
+\begin{enumerate}
+  \item \cmd{read\_signal\_em\_constraints} 加载约束（ITF 或 ALF）；
+  \item \cmd{read\_saif} 或 \cmd{set\_switching\_activity} 标注开关活动；
+  \item \cmd{report\_signal\_em} 分析；
+  \item \cmd{fix\_signal\_em} 修复。
+\end{enumerate}
+
+\begin{lstlisting}
+open_block block1_routed
+read_signal_em_constraints em.itf
+read_saif block1.saif
+report_signal_em -violated -verbose > block1.signal_em.rpt
+fix_signal_em
+\end{lstlisting}
+
+ITF：\opt{-encrypted} 可读加密文件。ALF：\opt{-format ALF}。约束以查找表存入设计库。
+
+分析计算 average / RMS / peak 电流。相关应用选项见表~\ref{tab:em-appopts}（如 \appopt{em.net\_delta\_temperature}、\appopt{em.net\_global\_rms\_relaxation\_factor}、\appopt{em.net\_min\_duty\_ratio}、\appopt{em.net\_use\_waveform\_duration}、\appopt{em.net\_violation\_rule\_types} 等）。
+
+\begin{table}[htbp]
+\centering
+\caption{信号电迁移分析应用选项（节选）}
+\label{tab:em-appopts}
+\begin{tabularx}{\textwidth}{@{}l l X@{}}
+\toprule
+\textbf{选项} & \textbf{默认} & \textbf{说明} \\
+\midrule
+\appopt{em.net\_delta\_temperature} & 5.0 & RMS 查找用 $\Delta T$ \\
+\appopt{em.net\_duration\_condition\_for\_peak} & 0.0 & peak 检查 duration \\
+\appopt{em.net\_global\_rms\_relaxation\_factor} & 1.0 & RMS 全局松弛因子 \\
+\appopt{em.net\_use\_waveform\_duration} & false & 是否用波形 duration \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\cmd{fix\_signal\_em} 通过加宽金属的 NDR 并做 ECO 布线修复；每调用一轮，有残留须再跑。可用 \opt{-nets} 限定。
+
+% ============================================================
+\section{执行 ECO 布线}
+\subsection*{Performing ECO Routing}
+
+修改网络后须用 \cmd{route\_eco} 重连，顺序执行全局、轨道、详细布线。默认考虑时序与串扰（会提取并更新时序）；若不需要可关闭各引擎的 timing/crosstalk\_driven 选项以加速。
+
+默认：处理全部 open net（\opt{-nets} 可限定）；忽略已有全局布线（\opt{-reuse\_existing\_global\_route true} 可增量）；复用 dangling wire（\opt{-utilize\_dangling\_wires false} 可关）；最多 40 轮详细布线；在整块修硬 DRC。
+
+\begin{itemize}
+  \item \opt{-open\_net\_driven true}：仅在 open net 邻域修 DRC；
+  \item \opt{-reroute modified\_nets\_only} 或 \cmd{modified\_nets\_first\_then\_others}；
+  \item \appopt{route.common.post\_eco\_route\_fix\_soft\_violations}=\cmd{true} 修 soft DRC。
+\end{itemize}
+
+报告变更网络时默认前 100 条；\opt{-max\_reported\_nets -1} 报告全部。
+
+% ============================================================
+\section{在 GUI 中布线}
+\subsection*{Routing Nets in the GUI}
+
+在活动 layout 视图用 Create Route 工具交互布线（Edit 工具栏按钮，或 \textbf{Create $>$ Route}）。默认忽略 routing blockage（可在 Mouse Tool Options 中改为遵从）；使用 technology 宽间距而忽略 NDR（同样可在面板中开启遵从 NDR）。
+
+\begin{noteBox}
+Create Route 工具不遵从 \cmd{create\_routing\_guide} 定义的 routing guide；也不使用 NDR 中的屏蔽宽/间距。
+\end{noteBox}
+
+修改已布线网络的 GUI 工具：Area Push、Spread Wires、Stretch Connected、Quick Connect。面板上的 Help 可打开 man 页。
+
+% ============================================================
+\section{清理已布线网络}
+\subsection*{Cleaning Up Routed Nets}
+
+\begin{lstlisting}
+fc_shell> remove_redundant_shapes
+fc_shell> remove_redundant_shapes -nets my_net \
+   -remove_loop_shapes true
+\end{lstlisting}
+
+默认基于设计视图中已存 DRC 信息移除 dangling/floating 形状；\opt{-initial\_drc\_from\_input false} 则先跑 \cmd{check\_routes}。可用 \opt{-nets}/\opt{-layers}/\opt{-route\_types} 限定。不改拓扑、不碰 terminal；不处理 open net 或有 DRC 的网。\opt{-remove\_dangling\_shapes false}、\opt{-remove\_floating\_shapes false}、\opt{-remove\_loop\_shapes true}、\opt{-report\_changed\_nets true}。清理后应重新做 DRC 验证。
+
+% ============================================================
+\section{分析布线结果}
+\subsection*{Analyzing the Routing Results}
+
+\subsection{拥塞报告与拥塞图}
+\subsubsection*{Generating a Congestion Report and Map}
+
+\begin{lstlisting}
+fc_shell> report_congestion
+\end{lstlisting}
+
+默认用库中拥塞图；若无则跑 congestion-map-only 全局布线。选项：\opt{-rerun\_global\_router}、\opt{-boundary}、\opt{-layers}、\opt{-mode global\_route\_cell\_edge\_based}、\opt{-include\_soft\_congestion\_maps}。
+
+GUI：\textbf{View $>$ Map $>$ Global Route Congestion}。图~\ref{fig:cong-map}、图~\ref{fig:cong-grc} 示意拥塞图与 GRC 上的 overflow（如 18/9 表示需求 18、供给 9）。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}\textit{（原书 Figure 82：Global Route Congestion Map）}\vspace{1.0cm}}}
+\caption{全局布线拥塞图}
+\label{fig:cong-map}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}\textit{（原书 Figure 83：Global Route Overflow on Global Routing Cell）}\vspace{1.0cm}}}
+\caption{Global Routing Cell 上的 Overflow}
+\label{fig:cong-grc}
+\end{figure}
+
+拥塞计算模式：各层 overflow 之和（默认，忽略 underflow），或总 demand 减总 supply（含 underflow，结果更乐观）。
+
+\subsection{用 Zroute 做设计规则检查}
+\subsubsection*{Performing Design Rule Checking Using Zroute}
+
+\begin{lstlisting}
+fc_shell> check_routes
+\end{lstlisting}
+
+默认检查布线 DRC、open net、天线与 voltage area 违例（排除 user/frozen/PG 网）。可用 \opt{-nets}、\opt{-check\_from\_user\_shapes}、\opt{-check\_from\_frozen\_shapes}；\opt{-drc}/\opt{-open\_net}/\opt{-antenna}/\opt{-voltage\_area} 可分别关闭。\opt{-coordinates} 做区域检查（与 \opt{-nets} 互斥；区域检查不做 open/天线/tie-to-rail）。
+
+错误写入 \texttt{zroute.err}。可用 DRC query 命令或 error browser 分析。基于 check\_routes 结果的增量详细布线：
+\begin{lstlisting}
+fc_shell> route_detail -incremental true \
+   -initial_drc_from_input true
+\end{lstlisting}
+
+\subsection{签核 DRC、外部工具与 LVS}
+\subsubsection*{Signoff DRC, External Tools, and LVS}
+
+\begin{itemize}
+  \item 签核：\cmd{signoff\_check\_drc} / \cmd{signoff\_fix\_drc}（需 IC Validator 许可证）；
+  \item 外部 Calibre：\cmd{read\_drc\_error\_file} 导入扁平 Calibre 错误文件；
+  \item LVS：\cmd{check\_lvs} 检查 short/open/floating（\opt{-checks}、\opt{-nets}、\opt{-max\_errors}、\opt{-treat\_terminal\_as\_voltage\_source}、\opt{-open\_reporting detailed}、\opt{-report\_floating\_pins} 等）。
+\end{itemize}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}\textit{（原书 Figure 84：Layout With Power and Ground Terminals）}\vspace{1.0cm}}}
+\caption{含电源/地 Terminal 的版图}
+\label{fig:pg-terminals}
+\end{figure}
+
+\subsection{报告布线结果与线长}
+\subsubsection*{Reporting Routing Results and Wire Length}
+
+\cmd{report\_design -routing}：各层信号/PG 形状数与线长、HV 分布、via 统计与 double via 转换率等（\opt{-hierarchical} 可含整棵物理层次）。
+
+\cmd{report\_wirelength}：按层与方向汇总线长（含 global/detail、Virtual、BestAvailable；支持斜线）。
+
+\subsection{DRC 查询命令}
+\subsubsection*{Using the DRC Query Commands}
+
+\begin{lstlisting}
+fc_shell> get_drc_error_data -all
+fc_shell> open_drc_error_data zroute.err
+fc_shell> get_drc_error_types -error_data zroute.err
+fc_shell> get_drc_errors -error_data zroute.err \
+   -filter {type_name == "Diff net spacing"}
+\end{lstlisting}
+
+属性示例：\appopt{type\_name}、\appopt{bbox}、\appopt{objects}、\appopt{shape}。完整列表：\cmd{list\_attributes -application -class drc\_error}。
+
+% ============================================================
+\section{保存布线信息}
+\subsection*{Saving Route Information}
+
+\begin{lstlisting}
+fc_shell> write_routes
+\end{lstlisting}
+
+生成可复现金属形状与 via（含属性）的 Tcl 脚本；\textbf{不}包含 routing blockage（后者用 \cmd{write\_floorplan}）。
+
+% ============================================================
+\section{推导掩模颜色}
+\subsection*{Deriving Mask Colors}
+
+布线命令通常会分配 mask 颜色。对未着色形状，用 \cmd{derive\_mask\_constraint} 从最近底层 track 推导（宽线占多 track 时取与下一空闲 track 相反颜色）。
+
+\begin{lstlisting}
+fc_shell> derive_mask_constraint \
+   [get_shapes -of_objects [get_nets net1]]
+fc_shell> derive_mask_constraint -derive_cut_mask \
+   [get_vias -within {{600 600} {700 700}}]
+fc_shell> derive_mask_constraint -follow_pin_mask \
+   [get_shapes -of_objects [get_nets net1]]
+fc_shell> derive_mask_constraint -follow_wider_object_mask \
+   [get_shapes -of_objects [get_nets net1]]
+\end{lstlisting}
+
+\begin{seeAlsoBox}
+第~\ref{chap:fc}~章「多重图案化概念」。
+\end{seeAlsoBox}
+
+% ============================================================
+\section{插入与移除 Cut Metal 形状}
+\subsection*{Inserting and Removing Cut Metal Shapes}
+
+Cut metal 用于双图案化设计以减小线端最小间距。Cut metal 层及尺寸在 technology file 的 Layer 段由 \texttt{cutMetalWidth}、\texttt{cutMetalHeight}/\texttt{cutMetalExtension} 定义；与同 mask 号金属层对应（如 cutMetal1 $\leftrightarrow$ metal1）。
+
+布线定稿后：
+\begin{lstlisting}
+fc_shell> create_cut_metals
+fc_shell> remove_cut_metals
+\end{lstlisting}
+
+插入条件：优选方向间距等于 \texttt{cutMetalWidth}、该处尚无 cut metal、金属层有对应 cut metal 层。可插在 net--net、net--PG、PG--obstruction 及子单元内金属之间，并传播颜色。
+
+写出 DEF 须 \cmd{write\_def -version 5.8}；写出 GDSII/OASIS 须 \cmd{write\_gds}/\cmd{write\_oasis} 的 \opt{-connect\_below\_cut\_metal}。布线变更后须先 \cmd{remove\_cut\_metals} 再重新插入。

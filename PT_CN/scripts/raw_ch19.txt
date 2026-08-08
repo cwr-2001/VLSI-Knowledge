@@ -1,0 +1,3163 @@
+                                                                                      Feedback
+
+
+
+
+19
+Reporting and Debugging Analysis Results
+     After you load and constrain the design and specify the conditions for analysis, you can
+     perform a full static timing analysis and report any timing and design rule violations. You
+     can also generate a wide range of reports that help you examine and debug violations. To
+     learn about the most commonly used reports, see
+     •   Global Timing Summary Report
+     •   Path Timing Report
+     •   Quality of Results Report
+     •   Constraint Reports
+     •   Bottleneck Report
+     •   Global Slack Report
+     •   Analysis Coverage Report
+     •   Clock Network Timing Report
+     •   Clock-Gating and Recovery/Removal Checks
+     •   Timing Update Efficiency
+     •   Path-Based Timing Analysis
+
+
+Global Timing Summary Report
+     The report_global_timing command provides a way to report the global timing closure
+     state of the design, including information such as worst negative slack (WNS) and total
+     negative slack (TNS) across all endpoints in the design.
+     The report_global_timing command works with other PrimeTime features, such as
+     path-based analysis (PBA), distributed multi-scenario analysis (DMSA), and simultaneous
+     multivoltage analysis (SMVA/DVFS).
+
+
+
+
+PrimeTime® User Guide                                                                        827
+T-2022.03
+                                                                                          Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Global Timing Summary Report
+
+
+     Because the report_global_timing command focuses on global timing closure status, it
+     has the following characteristics:
+     •   It considers only violating timing paths; it does not gather or analyze passing paths.
+     •   It organizes timing closure information into four topological path categories:
+             in -> reg             reg -> reg          reg -> out
+
+
+
+
+                                    in -> out
+
+     Internally, the report_global_timing command operates in two stages:
+     •   Path gathering—obtaining violating timing paths from the design
+     •   Reporting—producing formatted output from analysis of the gathered paths
+     It is important to understand that these two aspects—path gathering (”Which paths do I
+     want to analyze?”) and reporting (”What data do I want to see about those paths?”)—are
+     independently configured by command options.
+
+
+     Controlling report_global_timing Path Gathering
+     By default, the report_global_timing command obtains the single worst path to each
+     endpoint, regardless of the path's topology type or path group.
+     You can modify this default path gathering behavior using the command options shown in
+     Table 51.
+     Table 51        Controlling report_global_timing Path Gathering
+
+To do this                                          Use this option
+
+Limit path gathering to only setup (max-delay) or   -delay_type min | max
+hold (min-delay) paths
+
+At each endpoint, gather the worst path             -group group_list
+• For each path group in the specified list
+
+At each endpoint, gather the worst path             -enable_multiple_categories_per_endpoint
+• For each topological path category
+
+
+
+
+PrimeTime® User Guide                                                                             828
+T-2022.03
+                                                                                                 Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Global Timing Summary Report
+
+
+     Table 51        Controlling report_global_timing Path Gathering (Continued)
+
+To do this                                                Use this option
+
+At each endpoint, gather the worst path                   -include {per_clock_violations}
+• For each topological path category
+• For each path group
+• For each launch/capture clock combination
+
+Obtain the paths using path-based analysis                -pba_mode none | path | exhaustive |
+                                                          ml_exhaustive
+
+Limit path gathering to specific DVFS scenarios           -dvfs_scenarios dvfs_scenarios
+
+
+
+     To better understand how the path gathering options work, consider the following design
+     logic:
+                                              slack = -1
+             CLK1                                                                                 Z
+                                             slack = -2                                           (CLK3
+                                                                                          FF1
+                                                                                                  output delay)
+             CLK2                                                                  CLK1
+
+
+            (CLK2                            slack = -3
+      input delay)                                                                        FF12
+                                                                            CLK1
+            (CLK3                              slack = -4                   CLK2
+      input delay)
+
+
+     The path gathering behavior for this design is as follows (see the inline comments for
+     details):
+     pt_shell> # the default behavior - the single worst path to each endpoint
+     pt_shell> report_global_timing -delay_type max -path end
+     ...
+     Slack      Type     Group            From_clock       To_clock          Endpoint
+     --------------------------------------------------------------------------------
+     -4.00      in2out   CLK3             CLK3             CLK3              Z
+     -4.00      in2reg   CLK1             CLK3             CLK1              FF1/D
+     -4.00      in2reg   CLK2             CLK3             CLK2              FF12/D
+     --------------------------------------------------------------------------------
+
+     pt_shell> # get the worst path to each endpoint,
+     pt_shell> # for each path group in {CLK1 CLK2}
+     pt_shell> report_global_timing -delay_type max -path end \
+                 -group {CLK1 CLK2}
+     ...
+     Slack      Type     Group            From_clock       To_clock          Endpoint
+     --------------------------------------------------------------------------------
+     -4.00      in2reg   CLK1             CLK3             CLK1              FF1/D
+     -4.00      in2reg   CLK1             CLK3             CLK1              FF12/D
+     -4.00      in2reg   CLK2             CLK3             CLK2              FF12/D
+
+
+
+PrimeTime® User Guide                                                                                     829
+T-2022.03
+                                                                                  Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Global Timing Summary Report
+
+
+     --------------------------------------------------------------------------------
+
+     pt_shell> # get the worst path to each endpoint,
+     pt_shell> # for each of the four topological path categories
+     pt_shell> report_global_timing -delay_type max -path end \
+                 -enable_multiple_categories_per_endpoint
+     ...
+     Slack      Type     Group            From_clock       To_clock          Endpoint
+     --------------------------------------------------------------------------------
+     -2.00      reg2out CLK3              CLK2             CLK3              Z
+     -4.00      in2out   CLK3             CLK3             CLK3              Z
+     -2.00      reg2reg CLK1              CLK2             CLK1              FF1/D
+     -4.00      in2reg   CLK1             CLK3             CLK1              FF1/D
+     -2.00      reg2reg CLK1              CLK2             CLK1              FF12/D
+     -4.00      in2reg   CLK1             CLK3             CLK1              FF12/D
+     --------------------------------------------------------------------------------
+
+     pt_shell> # get the worst path to each endpoint,
+     pt_shell> # for each of the four topological path types,
+     pt_shell> # for each path group and launch/capture clock combination
+     pt_shell> report_global_timing -delay_type max -path end \
+                 -include {per_clock_violations}
+     ...
+     Slack      Type     Group            From_clock       To_clock          Endpoint
+     --------------------------------------------------------------------------------
+     -2.00      reg2out CLK3              CLK2             CLK3              Z
+     -1.00      reg2out CLK3              CLK1             CLK3              Z
+     -3.00      in2out   CLK3             CLK2             CLK3              Z
+     -4.00      in2out   CLK3             CLK3             CLK3              Z
+     -2.00      reg2reg CLK1              CLK2             CLK1              FF1/D
+     -1.00      reg2reg CLK1              CLK1             CLK1              FF1/D
+     -3.00      in2reg   CLK1             CLK2             CLK1              FF1/D
+     -4.00      in2reg   CLK1             CLK3             CLK1              FF1/D
+     -2.00      reg2reg CLK1              CLK2             CLK1              FF12/D
+     -1.00      reg2reg CLK1              CLK1             CLK1              FF12/D
+     -3.00      in2reg   CLK1             CLK2             CLK1              FF12/D
+     -4.00      in2reg   CLK1             CLK3             CLK1              FF12/D
+     -2.00      reg2reg CLK2              CLK2             CLK2              FF12/D
+     -1.00      reg2reg CLK2              CLK1             CLK2              FF12/D
+     -3.00      in2reg   CLK2             CLK2             CLK2              FF12/D
+     -4.00      in2reg   CLK2             CLK3             CLK2              FF12/D
+     --------------------------------------------------------------------------------
+
+
+
+     Controlling report_global_timing Report Output
+     By default, the report_global_timing command generates a summary table that shows:
+     (1) WNS, TNS, and the number of violating endpoints, (2) in each of the four topological
+     path categories, (3) for setup and hold paths.
+     For example,
+     pt_shell> report_global_timing -enable_multiple_categories_per_endpoint
+     ...
+     Setup violations
+     ---------------------------------------------------------
+              Total reg->reg    in->reg reg->out    in->out
+
+
+PrimeTime® User Guide                                                                    830
+T-2022.03
+                                                                                               Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Global Timing Summary Report
+
+
+     ---------------------------------------------------------
+     WNS      -6.08     -6.08     -0.80     -4.09      0.00
+     TNS     -51.61    -41.38     -1.60     -8.63      0.00
+     NUM         13         7         2         4         0
+     ---------------------------------------------------------
+
+
+     Hold violations
+     ---------------------------------------------------------
+              Total reg->reg    in->reg reg->out    in->out
+     ---------------------------------------------------------
+     WNS      -2.90     -0.75     -2.90     -1.01      0.00
+     TNS     -13.43     -4.44     -5.97     -3.02      0.00
+     NUM         12         6         3         3         0
+     ---------------------------------------------------------
+
+     You can modify this default path gathering behavior using the command options shown in
+     Table 52.
+     Table 52        Controlling report_global_timing Reporting
+
+To do this                                            Use this option
+
+Control whether to generate summary tables or         -path_type summary | end
+per-endpoint tables                                   (default is summary)
+                                        1
+Create separate tables for nonstandard path           -separate_non_standard_groups
+groups
+
+Create separate tables for all path groups (standard -separate_all_groups
+                1
+and nonstandard )
+
+Create separate tables for launch/capture clock       -include {per_clock_violations
+combinations                                          inter_clock}
+                                                      (The per_clock_violations option is also needed
+                                                      to gather paths for each launch/capture clock pair.)
+
+Explicitly include empty path categories (with zero   -include {non_violated}
+paths) instead of suppressing them
+
+Show scenario-specific details in a DMSA session      -include {scenario_details}
+
+Choose between two summary table formats:         -format narrow | wide
+• Narrow, with group data values in separate rows (default is narrow)
+• Wide, with group data values in adjacent
+  columns
+
+Write the data to an output file, in comma-separated -format csv
+value (CSV) format                                   -output filename
+
+
+
+1. The nonstandard path groups are **default**, **async_default**, and **clock_gating_default**.
+
+
+PrimeTime® User Guide                                                                                  831
+T-2022.03
+                                                                                   Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Global Timing Summary Report
+
+
+      Table 52        Controlling report_global_timing Reporting (Continued)
+
+To do this                                          Use this option
+
+Specify the significant digit count for reporting   -significant_digits digits
+
+
+
+      By default, the report_global_timing command generates summary tables. To see the
+      per-endpoint contributions to those summary values, use the -path_type end option. For
+      example,
+      pt_shell> report_global_timing -delay_type max -group {CLK3}
+      ...
+      Setup violations
+      ---------------------------------------------------------
+               Total reg->reg    in->reg reg->out    in->out
+      ---------------------------------------------------------
+      WNS      -6.08     -6.08      0.00     -4.09      0.00
+      TNS     -26.87    -18.24      0.00     -8.63      0.00
+      NUM          7         3         0         4         0
+      ---------------------------------------------------------
+
+      pt_shell> report_global_timing -delay_type max -group {CLK3} -path_type end
+      ...
+      Slack      Type     Group            From_clock       To_clock          Endpoint
+      --------------------------------------------------------------------------------
+      -6.08      reg2reg CLK3              CLK2             CLK3              FF13/D
+      -6.08      reg2reg CLK3              CLK2             CLK3              FF3/D
+      -6.08      reg2reg CLK3              CLK2             CLK3              FF23/D
+      -4.09      reg2out CLK3              CLK2             CLK3              W
+      -1.51      reg2out CLK3              CLK1             CLK3              X
+      -1.51      reg2out CLK3              CLK2             CLK3              Y
+      -1.51      reg2out CLK3              CLK1             CLK3              Z
+      --------------------------------------------------------------------------------
+
+      To see details on interclock timing paths, use the -include option to specify both the
+      per_clock_violations and inter_clock keyword values. (This ensures that paths
+      for all launch/capture clock combinations are gathered and reported, respectively.)
+      Intermediate-level summary tables with wildcarded clocks are also shown. For example,
+      pt_shell> report_global_timing -delay_type max \
+                  -include {per_clock_violations inter_clock}
+      ...
+      Setup violations
+      ---------------------------------------------------------
+               Total reg->reg    in->reg reg->out    in->out
+      ---------------------------------------------------------
+      C2C * -> *
+      WNS      -6.08     -6.08     -5.44     -4.09     -3.96
+      TNS    -269.83   -142.31   -103.30    -16.88     -7.33
+      NUM         59        27        22         8         2
+      ---------------------------------------------------------
+      C2C * -> CLK1
+      WNS      -6.08     -6.08     -5.44      0.00      0.00
+      TNS     -93.14    -52.49    -40.66      0.00      0.00
+      NUM         19        10         9         0         0
+      ---------------------------------------------------------
+
+
+PrimeTime® User Guide                                                                      832
+T-2022.03
+                                                                                 Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Global Timing Summary Report
+
+
+     C2C CLK1 -> CLK1
+     WNS      -5.85     -5.85     -0.80      0.00      0.00
+     TNS     -22.86    -22.06     -0.80      0.00      0.00
+     NUM           5        4         1         0         0
+     ---------------------------------------------------------
+     C2C CLK2 -> CLK1
+     WNS      -6.08     -6.08     -4.87      0.00      0.00
+     TNS     -41.92    -23.13    -18.79      0.00      0.00
+     NUM           8        4         4         0         0
+     ---------------------------------------------------------
+     C2C CLK3 -> CLK1
+     WNS      -5.44     -3.65     -5.44      0.00      0.00
+     TNS     -28.37     -7.30    -21.07      0.00      0.00
+     NUM           6        2         4         0         0
+     ---------------------------------------------------------
+     C2C * -> CLK2
+     WNS      -6.08     -6.08     -5.44      0.00      0.00
+     TNS     -78.46    -46.73    -31.72      0.00      0.00
+     NUM         16         9         7         0         0
+     ---------------------------------------------------------
+     C2C CLK1 -> CLK2
+     WNS      -5.85     -5.85      0.00      0.00      0.00
+     TNS     -17.55    -17.55      0.00      0.00      0.00
+     NUM           3        3         0         0         0
+     ---------------------------------------------------------
+     ...
+     ---------------------------------------------------------
+     C2C CLK3 -> CLK3
+     WNS      -5.44     -3.65     -5.44     -1.51     -3.96
+     TNS     -30.60     -7.30    -16.31     -3.03     -3.96
+     NUM           8        2         3         2         1
+     ---------------------------------------------------------
+
+     If you have a long report with many summary tables, you can use the -format wide
+     option to show the WNS, TNS and path count values in columns instead of rows. (This
+     option does not affect -path_type end per-endpoint tables.) For example,
+pt_shell> report_global_timing -delay_type max -group {CLK3}
+...
+Setup violations
+---------------------------------------------------------
+         Total reg->reg    in->reg reg->out    in->out
+---------------------------------------------------------
+WNS      -6.08     -6.08      0.00     -4.09      0.00
+TNS     -26.87    -18.24      0.00     -8.63      0.00
+NUM          7         3         0         4         0
+---------------------------------------------------------
+
+pt_shell> report_global_timing -delay_type max -group {CLK3} -format wide
+...
+Setup violations
+      Total      |    reg->reg    |     in->reg    |     reg->out    |     in->out
+ |
+WNS    TNS NUM | WNS     TNS NUM | WNS    TNS NUM | WNS     TNS NUM | WNS    TNS NUM
+ |
+------------------------------------------------------------------------------------
+---
+-6.08 -26.87 7 | -6.08 -18.24 3 | 0.00     0.00 0 | -4.09 -8.63 4 | 0.00 0.00 0
+ |
+
+
+
+
+PrimeTime® User Guide                                                                      833
+T-2022.03
+                                                                                       Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Path Timing Report
+
+
+
+Path Timing Report
+     You can use path timing reports to focus on particular timing violations and to determine
+     the cause of a violation. By default, the report_timing command reports the path with
+     the worst setup slack.
+     A path timing report provides detailed timing information about any number of requested
+     paths. The level of detail that you want to see in the output can vary. For example, you can
+     view this information:
+     •   Gate levels in the logic path
+     •   Incremental delay value of each gate level
+     •   Sum of the total path delays
+     •   Amount of slack in the path
+     •   Source and destination clock name, latency, and uncertainty
+     •   On-chip variation (OCV) with clock reconvergence pessimism removed
+
+
+     Using the report_timing Command
+     The report_timing command provides options to control reporting of the following:
+     •   Number of paths
+     •   Types of paths
+     •   Amount of detail
+     •   Startpoints, endpoints, and intermediate points along the path
+     To specify the number of digits after the decimal point displayed for time values in the
+     report, use the report_timing command with the -significant_digits option. This
+     option controls only the number of digits displayed, not the precision used internally for
+     analysis.
+     The following example shows a typical timing report:
+     pt_shell> report_timing
+
+     ****************************************
+     Report : timing
+     Design : FP_SHR
+     ****************************************
+
+     Operating Conditions:
+     Wire Loading Model Mode: top
+
+
+
+PrimeTime® User Guide                                                                             834
+T-2022.03
+                                                                                   Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Path Timing Report
+
+
+
+        Startpoint: a (input port)
+        Endpoint: c_d (output port)
+        Path Group: default
+        Path Type: max
+
+       Point                            Incr       Path
+     ----------------------------------------------------
+       input external delay             10.00      10.00 r
+       a (in)                            0.00      10.00 r
+       m1/Z (MUX21H)                     1.00      11.00 r
+       u1/S (FA1)                        1.00      12.00 r
+       c_d/Z (AN2)                       1.00      13.00 r
+       c_d (out)                         0.00      13.00 r
+       data arrival time                           13.00
+
+       max_delay                        15.00      15.00
+       output external delay           -10.00       5.00
+       data required time                           5.00
+     ----------------------------------------------------
+       data required time                           5.00
+       data arrival time                          -13.00
+     ----------------------------------------------------
+       slack (VIOLATED)                -8.00
+
+     To show detailed information about the four worst paths, enter
+     pt_shell> report_timing -input_pins -max_paths 4
+
+     When -max_paths is set to any value larger than 1, the command only reports paths that
+     have negative slack. To include positive-slack paths in multiple-paths reports, use the
+     -slack_lesser_than option, as in the following example:
+     pt_shell> report_timing -slack_lesser_than 100 -max_paths 40
+
+     You can use multiple -through options in a single command to specify paths that traverse
+     multiple points. For example:
+     pt_shell> report_timing -from A1 -through B1 -through C1 \
+                  -to D1
+
+     This means any path that starts at A1, passes through B1 and C1 in that order, and ends
+     at D1.
+     pt_shell> report_timing -from A1 -through {B1 B2} \
+                 -through {C1 C2} -to D1
+
+     This means any path that starts at A1, passes through either B1 or B2, then passes
+     through either C1 or C2, and ends at D1.
+     pt_shell> report_timing -from A1 -through {B1 C1} -to D1
+
+
+
+
+PrimeTime® User Guide                                                                     835
+T-2022.03
+                                                                                        Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Path Timing Report
+
+
+     This means any path that starts at A1, passes through B1 or C1, and ends at D1.
+     To report only the paths that have a specific type of startpoint and endpoint:
+     report_timing
+      -start_end_type reg_to_reg ; Only paths from register to register
+      -start_end_type reg_to_out ; Only paths from register to output port
+      -start_end_type in_to_reg ; Only paths from input port to register
+      -start_end_type in_to_out ; Only paths from input port to output port
+
+     For example, the command report_timing -start_end_type in_to_out reports only
+     paths that start at an input (or bidirectional) port and end at an output (or bidirectional)
+     port.
+     In this syntax, “reg” means any valid startpoint or endpoint that is not an input port, output
+     port, or bidirectional port, even if not a sequential register. For example, a clock-gating
+     check endpoint qualifies as “reg” in the in_to_reg start-end type.
+     The four start-end type choices are the same as the categories reported by the
+     report_global_timing command. All timing paths fall into one of the four categories.
+
+     This report example shows the transition time and capacitance:
+     pt_shell> report_timing -transition_time -capacitance
+     ...
+     Startpoint: ffa (rising edge-triggered flip-flop clocked by CLK)
+     Endpoint: ffd (rising edge-triggered flip-flop clocked by CLK)
+     Path Group: CLK
+     Path Type: max
+
+     Point                          Cap      Trans    Incr       Path
+     -------------------------------------------------------------------
+     clock CLK (rise edge)                    0.00    0.00
+     clock network delay (ideal)              0.00    0.00
+     ffa/CLK (DTC10)                          0.00    0.00       0.00 r
+     ffa/Q (DTC10)                 3.85       0.57    1.70       1.70 f
+     U7/Y (IV110)                  6.59       1.32    0.84       2.55 r
+     U12/Y (NA310)                 8.87       2.47    2.04       4.58 f
+     U17/Y (NA211)                 4.87       1.01    1.35       5.94 f
+     U23/Y (IV120)                 2.59       0.51    0.37       6.30 r
+     U15/Y (BF003)                 2.61       0.88    0.82       7.12 f
+     U16/Y (BF003)                 2.61       1.46    0.99       8.11 r
+     U10/Y (AN220)                 2.63       0.46    1.04       9.15 r
+     ffd/D (DTN10)                            0.46    0.00       9.15 r
+     data arrival time                                           9.15
+
+     clock CLK (rise edge)                           10.00      10.00
+     clock network delay (ideal)                      0.00      10.00
+     ffd/CLK (DTN10)                                            10.00 r
+     library setup time                              -1.33       8.67
+     data required time                                          8.67
+     -------------------------------------------------------------------
+
+
+
+PrimeTime® User Guide                                                                           836
+T-2022.03
+                                                                                      Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Path Timing Report
+
+
+     data required time                                          8.67
+     data arrival time                                          -9.15
+     -------------------------------------------------------------------
+     slack (VIOLATED)                                           -0.48
+
+
+     Reporting Normalized Slack
+     The maximum frequency for a path depends on the propagation delay of the path and the
+     number of clock cycles needed for the path. To determine the achievable frequency for
+     an existing design, you need to find the timing paths that limit the frequency and focus on
+     optimizing those paths.
+     PrimeTime helps you find the paths with the greatest effect on the clock frequency by
+     calculating the normalized slack, a metric for timing paths. PrimeTime calculates the
+     normalized slack for a path with the following equation:
+         [Normalized slack] = [Path slack] / [Allowed propagation delay for path]
+     For example, Table 53 describes two paths with different slack values. Although Path
+     B has worse slack than Path A, Path B has a smaller normalized slack and therefore a
+     smaller effect on the clock frequency.
+     Table 53       A path with worse slack can have a smaller normalized slack
+
+                                     Path A                   Path B
+                                     (Single-segment path)    (Multicycle path)
+
+Path slack                           -10 ps                   -20 ps
+
+Allowed number of clock cycles       1                        4
+
+Clock period                         500 ps                   500 ps
+
+Allowed propagation delay for path   500 ps                   2000 ps
+
+Normalized slack                     -0.02                    -0.01
+
+
+
+     Running Normalized Slack Analysis
+     To enable normalized slack analysis, set the timing_enable_normalized_slack variable
+     to true before running timing analysis.
+     After you enable normalized slack analysis, the report_timing command reports
+     normalized slack data. The tool can also sort paths by normalized slack, as well as find the
+     paths with the worst normalized slack. To report the worst normalized slack, enter
+     pt_shell> report_timing -normalized_slack
+
+
+
+
+PrimeTime® User Guide                                                                        837
+T-2022.03
+                                                                                            Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Path Timing Report
+
+
+     In addition, the normalized_slack attribute on timing path objects represents the
+     normalized slack computed by the get_timing_paths command. The normalized_slack
+     attribute is available only if you enabled normalized slack before the last full timing update.
+
+     Setting Limits for Normalized Slack Analysis
+     Normalized slack analysis can potentially take a lot of runtime and memory.
+     You can reduce the effect by limiting the allowed propagation delay along
+     paths to a specified multiple of the clock period. To specify this multiple, set the
+     timing_max_normalization_cycles variable:
+     pt_shell> set_app_var timing_max_normalization_cycles clock_cycles
+
+     The default is four clock cycles.
+
+     Using Normalized Slack to Adjust the Clock Period
+     When a path is launched and captured from clocks with varying periods, the normalized
+     slack of the path indicates how much the clock period needs to change for the path to
+     meet timing. If the launch and capture clocks are the same, the needed change in the
+     clock period is
+     ΔPeriod = -(normalized_slack) × (period)
+     To calculate the needed change in the clock period so that all paths in the clock domain
+     meet timing, use the worst normalized slack among the paths:
+     ΔPeriod = -(worst_normalized_slack) × (period)
+     For example, a design has the following characteristics:
+     •   Initial clock period = 1000 ps
+     •   Worst normalized slack = -0.2
+     To calculate the change in the period to meet timing, use this equation:
+     ΔPeriod = -(-0.2) × (1000 ps) = 200 ps
+     Therefore, the design in this example meets timing if you increase the clock period to 1200
+     ps.
+     The formulas in this section work for both positive and negative changes. If the design
+     already meets timing, and all the normalized slack values are positive, the normalized
+     slack can be used to compute the negative value of ΔPeriod, which you can use to speed
+     up the clock.
+     If the paths contain latches, then with advanced latch analysis, you can use the
+     normalized slack to calculate the maximum frequency for a path unless it is a recovered
+     path (see Finding Recovered Paths) or a path that contains latches identified as a loop
+     breaker or a path breaker (see Reporting Latch Loop Groups).
+
+
+PrimeTime® User Guide                                                                             838
+T-2022.03
+                                                                                          Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Path Timing Report
+
+
+
+     Using the report_timing -exclude Option
+     The report_timing command has the -exclude, -rise_exclude, and -fall_exclude
+     options that allow you to skip paths that contain any excluded netlist objects. All of these
+     options take a list of objects (pins, ports, nets, and cells). These options behave as
+     follows:
+     •   For pins and ports, they exclude all paths from, to, or through any excluded pin or port.
+         This option does not apply to clock pins.
+     •   For cells and nets, they exclude all paths from, to, or through all pins of any excluded
+         cell or net.
+     •   The -exclude option has higher precedence over the -from, -to, and -through
+         options.
+     •   The -rise_exclude and -fall_exclude options prune paths with rise and fall
+         transition, respectively.
+     •   When used with the -trace_latch_borrow option, the -exclude option does not
+         apply to the borrowing path.
+     •   When used with the -path_type full_clock_expanded or full_clock options, the
+         -exclude option does not apply to the clock path.
+
+     •   Multiple levels of the -exclude options are not supported. That is, you cannot exclude
+         a particular path by specifying a series of the -exclude options.
+     Example: Using the -exclude Option
+     For example, assume that you had a design with the paths shown in Figure 294, where C
+     is both an endpoint and a startpoint.
+
+Figure 294       Using the -exclude option
+
+             G                                              H
+
+
+
+                                                                                      F
+             B                     C
+                                                            D
+             A
+                                                                            E
+
+
+
+     The following command reports three paths: A-->D-->E, A-->D-->F, and G-->H-->F.
+     pt_shell> report_timing -nworst 2 -max_paths 3 -exclude C
+
+
+PrimeTime® User Guide                                                                           839
+T-2022.03
+                                                                                      Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Path Timing Report
+
+
+     Example: Using the -exclude Option With the -trace_latch_borrow Option
+     The -exclude option only applies to data paths, not borrowing paths. For example,
+     assume you have a circuit like the one shown in Figure 295. In this circuit, LD2 borrows
+     from both LD1 and LD4, but the path from LD1 is the worst path.
+
+Figure 295     Using -exclude with the -trace_latch_borrow option
+                              LD4
+
+                             D               Logic
+         CLK
+                             G
+                                                                   LD2                       LD3
+                                                               D              Logic         D
+
+                              LD1                              G                            G
+
+                             D               Logic
+
+                             G
+
+
+
+
+     The following commands show the worst path starting from LD2 and still borrowing from
+     LD1, because the -exclude option does not apply to borrowing paths:
+     pt_shell> report_timing -exclude LD1 -to LD3/D
+     pt_shell> report_timing -exclude LD1 -to LD3/D -trace_latch_borrow
+
+
+     Cover Design or Cover Through Report
+     To report or collect the worst path through each violating pin in the design, use the
+     report_timing or get_timing_paths command with the -cover_design option. This
+     capability overcomes the possibility of missing paths in cases where the -nworst option
+     specifies a low value or where the -start_end_pair option misses reconvergent paths.
+     To run path-based analysis on the path set returned by the cover design, perform cover
+     design reporting with the -pba_mode path option. This allows you to identify more path-
+     based analysis violations earlier in the flow with quick turnaround time. For signoff, you
+     should use exhaustive path-based analysis to ensure maximum pessimism removal.
+     You can use cover design reporting with signal integrity analysis, advanced on-chip
+     variation (AOCV), parametric on-chip variation (POCV), and simultaneous multivoltage
+     analysis (SMVA) flows. In distributed multi-scenario analysis (DMSA), you can perform
+     cover design reporting at the worker processes, but you cannot perform merged reporting
+     at the manager process.
+
+
+PrimeTime® User Guide                                                                           840
+T-2022.03
+                                                                                       Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Path Timing Report
+
+
+     To restrict the report to paths that go through specified objects, use the -cover_through
+     through_list option. This reports the single worst violating path through each of the
+     objects in a list. For example,
+     pt_shell> report_timing -cover_through {n1 n2 n3}
+
+     This command reports the worst path through net n1, the worst path through n2, and
+     the worst path through n3, resulting in a collection of up to three paths. Fewer paths are
+     collected if there are no violating paths through the objects, or if the worst path through
+     one object is the same as the worst path through another object in the list.
+     By default, only paths with negative slack are collected. If the -slack_lesser_than option
+     is used, only paths with slack less than the specified value are collected.
+     Note that the following commands typically do not produce the same results:
+     pt_shell> report_timing -cover_through {n1 n2 3}
+
+     pt_shell> report_timing -through {n1 n2 n3} -nworst 1 -max_paths 3
+
+     For example, the three worst paths might pass through n1, ending at three different
+     endpoints, without passing through n2 or n3. In that case, the first command would report
+     three different paths through n1, n2, and n3, respectively, whereas the second command
+     would report three different paths through n1 and none through n2 or n3.
+
+
+     Path Tagging
+     You can mark or “tag” a set of paths and then exclude those paths from consideration by
+     the get_timing_paths and report_timing commands. This feature lets you work on
+     smaller sets of paths, one set at a time, so that a large analysis can be more manageable
+     and can be completed more efficiently.
+     For example, the following commands identify and tag the 100 worst-slack paths:
+     pt_shell> set_app_var enable_path_tagging true
+     true
+     pt_shell> set paths1 \
+       [get_timing_paths -nworst 100 -max_paths 100] # creates path collection
+     ...
+     pt_shell> create_path_tag_set $paths1 -name tag1   # tags path collection
+     1
+
+     To exclude these paths from consideration in a subsequent report_timing or
+     get_timing_paths command:
+     pt_shell> report_timing -exclude tag1
+     ...
+
+     pt_shell> set paths2 \
+
+
+
+PrimeTime® User Guide                                                                          841
+T-2022.03
+                                                                                     Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Path Timing Report
+
+
+      [get_timing_paths -nworst 100 -max_paths 100 -exclude tag1]
+     ...
+
+     The new collection paths2 contains the next 100 worst paths aside from those already
+     tagged.
+
+     Enabling Path Tagging
+     To use path tagging, you must first enable the feature as follows:
+     pt_shell> set_app_var enable_path_tagging true
+     true
+
+     By default, the variable is set to false and path tagging is disabled.
+
+     Tagging a Path Collection
+     To tag a set of paths, use the create_path_tag_set command. The command takes two
+     arguments, the path collection to be tagged and a name for the tag set. For example,
+     pt_shell> create_path_tag_set \
+       [get_timing_paths -nworst 100 -max_paths 100] -name tag1
+     1
+
+     If the path tag set name is already being used, the new set overwrites the older one.
+
+     Excluding Tagged Paths
+     To exclude consideration of tagged paths in the report_timing or get_timing_paths
+     command, use the -exclude option. For example,
+     pt_shell> report_timing -exclude {tag1 tag2}
+     ...
+
+     pt_shell> set paths4 \
+      [get_timing_paths -nworst 100 -max_paths 100 -exclude {tag1 tag2}]
+     ...
+
+     Reporting and Removing Tag Sets
+     To report the number of paths in a tag set, use the report_path_tag_set command:
+     pt_shell> report_path_tag_set -name tag1
+     ...
+     Tag name                  | Number of paths
+     -------------------------------------------------
+     tag1                      | 100
+
+
+
+
+PrimeTime® User Guide                                                                        842
+T-2022.03
+                                                                                   Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Path Timing Report
+
+
+     To return the number of paths in a path tag set as an integer, use the
+     get_path_count_for_tag command:
+     pt_shell> get_path_count_for_tag -name tag1
+     100
+
+     To remove (destroy) a tag set, use the remove_path_tag_set command:
+     pt_shell> remove_path_tag_set -name tag1
+     Removing these path tag sets:
+             tag1
+     1
+
+     If you do not use the -name option, the command operates on all tag sets.
+
+     Path-Based Analysis of Successively Worse Paths
+     You can use path tagging to successively analyze sets of worst paths in path-based
+     analysis mode, without repeating the analysis of previously analyzed paths, as
+     demonstrated in the following example.
+     # Enable path tagging
+     set_app_var enable_path_tagging true
+
+     # Run path-based analysis on the worst 1000 paths and tag the set
+     set path_set1 [get_timing_paths -slack_lesser_than 0 -max_paths 1000]
+     report_timing -pba_mode path $path_set1
+     create_path_tag_set $path_set1 -name done1
+     report_path_tag_set
+
+     # Run path-based analysis again, excluding already-analyzed paths
+     set path_set2 [get_timing_paths -slack_lesser_than 0 -max_paths 1000 \
+       -exclude done1]
+     report_timing -pba_mode path $path_set2
+     create_path_tag_set $path_set2 -name done2
+
+     # Run path-based analysis again, excluding already-analyzed paths
+     set path_set3 [get_timing_paths -slack_lesser_than 0 -max_paths 1000 \
+       -exclude {done1 done2}]
+     report_timing -pba_mode path $path_set3
+     create_path_tag_set $path_set3 -name done3
+     ...
+
+     Exhaustive Path-Based Analysis
+     In exhaustive path-based analysis (using -pba_mode exhaustive in the report_timing
+     or get_timing_paths command), the tool first performs graph-based analysis and
+     discards the paths that already meet the timing constraint. These paths need not be
+     analyzed again because graph-based analysis is conservative (pessimistic).
+
+
+
+
+PrimeTime® User Guide                                                                     843
+T-2022.03
+                                                                                       Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Path Timing Report
+
+
+     During path-based analysis, the tool might reach the limit on the number of paths analyzed
+     per endpoint (if set the pba_exhaustive_endpoint_path_limit variable to an integer).
+     In that case, you can use path tagging to reanalyze only the path endpoints for which the
+     limit was reached, excluding the paths already discarded during graph-based analysis.
+     Use a script similar to the following.
+     # Enable path tagging
+     set_app_var enable_path_tagging true
+
+     # Exhaustive path-based analysis; tag discarded graph-based paths
+     set path_set1 [get_timing_paths -slack_lesser_than 0 -max_paths 1000 \
+       -pba_mode exhaustive -tag_paths_filtered_by_pba done1]
+     report_timing -pba_mode path $path_set1
+     report_path_tag_set
+
+     # Create collection of endpoints that reached limit (UITE-480 warnings)
+     set exceeded_endpoints [get_attribute [current_design] \
+       exhaustive_limit_exceeded_endpoints]
+
+     # Exhaustive path-based analysis of UITE-480 endpoints, skip discarded
+     set path_set2 [get_timing_paths -slack_lesser_than 0 -max_paths 1000 \
+       -to $exceeded_endpoints -pba_mode exhaustive -exclude done1 ]
+     report_timing -pba_mode path $path_set2
+
+
+     Custom Timing Reports With Attributes
+     The report_timing command offers an -attributes option that allows you to create
+     custom timing reports that include your attributes of interest.
+     To do this, specify a list of one or more point attribute names with the option. For
+     example,
+     pt_shell> report_timing \
+                 -nosplit \
+                 -pba_mode exhaustive \
+                 -significant_digits 3 \
+                 -input_pins \
+                 -attributes {transition object.max_transition}
+
+     would add transition and max_transition columns to the report:
+
+ Startpoint: mrxdv_pad_i
+              (input port clocked by mrx_clk_pad_i)
+ Endpoint: RxEnSync_reg
+              (rising edge-triggered flip-flop clocked by mrx_clk_pad_i)
+ Path Group: inputs
+ Path Type: max
+
+ Point                              Incr     Path   transition object.max_transition
+ -------------------------------------------------------------------------------------
+ clock mrx_clk_pad_i (rise edge)   0.000     0.000
+ clock network delay (propagated) 0.000      0.000
+
+
+PrimeTime® User Guide                                                                        844
+T-2022.03
+                                                                                      Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Quality of Results Report
+
+
+ input external delay                   4.000      4.000 f
+ mrxdv_pad_i (in)                       0.116 &    4.116 f      0.198                      4.500
+ U3/A (INVX2)                           0.000 &    4.117 f      0.198                      3.500
+ U3/Y (INVX2)                           0.181 &    4.298 r      0.220                      3.500
+ U30/S0 (MX2X1)                         0.000 &    4.298 r      0.220                      4.500
+ U30/Y (MX2X1)                          0.307 &    4.605 f      0.106                      4.500
+ RxEnSync_reg/D (DFFRX1)                0.000 &    4.605 f      0.106                      3.750
+ data arrival time                                 4.605
+
+ clock mrx_clk_pad_i (rise edge)    8.000    8.000
+ clock network delay (propagated)   1.037    9.037
+ clock reconvergence pessimism      0.000    9.037
+ RxEnSync_reg/CK (DFFRX1)                    9.037 r
+ library setup time                 0.350    8.687
+ data required time                          8.687
+ -------------------------------------------------------------------------------------
+ data required time                          8.687
+ data arrival time                          -4.605
+ -------------------------------------------------------------------------------------
+ slack (MET)                                 4.082
+
+     The attributes must be of the timing_point objects along the timing path. To obtain the
+     underlying port, pin, or net objects, use chained attribute access (the “dot” notation) to
+     access the object attribute of each point that returns the pin or port object. Undefined
+     attribute values in the report are left blank.
+     Timing report types that print timing reports are supported, including full-clock reports,
+     path-based analysis reports. Merged DMSA reporting is supported for attributes that are
+     available at the master. Use the -nosplit option to prevent lines from splitting.
+     The timing_report_fixed_width_columns_on_left variable can be set to true to
+     move the point name to the right of the attribute values.
+     Note the following limitation:
+     •   When the -nets option of the report_timing command is used, attributes are not
+         reported for the net objects. Only timing point attributes for timing point rows are
+         supported.
+
+
+Quality of Results Report
+     To report the quality of results (QoR), use the report_qor command. This report provides
+     an overview of the timing of your design with the following information:
+     •   Length of the worst paths (shown as “Critical Path Length” in the report, which
+         represents the arrival time of the signal at the path's endpoint)
+     •   Total negative slack (TNS)
+     •   Minimum delay and hold
+     •   Detailed design rule constraints summary
+
+
+
+PrimeTime® User Guide                                                                           845
+T-2022.03
+                                                                                                 Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Quality of Results Report
+
+
+     The tool offers two methods of total negative slack (TNS) calculation, the “union” mode
+     and the “every-group” mode:
+     •   Union TNS mode (default) – The tool adds up the worst slack for all endpoints with
+         negative slack, taking the worst-slack values across all path groups, across all
+         scenarios. Each endpoint with negative slack contributes only once to the TNS, even if
+         that endpoint has negative slack in multiple path groups (for example, when two clocks
+         reach the same endpoint).
+     •   Every-group TNS mode – The tool adds up the worst slack for all endpoints with
+         negative slack per path group, across all scenarios. If a given endpoint exists in two
+         path groups and the endpoint has negative slack in both groups, it contributes twice to
+         the TNS.
+     In either mode, for distributed multi-scenario analysis (DMSA), the worst slack for each
+     endpoint across all scenarios contributes to the TNS.
+     You select the mode by setting the timing_report_union_tns variable to true for the
+     union mode (the default) or false for the every-group mode.
+     The following example shows the negative slack (setup violations) at the endpoints in two
+     path groups and compares the union and conventional methods of calculating the TNS for
+     analysis in a single scenario:
+
+                                                 Group1          Group2
+
+                           Endpoint 1       -6              -5
+
+                           Endpoint 2       -4              -8
+
+            timing_report_union_tns = false                          timing_report_union_tns = true
+
+            Every-group TNS calculation                              Union TNS calculation
+            = Sum of the negative slacks at all endpoints            = Sum of the worst negative slack across all
+                in every path group                                      endpoints, irrespective of the path group
+            = -(6 + 5 + 4 + 8) = -23                                 = -(6 + 8)= -14
+
+            Number of violating paths = 4                            Number of violating paths = 2
+
+
+
+
+PrimeTime® User Guide                                                                                     846
+T-2022.03
+                                                                                             Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Constraint Reports
+
+
+     The following example shows the same type of TNS calculation for distributed multi-
+     scenario analysis (DMSA):
+
+                                                  Scenario1                 Scenario2
+
+                                         Group1         Group2      Group1        Group2
+
+                      Endpoint 1             -3               -5       -9               -1
+
+                      Endpoint 2             -4               -8       -2               -6
+
+             timing_report_union_tns = false                       timing_report_union_tns = true
+
+             Every-group TNS calculation                           Union TNS calculation
+             = Sum of the negative slacks at all endpoints         = Sum of the worst negative slacks at all
+                 among scenarios in every path group                   endpoints, irrespective of the
+             = -(5 + 9 + 4 + 8) = -26                                  scenario or the path group
+                                                                   = -(9 + 8)= -17
+             Number of violating paths = 4
+                                                                   Number of violating paths = 2
+
+
+
+
+Constraint Reports
+     The report_constraint command summarizes the constraint violations, including
+     the amount by which a constraint is violated or met and the design object that is the
+     worst violator. PrimeTime can report the maximum area of a design and certain timing
+     constraints. It can also verify whether the netlist meets specific pin limits.
+
+
+     Timing Constraints
+     There are several types of timing constraints, such as
+     •   Maximum path delay and setup
+     •   Minimum path delay and hold
+     •   Recovery time, the minimum amount of time required between an asynchronous
+         control signal (such as the asynchronous clear input of a flip-flop) going inactive and a
+         subsequent active clock edge
+     •   Removal time, the minimum amount of time required between a clock edge that occurs
+         while an asynchronous input is active and the subsequent removal of the asserted
+         asynchronous control signal
+
+
+
+PrimeTime® User Guide                                                                                847
+T-2022.03
+                                                                                        Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Constraint Reports
+
+
+     •   Clock-gating setup and hold
+     •   Minimum pulse width high or low at one or several clock pins in the network
+     •   Minimum period at a clock pin
+     •   Maximum skew between two clock pins of a cell
+
+
+     Design Rule Constraints
+     PrimeTime performs checks to ensure that the netlist meets the design rules defined
+     by the ASIC vendor and specified in the design library. You can also specify design rule
+     parameters in PrimeTime, using commands such as set_max_capacitance.
+     The report_constraint command checks the following design rules if they are defined
+     in the library or design:
+     •   Total net capacitance (minimum and maximum limits)
+     •   Pin transition time (minimum and maximum limits)
+     •   Sum of fanout load attributes on net (minimum and maximum limits)
+     Usually only maximum capacitance and maximum transition are considered important. You
+     can set the design rule constraint separately for rising and falling transitions, capacitance,
+     and different clock domains and data paths for these clock domains.
+
+
+     Generating a Default Constraint Report
+     A default constraint report displays brief information about the worst evaluation for each
+     constraint in the current design and the overall cost. To report the constraints of a design,
+     use the report_constraint command. For example:
+     pt_shell> report_constraint
+     ...
+     Weighted
+     Group (max_delay/setup)      Cost     Weight     Cost
+     -----------------------------------------------------
+     C1                           1.50      1.00      1.50
+     C2                           0.00      1.00      0.00
+     -----------------------------------------------------
+     max_delay/setup                                  1.50
+
+
+     Weighted
+     Group (min_delay/hold)       Cost     Weight     Cost
+     -----------------------------------------------------
+     C1                           0.00      1.00      0.00
+     C2                           0.00      1.00      0.00
+     -----------------------------------------------------
+
+
+PrimeTime® User Guide                                                                           848
+T-2022.03
+                                                                                   Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Constraint Reports
+
+
+     min_delay/hold                                              0.00
+
+
+     Constraint                                       Cost
+     -----------------------------------------------------
+     max_delay/setup                                  1.50              (VIOLATED)
+     min_delay/hold                                   0.00
+
+
+     Reporting Violations
+     To report all instances of constraint violations, use the report_constraint
+     -all_violators command, as shown in the following example.
+     pt_shell> report_constraint -all_violators
+     ...
+         max_delay/setup    (’C1’ group)
+
+         Endpoint            Slack
+         -------------------------------------
+         OUT1                -1.50(VIOLATED)
+         OUT2                -1.50(VIOLATED)
+
+     To show detailed information about the violations, use the report_constraint -verbose
+     command, as shown in the following example.
+     pt_shell> report_constraint -all_violators -verbose...
+     ...
+       Startpoint: ff3 (rising edge-triggered flip-flop clocked by C1)
+       Endpoint: OUT1 (output port clocked by C1)
+       Path Group: C1
+       Path Type: max
+
+        Point                                    Incr       Path
+        --------------------------------------------------------
+        clock C1 (rise edge)                     0.00       0.00
+        clock network delay (ideal)              0.00       0.00
+        ff3/CP (FF)                              0.00       0.00 r
+        ff3/Q (FF)                               1.00       1.00 r
+        OUT1 (out)                               0.00       1.00 r
+        data arrival time                                   1.00
+
+       clock C1 (rise edge)                     3.00       3.00
+       clock network delay (ideal)              0.00       3.00
+       output external delay                   -3.50      -0.50
+       data required time                                 -0.50
+     ----------------------------------------------------------
+       data required time                                 -0.50
+       data arrival time                                  -1.00
+       --------------------------------------------------------
+       slack (VIOLATED)                                   -1.50
+
+
+
+
+PrimeTime® User Guide                                                                    849
+T-2022.03
+                                                                                       Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Constraint Reports
+
+
+         Startpoint: ff4 (rising edge-triggered flip-flop clocked by C2)
+         Endpoint: OUT2 (output port clocked by C1)
+         Path Group: C1
+         Path Type: max
+         Point                                    Incr       Path
+         --------------------------------------------------------
+         clock C2 (rise edge)                     0.00       0.00
+         clock network delay (ideal)              0.00       0.00
+         ff4/CP (FF)                              0.00       0.00 r
+         ff4/Q (FF)                               1.00       1.00 r
+         OUT2 (out)                               0.00       1.00 r
+         data arrival time                                   1.00
+
+         clock C1 (rise edge)                     3.00       3.00
+         clock network delay (ideal)              0.00       3.00
+         output external delay                   -3.50      -0.50
+         data required time                                 -0.50
+         --------------------------------------------------------
+         data required time                                 -0.50
+         data arrival time                                  -1.00
+         --------------------------------------------------------
+         slack (VIOLATED)                                   -1.50
+
+
+     Maximum Skew Checks
+     You sometimes need skew timing checks on sequential devices with more than one clock
+     signal. The skew constraint defines the maximum separation time allowed between two
+     clock signals. You can describe skew constraints in the Liberty (.lib) format. The following
+     Library Compiler keywords describe skew constraints:
+     •   skew_rising
+
+     •   skew_falling
+
+     Using Library Compiler, you identify a skew constraint by defining the timing_type
+     attribute as one of these two keywords in a timing group. The related_pin attribute
+     specifies a reference clock pin. Figure 296 describes a timing diagram for skew constraint.
+
+
+
+
+PrimeTime® User Guide                                                                          850
+T-2022.03
+                                                                                     Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Constraint Reports
+
+
+Figure 296    Timing diagram for skew constraint
+
+                   CK1
+                   (ref)
+
+
+
+
+             CK2
+
+
+
+
+              CK1 rise to CK2 rise skew                CK1 fall to CK2 fall skew
+
+
+     When the timing type is skew_rising, the timing constraint interval is measured from
+     the rising edge of the reference pin (specified in related_pin) to a transition edge of
+     the constrained pin. The intrinsic_rise value is the maximum skew time between
+     the reference pin rising to the constrained pin rising. The intrinsic_fall value is the
+     maximum skew time between the reference pin rising to the constrained pin falling.
+     When the timing type is skew_falling, the timing constraint interval is measured from
+     the falling edge of the reference pin (specified in related_pin) to a transition edge of
+     the constrained pin. The intrinsic_rise value is the maximum skew time between
+     the reference pin falling to the constrained pin rising. The intrinsic_fall value is the
+     maximum skew time between the reference pin falling to the constrained pin falling. You
+     can specify either the intrinsic_rise or intrinsic_fall value. You cannot specify
+     both.
+     In PrimeTime, use the report_constraint command with the -max_skew option to
+     report maximum skew checks. PrimeTime reports only maximum skew timing checks.
+     The -max_skew option checks the maximum separation time allowed between two clock
+     signals. The default displays all timing and design rule constraints.
+     PrimeTime calculates the actual skew for the specific skew check by taking the absolute
+     value of the difference between delayed reference and constrained clock edges. The ideal
+     reference clock edge is delayed by minimum clock latency to the reference pin; the ideal
+     constrained clock edge is delayed by maximum clock latency to the constrained pin. Clock
+     uncertainties are not considered for the skew timing checks. To report maximum skew for
+     all violators, use this command:
+     pt_shell> report_constraint -max_skew -all_violators
+                         Required           Actual
+        Pin              Skew               Skew            Slack
+     ------------------------------------------------------------------------
+        ff3/c (r->f)     0.15               5.47           -5.32 (VIOLATED)
+        ff2/c (f->f)     0.14               2.32           -2.18 (VIOLATED)
+
+
+PrimeTime® User Guide                                                                          851
+T-2022.03
+                                                                                          Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Constraint Reports
+
+
+         ff2/c (r->r)          0.12                      1.18                  -1.06   (VIOLATED)
+         ff4/c (f->f)          0.14                      0.84                  -0.70   (VIOLATED)
+         ff4/c (r->r)          0.12                      0.42                  -0.30   (VIOLATED)
+
+     To report detailed information, use this command:
+     pt_shell> report_constraint -max_skew -verbose
+
+     Constrained Pin: ff2/c
+       Reference Pin: ff2/cn
+       Check: max_skew
+
+        Point                                     Incr          Path
+        -----------------------------------------------------------------
+        clock sclk (rise edge)                    0.00          0.00
+        clock network delay (ideal)               1.40          1.40 r
+        ff2/cn                                    0.00          1.40
+        reference pin arrival time                              1.40
+
+        clock mclk (rise edge)                    0.00          0.00
+        clock network delay (ideal)               1.60          1.60 r
+        ff2/c                                     0.00          1.60 r
+        constrained pin arrival time                            1.60
+        ----------------------------------------------------------------
+        allowable skew                                          0.12
+        actual skew                                             0.20
+        ----------------------------------------------------------------
+        slack (VIOLATED)                                       -0.08
+
+
+     No-Change Timing Checks
+     Certain signals need no-change timing checks to make sure that they do not switch during
+     the active interval of a periodic signal such as a clock. A no-change check is described in
+     the library.
+     Performing a no-change check is equivalent to performing a setup check against the
+     active edge transition and a hold check against the inactive edge transition. For a
+     sequential element with an active-high clock, the no-change setup check is performed
+     against the rising clock edge and the hold check is performed against the falling clock
+     edge.
+     The report_timing and report_constraint commands report no-change checks as
+     library no-change setup time and library no-change hold time.
+     In the following report, pay particular attention to the lines in bold.
+     Startpoint: EN1 (level-sensitive input port clocked by CLK)
+     Endpoint: UCKLENH (positive nochange timing check clocked
+     by CLK')
+     Path Group: CLK
+     Path Type: max
+
+
+PrimeTime® User Guide                                                                           852
+T-2022.03
+                                                                                     Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Constraint Reports
+
+
+
+     Point                                Incr          Path
+     ------------------------------------------------------------
+     clock CLK (rise edge)                0.00          0.00
+     clock network delay (ideal)          0.00          0.00
+     input external delay                 1.00          1.00 r
+     EN1 (in)                             0.00          1.00 r
+     U24/A (N1A)                          0.00          1.00 r
+     U24/Z (N1A)                          0.07          1.07 f
+     U25/A (N1B)                          0.00          1.07 f
+     U25/Z (N1B)                          0.08          1.15 r
+     U26/A (N1C)                          0.00          1.15 r
+     U26/Z (N1C)                          0.07          1.21 f
+     U27/A (N1D)                          0.00          1.21 f
+     U27/Z (N1D)                          0.04          1.25 r
+     UCKLENH/EN (LD1QC_HH)                0.00          1.25 r
+     data arrival time                                  1.25
+
+     clock CLK' (rise edge)               2.00          2.00
+     clock network delay (ideal)          0.00          2.00
+     UCKLENH/G (LD1QC_HH)                 0.00          2.00 r
+     library nochange setup time         -0.32          1.68
+     data required time                                 1.68
+     -----------------------------------------------------------
+     data required time                                 1.68
+     data arrival time                                 -1.25
+     -----------------------------------------------------------
+     slack (MET)                                        0.43
+
+
+     Minimum Pulse Width Report
+     To report detailed information about the minimum pulse width for specified pins or ports,
+     use the report_min_pulse_width command. By default, the report includes all objects
+     with minimum pulse width constraints. To display only the violating minimum pulse width
+     checks, use the -all_violators option, as shown in the following example:
+     pt_shell> set_timing_derate -late 2.0 -cell_check
+     pt_shell> report_min_pulse_width -all_violators \
+                 -path_type full_clock -derate
+
+     ****************************************
+     Report : min pulse width
+             -all_violators
+             -path_type full_clock
+             -derate
+     ...
+     ****************************************
+       Pin: reg3g/CP
+       Related clock: clk1
+       Check: sequential_clock_pulse_width
+       Point                               Derate                Incr         Path
+
+
+PrimeTime® User Guide                                                                        853
+T-2022.03
+                                                                                      Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Constraint Reports
+
+
+     -----------------------------------------------------------------
+       clock clk1 (rise edge)                        0.00       0.00
+       clock source latency                          0.00       0.00
+       d (in)                                        0.00       0.00 r
+       abufc/Z (BUFFHVTD1)                  1.00     0.05       0.05 r
+       del3/Z (DELHVT4)                     1.00     4.30       4.35 r
+       abufcd/Z (BUFFHVTD1)                 1.00     0.07       4.42 r
+       reg3g/CP (DFCNHVTD1)                 1.00     0.00       4.42 r
+       open edge clock latency                                  4.42
+
+       clock clk1 (fall edge)                        2.97       2.97
+       clock source latency                          0.00       2.97
+       d (in)                                        0.00       2.97 f
+       abufc/Z (BUFFHVTD1)                  1.00     0.06       3.03 f
+       del3/Z (DELHVT4)                     1.00     3.90       6.93 f
+       abufcd/Z (BUFFHVTD1)                 1.00     0.10       7.04 f
+       reg3g/CP (DFCNHVTD1)                 1.00     0.00       7.04 f
+       close edge clock latency                                 7.04
+      -----------------------------------------------------------------
+       required pulse width (high)          2.00                5.40
+       actual pulse width                                       2.61
+     ------------------------------------------------------------------
+       slack (VIOLATED)                                        -2.79
+
+
+     Minimum Period Report
+     To report the details of minimum period calculation and constraint checking, use the
+     report_min_period command.
+
+     By default, the report shows the required minimum period and the actual period:
+     pt_shell> report_min_period -significant_digits 5 -nosplit
+     ****************************************
+     Report : min period
+             -nosplit
+             -path_type summary
+     ...
+     ****************************************
+     sequential_clock_min_period
+
+                          Required     Actual
+     Pin                  min period   min period Slack
+     -----------------------------------------------------------------
+     FF_C/CP (clk rise)   0.20000      0.19780     -0.00220 (VIOLATED)
+     FF_C/CP (clk fall)   0.20000      0.19800     -0.00200 (VIOLATED)
+
+     If there is a minimum period violation, you can debug the problem by reporting the full
+     clock path:
+     pt_shell> report_min_period -path_type full_clock_expanded
+     ****************************************
+     Report : min period
+
+
+PrimeTime® User Guide                                                                          854
+T-2022.03
+                                                                                       Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Bottleneck Report
+
+
+               -nosplit
+               -path_type full_clock_expanded
+     ...
+     ****************************************
+       Pin: FF_C/CP
+       Related clock: clk
+       Check: sequential_clock_min_period
+
+        Point                               Incr       Path
+        --------------------------------------------------------
+        clock clk (rise edge)              0.00000    0.00000
+        clock source latency               0.00000    0.00000
+        clk (in)                           0.00000 & 0.00000 r
+        CB1/Z (BUFFD1BWP)                  0.12279 & 0.12279 r
+        CB2/Z (BUFFD1BWP)                  0.08361 H 0.20640 r
+        CB3/Z (BUFFD1BWP)                  0.13528 H 0.34168 r
+        FF_C/CP (DFD1BWP)                  0.00001 & 0.34169 r
+        open edge clock latency                       0.34169
+
+        clock clk (rise edge)              0.20000    0.20000
+        clock source latency               0.00000    0.20000
+        clk (in)                           0.00000 & 0.20000 r
+        CB1/Z (BUFFD1BWP)                  0.12263 & 0.32263 r
+        CB2/Z (BUFFD1BWP)                  0.08315 H 0.40578 r
+        CB3/Z (BUFFD1BWP)                  0.13509 H 0.54088 r
+        FF_C/CP (DFD1BWP)                  0.00001 & 0.54089 r
+        clock reconvergence pessimism      0.00060    0.54149
+        clock uncertainty                 -0.00200    0.53949
+        close edge clock latency                      0.53949
+        --------------------------------------------------------
+        required min period                           0.20000
+        actual period                                 0.19780
+       ---------------------------------------------------------
+        slack (VIOLATED)                             -0.00220
+
+
+
+Bottleneck Report
+     A bottleneck is a common point that contributes to multiple violations. Bottleneck analysis
+     helps you identify the worst bottlenecks, determine the likelihood of being able to
+     significantly improve a bottleneck, and make a change to the netlist (guide synthesis, try a
+     gate sizing change, and so forth).
+     PrimeTime bottleneck analysis associates a bottleneck with leaf cells in a design. You can
+     generate a bottleneck report to know which gates or nets to change to improve the overall
+     timing quality. Analyzing bottlenecks enables you to fix many paths with a single change
+     (whether the change is logical or physical). In some cases, fixing many subcritical violating
+     paths is preferable to fixing a few worst paths because a few violators might be resolved
+     by place and route.
+
+
+
+
+PrimeTime® User Guide                                                                         855
+T-2022.03
+                                                                                       Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Bottleneck Report
+
+
+     To report bottleneck information in PrimeTime, use one of the following methods:
+     •   In the PrimeTime GUI, generate a bottleneck histogram (Reports > Histograms >
+         Timing Bottlenecks in the PrimeTime GUI).
+     •   In the shell, use the report_bottleneck command, which lists the leaf cells with the
+         highest bottleneck cost..
+         Note:
+            If you use the report_bottleneck command in your flow, set the
+            timing_save_pin_arrival_and_slack variable to true before your first
+            timing update.
+     •   Write a Tcl program that retrieves, organizes, and reports bottleneck attributes.
+         The Tcl procedure in Example 88 is provided in install_dir/auxx/pt/examples/tcl/
+         bottleneck_utils.tcl.
+     To verify the result of bottleneck analysis, use the report_timing or get_timing_paths
+     command.
+     Example 87 reports the 20 worst bottleneck cells in the current design based on the
+     number of paths through the cells with slack less than 0.0.
+
+Example 87 Bottleneck report
+     pt_shell> report_bottleneck
+
+     ****************************************
+     Report : bottleneck
+             -max_cells 20
+             -nworst_paths 100
+     ...
+     ****************************************
+
+     Bottleneck Cost = Number of violating paths through cell
+
+                                                      Bottleneck
+     Cell                              Reference      Cost
+     ----------------------------------------------------------
+     ipxr/ir1/i2/i0/u3                 DFF1A          39656.00
+     ipxr/ir1/U14                      INV2           39654.00
+     ipxr/ir1/U16                      INV8           39654.00
+     ipxr/ir1/i2/i0/u4                 DFF1A          31806.00
+     ipxr/ir1/U15                      BUF8B          31804.00
+     ipxr/U1712                        MUX2I          23999.00
+     ipxr/U558                         INV4           23999.00
+     ipxr/U1370                        NAN4           22485.00
+     ipxr/x01                          INV2           22485.00
+     dmac/BufEn                        BUF3           22485.00
+     dmac/U574                         INV            22485.00
+     ipxr/U1335                        NAN6CH         21844.00
+
+
+
+PrimeTime® User Guide                                                                        856
+T-2022.03
+                                                                                      Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Bottleneck Report
+
+
+     ipxr/U564                                   MUX2I            20074.00
+     ipxr/U1694                                  MUX2A            19936.00
+     ipxr/U1559                                  BUF2C            14785.00
+     ipxr/U1484                                  MUX2I            14252.00
+     ipxr/U1486                                  MUX2I            12468.00
+     SccMOD/U929                                 OR3              12135.00
+     ipxr/U1493                                  MUX2I            11248.00
+     dmac/BiuSMOD/U879                           NAN2             10949.00
+
+     The following Tcl procedure validates the bottleneck cost for a cell to compare with
+     report_bottleneck or the GUI bottleneck data. You can use the print_report
+     command to list the paths.
+
+Example 88 Tcl procedure to compare bottleneck values
+     proc verify_bottleneck_cell {cell slack_limit nworst
+       print_report} {
+       set through_pins [get_pins -of_object [get_cells $cell] -filter
+     "direction!=in"]
+       set path_count 0
+       set path_cost 0.0
+       set fanout_endpoint_cost 0.0
+       foreach_in_collection through_pins $through_pins {
+         set paths [get_timing_paths -through $through_pins \
+             -slack_lesser_than $slack_limit -nworst $nworst]
+         foreach_in_collection path $paths {
+           incr path_count
+           set this_path_cost [expr 0.0 - [get_attribute $path slack]]
+           set path_cost [expr $this_path_cost + $path_cost]
+         }
+         if {$print_report} {
+           report_timing -through $through_pins \
+               -slack_lesser_than $slack_limit -nworst $nworst
+         }
+         set paths [get_timing_paths -through $through_pins \
+              -slack_lesser_than $slack_limit -max_paths 10000]
+         foreach_in_collection path $paths {
+           set this_path_cost [expr 0.0 - [get_attribute $path slack]]
+           set fanout_endpoint_cost [expr $fanout_endpoint_cost +
+              $this_path_cost]
+         }
+       }
+       echo "-----------------------------------------------------------"
+       echo "path_count = $path_count"
+       echo "path_cost = $path_cost"
+       echo "fanout_endpoint_cost = $fanout_endpoint_cost"
+     }
+
+
+
+
+PrimeTime® User Guide                                                                       857
+T-2022.03
+                                                                                        Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Global Slack Report
+
+
+
+Global Slack Report
+     You can use the report_global_slack command to display the slack for a specified pin
+     or port. All pins are reported by default, except pins of hierarchical cells and ports of the
+     design.
+     Note:
+         Set the timing_save_pin_arrival_and_slack variable to true before
+         you perform the first timing update. Otherwise, the report_global_slack
+         command sets the variable to true and incurs the runtime of another timing
+         update.
+     You can choose any combination from maximum or minimum and rise or fall to report a
+     particular slack value. The -max and -min options are mutually exclusive as are the -rise
+     and -fall options. Use the object_list option to list pins or ports. If no object list is
+     provided, then the default is all pins.
+     To get a list of path endpoints that have setup timing violations, use this command:
+     pt_shell> get_attribute [current_design] violating_endpoints_max
+     {"TOP/I_BLENDER/op2_reg[31]/D", ... }
+
+     The path endpoints are listed in order of increasing slack.
+     Similarly, to get a list of path endpoints that have hold timing violations, use this command:
+     pt_shell> get_attribute [current_design] violating_endpoints_min
+     {"sd_DQ[0]", ... }
+
+
+
+Analysis Coverage Report
+     You can report timing checks in the current design or current instance by using the
+     report_analysis_coverage command. Generating information about timing checks is
+     most critical for new designs.
+     Perform these checks right after you resolve errors found while using the check_timing
+     command. Perform additional checks whenever significant changes are made to the
+     design or the timing assertions. Analysis coverage checks are critical for sign-off. Follow
+     this basic flow:
+     1. Run link_design and resolve link errors.
+     2. Run check_timing and resolve timing check errors.
+     3. Run report_analysis_coverage and resolve untested issues.
+     4. Perform the rest of the analysis.
+
+
+
+PrimeTime® User Guide                                                                           858
+T-2022.03
+                                                                                        Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Analysis Coverage Report
+
+
+     The report_analysis_coverage command summarizes these checks:
+     •   Setup
+     •   Hold
+     •   No-change
+     •   Minimum period
+     •   Recovery
+     •   Removal
+     •   Minimum pulse width
+     •   Clock separation (master-slave)
+     •   Clock-gating setup
+     •   Clock-gating hold
+     •   Output setup
+     •   Output hold
+     •   Maximum skew
+     The default report is a summary of checks organized by type. For each type of check,
+     such as setup, the report shows the number and percentage of checks that meet
+     constraints, violate constraints, and are untested. If there are no checks of a certain type,
+     the report does not show that check type.
+     Use the report generated by the report_analysis_coverage command ensure that the
+     analysis was complete. Static timing is considered exhaustive—all paths are checked.
+     However, if the assertions are incomplete or if paths are disabled (using false paths,
+     disabled arcs, case analysis, and so forth), some timing checks are not tested. You can
+     use this report with the check_timing command to make sure the design and assertions
+     are valid.
+     In some cases, you might want to use case analysis to analyze the design in
+     different configurations. You can use the report_analysis_coverage command to
+     determine which checks are untested in each configuration. If a check is untested in all
+     configurations, you might want to do more analysis.
+     Use the -status_details option to show more information about the individual timing
+     checks. The report shows all checks with the corresponding status. Untested checks have
+     information about why they are untested, if the reason can be determined. You can use the
+     -exclude_untested option to sort the list of reasons.
+
+
+
+
+PrimeTime® User Guide                                                                           859
+T-2022.03
+                                                                                    Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Clock Network Timing Report
+
+
+     To display the summary report, use the report_analysis_coverage command. For
+     example:
+     pt_shell> report_analysis_coverage
+
+     ****************************************
+     Report : analysis_coverage
+     Design : counter
+     ...
+     ****************************************
+
+     Type of Check   Total               Met     Violated        Untested
+     ------------------------------------------------------------------------
+     setup               5          0 ( 0%)      3 ( 60%)        2 ( 40%)
+     hold                5          3 ( 60%)     0 ( 0%)         2 ( 40%)
+     ------------------------------------------------------------------------
+     All Checks         10          3 ( 30%)     3 ( 30%)        4 ( 40%)
+
+     To display the detailed report of untested setup checks, use the
+     report_analysis_coverage command with its options. For example:
+     pt_shell> report_analysis_coverage -status_details {untested} \
+               -check_type {setup}
+
+     ****************************************
+     Report : analysis_coverage
+             -status_details {untested}
+             -sort_by slack
+             -check_type {setup }
+     Design : counter
+     ...
+     ****************************************
+
+     Type of Check Total               Met       Violated     Untested
+     --------------------------------------------------------------------
+     setup              5          0 ( 0%)       3 ( 60%)     2 ( 40%)
+     --------------------------------------------------------------------
+     All Checks         5          0 ( 0%)       3 ( 60%)     2 ( 40%)
+
+     Constrained                Related   Check
+     Pin                        Pin       Type       Slack       Reason
+     --------------------------------------------------------------------
+     ffd/CR                     CP        setup      untested    no_clock
+     ffd/D                      CP        setup      untested    no_clock
+
+
+
+Clock Network Timing Report
+     The timing characteristics of the clock network are important in any high-performance
+     design. To obtain information about the clock networks in a design, use the
+     report_clock_timing command. This command reports the clock latency, transition
+
+
+
+PrimeTime® User Guide                                                                        860
+T-2022.03
+                                                                                         Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Clock Network Timing Report
+
+
+     time, and skew characteristics at specified clock pins of sequential elements in the
+     network.
+     In the report_clock_timing command, specify the type of report you want (latency,
+     transition time, single-clock skew, interclock skew, or summary), the scope of the design
+     to analyze, and any filtering or ordering options for the report. PrimeTime gathers the
+     requested information and reports it in the specified order.
+
+
+     Latency and Transition Time Reporting
+     The information reported by the report_clock_timing command is based on the clock
+     latency and transition times calculated by PrimeTime. This information is maintained for all
+     clock pins of sequential devices (flip-flops and latches).
+     The clock latency at a particular pin depends on the following analysis conditions:
+     •   Constraint type: setup or hold
+     •   Timing path role: launch or capture
+     •   Transition type: rise or fall
+     To restrict the scope of the report_clock_timing command, you can optionally specify
+     the pins to analyze and the conditions at those pins. For example:
+     pt_shell> report_clock_timing -type latency -to U1/CP \
+               -hold -capture -rise
+
+     In this example, PrimeTime reports the latency at pin U1/CP for a hold check, for data
+     capture at the flip-flop, for a rising edge at the clock pin. If you specify neither -rise nor
+     -fall, PrimeTime considers the device type, in conjunction with its launch or capture role,
+     to determine the appropriate transition to report.
+     Using the -to option, you can selectively restrict the scope of the design checked for the
+     report. For example:
+     pt_shell> report_clock_timing -type latency \
+                -to {U1/CP U7/CP} -hold -capture -rise
+
+     When a pin named in the “to” list is not a clock pin of a sequential element, PrimeTime
+     replaces that pin with the set of clock pins in the transitive fanout of the named pin. (Here,
+     “clock pin” means the clock pin of a flip-flop or the gate pin of a latch.)
+     When a pin named in the “to” list is not a clock pin of a sequential element, the default
+     behavior is to replace that pin with the set of clock pins in the transitive fanout of the
+     named pin. (Here, “clock pin” means the clock pin of a flip-flop or the gate pin of a latch.)
+     But if you specify the -probe option, then the latency directly at the specified pin is
+     reported, with no transitive fanout tracing.
+
+
+
+PrimeTime® User Guide                                                                            861
+T-2022.03
+                                                                                             Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Clock Network Timing Report
+
+
+
+     Skew Reporting
+     To get a single-clock skew report, use report_clock_timing -type skew. This reports
+     skews between pins clocked by the same clock. To report skews between pins clocked
+     by different clocks as well as by the same clock, use report_clock_timing -type
+     interclock_skew, as described in Interclock Skew Reporting.
+
+     The skew between the clock pins of two different sequential devices is the difference
+     between the latency values of the two pins, as shown in Figure 297. PrimeTime calculates
+     the latency at points A and B, and then subtracts latency at A from the latency at B to
+     obtain the clock skew.
+
+Figure 297     Clock skew calculation
+
+                                              Setup or hold constraint
+                                    FF1                                            FF2
+
+                                D         Q         Combinational              D         Q
+                                                       logic
+
+                            A                                               B
+                          Launch                                         Capture
+
+             Skew = (latency at B) – (latency at A) [ – (clock reconvergence pessimism) ]
+
+
+
+     To determine the latency at the two pins for skew calculation, PrimeTime considers the
+     following conditions at each pin:
+     •   Type of sequential device involved: rising or falling edge-sensitive; or high or low level-
+         sensitive
+     •   Type of constraint: setup or hold (which determines the path type, transition type, and
+         library)
+     •   Role of the sequential device in the constraint relationship: launch or capture
+     If CRPR is enabled, PrimeTime takes it into account for the skew calculation. For
+     information, see Clock Reconvergence Pessimism Removal.
+     You can optionally restrict the scope of the report by specifying “from” and “to” pins. For
+     example, to report the clock skew for a setup path between a negative-level-sensitive
+     launch latch and a rising-edge-triggered capture flip-flop, use this command:
+     pt_shell> report_clock_timing -from latch/G -to ff/CP \
+               -type skew -setup
+
+
+
+
+PrimeTime® User Guide                                                                              862
+T-2022.03
+                                                                                       Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Clock Network Timing Report
+
+
+     PrimeTime reports the skew between a pair of sequential devices only if they can
+     communicate by one or more data paths in the specified “from” and “to” direction. The
+     existence of such a data path is sufficient for reporting. PrimeTime does not check to see
+     whether the path has been declared false.
+     To find the worst skew between any pair of sequential devices, you can specify -from
+     without -to or -to without -from . For the unspecified pins, PrimeTime uses the set
+     of all sequential device clock pins that communicate with the specified pins in the
+     specified direction. To restrict the clocks considered in the report, use the -clock
+     clock_list option. To include clock uncertainty in the skew calculation, use the
+     -include_uncertainty_in_skew option.
+
+     Like the report_timing command , the report_clock_timing command calculates
+     skew based on the opening edge at the “to” device, even for a level-sensitive latch that
+     allows time borrowing.
+
+
+     Interclock Skew Reporting
+     To report skew between pins clocked by different clocks as well as by the same clock,
+     use the report_clock_timing -type interclock_skew command. An interclock skew
+     report can help you get information, such as the following:
+     •   Skew between pin A (clocked by CLK1) and pin B (clocked by CLK2)
+     •   Worst local skew between all sequential devices clocked by CLK1 and all sequential
+         devices clocked by CLK2
+     •   Ten worst skews to all devices that communicate with pin A, irrespective of their
+         domain
+     You can restrict the scope of the report by using the -from_clock from_clock_list
+     option or the -to_clock to_clock_list option, or both options. Because of the
+     potentially large number of clock pins that PrimeTime must analyze, it is a good idea to be
+     as specific as possible when you specify an interclock skew report.
+     To display the names of the “from” clock and the “to” clock in the interclock skew report,
+     use the -show_clocks option of the report_clock_timing command.
+
+
+     Clock Timing Reporting Options
+     The report_clock_timing command offers several different types of reports, as
+     summarized in Figure 298. The figure shows the report types, starting with the most
+
+
+
+
+PrimeTime® User Guide                                                                             863
+T-2022.03
+                                                                                                 Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Clock Network Timing Report
+
+
+     general type at the top (summary report) and ending with the most specific type at the
+     bottom (verbose report). The figure also shows an example of each type of command.
+
+Figure 298     Clock network timing report types
+
+             Clock network report
+
+                       Summary report (minimum and maximum values for each clock)
+                       report_clock_timing –type summary
+
+
+                        List report
+
+                                    Skew report (pin pairs and associated skew, one clock per pair)
+                                    report_clock_timing –type skew –nworst 5
+
+                                    Interclock skew report (pin pairs and associated skew, any clocks)
+                                    report_clock_timing –type interclock_skew –nworst 5
+
+                                    Pin report (single pins and associated latency, transition time)
+                                    report_clock_timing -type transition –nworst 5
+
+                       Verbose report (detailed timing along clock paths)
+                       report_clock_timing -from U1/CP -to U5/CP -verbose -type skew
+
+
+
+     Summary Report
+     A summary report shows a list of the minimum and maximum latency, transition time, and
+     clock skew values found in the requested scope of the clock network. For example:
+     pt_shell> report_clock_timing -type summary \
+                  -clock [get_clocks CLK1]
+     ...
+       Clock: CLK1
+     ---------------------------------------------------------
+       Maximum setup launch latency:
+           f2_2/CP                             6.11      rp-+
+       Minimum setup capture latency:
+           f1_2/CP                             1.00      rpi-+
+       Minimum hold launch latency:
+           f1_2/CP                             1.00      rpi-+
+       Maximum hold capture latency:
+           f2_2/CP                             6.11      rp-+
+       Maximum active transition:
+           l3_2/G                              0.13      rpi-
+       Minimum active transition:
+           l2_3/G                              0.00      rp-
+
+
+
+PrimeTime® User Guide                                                                                  864
+T-2022.03
+                                                                                     Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Clock Network Timing Report
+
+
+       Maximum setup skew:
+           f2_2/CP                                       rp-+
+           f2_1/CP                             4.00      rp-+
+       Maximum hold skew:
+           f3_3/CP                                       rpi-+
+           f2_2/CP                             3.01      rp-+
+     ---------------------------------------------------------
+
+     The report shows the following information for each minimum and maximum latency,
+     transition time, and skew value:
+     •   Pins at which the minimum or maximum value occurred
+     •   Minimum or maximum time value
+     •   Conditions under which the minimum or maximum time value occurred
+     The string of characters in the rightmost column shows the conditions under which
+     the minimum or maximum time value occurred, following the conventions shown in
+     Figure 299.
+
+Figure 299    Latency, transition time, and skew condition codes
+
+                     f1_2/CP                             1.00             rpi-+
+
+
+
+             rpi-+
+                                    - = transition causes launch event
+                                    + = transition causes capture event
+                                    i = clock inverted from source
+                                    no i = clock not inverted from source
+                                    p = propagated network
+                                    no p = ideal network
+                                    r = rising transition at latch clock pin
+                                    f = falling transition at latch clock pin
+
+
+     To restrict the scope of the report, you can use the -from and -to options of the
+     command. For example:
+     pt_shell> report_clock_timing -type summary -clock CLK1 \
+                 -from {A B C} -to {D E}
+
+
+
+PrimeTime® User Guide                                                                      865
+T-2022.03
+                                                                                        Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Clock Network Timing Report
+
+
+     This command restricts the scope of the report to CLK1 latency and transition times at
+     pins A through E, and restricts the scope of the skew report to CLK1 skew between the pin
+     groups {A B C} and {D E}.
+
+     List Report
+     A list report provides latency, transition time, and skew information in greater detail than
+     a summary report. You can have PrimeTime gather, filter, sort, and display a collection of
+     clock pins according to a specified attribute of interest.
+     There are two types of lists you can generate: skew reports and pin reports. A skew report
+     lists pin pairs and shows the skew value for each pair. A pin report lists individual pins and
+     shows the transition time and latency values for each pin. The items are listed in order of
+     skew, transition time, or latency, as specified by the options in the report_clock_timing
+     command.
+     The following example shows a skew report:
+     pt_shell> report_clock_timing -clock CLK1 -type skew -setup \
+                 -nworst 3
+
+     The report shows the three largest skew values listed in order of decreasing skew,
+     together with the latency at each pin and the clock reconvergence pessimism used in the
+     skew calculation:
+        Clock: CLK1
+
+       Clock Pin           Latency    CRP      Skew
+     ---------------------------------------------------------
+       f2_2/CP             6.11                          rp-+
+       f2_1/CP             2.01      -0.10     4.00      rp-+
+
+        l2_2/G                   4.11                                   rp-
+        f1_2/CP                  1.00         -0.10        3.01         rpi-+
+
+       f2_2/CP             6.11                          rp-+
+       l3_3/G              3.01      -0.10     3.00      rp-
+     ---------------------------------------------------------
+
+     The rightmost column shows the conditions under which the reported values occurred at
+     each corresponding pin, using the codes shown in Figure 299.
+     An example of a command to generate an interclock skew report is as follows:
+     pt_shell> report_clock_timing -type interclock_skew \
+                 -nworst 12 -setup -include_uncertainty_in_skew
+
+     The report shows the 12 largest skew values between clock pins, whether clocked by the
+     same clock or by different clocks. The report starts by showing the number of startpoint
+     and endpoint pins and clocks under consideration. (Very large numbers at this point
+
+
+
+PrimeTime® User Guide                                                                           866
+T-2022.03
+                                                                                       Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Clock Network Timing Report
+
+
+     indicate a possibly long runtime to generate the rest of the report.) An example of an
+     interclock skew report is:
+     ****************************************
+     Report : clock timing
+              -type interclock_skew
+      ...
+     ****************************************
+     Number of startpoint pins:     1023
+     Number of endpoint pins:       2496
+     Number of startpoint clocks:   4
+     Number of endpoint clocks:     6
+
+     Clock Pin               Latency    Uncert    Skew
+     ----------------------------------------------------------
+     f2_2/CP                 6.11                         rp-+
+     f2_1/CP                 2.01       0.11      4.21    fp-+
+     ...
+
+     To show the names of the two clocks for each entry in the interclock skew report, use the
+     -show_clocks option of the command.
+
+     An example of a command to generate a pin report is as follows:
+     pt_shell> report_clock_timing -clock CLK1 -type transition \
+                 -nworst 5
+
+     The report shows the five largest transition times listed in decreasing order, together with
+     the source, network, and total latency of the corresponding pins:
+        Clock: CLK1
+                        --- Latency ---
+       Clock Pin   Source   Network   Total     Trans
+     ----------------------------------------------------------
+       l3_2/G      0.10     4.00      4.10      0.13      rpi-
+       f3_1/CP     0.11     3.00      3.11      0.12      rp-+
+       l2_1/G      0.10     4.00      4.10      0.10      rpi-
+       f3_3/CP     0.10     3.00      3.10      0.08      rpi-+
+       l3_3/G      0.11     3.00      3.11      0.06      rp-
+     ----------------------------------------------------------
+
+     The rightmost column shows the conditions under which the reported values occurred,
+     using the codes shown in Figure 299.
+     To get a list of the largest latency values rather than transition times, use -type latency
+     instead of -type transition.
+
+
+
+
+PrimeTime® User Guide                                                                          867
+T-2022.03
+                                                                                      Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Clock Network Timing Report
+
+
+     Verbose Path-Based Report
+     The most detailed type of clock network timing report is the verbose, path-based report.
+     This type of report shows the calculation of skew, latency, and transition times along the
+     clock path. For example:
+     pt_shell> report_clock_timing \
+                 -from f3_3/CP -to f2_2/CP -verbose \
+                 -hold -type skew -include_uncertainty_in_skew
+
+     This command produces a report showing the transition time, incremental delay, and total
+     latency along the clock paths to the specified pins; and the clock skew between the two
+     pins:
+     Clock: CLK1
+
+        Startpoint: f3_3 (rising edge-triggered flip-flop clocked
+          by CLK1')
+        Endpoint: f2_2 (rising edge-triggered flip-flop clocked
+          by CLK1)
+
+        Point                     Trans       Incr       Path
+        -------------------------------------------------------
+        clock source latency                  0.00       0.00
+        clk3 (in)                  0.00       0.00       0.00 f
+        bf3_3_1/Z (B1I)            0.01       1.00 H     1.00 f
+        bf3_3_2/Z (B1I)            0.00       1.00 H     2.00 f
+        if3_3_1/Z (IVA)            0.04       1.00 H     3.00 r
+        f3_3/CP (FD1)              0.04       0.00       3.00 r
+        startpoint clock latency                         3.00
+
+        clock source latency                  0.11       0.11
+        clk2 (in)                  0.00       0.00       0.11 r
+        az_1/Z (B1I)               0.09       1.00 H     1.11 r
+        az_2/Z (B1I)               0.13       1.00 H     2.11 r
+        bf2_2_1/Z (B1I)            0.02       1.00 H     3.11 r
+        if2_2_1/Z (IVA)            0.44       1.00 H     4.11 f
+        bf2_2_2/Z (B1I)            0.01       1.00 H     5.11 f
+        if2_2_2/Z (IVA)            0.13       1.00 H     6.11 r
+        f2_2/CP (FD1)              0.13       0.00       6.11 r
+        endpoint clock latency                           6.11
+        -------------------------------------------------------
+        endpoint clock latency                           6.11
+        startpoint clock latency                        -3.00
+        clock reconvergence pessimism                   -0.10
+        inter-clock uncertainty                          0.21
+        -------------------------------------------------------
+        skew                                             3.22
+
+     A command using the -type latency or -type transition option rather than the -type
+     skew option produces a similar report, except that only one clock path is reported rather
+     than two.
+
+
+PrimeTime® User Guide                                                                         868
+T-2022.03
+                                                                                       Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Clock-Gating and Recovery/Removal Checks
+
+
+
+     Limitations of Clock Network Reporting
+     The following limitations apply to the report_clock_timing command:
+     •   When you ask for the skew between two clock pins, it calculates and reports the skew
+         even if the path between the two clocks has been declared false.
+     •   If the “from” and “to” lists in the command contain a large number of pins, execution
+         of the command can take a long time due to the large number of paths that must be
+         checked, especially for interclock skew reports.
+
+
+     Using the get_clock_network_objects Command
+     The get_clock_network_objects command allows you to thoroughly view the clock
+     network in your design. This command operates as a debugging tool similar to the such
+     commands as the get_cells or get_nets command.
+     When you run the get_clock_network_objects command, PrimeTime returns a
+     collection of clock network objects (including latches, flip-flops, and black box IPs driven
+     by the clock network). Use the -type option to instruct PrimeTime to return clock objects
+     you specified. These clock object can belong or relate to one or several clocks domains
+     (specified using the clock_list option) or all clock domains. The object_type can be
+     one of the following: cell, register, net, pin, clock_gating_output.
+     If you want PrimeTime to include clock-gating networks in the collection of clock networks,
+     use the -include_clock_gating_network option.
+     The following example returns a collection of clock network pins of all clock domains, not
+     including pins of the clock-gating networks.
+     pt_shell> get_clock_network_objects -type pin
+
+
+
+Clock-Gating and Recovery/Removal Checks
+     By default, PrimeTime automatically determines clock gating and performs clock-gating
+     setup and hold checks. To disable reporting clock-gating setup and hold checks, set the
+     timing_disable_clock_gating_checks variable to true.
+
+     By default, PrimeTime performs recovery and removal checks. To disable reporting
+     recovery and removal checks, set the timing_disable_recovery_removal_checks
+     variable to true.
+
+
+
+
+PrimeTime® User Guide                                                                            869
+T-2022.03
+                                                                                      Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Timing Update Efficiency
+
+
+
+Timing Update Efficiency
+     PrimeTime has a built-in algorithm to efficiently update the timing of a design after its
+     initial timing to accommodate a change in conditions. The algorithm reuses a portion of
+     the computation done for the initial timing. For example, if you load and analyze a design
+     using the update_timing or report_timing command, and then change the capacitance
+     on a port with the set_load command, the subsequent report_timing command reuses
+     results from the previous timing update, and only analyzes the timing changes resulting
+     from the capacitance change. As a result, the second timing update takes much less time
+     than the first one.
+     When any timing changes occur, timing is automatically updated by commands that need
+     the information, such as the report_timing and report_constraint commands. You do
+     not need to do a manual update.
+     Note:
+         The update_timing -full command causes a complete timing update
+         and overrides the fast timing updates previously described. Avoid invoking
+         update_timing -full unless it is necessary.
+
+     To update timing for the design manually, use the update_timing command. This
+     command causes PrimeTime to recompute all the timing information.
+     The preceding algorithm trades off computational effort for memory usage. The
+     timing_update_effort variable controls this tradeoff. You can set this variable to low,
+     medium (the default), or high.
+
+     When one or more of the following commands causes a change to the timing of the
+     design, PrimeTime updates only the timing for the changed data, resulting in a faster
+     timing update.
+     •   set_load
+
+     •   remove_capacitance
+
+     •   set_resistance
+
+     •   remove_resistance
+
+     •   set_port_fanout_number
+
+     •   remove_port_fanout_number
+
+     •   set_input_transition
+
+     •   set_driving_cell
+
+
+
+
+PrimeTime® User Guide                                                                        870
+T-2022.03
+                                                                                      Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Timing Update Efficiency
+
+
+     •   remove_driving_cell
+
+     •   set_drive
+
+
+     Status Messages During a Timing Update
+     PrimeTime can display messages during the timing update phase of an analysis, providing
+     you with the current status of the update. For example, PrimeTime can issue messages
+     when it is propagating constants, calculating delays, and calculating slack for paths. These
+     messages can be very useful in debugging large designs and monitoring the progress of
+     the analysis.
+     The timing_update_status_level variable controls the detail and number of progress
+     messages that the timing update process issues. The allowed values are none, low,
+     medium, or high. The default is none, indicating no intermediate status messages issued.
+     You can report the progress of the update timing explicitly by using the update_timing
+     command and setting the timing_update_status_level variable to low, medium,
+     or high, or for an implicit update use the report_timing command. The number of
+     messages varies based on the variable setting.
+     If you want a detailed status of a timing update, set the timing_update_status_level to
+     high before you begin your analysis. To show the messages during update timing, use the
+     following syntax:
+     pt_shell> set timing_update_status_level high
+     high
+
+     pt_shell> update_timing
+     Information: Updating design - Started                   (UITE-214)
+     Information: Updating design - Propagating Constants     (UITE-214)
+     Information: Updating design - Calculating delays        (UITE-214)
+     Information: Updating design - Calculating delays 10%... (UITE-214)
+     Information: Updating design - Calculating delays 20%... (UITE-214)
+     Information: Updating design - Calculating delays 30%... (UITE-214)
+     Information: Updating design - Calculating delays 40%... (UITE-214)
+     Information: Updating design - Calculating delays 50%... (UITE-214)
+     Information: Updating design - Calculating delays 60%... (UITE-214)
+     Information: Updating design - Calculating delays 70%... (UITE-214)
+     Information: Updating design - Calculating delays 80%... (UITE-214)
+     Information: Updating design - Calculating delays 90%... (UITE-214)
+     Information: Updating design - Calculating delays 100%...(UITE-214)
+     Information: Updating design - Calculating slacks        (UITE-214)
+     Information: Updating design - Calculating slacks (max type)
+                                    for group ’CLK3’          (UITE-214)
+     ...
+
+     Some messages issued during the read_parasitics, report_annotated_parasitics
+     -check, read_sdf, and an implicit or explicit update_timing commands have a default
+
+
+
+PrimeTime® User Guide                                                                         871
+T-2022.03
+                                                                                       Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Path-Based Timing Analysis
+
+
+     limit each time the command is invoked. If the number of messages exceeds this limit, a
+     note stating that no further messages will be issued is added to the log file. In addition,
+     a summary of the messages affected and the number suppressed is printed at the
+     end of the PrimeTime session. If there are a large number of messages, the size of
+     the log file is reduced. The sh_message_limit variable controls the default message
+     limit and the sh_limited_messages variable controls the messages affected by this
+     feature. Only messages issued during the commands mentioned are affected by the
+     sh_limited_messages variable.
+
+
+
+Path-Based Timing Analysis
+     Static timing analysis tools are designed to be pessimistic to ensure detection of all timing
+     violations. For example, PrimeTime considers both the worst arrival time and worst slew
+     among all signals feeding into a path, even if the signal with the worst arrival time is
+     different from the one with the worst slew.
+     You can reduce the pessimism for critical paths by analyzing those paths in isolation from
+     other paths. This method is called path-based timing analysis. When recalculating a timing
+     path, PrimeTime propagates the edge along each path of interest, ignoring slews from side
+     arcs along the path, and it performs delay calculation to compute the path-specific slack.
+     Thus, path-based analysis recalculates the timing in a timing path without considering
+     outside paths that might otherwise affect the arrival times and slew values used in the
+     calculation. The command annotates the path collection with new timing information such
+     as arrival times, slews, and slack.
+     Timing path effects, such as clock reconvergence pessimism removal and crosstalk effects
+     (delta delays), are also recomputed specifically to that path. Path-based analysis is useful
+     when there are only a few violations remaining in the analysis, and you want to find out
+     whether these violations are caused by pessimistic analysis of arrival and slew times.
+     One important property of path-based analysis is that the slack ordering of paths can
+     change due to the path recalculation. In other words, the most critical path before
+     recalculation might not be the most critical path after recalculation. Because of this
+     property, multiple paths to an endpoint might need to be recalculated to determine the
+     true post-recalculation critical path. It cannot be emphasized enough that recalculating the
+     single worst failing path to an endpoint does not provide the worst recalculated slack to
+     that endpoint.
+     You can perform path-based analysis by using the following commands with the
+     -pba_mode option:
+
+     •   get_timing_paths
+
+     •   report_constraint
+
+     •   report_global_timing
+
+
+
+PrimeTime® User Guide                                                                          872
+T-2022.03
+                                                                                        Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Path-Based Timing Analysis
+
+
+     •   report_qor
+
+     •   report_timing
+
+
+     Path-Based Analysis Modes
+     To choose the path-based analysis mode, specify the -pba_mode option with one of the
+     following arguments:
+     •   path – Does not perform a path search to determine whether those paths are truly
+         the worst recalculated paths. This method is useful for quickly gaining an idea of how
+         much improvement is provided by path-based analysis without the runtime of a full
+         path search. The slack results either match those from a full path search or are slightly
+         optimistic.
+     •   exhaustive – Performs an exhaustive recalculated path search, recalculating as many
+         paths as necessary to ensure that the paths returned are the worst recalculated paths
+         that meet the specified options.
+     •   ml_exhaustive – Performs an exhaustive recalculated path search, accelerated with
+         machine learning. This mode is faster than the ordinary exhaustive mode, yet is safe
+         for signoff analysis. It trades off runtime for QoR based on real-time prediction of the
+         design timing. It uses more aggressive prediction for better speed in earlier phases of
+         the analysis, and more conservative analysis in later phases for maximum accuracy.
+         See Exhaustive Path-Based Analysis With Machine Learning for details.
+     To ensure optimal path search runtime, the following usage is recommended:
+     •   Use the -pba_mode exhaustive option with the -slack_lesser_than option (if
+         applicable) to keep the search bounded.
+     •   Perform an exhaustive path search only when -pba_mode path shows that the slacks
+         are reasonably close to the required threshold.
+     •   Ensure that the reporting is as specific as possible. If reports are needed only for
+         specific path groups or startpoints and endpoints, specify the required reporting
+         options.
+     •   Enable worst parallel-arc reporting by setting the
+         timing_report_use_worst_parallel_cell_arc variable to true.
+
+     To see the critical path in each path group while applying exhaustive path-based
+     recalculation, use this command:
+     pt_shell> report_timing -pba_mode exhaustive -slack_lesser_than 0
+
+     In the earlier example, if no paths are reported with negative slack, the design has no
+     timing violations.
+
+
+
+PrimeTime® User Guide                                                                           873
+T-2022.03
+                                                                                        Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Path-Based Timing Analysis
+
+
+     Path-based recalculation can also be combined with other timing path selection options,
+     such as -from/-through/-to or -max_paths/-nworst. For -pba_mode path, the
+     -slack_lesser_than option applies to the original slack used to obtain the paths. The
+     reported recalculated slack might be improved.
+     When using -max_paths or -nworst with -pba_mode exhaustive, the path limits
+     represent the path counts at the completion of the search. Additional paths are searched
+     during the path search process to ensure a complete result. For example, to report the
+     worst path to each violating endpoint with recalculation taken into account, enter:
+     pt_shell> report_timing -pba_mode exhaustive -nworst 1 \
+               -slack_lesser_than 0 -max_paths 1000
+
+     Multiple paths to each failing endpoint are searched to find the worst recalculated failing
+     path.
+     The report_timing -pba_mode exhaustive option does not support the
+     -start_end_pair and -slack_greater_than options.
+
+     You can also use the get_timing_paths -pba_mode path command to recalculate a
+     collection of timing paths. When passed a collection of timing paths with this option, the
+     collection is recalculated and returned. For example:
+     pt_shell> set mypaths [get_timing_paths -max_paths 10]
+     pt_shell> set recalc_paths [get_timing_paths -pba_mode path $mypaths]
+
+     After a set of timing paths have been recalculated, use the report_timing command to
+     report the recalculated timing values of the path collection. For example:
+     pt_shell> report_timing $recalc_paths
+
+     The recalculated values are accessible only by the report_timing and get_attribute
+     commands, not by other commands, such as the report_constraint command.
+     However, you can use the report_attribute command to report the newly calculated
+     attribute values directly inside the path collection.
+     The timing_path objects have the is_recalculated Boolean attribute, which indicates
+     whether the timing path has been recalculated. The report_timing command reports
+     that a timing path is recalculated in the header text for the path, as shown in the following
+     example:
+     ****************************************
+     Report : timing
+             -path full
+             -delay max
+             -max_paths 1000
+     ...
+     ****************************************
+       Startpoint: c (input port)
+       Endpoint:   z2 (output port)
+
+
+
+PrimeTime® User Guide                                                                             874
+T-2022.03
+                                                                                        Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Path-Based Timing Analysis
+
+
+         Path Group: default
+         Path Type: max (recalculated)
+
+     To control whether clock paths and latch-based borrowing paths are recalculated, set the
+     pba_recalculate_full_path variable. When the variable is set to false (the default),
+     clock paths and borrowing paths are never recalculated. Only the data portion of the path
+     is recalculated. When you set the variable to true, the clock path and borrowing paths are
+     always recalculated.
+     The -path full_clock_expanded option of the report_timing command indicates only
+     that the clock path is included in the timing report. This option does not control whether
+     the clock path is recalculated or not. If the pba_recalculate_full_path variable is set
+     to true and the -path full_clock_expanded option is not specified, the clock path is
+     obtained and recalculated; however, the expanded clock path is not shown in the report.
+     The -path full_clock_expanded option of the get_timing_paths command specifies
+     that the clock path is obtained and stored along with the timing path collection objects. If
+     the pba_recalculate_full_path variable is set to true and recalculated timing paths
+     are obtained directly with the get_timing_paths -pba_mode option, the clock path is
+     recalculated and used to compute the path timing; however, the full clock path is not
+     stored in the timing path collection objects. If a timing_path object previously obtained
+     without the -path full_clock_expanded option is being recalculated and clock path
+     recalculation is enabled with the pba_recalculate_full_path variable set to true, an
+     error message is issued indicating that the clock path is needed for correct and consistent
+     results.
+     Note:
+         When the pba_recalculate_full_path variable is set to true, path-
+         based analysis recalculates the borrowing at transparent latches only if the
+         -trace_latch_borrow option has been specified. Otherwise, the existing
+         borrowing at the original path’s startpoint is used.
+     The timing_report_recalculation_status variable facilitates debugging and eases
+     the runtime concern. It works for both the get_timing_paths -pba_mode exhaustive
+     and report_timing -pba_mode exhaustive commands.
+     The amount of time needed for the integrated path search depends on a few factors:
+     •   Amount of slack improvement provided by recalculation
+     •   Number of paths involved in the search (-slack_lesser_than, -from/-through/-to)
+     •   Number of paths to be returned to the user (-max_paths and -nworst)
+     In particular, large -nworst values can significantly increase the runtime of the search.
+     You can limit the number of endpoints considered for exhaustive path searching by setting
+     the pba_exhaustive_endpoint_path_limit variable.
+
+
+
+PrimeTime® User Guide                                                                         875
+T-2022.03
+                                                                                       Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Path-Based Timing Analysis
+
+
+     When you perform a timing update on the original design (for example, with an
+     update_timing command), any timing path collections created by the get_timing_paths
+     command are automatically deleted.
+
+     Exhaustive Path-Based Analysis With Machine Learning
+     Exhaustive path-based analysis (PBA) searches all paths in a given scope to search for
+     paths that violate after recalculation.
+     Machine learning PBA (ML-PBA) performs exhaustive PBA using machine learning
+     techniques to trade off accuracy for runtime. It is faster than the regular exhaustive PBA
+     mode, yet it is safe for signoff analysis and thus can be used throughout the flow. It can
+     be used instead of switching between the path and exhaustive values of the -pba_mode
+     option.
+     To use ML-PBA, use the ml_exhaustive value for any analysis command that has a
+     -pba_mode option:
+     pt_shell> report_timing -pba_mode ml_exhaustive
+
+     The pba_exhaustive_endpoint_path_limit variable must be set to infinity (the
+     default).
+     The ML-PBA mode trades off accuracy for runtime when the design contains many
+     violations, gradually converging to the regular exhaustive PBA mode results when the
+     design is free of violations. The ML-PBA results are always a subset of the regular
+     exhaustive PBA results, where the path set is the scope of paths being searched (to an
+     endpoint, in a path group, across the design, and so on).
+     ML-PBA is safe for signoff—if ML-PBA reports no violations, then the design has no
+     violating recalculated paths.
+     The ML-PBA behavior can be summarized as follows:
+     •   If regular exhaustive PBA reports no violations, then ML-PBA will also report no
+         violations.
+     •   If regular exhaustive PBA reports a single violation, then ML-PBA will also report a
+         single violation, although possibly not the same violation or not the worst path.
+     •   If regular exhaustive PBA reports violating paths to multiple endpoints, then ML-PBA
+         will also report violating paths to one or more of these endpoints, although possibly not
+         the same violations or not the worst paths.
+
+
+     Setting Recalculation Limits
+     You can control the behavior of the recalculation limits in path-based analysis.
+     Path-specific recalculation with the -pba_mode path option has a limit of 2000000
+
+
+
+PrimeTime® User Guide                                                                           876
+T-2022.03
+                                                                                       Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Path-Based Timing Analysis
+
+
+     paths per recalculation command. Exhaustive recalculation with the -pba_mode
+     exhaustive option can have a paths-per-endpoint limit that you set with the
+     pba_exhaustive_endpoint_path_limit variable.
+
+     When either limit is reached, the limiting behavior is controlled by the
+     pba_path_recalculation_limit_compatibility variable. When set to its default of
+     true, no further paths are obtained or recalculated when the limit is reached. For path-
+     specific recalculation, the remaining paths beyond the limit are discarded. For exhaustive
+     recalculation, the limited endpoint is not included in the search; however, any paths that
+     are already found for that endpoint remain in the search.
+     When the pba_path_recalculation_limit_compatibility variable is set to false,
+     graph-based analysis paths are used to fill in the recalculation results past the limit.
+     For path-specific recalculation, the remaining paths beyond the limit retain their original
+     nonrecalculated graph-based timing. For exhaustive recalculation, any additional paths
+     obtained for the limited endpoint retains their original nonrecalculated graph-based timing.
+     In both cases, recalculated paths can be readily identified in the resulting timing reports
+     with the recalculation flag in the path headers.
+
+
+     Exhaustive Path-Based Analysis Settings
+     By default, when you use the report_timing command with the -pba_mode exhaustive
+     option, the command performs an exhaustive path-based analysis (PBA) and considers
+     all possible paths leading to an endpoint for finding the worst slack. You can control the
+     operation of this analysis by setting the pba_exhaustive_endpoint_path_limit variable
+     to the string infinity or an integer.
+     With the “infinity” setting (the default), the PBA algorithm breaks up the fanin cone of each
+     endpoint into subgraphs and successively analyzes and modifies the subgraphs to find
+     the worst path and slack. This approach is guaranteed to cover all the paths and always
+     returns the worst path-based analysis slack.
+     Alternatively, you can set the variable to an integer, for example,
+     set_app_var pba_exhaustive_endpoint_path_limit 25000
+
+     If you set the variable to an integer, the command analyzes each individual path in
+     isolation from other paths. When the number of recalculated paths reaches the specified
+     limit, analysis stops and you get a UITE-480 warning message, “The exhaustive path-
+     based recalculation limit of 25000 is reached ...”.
+     The “infinity” mode offers better runtime when there is a large gap between graph-based
+     and path-based slacks or the circuit topologies are complex, such as reconvergent
+     datapath logic. However, the integer limit mode can be faster when graph-based and path-
+     based slacks are already similar and relatively few paths need to be considered to reach
+     convergence.
+
+
+
+PrimeTime® User Guide                                                                          877
+T-2022.03
+                                                                                       Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Path-Based Timing Analysis
+
+
+
+     HyperTrace Accelerated Path-Based Analysis
+     HyperTrace is a technology that computes refined graph-based timing data to accelerate
+     exhaustive path-based analysis. The following topics provide more information:
+     •   Introduction to HyperTrace Technology
+     •   Configuring HyperTrace Analysis
+     •   Using HyperTrace Analysis
+     •   Unsupported Flows for HyperTrace Analysis
+     Using this feature requires a PrimeTime-ADV-PLUS license.
+
+     Introduction to HyperTrace Technology
+     Exhaustive path-based analysis (PBA) uses a search algorithm to find the worst
+     recalculated paths in the design. The search obtains graph-based timing paths from the
+     design, then recalculates them.
+     HyperTrace is a technology that accelerates the exhaustive PBA search by computing
+     refined graph-based timing data, then using it to drive the exhaustive PBA search.
+     This graph-based refinement is applied to the critical region of the design, which is the
+     set of slack-critical (violating) pins. Refinement performs selective signal merging to
+     improve accuracy while retaining the memory and runtime benefits of a graph-based
+     representation.
+     The tool automatically performs graph-based refinement before the first exhaustive PBA
+     command. Refinement has two opposing effects on runtime:
+     1. Runtime spent to compute the initial graph-based refinement data
+     2. Runtime saved for all subsequent exhaustive PBA analysis
+
+
+
+
+PrimeTime® User Guide                                                                            878
+T-2022.03
+                                                                                          Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Path-Based Timing Analysis
+
+
+Figure 300     HyperTrace Exhaustive PBA Runtime Comparison
+
+         HyperTrace disabled                            HyperTrace enabled
+
+              update_timing                                  update_timing
+
+
+                                                               Graph-based
+                                                                refinement
+
+
+              Exhaustive PBA                                 Exhaustive PBA
+
+                                         Time
+
+
+
+
+     To achieve an overall runtime benefit, the runtime reduction in exhaustive PBA must be
+     more than the runtime increase from refinement.
+     HyperTrace is intended for signoff use in cases where exhaustive PBA runtime is a
+     significant part (over 20 percent) of the overall analysis runtime. It is not suitable for
+     designs that have small exhaustive PBA runtimes or have a high percentage of the design
+     in the critical region (as the refinement overhead might exceed the benefit).
+     HyperTrace graph-based refinement is recommended when:
+     •    The design is near the signoff stage
+     •    Exhaustive path-based analysis takes more than 50 percent of the flow runtime
+     •    Fewer than 10 percent of the pins in the design have timing violations
+     Note that the refined graph-based timing is used only for exhaustive PBA. The original
+     timing graph is still used for graph-based (non-PBA) reporting.
+     The HyperTrace Critical Region
+     The critical region is the set of slack-critical (violating) pins in the design. HyperTrace
+     works by creating a refined timing graph of the critical region, then using it to drive
+     exhaustive PBA.
+
+
+
+
+PrimeTime® User Guide                                                                              879
+T-2022.03
+                                                                                         Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Path-Based Timing Analysis
+
+
+     To be accelerated, the exhaustive PBA search must take place entirely within the
+     critical region. This means that the critical region threshold should be set to the largest
+     -slack_lesser_than value (explicit or default) used for the exhaustive PBA search:
+
+Figure 301    The HyperTrace Critical Region (Max-Delay Analysis Shown)
+
+
+
+
+        max_slack       <   timing_refinement_max_slack_threshold
+                                   (default 0.0)
+
+     If you perform exhaustive PBA with an explicit -slack_lesser_than value that exceeds
+     the critical region threshold, the tool issues a warning and reverts to conventional
+     exhaustive PBA:
+     pt_shell> report_timing -pba_mode exhaustive -slack_lesser_than 1.0
+     Warning: Graph-based refinement will not be used for this report as
+     slack_lesser_than exceeds refinement slack threshold. (UITE-588)
+
+     Because refinement runtime is proportional to critical region size, the critical region should
+     not be larger than needed. During the initial refinement, the tool reports the critical region
+     size as a percentage of the entire design:
+     Information: 9.160 percent of pins in the design are being included
+     in the critical region for graph-based refinement. (UITE-579)
+
+     In most cases, a good limit for the critical region size is 10 percent of the design. If you
+     exceed this guideline, the tool issues a warning:
+     Warning: The number of pins considered critical for graph-based
+     refinement is large (37.405 percent of pins in the design). Graph-based
+     refinement may incur significant runtime and memory impact. (UITE-589)
+
+     However, this just a guideline. Flows dominated by exhaustive PBA runtime might still
+     benefit from enabling graph-based refinement, even if the critical region is larger than 10
+     percent.
+
+
+
+
+PrimeTime® User Guide                                                                               880
+T-2022.03
+                                                                                          Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Path-Based Timing Analysis
+
+
+     Configuring HyperTrace Analysis
+     To configure HyperTrace analysis, add the following commands before the first exhaustive
+     PBA command in your script:
+     1. Set the following variable to enable HyperTrace analysis:
+         # enable HyperTrace analysis
+         set_app_var timing_enable_graph_based_refinement true
+
+     2. Set the max-delay critical region threshold, as described in Setting the Critical Region
+        Slack Threshold Values.
+         Determine the lowest -slack_lesser_than value used for max-delay exhaustive PBA
+         in your analysis. If the value is above zero, set the following threshold variable to that
+         value. For example,
+         # set the critical region threshold
+         set_app_var timing_refinement_max_slack_threshold 0.100
+
+         If there are no explicit -slack_lesser_than options in your script, the default
+         threshold of zero is suitable.
+     3. (Optional) Normally, HyperTrace analysis is disabled for min-delay paths. If you have
+        complex violating min-delay logic cones (such as I/O or memory interfaces) and the
+        exhaustive PBA runtime for min-delay analysis is significant, repeat Step 2 for the min-
+        delay threshold.
+     4. If your scripts perform exhaustive PBA within a parallel_execute command, set the
+        following variable as described in Controlling When Graph-Based Refinement Occurs:
+         set_app_var timing_update_include_graph_based_refinement always
+
+     5. (Optional) Configure your script to automatically enable HyperTrace only when the
+        critical region falls within a particular size limit, as described in Automatically Enabling
+        HyperTrace by Critical Region Size:
+         set_app_var timing_refinement_maximum_critical_pin_percentage 20
+
+         The optimal value for this variable is design-dependent.
+     Setting the Critical Region Slack Threshold Values
+     HyperTrace provides separate variables to control the max-delay (setup) and min-delay
+     (hold) critical region thresholds:
+     •   timing_refinement_max_slack_threshold (defaults to 0.0)
+
+     •   timing_refinement_min_slack_threshold (defaults to disabled)
+
+
+
+
+PrimeTime® User Guide                                                                             881
+T-2022.03
+                                                                                          Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Path-Based Timing Analysis
+
+
+     Both variables can be set to:
+     •   A floating-point value
+     •   disabled, which disables graph-based refinement for that delay type
+
+     Min-delay refinement is disabled by default because min-delay exhaustive PBA is typically
+     fast and thus not a good candidate for refinement.
+     For example, if timing_refinement_max_slack_threshold is set to -0.10, then all
+     pins with a setup slack worse than -0.10 are included in the graph-based refinement for
+     maximum delay analysis. Similarly, if timing_refinement_min_slack_threshold is set
+     to 0.05, then all pins with a hold slack worse than 0.05 are included in the graph-based
+     refinement for minimum delay analysis.
+     Normally, the critical region threshold should be set to the lowest -slack_lesser_than
+     value used for exhaustive PBA analysis. If this threshold results in a large critical region—
+     or more importantly, an overall runtime degradation—then the design needs more timing
+     closure before HyperTrace can be used.
+     Automatically Enabling HyperTrace by Critical Region Size
+     To simplify scripting and flow setup, you can set the following variable to the largest critical
+     region size you want to allow:
+     pt_shell> set_app_var \
+                 timing_refinement_maximum_critical_pin_percentage 20
+
+     This allows HyperTrace to automatically disable itself when the design is largely violating,
+     then enable itself when the design reaches a suitable point in the flow.
+     If initial refinement determines that the size of the critical region would exceed this
+     percentage, then the tool issues a message and disables HyperTrace acceleration:
+     Warning: Graph-based refinement is not being performed because the
+     percentage of pins in critical region exceeds 20.000 percent.
+     (UITE-630)
+
+     The default for this variable is 100%, which effectively deactivates this feature.
+     Controlling When Graph-Based Refinement Occurs
+     By default, HyperTrace defers computation of the graph refinement until the first
+     exhaustive PBA command is run. You can control when refinement is computed by using
+     the timing_update_include_graph_based_refinement variable.
+     Table 54 shows the values for this variable.
+
+
+
+
+PrimeTime® User Guide                                                                            882
+T-2022.03
+                                                                                                     Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Path-Based Timing Analysis
+
+
+Table 54         timing_enable_graph_based_refinement Effects on HyperTrace Updates
+
+       Variable value        Timing update, full         Exhaustive PBA           Timing update,
+                             (explicit or implicit)      commands                 incremental
+                                                                                  (explicit or implicit)
+                                                                          2
+       never                                             Full HT update
+                                                                          2
+       default                                           Full HT update           Incremental HT update
+                                                                                                           3
+       always                Full HT update                                       Incremental HT update
+
+
+      The default of the variable is default.
+      This variable can be used as follows:
+      •    If you are using the parallel_execute command to perform exhaustive PBA
+           reporting, set this variable to always to precompute the refinement during the
+           initial timing update. (Refinement cannot be computed within a parallel_execute
+           command.)
+           # if the timing is already updated, update_timing
+           # will update *only* the graph refinement data
+           set_app_var timing_enable_graph_based_refinement always
+           update_timing
+
+           parallel_execute {
+             {report_timing -pba_mode exhaustive ...} file1.log
+             {report_timing -pba_mode exhaustive ...} file2.log
+             ...
+           }
+
+           # set the refinement update mode back to default to avoid
+           # unnecessary refinement in any subsequent timing updates
+           set_app_var timing_enable_graph_based_refinement default
+
+           As noted in the script comments, be sure to set the refinement timing update mode
+           back to default to avoid unnecessary refinement in subsequent timing updates.
+      •    If you are running a script that performs manual ECO operations (size_cell,
+           insert_buffer, and so on) that are not intermixed with exhaustive PBA reporting,
+
+
+
+
+2. No update occurs if the critical region threshold is not met.
+3. A full HyperTrace update is performed if no previously computed refinement data exists.
+
+
+PrimeTime® User Guide                                                                                          883
+T-2022.03
+                                                                                           Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Path-Based Timing Analysis
+
+
+           consider temporarily setting the variable to never to defer refinement updates until the
+           script is complete.
+           Note that when the variable is set to never, graph refinement updates are always full
+           updates. After the ECO operations are complete, be sure to set the refinement timing
+           update mode back to default to allow incremental refinement updates.
+
+     Using HyperTrace Analysis
+     After HyperTrace is enabled and configured, simply update the design timing and perform
+     exhaustive PBA analysis as usual.
+     The following messages indicate that the graph-based refinement is being computed:
+     Information: Beginning graph-based refinement. (UITE-585)
+     Information: 8.459 percent of pins in the design are being included
+     in the critical region for graph-based refinement. (UITE-579)
+     Information: Graph-based refinement complete. (UITE-586)
+
+     These messages are issued by update_timing or by the first exhaustive PBA reporting
+     command, depending on how the timing_update_include_graph_based_refinement
+     variable is set.
+     In addition, HyperTrace issues messages for certain conditions that affect or relate to its
+     use, as described in Table 55. If you see any of these messages, refer to the indicated
+     topic.
+Table 55        HyperTrace Information and Warning Messages
+
+      If you see this message                          Refer here for more information
+
+      Warning: Graph-based refinement                  Setting the Critical Region Slack Threshold
+      will not be used for this report as              Values
+      slack_lesser_than exceeds refinement
+      slack threshold. (UITE-588)
+
+      Warning: Setting slack_lesser_than to %f         Adjustment of the Default -slack_lesser_than
+      for this timing report. (UITE-590)               Value
+
+      Warning: Graph-based refinement will not         Unsupported Flows for HyperTrace Analysis
+      be performed as it is not supported with
+      %s. (UITE-587)
+
+      Information: Invalidating the                    Invalidation of Graph-Based Refinement
+      graph-based refinement analysis.
+      (PTE-137)
+
+      Warning: The number of pins considered           The HyperTrace Critical Region
+      critical for graph-based refinement is
+      large (%s). Graph-based refinement may
+      incur significant runtime and memory
+      impact. (UITE-589)
+
+
+
+PrimeTime® User Guide                                                                                884
+T-2022.03
+                                                                                     Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Path-Based Timing Analysis
+
+
+     Adjustment of the Default -slack_lesser_than Value
+     In a non-HyperTrace flow, when the -slack_lesser_than option is not specified, the
+     default behavior is as follows:
+     •   If -max_paths > 1, then -slack_lesser_than defaults to 0.0.
+     •   If -max_paths == 1, then -slack_lesser_than defaults to INFINITY.
+     But when HyperTrace is enabled, the default behavior applies a third additional rule:
+     •   If the default -slack_lesser_than value would exceed the critical range threshold,
+         then the -slack_lesser_than default is lowered to the critical range threshold value.
+     This avoids the UITE-588 fallback described in The HyperTrace Critical Region. When this
+     adjustment occurs, the tool issues a warning:
+     Warning: Setting slack_lesser_than to 0 for this timing report.
+     (UITE-590)
+
+     For -max_paths == 1, this override always occurs.
+     For -max_paths > 1, this override occurs when the refinement threshold is less than 0.0.
+     Invalidation of Graph-Based Refinement
+     The graph-based refinement data persists after the first command that computes it.
+     Subsequent exhaustive PBA commands that satisfy the usage criteria reuse the same
+     graph-based refinement data without repeating the analysis.
+     The graph-based refinement data is invalidated by any of these events:
+     •   A full timing update is performed.
+     •   An unsupported design or netlist change command.
+     •   Any of the following variables are changed:
+         ◦   timing_enable_graph_based_refinement
+
+         ◦   timing_refinement_max_slack_threshold
+
+         ◦   timing_refinement_min_slack_threshold
+
+         ◦   timing_pocvm_report_sigma
+
+         ◦   pba_derate_only_mode
+
+         ◦   timing_report_use_worst_parallel_cell_arc
+
+     •   The design is removed or reset.
+
+
+
+
+PrimeTime® User Guide                                                                        885
+T-2022.03
+                                                                                    Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Path-Based Timing Analysis
+
+
+     The following information message indicates that the graph-based refinement data has
+     been invalidated:
+     Information: Invalidating the graph-based refinement analysis.
+     (PTE-137)
+
+     After this invalidation message is issued, any subsequent exhaustive PBA command that
+     satisfies the criteria performs a new graph-based refinement analysis.
+     Incremental Graph-Based Refinement in HyperTrace
+     HyperTrace supports the following ECO change commands:
+     •   size_cell
+
+     •   insert_buffer
+
+     •   remove_buffer
+
+     If these commands are used after a graph-based refinement analysis, subsequent
+     incremental timing updates also update the graph-based refinement data. (This
+     incremental update issues the same status messages as a full update.)
+     If an unsupported design change command is used, then the existing graph-based
+     refinement data is invalidated (PTE-137) and a full (non-incremental) graph-based
+     refinement is performed if required by a subsequent exhaustive PBA command.
+
+     Unsupported Flows for HyperTrace Analysis
+     The following features and conditions prevent HyperTrace graph-based refinement
+     analysis from being performed:
+     •   The design is not in on-chip variation mode.
+     •   timing_remove_clock_reconvergence_pessimism is set to false.
+
+     •   timing_enable_cross_voltage_domain_analysis is set to true.
+
+     •   timing_disable_internal_inout_cell_paths is set to false.
+
+     •   timing_disable_internal_inout_net_arcs is set to false.
+
+     •   HyperScale analysis with AOCVM analysis is enabled.
+     •   HyperScale distributed analysis is enabled.
+     In these cases, the tool issues a message indicating the unsupported condition feature or
+     condition:
+     UITE-587 (Warning) Graph-based refinement will not be performed as
+     it is not supported with %s.
+
+
+
+
+PrimeTime® User Guide                                                                       886
+T-2022.03
+                                                                                       Feedback
+Chapter 19: Reporting and Debugging Analysis Results
+Path-Based Timing Analysis
+
+
+     After a UITE-587 warning, all subsequent reports still run, but without the benefit of
+     HyperTrace acceleration.
+
+     See Also
+     •   HyperScale Distributed Analysis
+
+
+     CCS Receiver Model for Path-Based Analysis
+     For path-based analysis, PrimeTime uses the actual receiver models in the path being
+     analyzed. For the cells that are side loads, the worst-case receiver models are used.
+     During path-based analysis, receiver models are derived using the effective capacitance
+     (Ceff) on the output of the load cell. You save this capacitance for path-based analysis by
+     setting the rc_cache_min_max_rise_fall_ceff variable to true (the default is false).
+     Note:
+         The rc_cache_min_max_rise_fall_ceff variable is automatically set to true
+         if you have enabled crosstalk analysis or if you have invoked the GUI before
+         running the update_timing command.
+
+
+
+
+PrimeTime® User Guide                                                                         887
+T-2022.03
+

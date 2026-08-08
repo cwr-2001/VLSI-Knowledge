@@ -1,0 +1,1520 @@
+                                                                                      Feedback
+
+
+
+
+13
+Variation
+     On-chip variation analysis applies different operating conditions to minimum paths and
+     maximum paths. To improve the accuracy, you can apply the following variation methods:
+     •   Advanced On-Chip Variation
+     •   Parametric On-Chip Variation (POCV)
+
+
+Advanced On-Chip Variation
+     Advanced on-chip variation (AOCV) analysis reduces pessimism by applying less derating
+     to paths with less variation, based on the number of gates in the path and the physical
+     distance spanned by the path. AOCV is less pessimistic than a traditional OCV analysis,
+     which relies on constant derating factors that do not take path-specific metrics into
+     account.
+     A longer path that has more gates tends to have less total variation because the random
+     variations from gate to gate cancel each other out. A path that spans a larger physical
+     distance across the chip tends to have larger systematic variation. AOCV analysis
+     determines path-depth and location-based bounding box metrics to calculate a path-
+     specific AOCV derating factor.
+     AOCV analysis works with all other PrimeTime features and affects all reporting
+     commands. It is compatible with distributed multi-scenario analysis and multicore analysis.
+     To learn about using AOCV, see
+     •   The AOCV Flow
+     •   Configuring Advanced On-Chip Variation Analysis
+     •   Importing AOCV Information
+     •   Querying AOCV Derating on Timing Paths
+
+
+     The AOCV Flow
+     To enable AOCV, set the timing_aocvm_enable_analysis variable to true. You also
+     need to provide tables of derating factors that apply to different ranges of path depths
+
+
+PrimeTime® User Guide                                                                           441
+T-2022.03
+                                                                                       Feedback
+Chapter 13: Variation
+Advanced On-Chip Variation
+
+
+     and physical path distances. You read these tables into PrimeTime with the read_ocvm
+     command.
+     The following table specifies the values used for derating the early delays of cells in paths
+     when the logic depths and physical distances of the paths fall within specified ranges:
+     version:                 1.0
+     object_type:             design
+     rf_type:                 rise fall
+     delay_type:              cell
+     derate_type:             early
+     object_spec:             top
+     voltage:                 1.2
+     depth:                   0 1 2 3
+     distance:                100 200
+     table:                   0.88 0.94 0.96 0.97 \
+                              0.84 0.86 0.88 0.91
+
+     After you enable AOCV analysis and read in the derating tables, you perform timing
+     analysis in the usual manner using update_timing or report_timing. The analysis
+     results reflect the application of varying derating factors based on the logic depths and
+     physical spans of the paths.
+     The AOCV feature in PrimeTime is integrated into the graph-based and path-based
+     analysis capabilities. Signoff can be performed using graph-based AOCV, with path-based
+     AOCV available as an optional capability to refine the analysis of any remaining violating
+     paths.
+
+     Graph-Based AOCV Analysis
+     Graph-based AOCV analysis is a fast, design-wide analysis performed during the
+     update_timing command. You can exploit reduced derating pessimism across the entire
+     design to save area and improve performance.
+     By construction, graph-based analysis computes conservative values of depth and
+     distance metrics. To perform graph-based AOCV analysis, conservative values of path-
+     depth and location-based bounding box are chosen to bound the worst-case path through
+     a cell. For example, the depth count for a cell does not exceed that of the path of minimum
+     depth that traverses that cell. Otherwise, the analysis might be optimistic for the minimum-
+     depth path.
+     Graph-based AOCV is a prerequisite for further margin reduction using path-based AOCV
+     analysis on selected critical paths. For most designs, graph-based AOCV is sufficient for
+     signoff.
+
+     Path-Based AOCV Analysis
+     If violations still remain after completion of graph-based AOCV analysis, you can reduce
+     pessimism and improve the accuracy of results by invoking path-based AOCV analysis,
+
+
+
+PrimeTime® User Guide                                                                            442
+T-2022.03
+                                                                                          Feedback
+Chapter 13: Variation
+Advanced On-Chip Variation
+
+
+     which analyzes each path in isolation from other paths. To do so, use the report_timing
+     or get_timing_paths command with the -pba_mode option set to path:
+     pt_shell> report_timing -pba_mode path
+
+     In graph-based AOCV analysis, PrimeTime calculates the depth and distance for all paths
+     through each timing arc and applies the worst values found for all such paths, whereas
+     in path-based mode, it calculates depth and distance precisely for each individual timing
+     path.
+     By default, when you select path-based analysis with AOCV, PrimeTime performs both
+     normal path-based analysis (without AOCV) and AOCV path-based analysis. The analysis
+     without AOCV performs path-based slew propagation recalculation, and the AOCV
+     analysis reduces pessimism by reducing the derating for deeper paths and paths that span
+     shorter physical distances.
+     To save runtime, you can optionally perform only the AOCV portion of path-based analysis
+     and use the worst-slew propagation instead of the recalculated slew propagation for path-
+     based analysis. To do so, set the pba_derate_only_mode variable to true.
+
+
+     Configuring Advanced On-Chip Variation Analysis
+     To configure advanced on-chip variation (AOCV) analysis, set the variables in the following
+     table.
+
+Variable                                     Description
+
+timing_aocvm_analysis_mode                   Specifies the calculation of depth metrics
+
+timing_aocvm_enable_clock_network_only       Applies AOCV analysis to the clock network
+                                             only
+
+timing_aocvm_enable_single_path_metrics      Specifies whether AOCV analysis uses
+                                             separate depth and distance values for nets
+                                             and cells
+
+timing_ocvm_enable_distance_analysis         Specifies whether advanced or parametric
+                                             on-chip variation analysis performs
+                                             distance-based analysis
+
+timing_ocvm_precedence_compatibility         Controls the fallback to on-chip variation (OCV)
+                                             derating for advanced or parametric OCV
+
+
+
+
+PrimeTime® User Guide                                                                           443
+T-2022.03
+                                                                                      Feedback
+Chapter 13: Variation
+Advanced On-Chip Variation
+
+
+
+     Importing AOCV Information
+     To perform AOCV analysis, you must specify AOCV information in derating tables. To
+     optionally model other effects not related to process variation, use guard-band timing
+     derating.
+     To learn how to specify AOCV information, see
+     •   Specifying AOCV Derating Tables
+     •   File Format for AOCV
+     •   AOCV Table Groups
+     •   Specifying Depth Coefficients
+     •   Guard-Banding in AOCV
+     •   Incremental Timing Derating
+     •   Using OCV Derating in AOCV Analysis
+
+     Specifying AOCV Derating Tables
+     Use the read_ocvm command to read AOCV derating tables from a disk file. Derating
+     tables are annotated onto one or more design objects and are applied directly to timing arc
+     delays. The allowed design object classes are hierarchical cells, library cells, and designs.
+     Use the write_binary_aocvm command to create binary encoded AOCV files from
+     ASCII-format AOCV files. This command is used to protect sensitive process-related
+     information. The read_ocvm command can read binary and compressed binary AOCV files
+     that were created using the write_binary_aocvm command. No additional arguments are
+     required to read binary or compressed binary AOCV files.
+     Internally calculated AOCV derating factors are shown in the derate column of the
+     report_timing command if you have specified the -derate option.
+
+     To display AOCV derating table data, use the report_aocvm command. An AOCV
+     derating table imported from a binary or compressed binary file is not visible in the
+     report_aocvm output. You can show design objects annotated with early, late, rise, fall,
+     cell, or net derating tables. You can also use this command to determine cells and nets
+     that have been annotated or not annotated with AOCV information.
+     In a graph-based AOCV analysis, specify a timing arc in the object_list of the
+     report_aocvm command. The graph-based depth and distance metrics and AOCV
+     derating factors on timing arc objects are displayed.
+     pt_shell> report_aocvm [get_timing_arcs -of_objects [get_cells U1]]
+
+
+
+
+PrimeTime® User Guide                                                                         444
+T-2022.03
+                                                                                      Feedback
+Chapter 13: Variation
+Advanced On-Chip Variation
+
+
+     If you specify a timing path in the object_list, path metrics (distance, launch depth, and
+     capture depth) for that path are displayed.
+     pt_shell> report_aocvm [get_timing_paths -path_type full_clock_expanded \
+               -pba_mode path]
+
+     File Format for AOCV
+     The AOCV file format allows you to specify multiple AOCV derating tables. It supports the
+     following table types:
+     •     One-dimensional tables in either depth or distance
+     •     Two-dimensional tables in both depth and distance
+     The file format is defined so that you can associate an AOCV table with a group of objects.
+     The objects are selected internally within PrimeTime based using the following definitions:
+     •     object_type design | lib_cell | cell
+
+     •     object_spec [patterns]
+
+     In the object_spec definition, patterns is optional. It specifies the object name and an
+     expression that you want to evaluate based on the attributes of the object.
+     You can use regular expression matching for the patterns value of the object_spec
+     definition. It is the same as the regexp Tcl command that you can use for design object
+     gathering commands, such as the get_cells, get_lib_cells, and get_designs
+     commands in PrimeTime.
+     You can use any of the options of the related object-gathering command in the patterns
+     value. For example, if the object_type is lib_cell, use any of the arguments of the
+     related get_lib_cells command in the patterns value.
+     PrimeTime can annotate cell and net tables on the design using the object_type design.
+     It can also annotate cell tables on library cells using the lib_cell object class and
+     annotate cell and net tables on hierarchical cells using the cell object class.
+     Note:
+           All descriptions are required, unless otherwise stated. To add a comment in any
+           location within the file, use double forward slashes (//).
+     The following table shows the syntax definition for the AOCV file format.
+Table 23       AOCV file format syntax
+
+     Specifier          Description
+
+     version            The AOCV version number.
+
+
+
+
+PrimeTime® User Guide                                                                           445
+T-2022.03
+                                                                                               Feedback
+Chapter 13: Variation
+Advanced On-Chip Variation
+
+
+Table 23       AOCV file format syntax (Continued)
+
+     Specifier         Description
+
+     group_name        A group name, which can be used to group AOCV tables together. You apply a
+                       group with the set_aocvm_table_group command.
+
+     object_type       design | lib_cell | cell
+
+     rf_type           rise | fall | rise fall
+
+     delay_type        cell | net | cell net
+
+     derate_type       early | late
+
+     path_type         clock | data | clock data
+
+     object_spec       A pattern describing objects affected by the table.
+
+     voltage           The supply voltage, in volts. The table applies only to cells operating at that
+                       voltage. This is an optional parameter.
+
+     depth             A set of M floating-point values, each representing the successive number of
+                       logic cells in the path. If no depth values are provided, M=0.
+
+     distance          A set of N floating-point values, each representing the physical distance spanned
+                       by the path, in nanometers (nm). If no distance values are provided, N=0.
+
+     table              • A set of N x M floating-point values representing the derating factors
+                          applied for all combinations of depth and distance. PrimeTime uses linear
+                          interpolation to obtain derating factors between the data points provided in
+                          the table. It does not extrapolate beyond the most extreme values in the table.
+                          The table size is one-dimensional in the following cases:
+                        • If N=0, the table has M entries.
+                        • If M=0, the table has N entries.
+                        • If M=0 and N=0, the table has one entry.
+
+
+     When different object_type entries with the same rf_type and derate_type apply to
+     the same cell or net object, the precedence rules that are used are consistent with the
+     set_timing_derate command.
+
+     Cell arc derating uses the following precedence, from highest to lowest:
+     1. Library cell
+     2. Hierarchical Cell
+     3. Design
+
+
+
+
+PrimeTime® User Guide                                                                                    446
+T-2022.03
+                                                                                        Feedback
+Chapter 13: Variation
+Advanced On-Chip Variation
+
+
+     Net arc derating uses the following precedence, from highest to lowest:
+     1. Hierarchical cell
+     2. Design
+     Note:
+        When multiple table entries with the same object_type, rf_type, and
+        derate_type specifications apply to the same cell or net object, the last table
+        entry takes precedence.
+     If you specify the voltage value, but an associated float value is missing, or if you do not
+     specify the voltage value at all, the derating table applies to all voltages. For a multirail
+     cell, do not specify a voltage; instead, specify the most conservative derating factors
+     across all possible input-output voltage combinations of the multirail cell.
+     The following example of an AOCV file sets an early AOCV table for the whole design,
+     which applies to all cell and nets:
+     version:                 1.0
+     object_type:             design
+     rf_type:                 rise fall
+     delay_type:              cell net
+     derate_type:             early
+     object_spec:             top
+     depth:                   0 1 2 3
+     distance:                100 200
+     table:                   0.87 0.93 0.95 0.96 \
+                              0.83 0.85 0.87 0.90
+
+     The following example of an AOCV file sets an early AOCV table for the whole design,
+     which applies to all cells with the voltage of 1.2 volts:
+     version:                 1.0
+     object_type:             design
+     rf_type:                 rise fall
+     delay_type:              cell
+     derate_type:             early
+     object_spec:             top
+     voltage:                 1.2
+     depth:                   0 1 2 3
+     distance:                100 200
+     table:                   0.88 0.94 0.96 0.97 \
+                              0.84 0.86 0.88 0.91
+
+     The following example of an AOCV file sets an early AOCV table for the whole design,
+     which applies to all nets:
+     version                  1.0
+     object_type:             design
+     rf_type:                 rise fall
+
+
+
+PrimeTime® User Guide                                                                           447
+T-2022.03
+                                                                                       Feedback
+Chapter 13: Variation
+Advanced On-Chip Variation
+
+
+     delay_type:              net
+     derate_type:             early
+     object_spec:             top
+     depth:                   0 1 2 3
+     distance:                100 200
+     table:                   0.88 0.94 0.96 0.97 \
+                              0.84 0.86 0.88 0.91
+
+     The following example of an AOCV file includes the optional path_type statement.
+     PrimeTime applies the table data to only the specified path types. To enable separate
+     derating for clock paths and data paths, the timing_aocvm_analysis_mode variable must
+     be set to the separate_data_and_clock_metrics mode. If the path_type statement is
+     omitted, the table applies to both clock paths and data paths. If this statement is used, the
+     version number specified by the version statement must be set to 2.0. For example:
+     version: 2.0
+     object_type: lib_cell
+     object_spec: LIB/BUF1X
+     rf_type: rise fall
+     delay_type: cell
+     derate_type: late
+     path_type: data
+     depth: 1 2 3 4 5
+     distance: 500 1000 1500 2000
+     table: \
+     1.123 1.090 1.075 1.067 1.062 \
+     1.124 1.091 1.076 1.068 1.063 \
+     1.125 1.092 1.077 1.070 1.065 \
+     1.126 1.094 1.079 1.072 1.067
+
+     AOCV Table Groups
+     You can define multiple groups of AOCV tables that can be used for different blocks at
+     different levels of hierarchy. You assign a name to each table group and apply these
+     groups to hierarchical cells using the set_aocvm_table_group command. You can apply
+     these tables independently at different levels of hierarchy, without sharing data between
+     different blocks, and maintain the AOCV table settings when a block is used at a higher
+     level of hierarchy.
+     Use the group_name keyword in the AOCV table to specify the group name for a table. For
+     example:
+     version: 3.0
+     group_name: core_tables
+     object_type: lib_cell
+     object_spec: LIB/BUF1X
+     rf_type: rise fall
+     delay_type: cell
+     derate_type: late
+     path_type: data clock
+     depth: 1 2 3 4 5
+
+
+PrimeTime® User Guide                                                                          448
+T-2022.03
+                                                                                        Feedback
+Chapter 13: Variation
+Advanced On-Chip Variation
+
+
+     distance: 500 1000
+     table: \
+     1.123 1.090 1.075 1.067 1.062 \
+     1.124 1.091 1.076 1.068 1.063
+
+     In this example, the group_name statement specifies that the table belongs to the
+     core_tables group. Multiple tables are typically assigned to a given group. If you use
+     the group_name statement, the version statement must be set to 3.0 as shown in the
+     example. If no group_name statement is used, the table belongs to the default group of
+     AOCV tables. The default group of tables applies to all parts of the design that have not
+     been assigned a named AOCV table group.
+     To apply an AOCV table group to an instance of a hierarchical cell, use the
+     set_aocvm_table_group command as shown in the following example:
+     pt_shell> set_aocvm_table_group core_tables [get_cells H1]
+
+     This example applies the AOCV core_tables table group to the hierarchical block instance
+     named H1. The core_tables table group applies to all nets fully enclosed in cell instance
+     H1 as well as all cells in H1, including lower-level cells in the hierarchy. Note that the
+     core_tables table group does not apply to a net partly inside and partly outside of H1.
+     The report_aocvm command reports the numbers of cells annotated with AOCV data for
+     each table group and for the default table group. It also shows the name of each defined
+     table group and the names of corresponding affected hierarchical cells.
+     To remove the application of a named table group, use the reset_aocvm_table_group
+     command. Note that using the set_aocvm_table_group, reset_aocvm_table_group, or
+     read_ocvm command after a timing update triggers a new full timing update.
+
+     Specifying Depth Coefficients
+     You can specify depth coefficients for cells to modify path depth calculations based on cell
+     complexity. A complex cell can consist of an unusually large number of transistors, so it
+     might be desirable to associate that cell with a logic depth count larger than 1, the default
+     logic depth count for a cell arc. For example, a buffer is often implemented as two inverters
+     in series. In that case, the buffer cell could be assigned a derate coefficient of 2.0 for its
+     logic depth count.
+     Use the set_aocvm_coefficient command to set AOCV coefficients on cells, library
+     cells, and library timing arcs. For example:
+     pt_shell> set_aocvm_coefficient 2.0 [get_lib_cells lib1/BUF2]
+
+     This example sets a coefficient of 2.0 on all instances of the lib1/BUF2 library cell.
+     Setting AOCV coefficients is optional. The default coefficient is 1.0.
+
+
+
+
+PrimeTime® User Guide                                                                          449
+T-2022.03
+                                                                                        Feedback
+Chapter 13: Variation
+Advanced On-Chip Variation
+
+
+     Guard-Banding in AOCV
+     Guard-band timing derate allows you to model nonprocess-related effects in an
+     AOCV flow. The -aocvm_guardband option is available in the set_timing_derate,
+     report_timing_derate, and reset_timing_derate commands.
+
+     Use the set_timing_derate command to specify a guard-band derating factor. The
+     -aocvm_guardband option is applicable only in an AOCV context. The derating factor
+     that is applied to an arc is a product of the guard-band derate and the AOCV derate. The
+     guard-band derate has no effect outside the context of AOCV.
+     To report timing derating factors on the current design, use the report_timing_derate
+     command. To report only guard-band derating factors, specify the -aocvm_guardband
+     option of the report_timing_derate command. If you do not specify either the
+     -variation or -aocvm_guardband option, only the deterministic derating factors are
+     reported. These two options are mutually exclusive.
+     To reset guard-band derating factors, use the -aocvm_guardband option of the
+     reset_timing_derate command.
+
+     Incremental Timing Derating
+     Incremental timing derating enables you to fine-tune the timing derating factors on
+     objects such as cells or nets. To specify that the derating factor is an incremental
+     timing derating, use the set_timing_derate command with the -increment option.
+     You cannot incrementally apply guard-band timing derating, so the -increment and
+     -aocvm_guardband options of the set_timing_derate command are mutually exclusive.
+
+     Incremental timing derating follows to the same precedence and override rules as regular
+     timing derating. For more information about the precedence rules, see File Format for
+     AOCV.
+     By default, a specified incremental derating factor replaces any previous incremental
+     derating factor set for an object, such as a cell or net.
+     To accumulate rather than overwrite successive incremental derating settings, set the
+     timing_enable_cumulative_incremental_derate variable to true.
+
+     If no timing derating factor exists, the value of 0.0 is used for incremental derating, and 1.0
+     is used for regular derating. The incremental timing derating factor is added to the regular
+     timing derating factor. If the final resulting derating factor is less than 0.0, the negative
+     derating factor is converted to 0.0 to avoid negative delays.
+
+
+
+
+PrimeTime® User Guide                                                                           450
+T-2022.03
+                                                                                         Feedback
+Chapter 13: Variation
+Advanced On-Chip Variation
+
+
+     Here are some examples of incremental timing derating calculation.
+     •   In an AOCV analysis, you might have a u1/u252 cell that has a regular late derating of
+         1.082 and early derating of 0.924.
+         set_app_var timing_aocvm_enable_analysis true
+         set_timing_derate -increment -late 0.03 [get_cells u1/u252]
+         set_timing_derate -increment -early -0.03 [get_cells u1/u252]
+
+         The final late derating factor on cell u1/u252 = 1.082 + 0.03 = 1.112, and the final early
+         derating factor on cell u1/u252 = 0.924 + (-0.03) = 0.894.
+     •   In an OCV analysis, you might have the following values:
+         set_timing_derate -late 1.09
+         set_timing_derate -early 0.91
+         set_timing_derate -late 1.11 [get_cells u1/u252]
+         set_timing_derate -increment -late 0.04 [get_cells u1/u252]
+         set_timing_derate -increment -early -0.02 [get_cells u1/u252]
+         set_timing_derate -increment -early -0.03 [get_cells u1/u252]
+
+         The final late derating factor on cell u1/u252 = 1.11 + 0.04 = 1.15, and the final early
+         derating factor on cell u1/u252 = 0.91 + (-0.03) = 0.88.
+     To reset only incremental derating factors for the specified object, use the
+     reset_timing_derate command with the -increment option.
+
+     To report incremental timing derating factors, use the report_timing_derate command
+     with the -increment option. In the following example, incremental derating factors have
+     been set globally on the design; therefore, only global incremental derating factors are
+     reported.
+     pt_shell> set_timing_derate -data -increment -early -0.02
+     pt_shell> set_timing_derate -data -increment -late 0.06
+     pt_shell> set_timing_derate -clock -increment -early -0.05
+     pt_shell> set_timing_derate -clock -increment -late 0.10
+     pt_shell> report_timing_derate -increment
+
+     ****************************************
+     Report : timing derate
+             -scalar -increment
+     ...
+     ****************************************
+                            ----- Clock ------       ------ Data ------
+                             Rise        Fall         Rise        Fall
+                          Early Late Early Late    Early Late Early Late
+     ----------------------------------------------------------------------
+     design: simple_path
+       Net delay static   -0.05 0.10 -0.05 0.10    -0.02 0.06 -0.02 0.06
+       Net delay dynamic -0.05 0.10 -0.05 0.10     -0.02 0.06 -0.02 0.06
+       Cell delay         -0.05 0.10 -0.05 0.10    -0.02 0.06 -0.02 0.06
+       Cell check           --    --    --    --     --    --    --    --
+
+
+PrimeTime® User Guide                                                                               451
+T-2022.03
+                                                                                    Feedback
+Chapter 13: Variation
+Advanced On-Chip Variation
+
+
+     Using OCV Derating in AOCV Analysis
+     PrimeTime supports a unified framework so that AOCV can use OCV derating under
+     certain conditions. By default, both OCV and AOCV derating are considered for a given
+     object. If derating factors are at the same level, the AOCV value is selected over the OCV
+     value. To ensure the correct derating factor is applied for a given design object when
+     AOCV is enabled, cell arc derating uses the following order of precedence, from highest to
+     lowest priority:
+     1. OCV leaf-level cell
+     2. AOCV library cell
+     3. OCV library cell
+     4. AOCV hierarchical cell
+     5. OCV hierarchical cell
+     6. AOCV design
+     7. OCV design
+     To override the default behavior and completely ignore the OCV derating values during
+     AOCV analysis, set the timing_aocvm_ocv_precedence_compatibility variable
+     to true. When you do this, PrimeTime uses the precedence rules specified by the
+     set_timing_derate command, and cell arc derating uses the following order of
+     precedence, from highest to lowest priority:
+     1. AOCV library cell
+     2. AOCV hierarchical cell
+     3. AOCV design
+
+
+     Querying AOCV Derating on Timing Paths
+     To get detailed information about AOCV derating applied to a timing path, query the
+     following AOCV attributes:
+     •   aocvm_coefficient
+
+     •   applied_derate
+
+     •   depth
+
+     •   derate_factor_depth_distance
+
+     •   distance
+
+
+
+
+PrimeTime® User Guide                                                                        452
+T-2022.03
+                                                                                        Feedback
+Chapter 13: Variation
+Parametric On-Chip Variation (POCV)
+
+
+     •   guardband
+
+     •   incremental
+
+     Although AOCV derating isbased on timing arcs, these attributes are associated with
+     timing point objects where the arcs end. You can use these attributes for both graph-based
+     and path-based analysis.
+     Before using the AOCV attributes, you must do one of the following:
+     •   Enable graph-based AOCV analysis by setting the timing_aocvm_enable_analysis
+         variable to true.
+     •   Run path-based AOCV analysis by using the get_timing_paths command with the
+         -pba_mode option.
+
+     To query the AOCV attributes, you can use the following script example, which iterates
+     over the timing paths:
+     set path_list [get_timing_paths ...]
+     foreach_in_collection path $path_list {
+       foreach_in_collection point [get_attribute $path points] {
+         echo [format "Derate value: %f" [get_attr $point applied_derate]]
+       }
+     }
+
+
+
+Parametric On-Chip Variation (POCV)
+     Parametric on-chip variation (POCV) models the delay of an instance as a function of a
+     variable that is specific to the instance. That is, the instance delay is parameterized as a
+     function of the unique delay variable for the instance. POCV provides the following:
+     •   Statistical single-parameter derating for random variations
+     •   Single input format and characterization source for both AOCV and POCV table data
+     •   Nonstatistical timing reports
+     •   Limited statistical reporting (mean, sigma) for timing paths
+     •   Compatibility with existing PrimeTime functionality
+     •   Reduced pessimism gap between graph-based analysis and path-based analysis
+     •   Less overhead for incremental timing analysis
+
+
+
+
+PrimeTime® User Guide                                                                           453
+T-2022.03
+                                                                                                Feedback
+Chapter 13: Variation
+Parametric On-Chip Variation (POCV)
+
+
+     Using this feature requires a PrimeTime-ADV license. To learn about performing POCV
+     analysis, see the following topics:
+     •     Variables and Commands for Parametric On-Chip Variation
+     •     Preparing Input Data for Parametric On-Chip Variation
+     •     Importing a SPEF File With Physical Locations
+     •     Enabling Parametric On-Chip Variation Analysis
+     •     Loading the Parametric On-Chip Variation Input Data
+     •     Specifying Guard Banding
+     •     Scaling the Parametric On-Chip Variation Coefficient
+     •     Enabling Constraint and Slew Variation
+     •     Enabling Analysis With Moment-Based Modeling
+     •     Reporting Parametric On-Chip Variation Results
+     •     Statistical Graph Merging Pessimism
+     •     Querying POCV Slack and Arrival Attributes
+
+
+     Variables and Commands for Parametric On-Chip Variation
+     The following tables summarize the variables and commands for POCV.
+     Table 24        Variables for POCV analysis
+
+Variable                                      Description
+
+parasitics_enable_tail_annotation             Enables reading of tail annotation data from
+                                              parasitic data files for via variation analysis
+
+timing_enable_constraint_variation            Enables constraint variation for setup and hold
+                                              constraints
+
+timing_enable_slew_variation                  Enables slew variation for cell delays
+
+timing_enable_via_variation                   Enables physical via variation analysis
+
+timing_enable_via_variation                   Enables via variation analysis using data read
+                                              with the read_ivm command
+
+timing_pocvm_corner_sigma                     Specifies the corner sigma for POCV delay
+                                              constraint analysis
+
+timing_pocvm_enable_analysis                  Enables POCV analysis
+
+
+
+PrimeTime® User Guide                                                                                 454
+T-2022.03
+                                                                                           Feedback
+Chapter 13: Variation
+Parametric On-Chip Variation (POCV)
+
+
+     Table 24       Variables for POCV analysis (Continued)
+
+Variable                                    Description
+
+timing_pocvm_enable_extended_moments        Enables usage of asymmetric moment-based
+                                            modeling data
+
+timing_pocvm_max_transition_sigma           Specifies the corner sigma for POCV maximum
+                                            transition time analysis
+
+timing_pocvm_precedence                     Specifies the order of priority between file-based
+                                            and library-based POCV coefficients
+
+timing_pocvm_report_sigma                   Specifies the sigma for reporting
+
+timing_use_slew_variation_in_constraint Enables use of slew variation in constraint
+_arcs                                   arc variation computation (requires that
+                                        timing_enable_constraint_variation be set
+                                        to true)
+
+
+     Table 25       Commands for POCV Analysis
+
+Command                                         Description
+
+read_ocvm pocvm_file                            Reads POCV tables
+
+read_ivm via_file                               Reads via variation tables
+
+report_delay_calculation -derate                Reports details about derating for delay
+                                                calculation
+
+report_ocvm -type pocvm                         Displays POCV information, including POCV
+                                                coefficient and distance-based derating table
+                                                data
+
+report_ivm                                      Displays via variation table data
+
+report_timing -derate                           Reports POCV information in timing report
+
+report_timing_derate                            Reports POCV scaling
+-pocvm_coefficient_scale_factor
+
+report_timing_derate -pocvm_guardband           Reports POCV guard banding
+
+reset_timing_derate                             Removes POCV scaling
+-pocvm_coefficient_scale_factor
+
+reset_timing_derate -pocvm_guardband            Removes POCV guard banding
+
+set_timing_derate                               Specifies POCV coefficient scaling
+-pocvm_coefficient_scale_factor
+
+
+
+
+PrimeTime® User Guide                                                                            455
+T-2022.03
+                                                                                        Feedback
+Chapter 13: Variation
+Parametric On-Chip Variation (POCV)
+
+
+     Table 25       Commands for POCV Analysis (Continued)
+
+Command                                           Description
+
+set_timing_derate -pocvm_guardband                Specifies POCV guard banding
+
+
+
+     Preparing Input Data for Parametric On-Chip Variation
+     To use parametric on-chip variation (POCV), you need one of the following types of input
+     data:
+     •   POCV Single Coefficient Specified in a Side File
+     •   POCV Slew-Load Table in Liberty Variation Format
+     If the tool reads both types of data, the POCV single coefficient in a side file has higher
+     precedence and overrides the POCV slew-load table in the library.
+
+     POCV Single Coefficient Specified in a Side File
+     The AOCV table format version 4.0 has an extended format that specifies POCV
+     information with the following fields:
+     •   ocvm_type: aocvm | pocvm
+
+         This field specifies the OCV methodology type.
+     •   coefficient: sigma_value
+
+         This field specifies the random variation coefficient (sigma).
+     If you specify ocvm_type: pocvm,
+     •   You cannot specify the depth field
+     •   The coefficient and distance fields are mutually exclusive
+     You need to specify different tables for POCV coefficients (random variation) and distance-
+     based variation.
+
+
+
+
+PrimeTime® User Guide                                                                              456
+T-2022.03
+                                                                                        Feedback
+Chapter 13: Variation
+Parametric On-Chip Variation (POCV)
+
+
+Table 26      Coefficient and Distance-Based POCV Tables
+
+      Variation type    POCV applies      Example
+                        to
+
+      Coefficient       Library cells     version    : 4.0
+                                          ocvm_type : pocvm
+                                          object_type: lib_cell
+                                          rf_type    : rise fall
+                                          delay_type : cell
+                                          derate_type: early
+                                          object_spec: lib28nm/invx*
+                                          coefficient: 0.05
+
+      Distance-based    Design level      version    : 4.0
+                                          ocvm_type : pocvm
+                                          object_type: design
+                                          rf_type    : rise fall
+                                          delay_type : cell
+                                          derate_type: early
+                                          object_spec:
+                                          distance   : 1    10   50 100  500
+                                          table      : 0.9116 0.9035 0.8917 0.8718
+
+
+
+     To extract the POCV coefficient for a library cell from Monte-Carlo HSPICE simulation, use
+     the following equation:
+
+                                 s (delay variation)
+           POCV coefficient =
+                                 m (nominal delay)
+
+
+     POCV data generation is usually faster than AOCV data generation. Monte-Carlo
+     simulation needs to be set up on a long chain of cells for AOCV, while it is limited to only a
+     single or a few stages for POCV data generation.
+
+     POCV Slew-Load Table in Liberty Variation Format
+     PrimeTime can read a POCV slew-load table for each delay timing arc in Liberty Variation
+     Format (LVF). The following example shows a POCV slew-load table in the library.
+
+Example 20 POCV LVF Slew-Load Table
+ocv_sigma_cell_rise ("delay_template_7x7") {
+  sigma_type : "early";
+  index_1("0.008800, 0.026400, 0.060800, 0.129600, 0.267200, 0.542400, 1.093600");
+  index_2("0.001000, 0.002400, 0.005200, 0.010800, 0.022100, 0.044500, 0.089500");
+    values("0.000476, 0.000677, 0.001075, 0.001870, 0.003438, 0.006626, 0.012922", \
+    "0.000651, 0.000901, 0.001303, 0.002081, 0.003678, 0.006818, 0.013144", \
+    "0.000840, 0.001166, 0.001714, 0.002558, 0.004112, 0.007249, 0.013529", \
+    "0.001115, 0.001520, 0.002193, 0.003317, 0.005087, 0.008153, 0.014445", \
+    "0.001521, 0.002033, 0.002883, 0.004242, 0.006522, 0.010072, 0.016258", \
+    "0.002155, 0.002793, 0.003853, 0.005563, 0.008424, 0.012955, 0.020171", \
+
+
+
+PrimeTime® User Guide                                                                           457
+T-2022.03
+                                                                                         Feedback
+Chapter 13: Variation
+Parametric On-Chip Variation (POCV)
+
+
+    "0.003204, 0.003977, 0.005321, 0.007515, 0.010960, 0.016582, 0.025786");
+}
+
+ocv_sigma_cell_rise ("delay_template_7x7") {
+  sigma_type : "late";
+  index_1("0.008800, 0.026400, 0.060800, 0.129600, 0.267200, 0.542400, 1.093600");
+  index_2("0.001000, 0.002400, 0.005200, 0.010800, 0.022100, 0.044500, 0.089500");
+    values("0.000476, 0.000677, 0.001075, 0.001870, 0.003438, 0.006626, 0.012922", \
+    "0.000651, 0.000901, 0.001303, 0.002081, 0.003678, 0.006818, 0.013144", \
+    "0.000840, 0.001166, 0.001714, 0.002558, 0.004112, 0.007249, 0.013529", \
+    "0.001115, 0.001520, 0.002193, 0.003317, 0.005087, 0.008153, 0.014445", \
+    "0.001521, 0.002033, 0.002883, 0.004242, 0.006522, 0.010072, 0.016258", \
+    "0.002155, 0.002793, 0.003853, 0.005563, 0.008424, 0.012955, 0.020171", \
+    "0.003204, 0.003977, 0.005321, 0.007515, 0.010960, 0.016582, 0.025786");
+}
+
+     Using LVF improves the overall accuracy of POCV analysis by applying coefficients
+     that vary with different slew and load conditions, instead of using a fixed coefficient for
+     all conditions. The tool supports POCV LVF data for delay timing arcs, setup and hold
+     constraints, recovery and removal constraints, and clock-gating checks.
+     Load the library with the POCV LVF data into PrimeTime before linking the design.
+     PrimeTime requires the existence of POCV LVF data in the timing library. You cannot read
+     POCV LVF from a separate file. The unit of POCV LVF data is the time unit of the library.
+     PrimeTime can also read distance-based derating in the Liberty Variation Format, as
+     shown in the following example. While linking the design, PrimeTime automatically reads
+     the distance-based derating table if it exists in the library.
+
+Example 21 POCV LVF Distance-Based Derating
+     ocv_table_template("aocvm_distance_template") {
+               variable_1 : path_distance;
+               index_1 ("0, 10, 100, 1000");
+             }
+     ...
+
+              ocv_derate(aocvm_distance_design){
+                 ocv_derate_factors(aocvm_distance_template) {
+                   rf_type : rise_and_fall;
+                   derate_type : late;
+                   path_type : clock_and_data;
+                   values ( "1.1, 1.2, 1.3, 1.4" );
+                 }
+                 ocv_derate_factors(aocvm_distance_template) {
+                   rf_type : rise_and_fall;
+                   derate_type : early;
+                   path_type : clock_and_data;
+                   values ( "0.9, 0.8, 0.7, 0.6" );
+                 }
+               }
+               default_ocv_derate_distance_group : aocvm_distance_design;
+
+
+
+
+PrimeTime® User Guide                                                                              458
+T-2022.03
+                                                                                    Feedback
+Chapter 13: Variation
+Parametric On-Chip Variation (POCV)
+
+
+     Extraction of LVF Coefficients in ETMs
+     When you generate an extracted timing model (ETM) using the extract_model command
+     with POCV enabled, by default the tool generates Liberty Variation Format (LVF) tables to
+     model the POCV effects. With LVF tables in the ETM, the tool that consumes the ETM can
+     perform timing analysis accurately at various corners.
+     The extract_model command creates delay sigma tables for both combinational and
+     sequential delay arcs. It can also create constraint sigma tables for constraints arcs
+     (setup, hold, minimum pulse width, clock-gating, removal, and recovery) when constraint
+     variation is enabled.
+     For best accuracy at the top level, generating LVF tables is recommended. However, LVF
+     might not be fully supported by all downstream tools. You can specify the types of LVF
+     data generated for the ETM by using the extract_model_create_variation_tables
+     variable.
+
+
+     Importing a SPEF File With Physical Locations
+     If you use distance-based derating tables for POCV analysis, the tool needs coordinates to
+     calculate the path distance. However, you do not need these coordinates to calculate the
+     path depth.
+     To read the coordinates of nodes of nets, pins, and ports from a SPEF or GPD parasitic
+     data file,
+     1. Set this variable:
+         pt_shell> set_app_var read_parasitics_load_locations true
+
+     2. Read the parasitic data:
+         pt_shell> read_parasitics …
+
+
+     Enabling Parametric On-Chip Variation Analysis
+     To enable graph-based POCV analysis, set this variable:
+     pt_shell> set_app_var timing_pocvm_enable_analysis true
+
+     PrimeTime performs graph-based POCV timing updates automatically as part of the
+     update_timing command. By default, POCV analysis is performed at 3 sigma. To change
+     the default, set the timing_pocvm_corner_sigma variable to a value larger than 3. For
+     example:
+     pt_shell> set_app_var timing_pocvm_corner_sigma 4
+
+
+
+
+PrimeTime® User Guide                                                                         459
+T-2022.03
+                                                                                        Feedback
+Chapter 13: Variation
+Parametric On-Chip Variation (POCV)
+
+
+
+     Loading the Parametric On-Chip Variation Input Data
+     To load POCV single coefficient information or POCV distance-based derating table from a
+     text file, use the read_ocvm command (similar to loading AOCV tables in the AOCV flow):
+     pt_shell> read_ocvm pocv_coefficient_file_name
+     pt_shell> read_ocvm pocv_distance_based_derating_file_name
+
+     You must specify the coefficient or derating factors in a table using the Synopsys
+     AOCV file format version 4.0 or later. (See Preparing Input Data for Parametric On-
+     Chip Variation.) PrimeTime applies the POCV coefficient values in the file directly to
+     the instance delays. If the POCV tables have incorrect syntax, the tool issues an error
+     message and does not annotate the data.
+     PrimeTime annotates the POCV tables onto one or more design objects. The design
+     objects that can be annotated are library cells, hierarchical cells, and designs. For a cell,
+     the precedence of data tables, from the lowest to highest, is the design POCV table,
+     hierarchical cell POCV table, and library cell POCV table. For a net, the precedence from
+     lowest to highest is the design POCV table and hierarchical cell POCV table.
+     Loading the library with POCV LVF data is similar to loading the regular timing library;
+     specify the library with the search_path and link_path variables. PrimeTime
+     automatically reads the POCV information from the library while linking the design.
+     You can apply both the library with POCV and the side file with POCV single coefficient
+     in the same PrimeTime run. The delay variation is annotated accordingly depending
+     on which POCV format is applied on the cell. If the library with POCV LVF and the side
+     file with POCV single coefficient are applied on the same library cell, the POCV single
+     coefficient takes precedence. It overrides POCV LVF for that particular library cell.
+
+
+     Specifying Guard Banding
+     In the POCV flow, similar to the AOCV flow, you can use guard banding to model
+     non-process-related effects. To perform guard banding in POCV, specify the
+     set_timing_derate command with the -pocvm_guardband option.
+
+     For example, the following commands apply a five percent guard band POCV derating on
+     both early and late mode:
+     pt_shell> set_timing_derate -cell_delay \
+               -pocvm_guardband -early 0.95
+     pt_shell> set_timing_derate -cell_delay \
+               -pocvm_guardband -late 1.05
+
+     The POCV guard band derating factor is applied on both the nominal cell delay (mean)
+     and cell delay variation (sigma).
+
+
+
+
+PrimeTime® User Guide                                                                           460
+T-2022.03
+                                                                                       Feedback
+Chapter 13: Variation
+Parametric On-Chip Variation (POCV)
+
+
+     To report only the guard band derating factors, use the report_timing_derate
+     -pocvm_guardband command. To reset guard band derating factors, use the
+     reset_timing_derate -pocvm_guardband command.
+
+
+     Scaling the Parametric On-Chip Variation Coefficient
+     In addition to guard banding, you can scale only the variation of the cell delay without
+     changing the coefficient in POCV tables. To do this, use the set_timing_derate
+     -pocvm_coefficient_scale_factor command.
+
+     For example, the following command scales the POCV coefficient by three percent for
+     both early and late modes:
+     pt_shell> set_timing_derate -cell_delay \
+               -pocvm_coefficient_scale_factor -early 0.97
+     pt_shell> set_timing_derate -cell_delay \
+               -pocvm_coefficient_scale_factor -late 1.03
+
+     The command applies the POCV coefficient scaling factor to only the variation of cell delay
+     (sigma).
+     To report the POCV coefficient scaling factors, use the report_timing_derate
+     -pocvm_coefficient_scale_factor command. To reset the POCV coefficient scaling
+     factors, use the reset_timing_derate -pocvm_coefficient_scale_factor command.
+
+
+     Enabling Constraint and Slew Variation
+     You can improve the accuracy of POCV analysis with the following optional settings:
+     •   To enable variation for setup and hold constraints, set the
+         timing_enable_constraint_variation variable to true.
+
+         ◦   To additionally include slew variation effects in the constraint arc variation
+             computation, set the timing_use_slew_variation_in_constraint_arcs variable
+             to setup_hold (or setup or hold only). The default is none.
+     •   To enable slew variation for cell delays, set the timing_enable_slew_variation
+         variable to true.
+     The tool reads the constraint and slew variation data provided in the Liberty Variation
+     Format (LVF) in the .lib or .db file.
+     To report the constraint and slew variation, use the report_timing -variation or
+     report_ocvm command.
+
+
+
+
+PrimeTime® User Guide                                                                           461
+T-2022.03
+                                                                                      Feedback
+Chapter 13: Variation
+Parametric On-Chip Variation (POCV)
+
+
+
+     Enabling Analysis With Moment-Based Modeling
+     The tool supports analysis using cell libraries containing moment-based Liberty Variation
+     Format (LVF) delay and constraint data. This type of data more accurately models the
+     non-Gaussian statistical variation characteristics of advanced process nodes and very low
+     supply voltages. The following diagram shows a typical asymmetric cell delay distribution.
+
+Figure 138    Moment-Based Asymmetric Delay Distribution
+
+
+
+
+                                                                        Skewness
+
+
+
+
+                                                      s     Standard
+                                                            deviation
+
+                                                          Mean shift
+                                                          Mean
+                                      Nominal
+
+
+     The statistical parameters for this distribution are the mean shift, standard deviation,
+     and skewness. In LVF modeling syntax, these parameters are specified by the following
+     attributes:
+     ocv_std_dev_*
+     ocv_mean_shift_*
+     ocv_skewness_*
+
+     For example, an ocv_std_dev_cell_rise table in the LVF model specifies the standard
+     deviation of the cell delay distribution as a function of input transition and output load.
+     To enable timing analysis using moment-based modeling data, set the control variable:
+     pt_shell> set_app_var timing_pocvm_enable_extended_moments true
+
+     In variation reports, the mean value reported for a parameter includes both the nominal
+     and the mean shift adjustment.
+     Using this feature requires a PrimeTime-ADV-PLUS license.
+
+
+
+
+PrimeTime® User Guide                                                                          462
+T-2022.03
+                                                                                           Feedback
+Chapter 13: Variation
+Parametric On-Chip Variation (POCV)
+
+
+
+     Reporting Parametric On-Chip Variation Results
+     To see the results of parametric on-chip variation (POCV) analysis,
+     1. Report the POCV Coefficient and Derating
+     2. Report the POCV Analysis Results
+
+     Report the POCV Coefficient and Derating
+     To display POCV information, including POCV coefficient and distance-based derating
+     table data, use the report_ocvm -type pocvm command. This command reports design
+     objects annotated with early, late, rise, fall, cell, net coefficient or derating tables and also
+     the annotation information for leaf cells and nets, as shown in the following example.
+     pt_shell> report_ocvm -type pocvm [get_cells I]
+
+     ******************************************************
+     POCV Table Set                :       *Default*
+     ******************************************************
+     POCV coefficient: 0.0500
+     Name Object Process Voltage Sense Path          Delay Inherited
+     ------------------------------------------------------------------
+     I     cell     early   *        rise   clock    cell   lib1/INV1
+     I     cell     early   *        fall   clock    cell   lib1/INV1
+     I     cell     early   *        rise   data     cell   lib1/INV1
+     I     cell     early   *        fall   data     cell   lib1/INV1
+
+     ******************************************************
+     POCV Table Set                :       *Default*
+     ******************************************************
+     POCV coefficient: 0.0500
+     Name Object Process Voltage Sense Path          Delay Inherited
+     ------------------------------------------------------------------
+     I     cell     late    *        rise   clock    cell   lib1/INV1
+     I     cell     late    *        fall   clock    cell   lib1/INV1
+     I     cell     late    *        rise   data     cell   lib1/INV1
+     I     cell     late    *        fall   data     cell   lib1/INV1
+
+     To report all cells missing POCV coefficient and distance-based derating data, use this
+     command:
+     pt_shell> report_ocvm -type pocvm -cell_delay -list_not_annotated
+
+     To report all cells only missing POCV coefficient data (when you did not apply distance-
+     based derating table in POCV analysis), use this command:
+     pt_shell> report_ocvm -type pocvm -cell_delay \
+               -list_not_annotated -coefficient
+
+
+
+
+PrimeTime® User Guide                                                                              463
+T-2022.03
+                                                                                       Feedback
+Chapter 13: Variation
+Parametric On-Chip Variation (POCV)
+
+
+     The report_ocvm command does not require update_timing. You can do it before
+     update_timing to check if there are any cells missing POCV coefficient or distance-based
+     derating table.
+     For POCV LVF, since the slew-load table is defined on library timing arc, you need to
+     specify library timing arc on the object list to make it work. The report_ocvm command
+     displays all slew-load tables associated with the specified library timing arc, as shown in
+     the following example.
+
+Example 22 Output of report_ocvm -type pocvm Command With POCV LVF
+pt_shell> report_ocvm -type pocvm [get_lib_timing_arcs \
+          -from */INVD1/I -to */INVD1/ZN]
+
+min rise table
+Sense / Type: negative_unate
+          | Slew
+Load      | 0.0010000 0.0024000 0.0052000 0.0108000 0.0221000 0.0445000 0.0895000
+ ---------+--------------------------------------------------------------------------
+0.0088000 | 0.0004760 0.0006770 0.0010750 0.0018700 0.0034380 0.0066260 0.0129220
+0.0264000 | 0.0006510 0.0009010 0.0013030 0.0020810 0.0036780 0.0068180 0.0131440
+0.0608000 | 0.0008400 0.0011660 0.0017140 0.0025580 0.0041120 0.0072490 0.0135290
+0.1296000 | 0.0011150 0.0015200 0.0021930 0.0033170 0.0050870 0.0081530 0.0144450
+0.2672000 | 0.0015210 0.0020330 0.0028830 0.0042420 0.0065220 0.0100720 0.0162580
+0.5424000 | 0.0021550 0.0027930 0.0038530 0.0055630 0.0084240 0.0129550 0.0201710
+1.0936000 | 0.0032040 0.0039770 0.0053210 0.0075150 0.0109600 0.0165820 0.0257860
+
+min fall table
+Sense / Type: negative_unate
+          | Slew
+Load      | 0.0010000 0.0024000 0.0052000 0.0108000 0.0221000 0.0445000 0.0895000
+----------+--------------------------------------------------------------------------
+0.0088000 | 0.0003780 0.0005140 0.0007840 0.0013200 0.0024020 0.0045370 0.0088430
+0.0264000 | 0.0004950 0.0006980 0.0010150 0.0015460 0.0026210 0.0047660 0.0090610
+0.0608000 | 0.0005730 0.0008580 0.0012960 0.0019850 0.0030780 0.0052090 0.0095170
+0.1296000 | 0.0006060 0.0009720 0.0015550 0.0024890 0.0039210 0.0061280 0.0103820
+0.2672000 | 0.0005040 0.0009800 0.0017400 0.0029410 0.0048280 0.0077760 0.0122220
+0.5424000 | 0.0001620 0.0007670 0.0017220 0.0033180 0.0057850 0.0095850 0.0154820
+1.0936000 | 0.0006780 0.0000330 0.0012030 0.0032310 0.0064090 0.0114070 0.0189420
+
+     In addition to the data, each table displays the min (early) or max (late) analysis mode and
+     the negative_unate or positive_unate sense type. If there are multiple library timing arcs
+     with different input conditions, the sdf_cond is also displayed.
+
+     Report the POCV Analysis Results
+     POCV analysis works with all reporting commands in PrimeTime. For reporting,
+     by default PrimeTime reports the timing at 3-sigma value. To change it, set the
+     timing_pocvm_report_sigma variable to different value; the default is 3. Changing this
+     variable does not trigger update_timing. It only affects reporting.
+     For example, to make POCV analysis more pessimistic, you can change the variable to 4.
+     pt_shell> set_app_var timing_pocvm_report_sigma 4
+
+
+
+
+PrimeTime® User Guide                                                                          464
+T-2022.03
+                                                                                           Feedback
+Chapter 13: Variation
+Parametric On-Chip Variation (POCV)
+
+
+     To check the slack without POCV, set the variable to 0. It shows the slack at 0 sigma (no
+     POCV) without triggering update_timing.
+     pt_shell> set_app_var timing_pocvm_report_sigma 0
+
+     To display the variation in the timing report for POCV analysis, use the report_timing
+     -variation command. Here is an example:
+pt_shell> report_timing -variation ...
+...
+                               --------- Incr -------------   ------- Path ---------
+Point                          Mean    Sensit Corner  Value   Mean   Sensit    Value
+--------------------------------------------------------------------------------------
+clock clk (rise edge)                                 0.00                     0.00
+clock network delay (ideal)    0.00    0.00    0.00   0.00    0.00   0.00      0.00
+input external delay                                  0.00                     0.00 r
+in1 (in)                       0.00    0.00    0.00   0.00    0.00   0.00      0.00 r
+b1/Z (B1I)                     1.00    3.00   10.00  10.00    1.00   3.00 H   10.00 r
+b3/Z (B1I)                     1.00    2.00    7.00   2.82    2.00   3.61 H   12.82 r
+out1 (out)                     0.00    0.00    0.00   0.00    2.00   3.61     12.82 r
+data arrival time                                                             12.82
+
+clock clk (rise edge)                                 2.00                     2.00
+clock network delay (ideal)    0.00   0.00    0.00    0.00    0.00   0.00      2.00
+clock reconvergence pessimism 0.00    0.00    0.00    0.00    0.00   0.00      2.00
+clock uncertainty                                    -0.20                     1.80
+output external delay                               -10.00                    -8.20
+data required time                                           -8.20   0.00     -8.20
+-------------------------------------------------------------------------------------
+data required time                                           -8.20   0.00     -8.20
+data arrival time                                            -2.00   3.61    -12.82
+-------------------------------------------------------------------------------------
+statistical adjustment                                0.00                   -21.02
+slack (VIOLATED)                                            -10.20   3.61    -21.02
+
+     In the Incr columns,
+     •   The Mean, Sensit, and Corner numbers provide mean, standard deviation, and corner
+         information about each incremental delay distribution by itself, independent of other
+         incremental delay distributions. Corner is equal to Mean ± K*Sensit, where K is equal
+         to timing_pocvm_report_sigma.
+     •   The Incr Value number is not derived from the incremental delay distribution. Instead,
+         it is the simple numerical difference between the previous and current Path Value
+         (corner arrival) numbers, described below.
+     In the Path columns,
+     •   The Mean, Sensit, and Value numbers provide provide mean, standard deviation, and
+         corner information about the cumulative arrival distribution at that pin. Value is equal to
+         Mean ± K*Sensit, where K is equal to timing_pocvm_report_sigma.
+
+     •   A pin’s cumulative arrival distribution is the statistical combination (in the distribution
+         domain) of all incremental distributions up to that pin.
+
+
+
+
+PrimeTime® User Guide                                                                                  465
+T-2022.03
+                                                                                      Feedback
+Chapter 13: Variation
+Parametric On-Chip Variation (POCV)
+
+
+     For details on how PrimeTime calculates the final derating factor from all derating factors
+     applied in POCV analysis, run the report_delay_calculation -derate command. It
+     reports in details how the final derating values are derived for cell delay and cell delay
+     sigma as shown in the following example.
+
+Example 23 Output of report_delay_calculation -derate Command With POCV Side File
+     pt_shell> report_delay_calculation -from I/I -to I/ZN -derate
+     ...
+     Advanced driver-modeling used for rise and fall.
+                                Rise        Fall
+     ------------------------------------------------------------------
+     Input transition time   = 0.011600    0.011600 (in library unit)
+     Effective capacitance   = 0.002000    0.002000 (in pF)
+     Effective capacitance   = 0.002000    0.002000 (in library unit)
+     Output transition time = 0.007237     0.006342 (in library unit)
+     Cell delay              = 0.008886    0.009559 (in library unit)
+
+     POCVM coefficient       = 0.050000              0.050000
+     POCVM coef scale factor = 1.000000              1.000000
+     POCVM distance derate   = 1.000000              1.000000
+     POCVM guardband         = 1.020000              1.020000
+     Incremental derate      = 0.000000              0.000000
+     Cell delay derated      = 0.009064              0.009750    (in library unit)
+     Cell delay sigma        = 0.000453              0.000488    (in library unit)
+
+     Cell delay derated = "Cell delay" *
+      ( "POCVM guardband" * "POCVM distance derate" + "Incremental derate" )
+     Cell delay sigma   = "Cell delay" *
+      ( "POCVM guardband" * "POCVM coefficient" * "POCVM coef scale factor" )
+
+     In the preceding example, the report_delay_calculation -derate command displays
+     the equations how the cell delay and cell delay variation are derated by applying POCV
+     guard banding, POCV distance-based derating, POCV coefficient, POCV coefficient
+     scaling factor and incremental derate.
+     If you are using the POCV LVF instead of the POCV single coefficient, the format
+     of report_delay_calculation -derate command changes slightly since the unit
+     of POCV data in LVF is in time units. The following example shows the output of
+     report_delay_calculation -derate when the POCV slew-load table is applied.
+
+Example 24 Output of the report_delay_calculation -derate Command With POCV LVF
+     pt_shell> report_delay_calculation -from I/I -to I/ZN -derate
+     ...
+
+     Advanced driver-modeling used for rise and fall.
+                                Rise        Fall
+     ------------------------------------------------------------------
+     Input transition time   = 0.011600    0.011600 (in library unit)
+     Effective capacitance   = 0.002000    0.002000 (in pF)
+     Effective capacitance   = 0.002000    0.002000 (in library unit)
+
+
+PrimeTime® User Guide                                                                         466
+T-2022.03
+                                                                                      Feedback
+Chapter 13: Variation
+Parametric On-Chip Variation (POCV)
+
+
+     Drive resistance                 = 0.001000    0.001000     (in Kohm)
+     Output transition time           = 0.016620    0.011003     (in library unit)
+     Cell delay                       = 0.013041    0.010004     (in library unit)
+
+     POCVM delay sigma       = 0.000652             0.000500
+     POCVM coef scale factor = 1.000000             1.000000
+     POCVM distance derate   = 1.000000             1.000000
+     POCVM guardband         = 0.980000             0.980000
+     Incremental derate      = 0.000000             0.000000
+     Cell delay derated      = 0.012780             0.009804     (in library unit)
+     Cell delay sigma        = 0.000639             0.000490     (in library unit)
+
+     Cell delay derated = "Cell delay" *
+      ( "POCVM guardband" * "POCVM distance derate" + "Incremental derate" )
+     Cell delay sigma = "POCVM delay sigma" *
+      ( "POCVM guardband" * "POCVM coef scale factor" )
+
+
+     Statistical Graph Merging Pessimism
+     In POCV analysis, delays are statistical distributions rather than fixed numbers. Therefore,
+     when comparing multiple delay values, such as converging timing arcs through a multiple-
+     input gate, the maximum delay can be larger than any of the individual delays when
+     considered by themselves. This effect is called graph merging pessimism.
+     POCV analysis accounts for graph merging pessimism by removing the pessimism as a
+     timing point adjustment in the report_timing -variation timing report, as shown in the
+     following example.
+                                    ------- Incr --------------- ------- Path
+      ---------
+     Point                          Mean   Sensit Corner Value    Mean   Sensit
+      Value
+     ---------------------------------------------------------------------------------
+     ---
+     clock clk (rise edge)         0.00                   0.00    0.00
+      0.00
+     clock network delay (ideal)   0.00   0.00     0.00   0.00    0.00   0.00
+      0.00
+     input external delay          0.00                   0.00    0.00
+      0.00 r
+     in1 (in)                      0.00   0.00     0.00   0.00    0.00   0.00
+      0.00 r
+     b1/Z (B1I)                    1.00   3.00    10.00 10.00     1.00   3.00 H
+      10.00 r
+     statistical graph pessimism   3.00 -2.24             0.00    4.00   2.00
+      10.00
+     b3/Z (B1I)                    1.00   2.00     7.00   3.49    5.00   2.83 H
+      13.49 r
+     statistical graph pessimism   5.00 -2.58             0.00   10.00   1.16
+      13.49
+     out1 (out)                    0.00   0.00     0.00   0.00   10.00   1.16
+      13.49 r
+     data arrival time
+      13.49
+
+
+
+PrimeTime® User Guide                                                                         467
+T-2022.03
+                                                                                     Feedback
+Chapter 13: Variation
+Parametric On-Chip Variation (POCV)
+
+
+     clock clk (rise edge)         2.00                   2.00    2.00
+      2.00
+     clock network delay (ideal)   0.00   0.00     0.00   0.00    0.00   0.00
+      2.00
+     clock reconvergence pessimism 0.00   0.00     0.00   0.00    0.00   0.00
+      2.00
+     output external delay                                0.00
+      2.00
+     data required time                                           2.00   0.00
+      2.00
+     ---------------------------------------------------------------------------------
+     ---
+     data required time                                           2.00   0.00
+      2.00
+     data arrival time                                          -10.00   1.16
+      -13.49
+     ---------------------------------------------------------------------------------
+     ---
+     statistical adjustment                               0.00
+      -11.49
+     slack (VIOLATED)                                            -8.00   1.16
+      -11.49
+
+     A report_timing command that uses both -from and -to can potentially have less
+     graph merging pessimism that a timing report using -to the same endpoint alone (without
+     using -from). Therefore, you can expect that the results of report_timing -to xyz to
+     bound, but not necessarily match, the results of report_timing -from abc -to xyz.
+
+
+     Querying POCV Slack and Arrival Attributes
+     POCV analysis uses the following slack and arrival attributes on pins, timing paths, and
+     timing points to cover the mean and variation of the cell delays.
+     Table 27      POCV slack and arrival attributes
+
+Attribute                               Object class
+
+max_fall_variation_arrival              pin
+
+max_fall_variation_slack                pin
+
+max_rise_variation_arrival              pin
+
+max_rise_variation_slack                pin
+
+min_fall_variation_arrival              pin
+
+min_fall_variation_slack                pin
+
+min_rise_variation_arrival              pin
+
+min_rise_variation_slack                pin
+
+
+
+
+PrimeTime® User Guide                                                                           468
+T-2022.03
+                                                                                      Feedback
+Chapter 13: Variation
+Parametric On-Chip Variation (POCV)
+
+
+     Table 27       POCV slack and arrival attributes (Continued)
+
+Attribute                                Object class
+
+statistical_adjustment                   timing_path
+
+variation_arrival                        timing_path, timing_point
+
+variation_slack                          timing_path, timing_point
+
+
+
+     POCV slack and arrival attributes are statistical quantities; they have mean and standard
+     deviation. If you directly query the POCV slack and arrival attributes, the tool returns an
+     empty list. You need to query the mean or std_dev (standard deviation) attribute of the
+     POCV slack and arrival attributes. For example:
+     pt_shell> get_attribute [get_pins I/ZN] max_fall_variation_slack
+     {}
+     pt_shell> get_attribute [get_attribute [get_pins I/ZN] \
+               max_fall_variation_slack] mean
+     0.990180
+     pt_shell> get_attribute [get_attribute [get_pins I/ZN] \
+               max_fall_variation_slack] std_dev
+     0.000488
+     pt_shell> set path [get_timing_paths -fall_through I/ZN]
+     _sel96
+     pt_shell> get_attribute $path variation_slack.mean
+     0.990180
+     pt_shell> get_attribute $path variation_slack.std_dev
+     0.000488
+
+
+
+
+PrimeTime® User Guide                                                                         469
+T-2022.03
+

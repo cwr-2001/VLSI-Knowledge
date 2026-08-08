@@ -1,0 +1,472 @@
+﻿% 第 15 章 可靠性与 EM 分析（原书 15-419 … 15-434）
+\bichapter{可靠性与 EM 分析}{Reliability and EM Analysis}
+\label{chap:rel}
+
+\section{引言}
+\subsection*{Introduction}
+
+电迁移（Electromigration，EM）是在外加电场下电子与金属原子间动量传递导致材料移动的现象。该动量传递使金属原子偏离原位置。导线电流密度越高、温度越高，该效应越严重。因此在亚 100\,nm 设计中，器件电流更大、导线更窄、片上温度更高，互连可靠性及 EM 退化成为严重关切。
+
+随时间推移，EM 引起的金属离子迁移可导致导线变窄或形成丘状凸起（hillock）。导线变窄会降低性能，极端情况下可完全断路。导线展宽与凸起可能导致与相邻导线短路，尤其在新技术最小间距布线时。
+
+代工厂通常在不同条件下规定导线可通过的最大电流。EM 限值取决于拓扑、线宽、金属密度等设计参数。EM 退化与限值还取决于互连工作温度、导线与过孔材料特性、电流方向及线段距驱动器的距离。图~\ref{fig:em-current-def} 定义关键 EM 电流特性。
+
+\figplaceholder{Figure 15-1}{EM 电流定义}
+
+其中 $t\_p = t\_{\mathrm{period}}$，关键量定义如下：
+
+\begin{itemize}
+  \item 占空比：$R = t\_D / t\_p$
+  \item 峰值电流：$I\_{\mathrm{peak}} = \max I(t)$
+  \item 平均电流（P/G 及带 APL 仿真波形的信号）：$I\_{\mathrm{avg}} = \int I(t)\,dt / t\_p$
+  \item 平均电流（估计波形的信号）：$I\_{\mathrm{avg}} = \int I(t)\,dt / t\_p$
+  \item RMS 电流：$I\_{\mathrm{rms}} = \sqrt{\int I(t)^2\,dt / t\_p}$
+\end{itemize}
+
+常用 EM 检查之一为测量导线平均或 DC 电流密度并与代工厂限值比较。平均/DC 电流影响通常用 Black 方程量化，比较不同参数（平均电流密度、温度、激活能）下的平均失效时间（MTTF）。另一常见检查为测量峰值与 RMS 电流并与目标比较，以避免焦耳/自热导致金属失效。
+
+RedHawk 在统一平台中分析电源网格与信号互连的 EM。电源 EM 作为静态和/或动态分析的组成部分；信号 EM 在单独运行中检查所有信号线与过孔的平均（单向或双向）、RMS 及峰值电流密度。
+
+\section{电源 EM 计算的温度设置}
+\subsection*{Temperature Setting for Power EM Calculation}
+
+静态与动态 EM 计算的工作温度可与分析用温度独立设置，通过 tech 文件关键字 \texttt{TNOM\_EM} 及 GSR 关键字 \texttt{TEMPERATURES\_EM}、\texttt{TEMPERATURE\_EM} 实现。对应功耗分析温度为 tech 文件 \texttt{TNOM} 与 GSR \texttt{TEMPERATURES}、\texttt{TEMPERATURE}。
+
+在 tech 文件中指定标称与最终温度：
+\begin{lstlisting}
+metal <metal_layer_name> {
+    EM <max_wire_current_density>
+    TNOM_EM <EM_nom_temp>
+    ? T_EM <EM_final_temp> ?
+    TNOM <Power_nom_temp>
+    ? T <Power_oper_temp>?
+    ..
+}
+\end{lstlisting}
+
+GSR 中 EM 计算温度关键字：
+\begin{lstlisting}
+TEMPERATURES_EM {
+    <layer_1> <temp_1 C>
+    ...
+    <layer_n> <temp_n C>
+}                                          , or
+TEMPERATURE_EM <temp C>
+\end{lstlisting}
+
+提取用温度关键字：
+\begin{lstlisting}
+TEMPERATURES {
+    <layer_1> <temp_1 C>
+    ...
+    <layer_n> <temp_n C>
+}                     or
+TEMPERATURE <temp C>
+\end{lstlisting}
+
+EM 计算时温度关键字优先级：
+\begin{enumerate}
+  \item \texttt{TEMPERATURES\_EM}（GSR，按层）
+  \item \texttt{TEMPERATURE\_EM}（GSR，全局）
+  \item \texttt{T\_EM}（tech 文件，按层）
+  \item \texttt{TEMPERATURES}（GSR，提取）
+  \item \texttt{TEMPERATURE}（GSR，提取）
+  \item \texttt{T}（tech 文件，提取）
+  \item \texttt{TNOM\_EM}（tech 文件，全局）
+\end{enumerate}
+
+RedHawk 在 \texttt{redhawk.log} 中记录提取与 EM 检查所用温度。
+
+\section{RedHawk 静态电源 EM 分析方法}
+\subsection*{RedHawk Methodology for Static Power EM Analysis}
+
+RedHawk 基于静态或动态压降分析得到的电流自动进行电源 EM 分析。静态 EM 基于真实平均电流（本节）；动态电源 EM 基于峰值、真实平均或 RMS 电流（见第~\ref{sec:dyn-em}~节）。
+
+静态 EM 无需单独命令；tech 文件定义 EM 限值时默认执行。RedHawk 将 METAL 导线实际电流密度、VIA 段每 cut 或面积电流与 tech 限值比较。设置见下文。
+
+\subsection{设置 EM 限值}
+\subsubsection*{Setting Up EM Limits}
+
+最简单方式为按层定义 METAL 或 VIA 允许电流密度。金属层为每单位宽度电流，例如：
+\begin{lstlisting}
+metal METAL1
+{
+    Thickness        1.45
+    Resistance 0.2343
+    EM               2.7
+    above            PASS4
+}
+\end{lstlisting}
+
+电流密度单位来自 tech 文件 \texttt{Units} 段：
+\begin{lstlisting}
+units {
+    capacitance 1p
+    resistance 1
+    length      1u
+    current     1m
+    voltage     1
+    time        1n
+    frequency   1me
+}
+\end{lstlisting}
+
+VIA 层 EM 按每 cut 限值定义：
+\begin{lstlisting}
+via VIA78
+{
+    Area               { 9 }
+    Resistance 0.041
+    T                 25
+    Tnom              110
+    Coeff_RT1         0.00337
+    Coeff_RT2         -7.91e-7
+    EM                7
+    UpperLayer METAL8
+    LowerLayer METAL7
+}
+\end{lstlisting}
+
+更高级限值可通过 \texttt{metal} 关键字选项定义：\texttt{EM\_Adjust}、\texttt{Width\_Based\_EM}、\texttt{Blech\_JLC}、\texttt{EM\_Temp\_Rating}、\texttt{Tnom\_EM}。详见附录 C「METAL」。
+
+使用 \texttt{rhtech} 工具时，\texttt{-e <EM\_FILE>} 可填充 EM 相关关键字；多项式规则用 \texttt{-pe <file>}：
+\begin{lstlisting}
+rhtech -i <input_file> [-o <output_file>]
+    [-m <layer_mapping_file>]
+    [-e <EM_file>] [-t <temp_file>]
+\end{lstlisting}
+
+EM 规则文件示例：
+\begin{lstlisting}
+## <layer_in_itf/nxtgrd> <EM_limit-mA/um for metal; mA for vias> <EM adjust>
+  metal5 0.9308 0.02
+  metal4 0.9308 0.02
+  metal3 0.9308 0.02
+  metal2 0.9308 0.02
+  metal1 0.716 0.02
+  via4 0.06766
+  via3 0.06766
+  via2 0.06766
+  via1 0.0676
+\end{lstlisting}
+
+\subsection{运行电源 EM 分析}
+\subsubsection*{Running Power EM Analysis}
+
+设置与运行流程见第~4~章「Running RedHawk-S (Static IR/EM Analysis)」。默认静态/动态仿真后不自动做 EM；可设 \texttt{ENABLE\_AUTO\_EM 1} 在仿真后处理中执行 EM 检查。
+
+Tcl 命令：
+\begin{lstlisting}
+perform emcheck ?-mode [AVG |RMS |PEAK |all ]?
+    ?-net <netname>?
+\end{lstlisting}
+默认模式为 \texttt{all}。
+
+\subsection{分析静态 EM 结果}
+\subsubsection*{Analyzing Static EM Analysis Results}
+
+仿真后点击 View Results 面板 EM 按钮查看违例彩图（图~\ref{fig:em-results}）。默认红色为超过 EM 限值（100\%）的金属/过孔段，其他颜色为较低比例。
+
+\figplaceholder{Figure 15-2}{EM 结果显示}
+
+可通过 Configuration 面板「Set Color Range」打开 ElectroMigration Color Map 对话框修改范围与颜色。
+
+静态分析后违例列表在 \texttt{adsRpt/Static/<design\_name>.em.worst}，按 EM 比率降序列出超过默认 100\% 限值（可用 \texttt{EM\_REPORT\_PERCENTAGE} 修改）的 METAL/VIA 段。默认最多 1000 条，可用 \texttt{EM\_REPORT\_LINE\_NUMBER} 增加。
+
+\texttt{EM\_DUMP\_PERCENTAGE} 可导出指定范围违例，例如 \texttt{EM\_DUMP\_PERCENTAGE 50 60} 将 50\%--60\% 违例写入 \texttt{adsRpt/Static/<design\_name>.em}（非排序，仅在该关键字指定时生成）。
+
+METAL 违例报告格式：
+\begin{lstlisting}
+#Layer #End-to-end_coordinates                         #EM_Ratio #Net #Width
+METAL4 (4905.670,3398.849 4905.670,3400.562) 469.016% VDD 25.000
+\end{lstlisting}
+
+亦可通过 GUI：Results $\rightarrow$ List of Worst EM；Go To Location 定位违例。
+
+若 tech 文件定义 \texttt{EM\_ADJUST}，RedHawk 从实际宽度减去该值得到有效宽度计算电流密度。
+
+\section{动态电源 EM 分析方法}
+\subsection*{Methodology for Dynamic Power EM Analysis}
+\label{sec:dyn-em}
+
+动态电源 EM 与静态类似：静态用真实平均电流密度（导线）或每 cut 电流（过孔）；动态可基于峰值、RMS 或平均电流。GSR \texttt{EM\_MODE} 选择模式。默认不对指定 \texttt{EM\_MODE} 自动做 EM；设 \texttt{ENABLE\_AUTO\_EM 1} 后可用 \texttt{perform emcheck} 按模式与网表分析。
+
+\subsection{设置 EM 限值}
+\subsubsection*{Setting Up EM Limits}
+
+可在 tech 文件为每层设简单 EM 限值（适用于所有 \texttt{EM\_MODE}）。亦可为各模式单独设规则，三种方式：
+
+\begin{enumerate}
+  \item \textbf{POLYNOMIAL\_BASED\_EM 规则}：关键字含目标模式，如 \texttt{POLYNOMIAL\_BASED\_EM\_PEAK}、\texttt{\_AVG}、\texttt{\_RMS}。
+  \item \textbf{独立 EM 规则 tech 文件}：
+\begin{lstlisting}
+EM_TECH_DC <DC_em_rule_file>
+EM_TECH_RMS <RMS_em_rule_file>
+EM_TECH_PEAK <Peak_em_rule_file>
+\end{lstlisting}
+  DC 文件规则用于 DC（平均）及静态 EM。
+  \item \textbf{规则集}：\texttt{EM\_RULE\_SET} 将多组规则命名分组：
+\begin{lstlisting}
+EM_RULE_SET <user_rule_name1>
+metal <layer name> {
+    <metal EM rules>
+    ...
+}
+via <layer name> {
+    <via EM rules>
+    ...
+}
+EM_RULE_SET <user_rule_name2>
+...
+\end{lstlisting}
+  用 GSR \texttt{EM\_TECH\_FILE <ruleset\_file>} 加载；分析时指定：
+\begin{lstlisting}
+EM_RULE_SET [AVG|PEAK|RMS] <user_rule_name>
+\end{lstlisting}
+  运行中可 \texttt{gsr set EM\_RULE\_SET [AVG|PEAK|RMS] <new\_user\_rule\_name>} 后重跑 \texttt{perform emcheck}。
+\end{enumerate}
+
+\subsection{分析动态电源 EM 违例}
+\subsubsection*{Analyzing Dynamic Power EM Violations}
+
+动态分析后用 \texttt{perform emcheck} 按模式/网表生成报告：
+\begin{lstlisting}
+perform emcheck ?-mode [AVG |RMS |PEAK |all ]?
+    ?-net <netname>?
+\end{lstlisting}
+
+省略 \texttt{-mode} 与 \texttt{-net} 则分析所有模式与网表。报告文件名与静态相同（\texttt{<design>.em.worst.peak}、\texttt{*.avg}、\texttt{*.rms}），位于 \texttt{adsRpt/Dynamic}。
+
+PEAK 模式报告示例：
+\begin{lstlisting}
+EM MODE is PEAK
+# For wires: #layer #end-to-end_coordinates #EM_Ratio #net #width
+# Blech_length
+# For vias: #via_name #x-y_coordinates #EM_Ratio #net #blech_length
+METAL3 (886.190,1018.712 887.192,1018.712)     1081.01% VDD 2.003 141.951
+\end{lstlisting}
+
+\figplaceholder{Figure 15-3}{调查潜在金属 EM 违例}
+
+若 METAL4 的 \texttt{EM\_ADJUST} 为 0.016，实际电流密度 $= 219.664 / (25 - 0.016) = 8.7922$\,mA/$\mu$m；tech 限值 1.874\,mA/$\mu$m；$\mathrm{EM\_Ratio} = 100 \times 8.7922 / 1.874 = 469.2$\%.
+
+VIA 违例格式：
+\begin{lstlisting}
+via via3Array_87 (3154.820,893.390)                   172.29%   GND
+\end{lstlisting}
+$\mathrm{EM\_Ratio} = (\mathrm{过孔电流}) \times 100 / (\mathrm{EM\ 限值})$。
+
+\figplaceholder{Figure 15-4}{调查潜在过孔 EM 违例}
+
+过孔数组 EM 限值 $=$ tech 每 cut 限值 $\times$ cut 数。依规则类型可能显示附加检查数据。
+
+\subsubsection{电流方向与 EM 违例}
+点击 METAL/VIA 后 log 窗口显示假定电流方向与电流值（图~\ref{fig:em-current-dir}）。
+
+\figplaceholder{Figure 15-5}{log 显示电流方向}
+
+符号约定：
+\begin{itemize}
+  \item \texttt{>}：金属，左到右
+  \item \texttt{<}：金属，右到左
+  \item \texttt{\^{}}：金属，下到上
+  \item \texttt{V}：金属，上到下
+  \item \texttt{Up}：过孔，下层到上层
+  \item \texttt{Down}：过孔，上层到下层
+\end{itemize}
+
+可用 Current 图（View Results 面板 CUR 按钮）核对电流流。
+
+\subsection{修复电源 EM 违例}
+\subsubsection*{Fixing Power EM Violations}
+
+违例多因弱 P/G 连接向高功耗区域馈电。典型修复：加宽金属降电流密度；过孔违例增加过孔数；增加供电 strap 降低每 strap 电流；换用上层金属（厚度更大、驱动能力更强）。
+
+可用 What-if 与 Fix and Optimize（第~7~章）编辑/添加 strap 与过孔；增量提取便于快速验证修改。
+
+\figplaceholder{Figure 15-6}{用 FAO 修复 EM 违例}
+
+\section{信号 EM 分析方法}
+\subsection*{Methodology for Signal EM Analysis}
+
+信号 EM 应估计每条信号线（尤其时钟树）的 $I\_{\mathrm{avg}}$、$I\_{\mathrm{rms}}$、$I\_{\mathrm{peak}}$ 并与限值比较。RedHawk 基于单元设计参数估计电流，分析单元内（intra-cell）与单元间（inter-cell）所有信号线。
+
+平均电流由输出负载电容、频率、电源电压与翻转率估计（时钟 pin 翻转率通常为 2.0 或 200\%）：
+\[
+I\_{\mathrm{avg}} = f(\text{电容负载}, \text{频率}, \text{翻转率}, \text{电源电压})
+\]
+信号网通常双向，真实平均很小；RedHawk 计算整流平均电流。
+
+RMS 电流：
+\[
+I\_{\mathrm{rms}} = \sqrt{\frac{\int i(t)^2\,dt}{T\_{\mathrm{clk}}}}
+\]
+默认用多项式轮廓近似充放电电流，亦可选不同多项式波形估计 $I\_{\mathrm{rms}}$ 与 $I\_{\mathrm{peak}}$。电流在距驱动器最近处通常最大。
+
+确定各模式电流后，计算各线段/过孔电流密度并与 EM 限值比较（可依赖线宽、过孔尺寸、温度等）。
+
+\subsection{输入数据要求}
+\subsubsection*{Input Data Requirements}
+
+单元间 EM 与常规静态分析数据准备相同，关键项：
+\begin{itemize}
+  \item DEF 布线网表
+  \item SPEF/DSPF 信号寄生
+  \item 时序（频率、slew、时钟网）
+  \item VCD 或实例翻转率（可选）
+  \item 含 EM 限值的 technology 文件
+\end{itemize}
+
+\subsection{信号 EM 分析设置}
+\subsubsection*{Setup for Signal EM Analysis}
+
+命令文件与静态分析类似；单次运行估计三种电流。GUI 中通过 ElectroMigration Color Map 对话框切换 EM 模式。
+
+\subsubsection{波形规格}
+RMS/峰值电流轮廓可为三角或多项式（默认多项式）：
+\begin{lstlisting}
+EM_WAVEFORM_TYPE [polynomial | triangle ]
+\end{lstlisting}
+
+slew 类型（默认 Min）：
+\begin{lstlisting}
+EM_USE_SLEW [ Max | Min | Average]
+\end{lstlisting}
+推荐 \texttt{Min}。
+
+缺失 STA/RC 时可用：
+\begin{lstlisting}
+EM_SLEW_SIG_PERCENTAGE               p1 (default 0.25)
+EM_SLEW_SIG_TIME                     t1 (default 0.8 ns)
+EM_SLEW_CLK_PERCENTAGE               p2 (default 0.1)
+EM_SLEW_CLK_TIME                     t2 (default 0.3 ns)
+\end{lstlisting}
+信号网 slew $= \min(p\_1 \times T\_{\mathrm{clk}}, t\_1)$；时钟网 $= \min(p\_2 \times T\_{\mathrm{clk}}, t\_2)$。
+
+设 \texttt{TOGGLE\_RATE <signal TR> <clock TR>} 为缺省翻转率。
+
+\subsubsection{导线合并}
+RedHawk 合并重叠信号线（有 45° 线时默认禁用）。无法合并的重叠网被丢弃，报告于 \texttt{adsRpt/SignalEM/topcell.droppedSignalNets}。可用 \texttt{MERGE\_WIRE 1} 强制合并。
+
+\subsubsection{EM 限值}
+峰值 EM 可含 duty ratio：\texttt{EM\_USE\_DUTY\_RATIO 1}。
+
+可设独立 tech 文件：
+\begin{lstlisting}
+EM_TECH_RMS <tech_file_nameA>
+EM_TECH_DC <tech_file_nameB>
+EM_TECH_PEAK <tech_file_nameC>
+\end{lstlisting}
+
+三种可接受格式（仅 EM 数据）：
+\begin{lstlisting}
+metal <metal_layer> { EM <limit_value> }
+metal <metal_layer> {
+    WIDTH_BASED_EM {
+        width { <width1> <width2> ... <widthN>}
+        em { <limit_width1> ... <limit_widthN+1>}
+    }
+}
+via <via_name> { EM <limit_value> }
+\end{lstlisting}
+
+专用 EM tech 文件仅含限值；电阻率、厚度、\texttt{EM\_adjust} 等仍在主 tech 文件。某模式无过孔信息则该模式不检查过孔 EM。
+
+无驱动或无物理连接的网被丢弃并报错，列表见 \texttt{adsRpt/SignalEM/<top\_cell>.droppedSignalNets}。
+
+\subsubsection{自定义电流文件}
+\begin{lstlisting}
+EM_CUSTOM_CURRENT_FILE <filename>
+\end{lstlisting}
+格式：
+\begin{lstlisting}
+<net_name> INST <inst_name> <pin_name> <avg> <rms> <peak>
+<net_name> CELL <cell_name> <pin_name> <avg> <rms> <peak>
+\end{lstlisting}
+未设电流类型填 \texttt{-1}。示例：
+\begin{lstlisting}
+net1 INST ANA1 VREGO -1 -1 1e-3
+net2 INST ANA1 SIGPIN -1 -1 2e-3
+\end{lstlisting}
+\texttt{EM\_CCF\_ONLY 1} 时仅分析文件中列出的网。
+
+\subsubsection{层次化分析}
+\begin{lstlisting}
+SEM_HIERARCHICAL_MODE [ 0 | top_only | internal_only ]
+\end{lstlisting}
+仅分析顶层与块间接口网，降低内存与时间。
+
+\subsection{运行信号 EM 分析}
+\subsubsection*{Running Signal EM Analysis}
+
+统一引擎支持电源与信号 EM，特性包括：RMS/峰值考虑 RC 负载；\texttt{SEM\_NET\_INFO} 可加 pin 电容；峰值按饱和电流调整；缺省 slew/翻转率/pin 电容；改进导线合并；波形估计；主输出网可用 Ceff（\texttt{EM\_NET\_INFO} 文件）。
+
+命令流程：
+\begin{lstlisting}
+setup analysis_mode signalEM
+import gsr <gsr_file_name>
+setup design
+perform pwrcalc
+perform extraction -signal
+perform analysis -signalEM
+perform emcheck <options>
+\end{lstlisting}
+
+\begin{noteBox}
+信号 EM 须首先 \texttt{setup analysis\_mode signalEM}（与电源 EM 不同）。仅时钟或仅信号提取：
+\begin{lstlisting}
+perform extraction -signal -exclude_clock   # 仅信号
+perform extraction -clock                   # 仅时钟
+\end{lstlisting}
+\end{noteBox}
+
+\subsection{信号 EM 中的 RedHawk GUI}
+\subsubsection*{Using the RedHawk GUI in Signal EM}
+
+\begin{itemize}
+  \item 点击金属线查看双向 RMS/Peak/Avg 电流
+  \item \texttt{gsr get EM\_MODE} / \texttt{gsr set EM\_MODE [ rms | avg | peak ]}
+  \item View $\rightarrow$ Nets 查看网表
+  \item \texttt{select add [get instbynet <netname>]} 高亮实例
+  \item \texttt{select add [get instbynet -driver <netname>] -color red} 高亮驱动
+\end{itemize}
+
+\subsection{定义等电位区}
+\subsubsection*{Defining Equipotential Regions}
+
+在 pad 文件中定义等电位区，将区域内金属表示为单电阻，适用于八角焊盘等特殊形状。P/G 与信号网均支持。PLOC 格式：
+\begin{lstlisting}
+<area_name> <x1> <y1> <x2> <y2> <layer> <net_name>
+\end{lstlisting}
+示例：\texttt{Equi\_pot\_area1 203.840 341.000 323.840 461.055 ZA TEST\_NET}
+
+\subsection{分析结果}
+\subsubsection*{Analyzing Results}
+
+\begin{lstlisting}
+perform emcheck ?-mode [AVG |RMS |PEAK |all ]?
+    ?-net <netname>?
+\end{lstlisting}
+
+可用报告与文件：
+\begin{itemize}
+  \item \texttt{adsRpt/apache.sigem.info}：无负载电容/时序/驱动信息的信号网
+  \item \texttt{adsRpt/redhawk.err}：信号 EM 流程错误
+  \item \texttt{adsRpt/SignalEM/<design>.rms\_em.worst}：最高 1000 条 $J\_{\mathrm{rms}}$ 违例
+  \item \texttt{adsRpt/SignalEM/<design>.avg\_em.worst}：$J\_{\mathrm{avg}}$ 违例
+  \item \texttt{adsRpt/SignalEM/<design>.peak\_em.worst}：$J\_{\mathrm{peak}}$ 违例
+  \item \texttt{adsRpt/SignalEM/<design>\_sem\_toggle\_summary}：按网类型翻转率摘要
+  \item \texttt{adsRpt/SignalEM/<design>\_sem\_layer\_wise\_violation\_summary}：按层违例统计
+\end{itemize}
+
+更多违例用 \texttt{EM\_REPORT\_LINE\_NUMBER}；阈值用 \texttt{EM\_REPORT\_PERCENTAGE}（默认 100，有时需降低才有 \texttt{*em.worst} 条目）。
+
+\subsection{调试技巧}
+\subsubsection*{Debugging Tips}
+
+\begin{itemize}
+  \item 先查 \texttt{adsRpt/apache.err}
+  \item 查 \texttt{adsRpt/SignalEM/<design>.em.warn}
+  \item \texttt{IGNORE\_NETS \{ <netname> ... \}} 排除无关网
+  \item \texttt{ANALYZE\_NETS \{ <net\_name\_1> ... \}} 限定分析网表
+\end{itemize}

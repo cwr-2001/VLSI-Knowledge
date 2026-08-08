@@ -1,0 +1,269 @@
+﻿% 第 18 章 Chip Thermal Modeling and Analysis（原书 18-509 … 18-516）
+\bichapter{芯片热建模与分析}{Chip Thermal Modeling and Analysis}
+\label{chap:thermal}
+
+\section{引言}
+\subsection*{Introduction}
+
+随着 SiP（System-in-Package）与 3D-IC 方法学的兴起，多层堆叠 die 内部需要特殊的热传递处理。否则，die 温度与漏电流相互作用可能引发热失控，导致意外的芯片失效。多 die SiP 或 3D-IC 设计必须进行电源-热完整性分析。图~\ref{fig:rh-heat-transfer} 展示了典型芯片-封装组合中的热传递机制：芯片上的电能转化为热能，随后通过塑封、基板、焊点与热板传导至外表面，再通过对流与辐射向环境空气耗散。
+
+\figplaceholder{Figure 18-1}{典型封装环境中的热传递机制}
+\label{fig:rh-heat-transfer}
+
+图~\ref{fig:rh-sip-two-die} 为典型 SiP 配置示例，含两个堆叠 die。下层与上层芯片间距较近，对散热能力的要求高于单芯片封装。片上功耗升高自然导致 die 温度升高；但结温不能安全超过 120\,°C。因此，理解实际片上功耗对判断热设计是否可行至关重要。此外，片上功耗具有温度依赖性，使精确的功耗与温度分析密不可分。
+
+\figplaceholder{Figure 18-2}{带 spacer 的双 die 堆叠 SiP 配置}
+\label{fig:rh-sip-two-die}
+
+对于 28\,nm 及以下工艺节点的设计，分析与管理漏电流已成为实现高性能芯片设计的关键挑战之一。漏电流对温度具有强烈（指数）依赖。因此，要准确分析各 instance 的漏电流，设计者必须考虑由功耗分布不均引起的芯片温度变化。局部芯片温度还会影响金属电阻率、互连自热、电迁移与设计中的压降。图~\ref{fig:rh-power-thermal-loop} 为电源-热分析循环示例；本例中总功耗与最高温度变化可超过 20\%。
+
+\figplaceholder{Figure 18-3}{左：漏电流随温度的指数增长；右：达到最终平衡温度与漏电流功耗所需的电源-热分析循环}
+\label{fig:rh-power-thermal-loop}
+
+Apache 的 Sentinel-TI 温度依赖芯片功耗数据库（CTM 格式），配合详细的板级封装热模型，可生成片上功耗与温度收敛图。Sentinel-TI 紧密集成的 CTM 热分析在功耗与热分布的快速收敛方面提供精度、容量、性能与易用性。Sentinel-TI 包含两步流程，如图~\ref{fig:rh-ctm-flow} 与图~\ref{fig:rh-chip-pkg-thermal} 所示。
+
+第一阶段为 CTM 生成，包括在 RedHawk 中确定片上功耗、温度依赖漏电流功耗，以及每层金属 tile 密度图。第二阶段为在 Sentinel-TI 中使用 CTM 执行的独立热分析。Sentinel-TI 支持多芯片封装配置，可使用或不使用各芯片的 CTM。各芯片上收敛的温度分布支持全芯片集成电源-热分析。
+
+\figplaceholder{Figure 18-4}{基于 CTM 的 Sentinel-TI 热分析任务流程}
+\label{fig:rh-ctm-flow}
+
+\figplaceholder{Figure 18-5}{芯片-封装热分析方法学}
+\label{fig:rh-chip-pkg-thermal}
+
+\section{基于 CTM 的热分析流程概述}
+\subsection*{CTM-Based Thermal Analysis Flow Overview}
+
+运行基于 CTM 的热分析的关键步骤如下：
+\begin{enumerate}
+  \item 使用 RedHawk 为各芯片生成 CTM（由芯片设计者完成）
+  \begin{enumerate}
+    \item 使用 Apache Power Library（APL）生成温度依赖漏电流库，并可选择生成每层金属 tile 密度图。
+    \item 准备设计数据与输入文件：
+    \begin{itemize}
+      \item IC 工艺的 technology 文件（\texttt{*.tech}）数据
+      \item pad cell 名、pad instance 名或 pad 位置文件
+      \item 全局系统需求（GSR）文件（含 tech 文件、pad 文件、STA 文件、LEF、DEF 与 LIB 等所需数据）
+    \end{itemize}
+    \item 导入 GSR 文件中定义的设计数据。
+    \item 在 RedHawk 中执行 \cmd{perform thermalmodel -layer}，生成可移植的功耗/温度库。
+    \item 以下各节将更详细描述这些步骤。
+  \end{enumerate}
+  \item 使用 Sentinel-TI 对各芯片 CTM 进行 SiP 热分析（由封装设计者完成）
+  \begin{enumerate}
+    \item 为 SiP 或 3D-IC 封装生成有限元热模型。
+    \item 设置封装模型文件与 CTM 库路径。
+    \item 在分析模型内迭代片上温度/功耗分析，直至温度与功耗收敛。
+    \item 报告/显示各芯片收敛的温度/功耗分布。
+    \item 导出片上温度图，供 RedHawk 进一步评估芯片性能（例如 EM）。
+    \item 有关 Sentinel-TI 热数据准备与分析的详情，请参阅 SiP Chip-Package Thermal Analysis Application Note。
+  \end{enumerate}
+\end{enumerate}
+
+\section{CTM 生成的数据准备}
+\subsection*{Data Preparation for CTM Generation}
+
+\subsection{APL 库表征}
+\subsubsection*{APL Library Characterization}
+
+由于漏电流高度依赖温度，芯片漏电流功耗计算必须考虑局部芯片温度。APL 工具 \cmd{apldi -leak} 对温度依赖漏电流进行表征，以支持高效功耗计算。
+
+要开始 APL 表征，在 RedHawk 中对设计执行 \cmd{setup apl} 命令，与任何设计相关的 APL 表征类似。通常涉及的步骤为：
+\begin{lstlisting}
+setup design <gsr_filename>
+setup apl # in dir APL
+\end{lstlisting}
+
+在目录 \texttt{APL} 中，RedHawk 创建三个文件：\texttt{<APL config template file>}、\texttt{.apache/adsLib.output} 与 \texttt{.apache/apache.apl}，供后续 APL 表征使用。
+
+\subsubsection{APLDI Leak}
+\subsubsection*{APLDI Leak}
+
+\cmd{apldi -leak} 程序用于标准单元的温度依赖漏电流表征。应在包含上述 \texttt{.apache} 目录（含 \texttt{apache.apl} 与 \texttt{adsLib.output}）的同一目录中运行。
+
+配置文件设置与典型 APL 运行相同，但温度设置使用 APL 配置文件关键字 \kw{SWEEP TEMPERATURE}，用于指定表征的单元温度。由于 \cmd{apldi -leak} 支持多温度表征，\kw{SWEEP TEMPERATURE} 可指定多个温度。建议在预期温度范围内至少对五个温度点进行表征。
+
+\begin{noteBox}
+400 个单元在五个温度下表征，在 3\,GHz Linux32 机器上约需 6 小时。
+\end{noteBox}
+
+\kw{SWEEP TEMPERATURE} 配置文件关键字用法如下：
+\begin{lstlisting}
+# Syntax:
+SWEEP TEMPERATURE <temp1> <temp2> ... <tempN>
+# Example for 5 temperature points:
+SWEEP TEMPERATURE 25 55 80 105 120
+\end{lstlisting}
+
+其他配置设置请参阅第~9~章「Characterization Using Apache Power Library」。\cmd{apldi -leak} 语法如下：
+\begin{lstlisting}
+apldi -leak <config_file>][-c][-d][-log][-l <list_file>]
+     [-v]
+\end{lstlisting}
+其中：
+\begin{itemize}
+  \item \texttt{<config\_file>}：指定输入控制文件
+  \item \opt{-c}：运行 intrinsic decap 与漏电流表征
+  \item \opt{-d}：调试模式
+  \item \opt{-log}：将输出消息重定向到日志文件
+  \item \opt{-l} \texttt{<list\_file>}：指定包含单元列表的文件
+  \item \opt{-v}：详细打印消息（verbose 模式）
+\end{itemize}
+
+示例：
+\begin{lstlisting}
+apldi -leak apl_std.conf -l std_cell.list
+\end{lstlisting}
+
+输出文件名为 \texttt{cell.leak}。对于存储器单元，可使用 AVM 程序生成温度依赖漏电流（见下文 AVM 一节）。
+
+\subsubsection{APLLEAKMERGE}
+\subsubsection*{APLLEAKMERGE}
+
+若生成多个 \texttt{*.leak} 文件，可使用 \cmd{aplleakmerge} 合并。语法如下：
+\begin{lstlisting}
+aplleakmerge [-d][-v][-o <out_file>] <file1> <[file2 [file3 [...]]]
+     –fl <list_filename>
+\end{lstlisting}
+其中：
+\begin{itemize}
+  \item \opt{-d}：调试模式
+  \item \opt{-v}：详细打印消息（verbose 模式）
+  \item \opt{-o} \texttt{<out\_file>}：输出文件
+  \item \texttt{<file[1,2,3, ...]>}：指定待合并文件
+  \item \opt{–fl} \texttt{<list\_filename>}：指定包含所有待合并 leak 文件列表的文件
+\end{itemize}
+
+示例：
+\begin{lstlisting}
+aplleakmerge file1 file2 *.leak -o cell.leak
+\end{lstlisting}
+
+\subsubsection{AVM}
+\subsubsection*{AVM}
+
+AVM 是基于 datasheet 的程序，便于存储器表征。由于 \cmd{avm} 不运行存储器仿真，模型可较快获得。AVM 还支持温度依赖漏电流：使用 \opt{-t} 选项并后跟参考 \texttt{*.leak} 文件。该 \texttt{*.leak} 文件可来自使用 \cmd{apldi -leak} 的标准单元表征输出。温度依赖漏电流数据用作 \cmd{avm} 的温度降额因子。例如，若对五个相似单元在四个温度点仿真，则使用不同温度下的平均漏电流获得缩放用的降额因子。\cmd{avm} 调用语法为：
+\begin{lstlisting}
+avm <config_file> [-c][-t <ref_leakage_file>]
+\end{lstlisting}
+其中：
+\begin{itemize}
+  \item \texttt{<config\_file>}：指定输入控制文件
+  \item \opt{-c}：将所有 cell 名改为大写
+  \item \opt{-t} \texttt{<ref\_leakage\_file>}：指定温度降额因子的参考文件
+\end{itemize}
+
+示例：
+\begin{lstlisting}
+avm avm.conf -t cell.leak
+\end{lstlisting}
+
+\subsection{GSR 关键字设置}
+\subsubsection*{GSR Keyword Settings}
+
+GSR 文件准备与标准 RedHawk 芯片分析基本相同。本节讨论 CTM 生成所需的若干附加设置。
+
+\subsubsection{APL\_FILES}
+\subsubsection*{APL\_FILES}
+
+导入 APL 表征文件或目录。温度分析与漏电流表征须使用选项 \texttt{leakage} 或 \texttt{leak}。
+\begin{lstlisting}
+# Syntax:
+APL_FILES {
+     <file/directory> ?leakage?
+     ...
+}
+# Example:
+APL_FILES {
+    qcell_file.leak leak
+    cell_leak_dir leakage
+}
+\end{lstlisting}
+
+\subsubsection{POWER\_MODE}
+\subsubsection*{POWER\_MODE}
+
+定义内部功耗与漏电流功耗计算的来源。CTM 生成时，若在 \gsr{APL_FILES} 中包含单元漏电流文件，则使用温度依赖漏电流。
+\begin{lstlisting}
+# Syntax:
+POWER_MODE [ APL | LIB | MIXED ]
+\end{lstlisting}
+其中：
+\begin{itemize}
+  \item \texttt{APL}：使用 APL/AVM 表征的漏电流与功耗进行功耗计算
+  \item \texttt{LIB}：使用 \texttt{.lib} 数据进行功耗计算
+  \item \texttt{MIXED}：若 \texttt{.lib} 含内部功耗则使用 \texttt{.lib}，否则使用 APL 数据
+\end{itemize}
+
+示例：
+\begin{lstlisting}
+POWER_MODE APL
+\end{lstlisting}
+
+\subsubsection{THERMAL\_MODEL}
+\subsubsection*{THERMAL\_MODEL}
+
+设置后启用 CTM 生成与温度依赖功耗计算。
+\begin{itemize}
+  \item 若指定 \texttt{THERMAL\_MODEL 1}，仅 \texttt{cell.leakage} 数据覆盖的单元以温度依赖漏电流更新。
+  \item 若指定 \texttt{THERMAL\_MODEL 2}，除包含在设置 ``1'' 中的步骤外，\texttt{cell.leakage} 未覆盖的单元使用已覆盖单元的漏电流-温度缩放因子进行温度依赖漏电流更新——即具有 \texttt{<cell>.cdev} 文件的单元。
+  \item 若指定 \texttt{THERMAL\_MODEL 3}，单元更新方式与设置 ``2'' 相同，但基准漏电流功耗始终从 LIB/CDEV 计算。
+  \item 若未设置 \gsr{THERMAL_MODEL}，或设为 0（默认），则不执行热建模。但若指定了 \gsr{THERMAL_PROFILE} 关键字且未设置 \gsr{THERMAL_MODEL}，则默认设为 1。
+\end{itemize}
+
+语法：
+\begin{lstlisting}
+THERMAL_MODEL [1 | 2| 3| 0]
+\end{lstlisting}
+
+\subsubsection{THERMAL\_PROFILE}
+\subsubsection*{THERMAL\_PROFILE}
+
+在 \gsr{THERMAL_MODEL} 设为 1、2 或 3 且运行 \cmd{perform pwrcalc} 命令时，指定本关键字将生成指定的芯片热模型文件供热分析使用；该文件将热分布中的 tile 与 layer 温度映射到设计中的 instance，格式如下：
+\begin{lstlisting}
+<inst name> <Tavg_C> <Tmax_C> <Tmin_C>
+\end{lstlisting}
+
+若 instance 位于 \texttt{<thermal\_profile\_file>} 定义的网格交集内，则使用交集网格的最高温度。可选；默认：无。
+\begin{lstlisting}
+# Syntax:
+THERMAL_PROFILE {
+       FILE <thermal_profile_file>
+}
+\end{lstlisting}
+其中 \texttt{<thermal\_profile\_file>} 来自 Sentinel-TI 封装建模。
+
+\section{CTM 生成}
+\subsection*{CTM Generation}
+
+完成数据准备、表征并设置正确关键字后，使用以下 RedHawk TCL 命令生成 CTM：
+\begin{lstlisting}
+import gsr <file>
+setup design
+perform thermalmodel -layer ?-self_heat? ?-inst?
+?-die ? ?-d <Thermal dir> ? ? -ctmfilecheck ?
+\end{lstlisting}
+其中：
+\begin{itemize}
+  \item \opt{-layer}：（必需）生成 layer 金属分布，供 Sentinel-TI 芯片热建模使用
+  \item \opt{-self_heat}：除器件层总功耗外，还生成各 layer 的自热功耗，供 Sentinel-TI 基于 CTM 的热分析使用。自热数据默认仅针对电源网络。
+  \item \opt{--inst}：生成 \texttt{ins\_power\_loc} 文件，提供 instance 名、范围与功耗，供 Sentinel-TI 热点查询使用。
+  \item \opt{-die}：为 3D-IC 配置指定 die 名。
+  \item \opt{-d}：在 thermal 目录生成 \texttt{<Thermal dir>.tar.gz} 文件。若未指定 \opt{-d} \texttt{<Thermal dir>}，除 \texttt{adsThermal} 目录外还会生成 \texttt{adsThermal.tar.gz}。
+  \item \opt{-ctmfilecheck}：生成文本格式 CTM 文件 \texttt{adsThermal/chip.ctm.txt}
+\end{itemize}
+
+生成的 CTM 是一组供 Sentinel-TI 芯片热分析使用的文件。指定 \opt{–layer} 时，包含头文件（文本）、leakage 文件中各温度点对应的 \texttt{power\_T[x].ctm} 文件（二进制）、芯片各层金属分布的 \texttt{metal\_density.ctm}（二进制）。若指定 \opt{–self_heat}，还会生成 \texttt{SH\_T[1].ctm} 与 \texttt{SH\_T[<last>].ctm}（二进制）。
+
+\texttt{CTM\_header.txt} 文件的内容与格式如下：
+\begin{lstlisting}
+# version 2.0
+LAYER <num_layers> <layer1> <L1_thick_um> <layer2> <L2_thick_um> ...
+    // bottom to top
+DIE <die x_ll> <die y_ll> <die x_ur> <die y_ur>
+    // die outline in RedHawk (>110% enlarged)
+TEMP <T1> <T2> <T3> <T4> <T5> // five temperature points of interest
+TILE <nx> <ny> // number of tiles in x direction and y direction
+RESOLUTION <size of tile in um> // 10.000 for 10um
+DIE_ORIG <die x_ll> <die y_ll> <die x_ur> <die y_ur>
+    // metal range in RDL
+\end{lstlisting}

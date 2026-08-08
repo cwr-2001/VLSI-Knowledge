@@ -1,0 +1,452 @@
+% 第 17 章 Advanced Analysis Techniques
+\bichapter{高级分析技术}{Advanced Analysis Techniques}
+\label{chap:adv}
+
+要了解 PrimeTime 高级时序分析技术，请参阅：
+\begin{itemize}
+  \item 并行弧路径追踪（Parallel Arc Path Tracing）
+  \item 对 Retain 弧的支持（Support for Retain Arcs）
+  \item 异步逻辑分析（Asynchronous Logic Analysis）
+  \item 三态总线分析（Three-State Bus Analysis）
+  \item 数据到数据检查（Data-to-Data Checking）
+  \item 基于锁存器设计中的时间借用（Time Borrowing in Latch-Based Designs）
+  \item 高级锁存器分析（Advanced Latch Analysis）
+\end{itemize}
+
+% ============================================================
+\section{并行弧路径追踪}
+\subsection*{Parallel Arc Path Tracing}
+
+为确保 \cmd{report\_timing} 命令在路径追踪时仅使用每个 sense 集合中并行弧的最差弧，将变量 \cmd{timing\_report\_use\_worst\_parallel\_cell\_arc} 设为 \texttt{true}。路径追踪行为如下所示。
+
+\figplaceholder{Figure 200: Worst arc used for path tracing}{路径追踪使用的最差弧}{fig:adv-worst-arc}
+
+仅返回具有给定上升/下降边沿序列、经逻辑传播时采用最差弧行为的路径。最差弧在最小延迟追踪中为最快弧，在最大延迟追踪中为最慢弧。具有相同边沿方向序列但经其他时序弧组合的子关键路径不会返回。然而，由于不同 sense 的时序弧仍被视为唯一，经非单调门且具有唯一上升/下降边沿序列的不同路径仍会返回。
+
+当 \cmd{-nworst} 值较大时，这可大幅减少返回路径数量，提高分析效率。若未达到 \cmd{-nworst} 限制（例如报告到单一端点的路径），返回的时序路径数量可能较少。若 \cmd{-nworst} 已达上限（例如跨整个路径组报告），返回的路径（直至上限）可能对逻辑有更丰富的拓扑探索，有助于提高报告脚本、瓶颈分析及由 \cmd{timing\_path} 集合驱动的 ECO 脚本的效率。
+
+该特性在指定 \cmd{-nworst} 大于 1 时同时影响 \cmd{report\_timing} 与 \cmd{get\_timing\_paths}。仅同 sense 的并行弧受影响。若并行弧具有不同 sense（例如 XOR 门上的 \texttt{positive\_unate} 与 \texttt{negative\_unate}），它们仍被视为唯一。该特性仅影响报告时的路径追踪行为，不影响 \cmd{update\_timing}。可随时更改变量值而不产生时序更新开销。
+
+% ============================================================
+\section{对 Retain 弧的支持}
+\subsection*{Support for Retain Arcs}
+
+PrimeTime 可从库文件加载 retain 弧、从 SDF 输入标注 retain 弧并报告这些弧。Retain 弧类似于 hold 检查弧，通常用于建模随机存取存储器（RAM）。它们定义在时钟引脚与 RAM 数据输出之间，且始终与父弧（同一对引脚之间的普通/默认延迟弧）并行定义。Retain 弧在时序分析期间不产生实际时序检查，而是作为与父弧并联的另一条延迟弧处理。
+
+时钟到输出的 retain 弧保证 RAM 输出在时钟边沿后特定时间间隔内不改变。当 retain 弧延迟小于父弧时，retain 弧仅出现在最小延迟路径的时序报告中。当 retain 弧延迟大于父弧时，retain 弧也可出现在最大延迟路径报告中，且无错误或警告。
+
+要报告逻辑库中所有时序弧（含 retain 弧），对 \cmd{report\_lib} 使用 \cmd{-timing\_arcs} 选项。使用 \cmd{check\_timing retain} 检查 retain 弧延迟是否大于其父弧。
+
+\cmd{read\_sdf} 支持 retain 弧，但 \cmd{write\_sdf} 的默认行为不支持。要写出 retain 弧，使用 SDF 3.0 格式（非默认 2.1），语法如下：
+\begin{lstlisting}
+pt_shell> write_sdf -version 3.0 file
+\end{lstlisting}
+
+映射弧的保留信息可使用以下函数：
+\begin{itemize}
+  \item \cmd{min\_rise\_retain\_delay}
+  \item \cmd{min\_fall\_retain\_delay}
+  \item \cmd{max\_rise\_retain\_delay}
+  \item \cmd{max\_fall\_retain\_delay}
+\end{itemize}
+
+% ============================================================
+\section{异步逻辑分析}
+\subsection*{Asynchronous Logic Analysis}
+
+为简化含异步逻辑设计的时序验证，将异步逻辑隔离到独立模块，然后禁用这些模块的时序分析。
+
+PrimeTime 不支持不使用全局时钟的自定时异步逻辑。在层次中隔离此类逻辑，并使用全时序门级仿真验证时序与功能。
+
+PrimeTime 可分析满足以下条件的设计：
+\begin{itemize}
+  \item 无组合反馈环；含触发器或锁存器的环可接受（组合反馈环自动断开）
+  \item 无无时钟存储元件（如 RS 锁存器）
+  \item 每个寄存器时钟引脚有单一或多时钟扇入
+  \item 每条路径起止寄存器时钟之间有已知且固定的相位关系（交互时钟须具有所有时钟波形重复的最小公倍周期）
+\end{itemize}
+
+\figplaceholder{Figure 201: Base period of clocks}{时钟基周期}{fig:adv-base-period}
+
+\subsubsection{组合反馈环断开}
+\subsection*{Combinational Feedback Loop Breaking}
+
+组合反馈环是可经组合逻辑回溯到起点的路径。
+
+\figplaceholder{Figure 202: Combinational feedback loop}{组合反馈环}{fig:adv-cfb-loop}
+
+分析此类路径时，PrimeTime 须在环内某点断开环（停止追踪）。用 \cmd{check\_timing -include loops} 检查设计中是否存在组合反馈环。
+
+默认情况下，PrimeTime 识别每个反馈环并禁用环中一条时序弧（例如环内 NAND 门从某输入到某输出的弧）。某些情况下，被禁用弧会打断真实路径导致部分路径无法报告。
+
+以下示例中，无法断开组合环中任一时序弧而不同时打断设计中的有效路径。
+
+\figplaceholder{Figure 203: Loop breaking example}{环断开示例}{fig:adv-loop-break}
+
+弧 \#1 与 \#4 不能断开，否则会打断有效路径 ff1--u2--u1--ff3。弧 \#2 与 \#3 不能断开，否则会打断有效路径 ff2--u1--u2--ff4。
+
+反馈环中可在多处断开。若要在与默认不同的时序弧处断开，运行 \cmd{set\_disable\_timing} 在指定点断开。
+
+Design Compiler 也使用环断开来分析时序。两工具断开位置可能不同，导致时序结果差异。若要保证一致，在 PrimeTime 中将 \cmd{timing\_keep\_loop\_breaking\_disabled\_arcs} 设为 \texttt{true}，则 PrimeTime 继承 Design Compiler 生成的 \texttt{.ddc} 或 \texttt{.db} 中的环断开选择。默认该变量为 \texttt{false}；更改后需时序更新才能看到效果。
+
+\cmd{report\_disable\_timing} 生成的报告区分 PrimeTime 禁用的弧与从 \texttt{.ddc}/\texttt{.db} 继承的弧。
+
+\subsubsection{无关时钟}
+\subsection*{Unrelated Clocks}
+
+有时设计存在无关时钟之间的路径。无关时钟频率不同且无合理基周期。PrimeTime 仍会尝试找基周期与相位关系，通常无实用价值。
+
+\figplaceholder{Figure 204: Unrelated clock waveforms}{无关时钟波形}{fig:adv-unrelated-clk}
+
+时钟无法展开到合理基周期，得到的建立时间要求往往过严。此时可用动态仿真而非 PrimeTime 验证时序。
+
+要从静态时序分析中排除异步路径以改善运行时间并避免虚假违例：
+\begin{lstlisting}
+pt_shell> set_false_path -from [get_clocks clk40] \
+          -to [get_clocks clk41]
+\end{lstlisting}
+
+若已知无关时钟间寄存器组合逻辑所需的最小/最大路径延迟，可对该路径用 \cmd{set\_max\_delay} 与 \cmd{set\_min\_delay} 指定约束。
+
+% ============================================================
+\section{三态总线分析}
+\subsection*{Three-State Bus Analysis}
+
+默认情况下，PrimeTime 检查三态总线设计中的建立与保持违例，检查到寄存器的最差延迟路径，确保锁存信号稳定且非未知（X）值，从而正确检查瞬态总线争用与瞬态浮空总线条件。
+
+PrimeTime 认为三态单元上的禁用转换可在输出引起逻辑 1 或 0 延迟。默认考虑库中定义的 \texttt{three\_state\_disable} 与 \texttt{three\_state\_enable} 弧进行路径追踪。虽不同于传播 X，对静态时序的效果与传播 X 相同。
+
+\subsubsection{检查的限制}
+\subsection*{Limitations of the Checks}
+
+三态总线检查存在以下限制：
+\begin{itemize}
+  \item PrimeTime 检查因总线争用或浮空引起的建立/保持错误可能性，不检查争用或浮空的逻辑与功耗违例
+  \item 分析偏悲观；部分报告违例可能因状态依赖永不发生
+  \item 部分仿真器中 Z 在电荷衰减时间后才传播为 X；PrimeTime 不建模该效应，用门延迟方程传播 Z 与 X，可能比某些仿真器更悲观
+\end{itemize}
+
+\subsubsection{禁用检查}
+\subsection*{Disabling the Checks}
+
+若确认设计中不会发生总线争用或浮空，将以下变量设为 \texttt{true} 以禁用检查：
+\begin{description}
+  \item[\cmd{timing\_disable\_bus\_contention\_check}] 设为 \texttt{true} 时，禁用沿 \texttt{three\_state\_disable} 弧的最大延迟传播及沿 \texttt{three\_state\_enable} 弧的最小延迟传播。这些检查仅在瞬态总线争用期间有效。默认 \texttt{false}。
+  \item[\cmd{timing\_disable\_floating\_bus\_check}] 设为 \texttt{true} 时，禁用沿 \texttt{three\_state\_disable} 弧的最小延迟传播及沿 \texttt{three\_state\_enable} 弧的最大延迟传播。这些检查仅在浮空总线条件下有效。默认 \texttt{false}。
+\end{description}
+
+\subsubsection{总线争用}
+\subsection*{Bus Contention}
+
+部分设计依赖多个三态驱动器控制的总线。多数设计中，稳态下（三态使能在各时钟周期达到稳态值时）不会有两个输出逻辑不同的驱动器同时使能。多驱动器驱动同一总线称为总线争用。
+
+虽可设计电路使稳态无争用，仍可能存在瞬态争用：总线控制从一驱动器切换到另一驱动器的短暂时段内，若争用驱动器施加冲突逻辑值，总线逻辑值为未知（X）。静态时序分析中，建立检查确保该 X 值（在瞬态争用期间假定）不被锁存；建立检查从总线稳定时刻量起。
+
+\subsubsection{浮空总线}
+\subsection*{Floating Buses}
+
+三态总线配置可能出现浮空：无驱动器使能时总线立即为未知（X）。静态时序分析中，保持检查确保切换到浮空模式时假定的 X 不被锁存；保持检查量至总线开始浮空的时刻。
+
+\subsubsection{三态缓冲器}
+\subsection*{Three-State Buffers}
+
+库中用两种时序弧类型描述三态缓冲器行为：
+\begin{itemize}
+  \item \textbf{\texttt{three\_state\_disable}}：三态引脚从高/低态到高阻态所需时间
+  \item \textbf{\texttt{three\_state\_enable}}：三态引脚从高阻态到高/低态所需时间
+\end{itemize}
+
+\subsubsection{执行瞬态总线争用检查}
+\subsection*{Performing Transient Bus Contention Checks}
+
+\figplaceholder{Figure 205: Circuit example}{电路示例}{fig:adv-ts-circuit}
+\figplaceholder{Figure 206: Transient bus contention check}{瞬态总线争用检查}{fig:adv-ts-contention}
+
+图 205 中，若 EN1 在 EN2 之后关断，可能存在短暂争用。信号在争用结束、新总线值沿路径传播前为 X。若 I1=0、I2=1，波形如图 206。
+
+FF4/CP 的建立违例仅当考虑 \texttt{three\_state\_disable} 弧延迟时出现。到 Z 态的转换须作为可能到逻辑 0 或 1 的转换传播。保持违例仅当考虑 \texttt{three\_state\_enable} 弧延迟时出现。
+
+争用区域由任一侧总线驱动器最小 \texttt{three\_state\_enable} 弧延迟与另一侧最大 \texttt{three\_state\_disable} 弧延迟界定。若确认此类区域不会发生，将 \cmd{timing\_disable\_bus\_contention\_check} 设为 \texttt{true}，PrimeTime 在保持检查中忽略 \texttt{three\_state\_enable} 弧延迟，在建立检查中忽略 \texttt{three\_state\_disable} 弧延迟。即使设为 \texttt{true}，浮空总线区域仍考虑 \texttt{three\_state\_enable} 用于建立、\texttt{three\_state\_disable} 用于保持（见“执行浮空总线检查”）。
+
+\subsubsection{执行浮空总线检查}
+\subsection*{Performing Floating Bus Checks}
+
+浮空总线指总线处于有效逻辑值后开始浮空。时序分析确保浮空不会将 X 传播到寄存器数据引脚，直至保持检查之后。PrimeTime 对建立/保持关系与其他数据信号相同假定。
+
+\figplaceholder{Figure 207: Floating bus contention check}{浮空总线检查}{fig:adv-float-bus}
+
+图 207 中，FF4/CP 的保持违例仅当考虑 \texttt{three\_state\_disable} 弧延迟时出现；建立违例仅当考虑 \texttt{three\_state\_enable} 弧延迟时出现。
+
+默认情况下 PrimeTime 检查浮空区域引起的所有建立/保持违例。浮空区域由任一侧最小 \texttt{three\_state\_disable} 与另一侧最大 \texttt{three\_state\_enable} 界定。PrimeTime 忽略电荷衰减（假定总线浮空时逻辑值立即变为 X）。
+
+若确认浮空区域不会发生，将 \cmd{timing\_disable\_floating\_bus\_check} 设为 \texttt{true}。即使设为 \texttt{true}，争用区域仍考虑 \texttt{three\_state\_enable} 用于建立、\texttt{three\_state\_disable} 用于保持。
+
+% ============================================================
+\section{数据到数据检查}
+\subsection*{Data-to-Data Checking}
+
+PrimeTime 可在任意两个引脚之间对两条均非时钟的数据信号执行建立与保持检查。适用于：
+\begin{itemize}
+  \item 握手接口逻辑约束
+  \item 异步或自定时电路接口约束
+  \item 难以用 \cmd{create\_clock} 指定的非常规时钟波形信号约束
+  \item 总线间 skew 约束
+  \item 异步 preset/clear 输入引脚间的 recovery/removal 约束
+\end{itemize}
+
+两条数据（非时钟）信号之间的时序约束称为\textbf{非顺序约束}。可用 \cmd{set\_data\_check} 定义，或在 Library Compiler 中为单元设置非顺序约束。仅在上述情形使用数据检查；不可替代标准顺序检查。
+
+\subsubsection{数据检查示例}
+\subsection*{Data Check Examples}
+
+\figplaceholder{Figure 208: Simple data check example}{简单数据检查示例}{fig:adv-dchk-simple}
+
+单元有两个数据输入 D1、D2。D2 上升沿可能是锁存 D1 的有效边沿。D1 为\textbf{被约束引脚}，D2 为\textbf{相关引脚}。顺序检查中 D2 视为时钟引脚；但有时宜将 D2 视为数据信号而非时钟。
+
+D1 须在有效边沿前稳定一定建立时间，有效边沿后稳定一定保持时间。若库单元未定义非顺序约束，可在 PrimeTime 中定义：
+\begin{lstlisting}
+pt_shell> set_data_check -rise_from D2 -to D1 -setup 3.5
+pt_shell> set_data_check -rise_from D2 -to D1 -hold 6.0
+\end{lstlisting}
+
+“from” 为相关引脚，“to” 为被约束引脚。若对相关引脚上升沿与下降沿均适用，用 \cmd{-from} 代替 \cmd{-rise\_from}/\cmd{-fall\_from}：
+\begin{lstlisting}
+pt_shell> set_data_check -from D2 -to D1 -setup 3.5
+pt_shell> set_data_check -from D2 -to D1 -hold 6.0
+\end{lstlisting}
+
+\figplaceholder{Figure 209: Data checks on rising and falling edges}{上升/下降沿数据检查}{fig:adv-dchk-rf}
+
+通过仅指定上升沿建立检查与下降沿保持检查可定义 no-change 数据检查：
+\begin{lstlisting}
+pt_shell> set_data_check -rise_from D2 -to D1 -setup 3.5
+pt_shell> set_data_check -fall_from D2 -to D1 -hold 3.0
+\end{lstlisting}
+
+PrimeTime 将其解释为正向脉冲上的 no-change 检查。
+
+\figplaceholder{Figure 210: No-change data check}{No-change 数据检查}{fig:adv-dchk-nc}
+
+数据检查为非顺序，\textbf{不会打断时序路径}。图 211 中 D1 与 D2 之间的数据检查不中断虚线箭头所示路径。若将 D2 定义为时钟，检查变为顺序，路径在 D1 处终止。
+
+\figplaceholder{Figure 211: Timing paths not broken by data checks}{数据检查不打断时序路径}{fig:adv-dchk-paths}
+
+可将数据检查引脚指定为 \cmd{report\_timing} 的路径端点；PrimeTime 报告适用于该引脚的数据检查。图 211 电路中，\cmd{report\_timing -to dchk/D1} 生成数据检查报告，\cmd{report\_timing -through dchk/D1} 报告经该引脚的标准路径时序。
+
+用 \cmd{remove\_data\_check} 移除 \cmd{set\_data\_check} 设置的数据检查。
+
+\subsubsection{数据检查与时钟域}
+\subsection*{Data Checks and Clock Domains}
+
+被约束引脚或相关引脚上的信号可来自不同时钟域。PrimeTime 分别检查信号路径并归入不同时钟组，与标准顺序检查相同。
+
+若相关引脚有多时钟域信号，可用 \cmd{set\_data\_check} 的 \cmd{-clock clock\_name} 指定分析所用时钟域，或禁用除目标时钟外的所有时钟。
+
+\subsubsection{基于库的数据检查}
+\subsection*{Library-Based Data Checks}
+
+若库单元定义了非顺序时序约束且相关引脚信号在 PrimeTime 中未定义为时钟，PrimeTime 执行数据检查。若定义为时钟，非顺序检查转为顺序检查，该时钟信号可继续传播。若存在从相关引脚出发的组合弧（如集成时钟门控单元），时钟可沿该弧继续传播。
+
+在 Library Compiler 中通过指定相关引脚并为被约束引脚分配以下 \texttt{timing\_type} 属性定义非顺序约束：
+\begin{itemize}
+  \item \texttt{non\_seq\_setup\_rising}、\texttt{non\_seq\_setup\_falling}
+  \item \texttt{non\_seq\_hold\_rising}、\texttt{non\_seq\_hold\_falling}
+\end{itemize}
+
+库中定义非顺序约束比 \cmd{set\_data\_check} 更准确，因建立/保持时间可对被约束引脚与相关引脚 slew 敏感；\cmd{set\_data\_check} 对 slew 不敏感。
+
+对库中定义的数据检查，用 \cmd{set\_data\_check ... -clock clock\_name} 指定相关引脚时钟域。\cmd{remove\_data\_check} 不移除库中定义的数据检查。
+
+% ============================================================
+\section{基于锁存器设计中的时间借用}
+\subsection*{Time Borrowing in Latch-Based Designs}
+
+电平敏感锁存器给静态时序分析带来特殊挑战。\textbf{时间借用}（亦称 cycle stealing）使锁存器设计相对触发器设计有优势：电平敏感锁存器在门控输入有效期间透明，可放宽同步设计边到边的时序要求，但因多相时钟与缺乏“硬”时钟边沿而更难控制时序。
+
+\subsubsection{从逻辑级借用时间}
+\subsection*{Borrowing Time From Logic Stages}
+
+在电平敏感锁存器设计中，路径可利用锁存器在门控有效期间的透明性从下一级逻辑“借”时间。图 212 为简单两相时钟方案下的锁存器级。
+
+\figplaceholder{Figure 212: Latch-based timing paths}{基于锁存器的时序路径}{fig:adv-latch-paths}
+
+电平敏感锁存器设计允许组合路径延迟超过可用周期时间，若后续锁存器到锁存器级有更短路径补偿。两相设计中，锁存器到锁存器路径可用时间为半个时钟周期。
+
+图 212 中 U1、U2、U3 为正电平敏感锁存器（G=1 有效），P1、P2 为组合逻辑。暂设库建立时间为 0、透明模式 D 到 Q 延迟为 0。对正电平敏感锁存器，PrimeTime 以上升沿（opening edge）为参考边沿。
+
+P1=8.92、P2=0.77。U2 处数据在 phi2 上升沿后到达，看似违例；但 U2 透明 5\,ns 且 P2 更短，P1 可从 U2--U3 路径借 slack 3.92\,ns。故 P1+P2=9.69 $<$ U3 要求时间 10.00。
+
+\subsubsection{锁存器时序报告}
+\subsection*{Latch Timing Reports}
+
+若数据在端点锁存器 opening 边沿之前到达，PrimeTime 与触发器一样建模：opening 边沿捕获数据，同一边沿在下一路径起点启动数据。
+
+若数据在锁存器透明期间（opening 与 closing 之间）到达，PrimeTime 将下一级建模为从锁存器数据引脚而非时钟引脚启动；无时序违例，slack 视为零。该级借用的時間成为下一级出发时间（受“最大借用时间调整”约束）。数据在 closing 之后到达则为违例。
+
+\figplaceholder{Figure 213: Latch-based timing path slack calculation}{锁存器路径 slack 计算}{fig:adv-latch-slack}
+
+图 213 说明 PrimeTime 如何对 P1 不同组合延迟计算并报告 slack（未考虑锁存器建立时间、latency、uncertainty 与 CRPR）。
+
+\cmd{report\_timing} 报告透明锁存器路径时包含 “time borrowed from endpoint” 与 “time given to startpoint”，与图 212 对应。
+
+\subsubsection{最大借用时间调整}
+\subsection*{Maximum Borrow Time Adjustments}
+
+端点锁存器可借用的最大时间基于 \cmd{create\_clock} 定义的时钟脉冲宽度（opening 到 closing）减去锁存器库建立时间（图 214）。
+
+\figplaceholder{Figure 214--217}{最大借用时间调整（建立、latency、uncertainty、CRPR）}{fig:adv-borrow-adj}
+
+为更准确，PrimeTime 进一步根据时钟 latency、uncertainty 与时钟重汇聚悲观移除（CRPR）调整。Latency 可由 \cmd{set\_clock\_latency} 定义或由传播延迟计算（\cmd{set\_propagated\_clock}）。上升/下降沿 latency 不同会影响脉冲宽度与最大借用时间。
+
+Uncertainty 由 \cmd{set\_clock\_uncertainty} 定义；建立检查考虑捕获时钟边沿最早可能到达。上升/下降 uncertainty 差异影响脉冲宽度与最大借用时间。
+
+将 \cmd{timing\_remove\_clock\_reconvergence\_pessimism} 设为 \texttt{true} 启用 CRPR。CRPR 像 uncertainty 一样移动时钟边沿时间，但方向相反（使分析更少悲观）。上升/下降 CRPR 差异影响脉冲宽度与最大借用时间。
+
+计算最大允许借用时间时，PrimeTime 从脉冲宽度出发，再按 latency 差、uncertainty 差、CRPR 差与端点库建立时间调整。\cmd{report\_timing} 在 Time Borrowing Information 段报告各项。
+
+\subsubsection{借用时间与给予时间}
+\subsection*{Time Borrowed and Time Given}
+
+PrimeTime 根据 opening 时钟边沿到达时间计算借用量，先按路径相关 uncertainty 与 CRPR 调整 opening 边沿到达时间，再与数据引脚到达时间比较确定端点借用量。
+
+若 opening 边沿存在 uncertainty 与 CRPR，端点借用量与下一级起点给予时间可能不同。确定给予时间时 PrimeTime 减去 uncertainty 与 CRPR 调整，使透明模式下下一级在数据到达数据引脚时刻启动（图 218）。\cmd{timing\_early\_launch\_at\_borrowing\_latches} 禁用时，数据到达与启动时间因故意对下一级施加较晚时钟 latency 而不完全相同；启用 CRPR 时推荐该模式。此模式下给予时间的 CRPR 调整不应用。
+
+\figplaceholder{Figure 218--219}{透明模式借用/给予时间与负借用}{fig:adv-borrow-given}
+
+在 D-to-Q 延迟大于 clock-to-Q 且到达时间非常接近时钟边沿时，数据在 opening 之前到达仍可能借用（负借用）；下一路径出发时间由到达时间与 D-to-Q 决定。借用量为负，报告为 “time given to endpoint” / “time borrowed from startpoint”，且不超过 D-to-Q 与 clock-to-Q 之差。
+
+\subsubsection{限制时间借用}
+\subsection*{Limiting Time Borrowing}
+
+\cmd{set\_max\_time\_borrow} 在设计指定范围内对所有锁存器端点限制借用量。在指定端点，借用限制为指定值与默认调整脉冲宽度中的较小者。
+
+若 \texttt{default\_max\_time\_borrow} 为 0，不允许借用，锁存器按触发器分析。若为负，数据须在时钟 opening 之前稳定（如门控时钟锁存器的使能输入）。
+
+用 \cmd{report\_exceptions} 显示 \texttt{max\_time\_borrow} 属性。用 \cmd{remove\_max\_time\_borrow} 移除限制。
+
+示例：对 clk 时钟的所有锁存器设置最大借用 2.5：
+\begin{lstlisting}
+pt_shell> create_clock -period 10 -waveform {0 5} clk
+pt_shell> set_max_time_borrow 2.5 [get_clocks clk]
+pt_shell> report_timing -to latch1/D
+\end{lstlisting}
+
+\cmd{max\_time\_borrow} 将可用脉冲从 5.0 有效减至 2.5。端点借用量通常等于下一起点给予量（同锁存器 D 引脚）；因 opening 边沿 uncertainty/CRPR 调整可能有微小差异。
+
+% ============================================================
+\section{高级锁存器分析}
+\subsection*{Advanced Latch Analysis}
+
+默认通过锁存器间单段路径报告时序违例；对借用（或失败）锁存器引入借用路径，为结束于下一锁存器或触发器 D 引脚的单段路径。单段特性可能妨碍锁存器设计的时序修复与功耗优化。
+
+可选地\textbf{不将路径打断为段}而分析经锁存器的路径：透明锁存器同时是 throughpath 与端点；每锁存器可有结束于 D 的路径及穿过锁存器到另一端点的路径；锁存器时钟引脚也可为路径起点。高级锁存器分析提供经锁存器时序路径的全局可见性，改善功耗与设计优化。
+
+\begin{table}[htbp]
+\centering
+\caption{高级锁存器分析命令与变量（表 41）}
+\small
+\begin{tabular}{@{}p{5.5cm}p{7.5cm}@{}}
+\toprule
+命令或变量 & 用途 \\
+\midrule
+\cmd{timing\_enable\_through\_paths} & 启用高级锁存器分析 \\
+\cmd{set\_latch\_loop\_breaker} & 在指定点断开锁存器环，覆盖工具默认选择 \\
+\cmd{get\_latch\_loop\_groups} & 返回锁存器环组中 D 引脚集合的列表 \\
+\cmd{report\_latch\_loop\_groups} & 报告参与透明锁存器环的 D 引脚信息 \\
+\cmd{timing\_through\_path\_max\_segments} & 每条路径分析的最大连续锁存器段数 \\
+\cmd{timing\_report\_skip\_early\_paths\_at\_intermediate\_latches} & 跳过在中间锁存器过早到达的 throughpath 报告 \\
+\cmd{report\_timing -trace\_latch\_borrow/-trace\_latch\_forward} & 经环断开锁存器向后/向前追踪 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{启用高级锁存器分析}
+\subsection*{Enabling Advanced Latch Analysis}
+
+将 \cmd{timing\_enable\_through\_paths} 设为 \texttt{true}（默认 \texttt{false}）。
+
+\subsubsection{断开环}
+\subsection*{Breaking Loops}
+
+将 throughpath 视为时序路径时，含环电路的最差路径难以求得。选定锁存器为\textbf{环断开锁存器}，路径不穿过它们。默认由 PrimeTime 根据连通性选择少量环断开锁存器，不考虑到达值。
+
+\cmd{report\_timing} 不找经环断开锁存器的路径；每次报告基于不经过任何环断开锁存器的最差路径。
+
+手动指定：
+\begin{lstlisting}
+set_latch_loop_breaker -pin pin_list
+\end{lstlisting}
+
+适用情形：锁存器不在关键路径；读/写端口不同时使用的寄存器文件等；脉冲时钟或透明窗口很小的锁存器；环中其他锁存器不应作为环断开器。
+
+查询 \texttt{is\_latch\_loop\_breaker} 属性（D 引脚为 \texttt{true}）：
+\begin{lstlisting}
+get_pins -hierarchical * -filter "@is_latch_loop_breaker"
+\end{lstlisting}
+
+\subsubsection{锁存器环组}
+\subsection*{Latch Loop Groups}
+
+单个锁存器可属于多个锁存器环；所有相交环的集合称为\textbf{锁存器环组}。组内任意两锁存器至少共处于一个环。
+
+\figplaceholder{Figure 220: Single latch loop group with three latches}{三锁存器单环组}{fig:adv-llg}
+
+\cmd{get\_latch\_loop\_groups [-of\_objects list] [-loop\_breakers\_only]} 返回 Tcl 列表，每项为一环组的 D 引脚集合。\cmd{report\_latch\_loop\_groups} 列出 D 引脚、环组编号及属性（\texttt{b} 环断开、\texttt{p} 长路径断开但不在环中、\texttt{u} 用户指定断开、\texttt{a} 用户要求避免断开）。不在环中的 D 引脚显示 “NA”。
+
+默认每条路径最多分析五个连续锁存器；无环处也可能引入额外环断开器限制路径长度。\cmd{timing\_through\_path\_max\_segments} 可覆盖；设为 0 表示无限制（可能运行时间极长）。
+
+\subsubsection{应用于锁存器路径的时序例外}
+\subsection*{Timing Exceptions Applied to Latch Paths}
+
+启用高级锁存器分析时，时序例外须在\textbf{一个路径段内}满足；所有 \cmd{-from}/\cmd{-through}/\cmd{-to} 须在同一段内匹配才生效。
+
+\begin{itemize}
+  \item \textbf{False path}：任一段满足 false path，整条 throughpath 为 false throughpath，不检查路径末端约束（图 221）
+  \item \textbf{Multicycle path}：任一段满足多周期例外，影响下游锁存器透明窗口与路径端点要求时间；不同段可有不同多周期例外（图 222）
+  \item \textbf{Max/min delay}：最大延迟例外在终点为锁存器 D 时仅作用于该段；不满足的 throughpath 不受影响。最小延迟例外仅影响单段保持，throughpath 不做保持检查
+  \item \textbf{Clock groups}：互斥时钟组对 throughpath 生效；两时钟无通信则 throughpath 不受约束，即使仅在中间锁存器依赖互斥时钟（图 223）。不能用 clock-to-clock false path 完全替代 clock groups（false path 须在同一段内满足）；hold 可用 clock-to-clock false path（throughpath 不做 hold）
+  \item \textbf{Throughpath 上的例外指定}：多说明符例外须在同一段内满足；跨段指定无效（图 224）。用 \cmd{report\_exceptions -ignored} 列出无效例外
+\end{itemize}
+
+\figplaceholder{Figure 221--224}{Throughpath 上的 false/multicycle/时钟组/错误指定例外}{fig:adv-through-exc}
+
+\subsubsection{报告经锁存器的路径}
+\subsection*{Reporting Paths Through Latches}
+
+传递 slack 估计改善某引脚所需时序余量。找决定某引脚传递 slack 的关键路径：
+\begin{lstlisting}
+report_timing -through pin_name
+\end{lstlisting}
+
+throughpath 报告描述每个中间透明窗口。将 \cmd{timing\_report\_skip\_early\_paths\_at\_intermediate\_latches} 设为 \texttt{true} 可过滤在中间锁存器过早到达的 throughpath（图 226）。
+
+无 \cmd{-to} 时，工具在计算环断开锁存器要求时间时考虑下游时序。\cmd{-trace\_latch\_forward} 类似 \cmd{-trace\_latch\_borrow} 但向前追踪（图 227）。
+
+\subsubsection{最差负 slack 与总负 slack 计算}
+\subsection*{Calculation of the Worst and Total Negative Slack}
+
+D 引脚属性 \cmd{max\_rise\_local\_slack}、\cmd{max\_fall\_local\_slack} 返回锁存器路径\textbf{局部} slack（不考虑透明锁存器引脚下游约束）。\cmd{max\_fall\_slack}/\cmd{max\_slack} 考虑下游约束。
+
+WNS 为最差违例路径端点 slack（单段或 throughpath）；无违例则为 0。WNS 为所有 \cmd{max\_rise\_local\_slack} 与 \cmd{max\_fall\_local\_slack} 的最小值。
+
+TNS 计算：
+\[
+\mathrm{TNS} = \sum_{\text{所有时序端点}} \min\bigl(0,\; \min(\mathrm{max\_rise\_local\_slack},\; \mathrm{max\_fall\_local\_slack})\bigr)
+\]
+
+\subsubsection{归一化 slack 分析}
+\subsection*{Normalized Slack Analysis}
+
+除非为恢复路径或含环断开/路径断开锁存器的路径，可用归一化 slack 估算路径最大频率（图 228）。工具用理想时钟边沿计算允许传播延迟（忽略建立时间、uncertainty、latency）；允许延迟可为半周期、全周期或多周期，跨时钟域时更复杂。
+
+\cmd{report\_timing -normalized\_slack} 按归一化 slack 报告与排序。
+
+\subsubsection{查找恢复路径}
+\subsection*{Finding Recovered Paths}
+
+当锁存器到达时间晚于透明窗口 closing 边沿减去 uncertainty 与建立时间时，路径被\textbf{恢复}。查询时序路径属性 \texttt{is\_recovered}；在中间锁存器被恢复的路径上为 \texttt{true}。
+
+\begin{seeAlsoBox}
+路径例外与多周期路径，见第~\ref{chap:paths}~章；时钟定义见第~\ref{chap:clocks}~章。
+\end{seeAlsoBox}
+

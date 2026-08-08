@@ -1,0 +1,344 @@
+% 第 8 章 UPF Exploration
+\bichapter{UPF 探索}{UPF Exploration}
+\label{chap:upf}
+
+DC Explorer 接受最小 UPF，并根据电源状态表与域供电电压自动生成隔离策略与电平移位策略。
+您可将 DC Explorer 生成的 RTL UPF 用于 floorplanning、综合与物理实现。
+
+要运行 UPF 探索流程，请确保 \varname{de\_enable\_upf\_exploration} 变量设为 \texttt{true}（默认值）。
+
+下列主题描述 UPF 探索流程：
+\begin{itemize}
+  \item UPF 探索流程概览
+  \item 最小 UPF 文件
+  \item 带 UPF 的探索综合
+  \item 报告功耗探索结果
+\end{itemize}
+
+有关 UPF 多电压设计实现，请参阅 \textit{Power Compiler User Guide}。
+
+% ============================================================
+\section{UPF 探索流程概览}
+\subsection*{UPF Exploration Flow Overview}
+
+使用仅包含电源域与电源状态定义的最小 UPF 文件，DC Explorer 会生成完整的 RTL UPF 文件（其中新增策略使用 RTL 名称），以及 floorplan；完整 RTL UPF 包含隔离与电平移位策略。
+您可将该文件作为 Design Compiler 与 IC Compiler 中综合与实现的 golden UPF 文件。
+也可修改该文件以更改工具创建的默认隔离与电平移位策略，或添加保持（retention）策略。
+流程概要见图~\ref{fig:dce-upf-flow}。
+
+\figplaceholder{Figure 33: Design Exploration, Synthesis, and Implementation Flow With UPF}{带 UPF 的设计探索、综合与实现流程}{fig:dce-upf-flow}
+
+要了解如何运行 UPF 探索流程，见：
+\begin{itemize}
+  \item 带 UPF 的设计探索
+  \item 运行带 UPF 的设计探索
+  \item 隔离与电平移位插入
+\end{itemize}
+
+更多信息见 \textit{Synopsys Multivoltage Flow User Guide}。
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item SolvNet 文章 24582，《UPF in DC Explorer Application Note》
+  \item 第~\ref{chap:env}~章「使用 UPF 的多电压设计」
+\end{itemize}
+\end{seeAlsoBox}
+
+\subsection{带 UPF 的设计探索}
+\subsubsection*{Design Exploration With UPF}
+
+为 DC Explorer 指定 UPF 功耗意图，与为 Design Compiler 或 IC Compiler 指定的方式不同。
+对于设计探索，您只需使用 \cmd{create\_power\_domain} 命令指定电源域，并使用 \cmd{add\_power\_state}、\cmd{create\_pst} 与 \cmd{add\_pst\_state} 命令指定电源状态。
+这一完整功耗意图的基本子集称为最小 UPF（minimal UPF）。
+
+利用最小 UPF，DC Explorer 会根据是否存在可下电域以及域间供电电压差异，自动生成设计所需的隔离策略与电平移位策略。
+工具以完整形式写出修改后的 UPF，可用作 Design Compiler 与 IC Compiler 中设计功耗意图的规范。
+
+\subsubsection{DC Explorer 使用的输入数据}
+\subsubsection*{Input Data Used by DC Explorer}
+
+DC Explorer 在 UPF 流程中使用的输入数据类型如下：
+\begin{itemize}
+  \item \textbf{设计 RTL} — 探索流程的 RTL 不应包含任何电源管理单元（隔离、电平移位与保持单元）或这些单元的控制信号。
+        若存在此类单元，将按普通标准单元处理，其电源管理功能被忽略。
+  \item \textbf{Synopsys 设计约束} — SDC 文件必须包含为各电源域供电网络设置电压的 \cmd{set\_voltage} 命令，以及设置顶层工作条件的 \cmd{set\_operating\_conditions} 命令。
+  \item \textbf{最小 UPF} — 最小 UPF 文件必须包含定义电源域与电源状态的命令，但不应包含隔离、电平移位或保持命令（若存在则被忽略）。
+\end{itemize}
+
+\subsubsection{面向综合与物理实现的输出数据}
+\subsubsection*{Output Data for Synthesis and Physical Implementation}
+
+带 UPF 的设计探索流程为综合与物理实现提供下列数据：
+\begin{itemize}
+  \item \textbf{RTL UPF} — 可将 RTL UPF 用作综合与物理实现流程的 golden UPF。
+        可按需修改 RTL UPF。例如，探索流程对隔离策略使用 \texttt{location self}；若更偏好 \texttt{location parent}，可自行更改。
+  \item \textbf{Floorplan} — 可用 floorplan 指导 Design Compiler topological 模式中的综合，以及 IC Compiler 中的物理实现。
+\end{itemize}
+
+探索流程会自动创建隔离控制信号，并可选创建驱动这些信号的 dummy 控制器块（黑盒）。
+要开始逻辑综合，需提供真实控制器逻辑的 RTL 以替换 dummy 控制器块。
+控制器逻辑根据设计中各域当前的下电状态使能或禁用隔离单元。
+您可在 RTL UPF 中编辑控制信号。
+
+带 UPF 的一般探索流程概要见图~\ref{fig:dce-upf-explore}。
+
+\figplaceholder{Figure 34: Design Exploration Flow With UPF}{带 UPF 的设计探索流程}{fig:dce-upf-explore}
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 运行带 UPF 的设计探索
+  \item 隔离与电平移位插入
+\end{itemize}
+\end{seeAlsoBox}
+
+\subsection{运行带 UPF 的设计探索}
+\subsubsection*{Running Design Exploration With UPF}
+
+按下列步骤运行带 UPF 的一般设计探索流程。
+
+\begin{enumerate}
+  \item 读入设计的 RTL 描述；其中不应包含任何电源管理单元、此类单元的控制信号或电源控制器电路。
+  \item 读入 Synopsys 设计约束（SDC 文件），包括 \cmd{set\_voltage} 命令，并设置顶层工作条件。
+  \item 使用 \cmd{load\_upf} 命令读入最小 UPF 文件；其中不应包含任何隔离、电平移位或保持策略。
+  \item 使用 \cmd{generate\_rtl\_upf} 命令写出完整 UPF 设计意图（RTL UPF）。\\
+        DC Explorer 会根据输出馈入活动域的可下电域自动生成隔离策略；也会根据相邻电源域供电电压不同自动生成电平移位策略。（工具不生成或实现保持策略。）\\
+        若没有合适工作电压的基本逻辑门可供链接，工具会链接到工作电压不同的单元。
+  \item 使用 \cmd{compile\_exploration} 命令综合设计。\\
+        DC Explorer 按 RTL UPF 文件的完整功耗意图插入隔离、电平移位与 always-on buffer 单元。
+  \item 报告设计的面积、时序与功耗。\\
+        可使用新的最小 UPF 文件重复步骤 1 至 6，以探索其他可能的供电架构。
+  \item 使用 \cmd{write\_file} 命令写出含 PG 连接的门级网表。
+  \item 使用 \cmd{save\_upf} \opt{-supplemental} 命令写出 supplemental UPF 文件。
+        该文件包含设计优化期间被重命名的对象。
+  \item 执行 floorplan 探索并为设计生成 floorplan，见「执行 Floorplan 探索」。
+\end{enumerate}
+
+\begin{noteBox}
+电源管理单元只能由 \cmd{compile\_exploration} 命令插入；不支持 \cmd{insert\_mv\_cells} 命令。
+
+尽管 DC Explorer 不支持增量 compile，但可将包含电源管理单元的已综合设计以 \texttt{.ddc} 格式重新读入工具进行分析。
+\end{noteBox}
+
+探索流程完成后，可将生成的 RTL UPF 与 floorplan 用于逻辑综合与物理实现。
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 带 UPF 的设计探索
+  \item 隔离与电平移位插入
+\end{itemize}
+\end{seeAlsoBox}
+
+\subsection{隔离与电平移位插入}
+\subsubsection*{Isolation and Level Shifter Insertion}
+
+下例说明 DC Explorer 在探索流程中如何插入电源管理单元。
+
+在最小 UPF 文件中，仅指定电源域与电源状态表信息，例如：
+\begin{lstlisting}
+create_power_domain PD1 -elements U1
+create_power_domain PD2 -elements U2
+create_power_domain PD3 -elements U3
+
+add_power_state PD1.primary -state HIGH12 \
+   {-supply_expr {power == `{FULL_ON, 1.2}}}
+add_power_state PD1.primary -state OFFX \
+   {-supply_expr {power == `{OFF}}}
+add_power_state PD1.ground -state GND \
+   {-supply_expr {ground == `{FULL_ON, 0.00}}}
+
+add_power_state PD2.primary -state HIGH12 \
+   {-supply_expr {power == `{FULL_ON, 1.2}}}
+add_power_state PD2.primary -state LOW08 \
+   {-supply_expr {power == `{FULL_ON, 0.8}}}
+add_power_state PD2.primary -state OFFX \
+   {-supply_expr {power == `{OFF}}}
+add_power_state PD2.ground -state GND \
+   {-supply_expr {ground == `{FULL_ON, 0.00}}}
+
+add_power_state PD3.primary -state HIGH12 \
+   {-supply_expr {power == `{FULL_ON, 1.2}}}
+add_power_state PD3.primary -state LOW08 \
+   {-supply_expr {power == `{FULL_ON, 0.8}}}
+add_power_state PD3.ground -state GND \
+   {-supply_expr {ground == `{FULL_ON, 0.00}}}
+
+create_pst MY_PST -supplies \
+   {PD1.primary.power PD2.primary.power PD3.primary.power}
+add_pst_state S1 -pst MY_PST -state {HIGH12 LOW08  LOW08 }
+add_pst_state S2 -pst MY_PST -state {OFFX   OFFX   LOW08 }
+add_pst_state S3 -pst MY_PST -state {HIGH12 HIGH12 HIGH12}
+\end{lstlisting}
+
+读入 RTL 设计、SDC 约束与最小 UPF 文件后，使用 \cmd{generate\_rtl\_upf} 命令自动写出包含隔离与电平移位策略的完整 RTL UPF。
+
+使用 \cmd{compile\_exploration} 命令时，DC Explorer 遵循所生成策略，插入图~\ref{fig:dce-iso-ls} 所示的电源管理单元。
+
+\figplaceholder{Figure 35: Isolation and Level Shifter Cells Inserted by DC Explorer}{DC Explorer 插入的隔离与电平移位单元}{fig:dce-iso-ls}
+
+工具在可关断域的每个输出插入隔离单元；在驱动域输出可与接收域以不同电压工作时插入电平移位单元。
+若某输出同时需要隔离与电平移位功能，工具插入 enable level shifter。
+
+在某些情况下，对关断域所有输出插入隔离单元会导致插入实际不需要的隔离单元。
+例如，插入 U2 块中的 ELS 单元的隔离功能并不需要，因为驱动域 PD2 仅在接收域 PD1 也关断时才关断。
+
+若信号必须经第三电源域从某一电源域传到另一电源域，且连接上需要缓冲器，工具会在网络上插入 always-on buffer，如图~\ref{fig:dce-aon-buf} 所示。
+本例中，always-on buffer 使用信号接收域 PD3 的电源供电。
+\begin{lstlisting}
+create_power_domain PD1 -elements U1
+create_power_domain PD2 -include_scope
+create_power_domain PD3 -elements U3
+\end{lstlisting}
+
+\figplaceholder{Figure 36: Always-On Buffer Inserted by the DC Explorer Tool}{DC Explorer 工具插入的 Always-On Buffer}{fig:dce-aon-buf}
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 带 UPF 的设计探索
+  \item 运行带 UPF 的设计探索
+\end{itemize}
+\end{seeAlsoBox}
+
+% ============================================================
+\section{最小 UPF 文件}
+\subsection*{Minimal UPF File}
+
+在设计探索流程中仅指定最小 UPF，可快速理解、分析并比较各种供电架构决策的影响，例如是否对某区域下电，或使用不同供电电压。
+您可尽早得到各域与整个系统的面积、功耗与漏电估计。
+
+最小 UPF 文件可能包含下列内容：
+\begin{itemize}
+  \item 必需命令
+  \item 可选命令
+  \item 被忽略的命令
+  \item 被忽略的供电网络域依赖性
+\end{itemize}
+
+\subsection{必需命令}
+\subsubsection*{Required Commands}
+
+最小 UPF 需要下列内容：
+\begin{itemize}
+  \item 由 \cmd{create\_power\_domain} 命令指定的电源域定义
+  \item 由 \cmd{add\_power\_state} 或 \cmd{add\_port\_state} 命令指定的各电源域主供电的电源状态
+  \item 由 \cmd{create\_pst} 与 \cmd{add\_pst\_state} 命令指定的、定义所有可能电源状态的电源状态表
+\end{itemize}
+
+除提供指定电源域、电源状态与电源状态表的 UPF 命令外，还需使用 \cmd{set\_voltage} 命令指定主供电电压，并使用 \cmd{set\_operating\_conditions} 命令指定顶层工作条件。
+
+\subsection{可选命令}
+\subsubsection*{Optional Commands}
+
+最小 UPF 文件可包含指定供电网络、供电集合、供电端口、供电连接与电源开关的命令。
+DC Explorer 支持下列 UPF 命令，但在设计探索中使用这些命令是可选的：
+\begin{lstlisting}
+associate_supply_set
+connect_supply_net
+create_power_switch
+create_supply_net
+create_supply_port
+create_supply_set
+load_upf
+name_format
+set_port_attributes
+set_related_supply_net
+set_scope
+\end{lstlisting}
+
+\cmd{create\_power\_domain} 命令会为指定域自动创建默认隔离供电集合句柄 \texttt{default\_isolation}。
+DC Explorer 将该供电集合句柄用于该域的隔离策略，并自动生成 \cmd{set\_voltage} 命令以设置该供电集合的电压。
+（在其他工具中，可使用 \cmd{set\_isolation} 命令显式指定其他供电集合或供电网络。）
+
+为 \texttt{default\_isolation} 句柄指定电源状态是可选的。
+若未指定这些电源状态，工具会根据主供电的电源状态表自动生成。
+
+\cmd{set\_port\_attributes} 命令的 \opt{-repeater\_supply} 选项被忽略。
+
+\subsection{被忽略的命令}
+\subsubsection*{Ignored Commands}
+
+最小 UPF 文件不应包含隔离、电平移位或保持策略命令。
+DC Explorer 忽略下列 UPF 命令：
+\begin{lstlisting}
+map_isolation_cell
+map_level_shifter_cell
+map_power_switch
+map_retention_cell
+set_isolation
+set_isolation_control
+set_level_shifter
+set_retention
+set_retention_control
+\end{lstlisting}
+
+工具会读入并接受这些命令，但不会使用它们。
+使用 \cmd{generate\_rtl\_upf} 生成 RTL UPF 文件时，工具将这些命令写为注释行。
+例如，若最小 UPF 文件包含：
+\begin{lstlisting}
+set_isolation ISO1 -domain PD1
+\end{lstlisting}
+工具在 RTL UPF 文件中写出下列注释行：
+\begin{lstlisting}
+# set_isolation ISO1 -domain PD1
+\end{lstlisting}
+
+\subsection{被忽略的供电网络域依赖性}
+\subsubsection*{Ignored Domain Dependency of Supply Nets}
+
+在 DC Explorer 中，隔离单元的自动推断依赖于在所有电源域中可用的供电集合句柄与隐式供电集合。
+工具不支持域相关供电集合（domain-dependent supply sets）；后者在 Design Compiler 与 IC Compiler 中通过 \cmd{create\_supply\_net} 的 \opt{-domain} 选项创建。
+
+例如，最小 UPF 文件包含下列使用 \opt{-domain} 选项将供电网络 VDD1 的使用限制在电源域 PD1 的命令：
+\begin{lstlisting}
+create_supply_net VDD1 -domain PD1
+\end{lstlisting}
+
+运行 \cmd{generate\_rtl\_upf} 时，DC Explorer 在 RTL UPF 文件中先将带 \opt{-domain} 选项的 \cmd{create\_supply\_net} 写为注释行，再写出去掉该选项的修改后命令。例如：
+\begin{lstlisting}
+#create_supply_net VDD1 -domain PD1
+create_supply_net VDD1
+\end{lstlisting}
+
+% ============================================================
+\section{带 UPF 的探索综合}
+\subsection*{Exploration Synthesis With UPF}
+
+在 DC Explorer 中，\cmd{generate\_rtl\_upf} 命令写出包含设计完整意图（含隔离与电平移位策略）的 UPF 文件。
+该文件称为 RTL UPF，因为它用 RTL 名称表示自动生成的隔离与电平移位策略所对应的设计功耗意图。
+
+\cmd{compile\_exploration} 命令对设计执行逻辑综合，包括以下电源管理任务：隔离插入、电平移位插入与 always-on buffer 插入。
+有关带 UPF 的探索综合的更多信息，见 \textit{UPF in DC Explorer Application Note}。
+
+\begin{noteBox}
+设计探索流程不实现保持策略。探索流程完成后，可向 RTL UPF 添加保持策略，供 Design Compiler 与 IC Compiler 使用。
+
+不支持 well bias 功能。该功能是 Design Compiler 中实现 well bias 供电与主供电的功能，通过将 \texttt{enable\_bias} 设计属性设为 \texttt{true} 启用。
+\end{noteBox}
+
+在自底向上流程中，优化各块时需定义该块的边界条件。
+对于 UPF，使用 \cmd{set\_related\_supply\_net}、\cmd{set\_port\_attributes} \opt{-driver\_supply} 与 \cmd{set\_port\_attributes} \opt{-receiver\_supply} 命令指定边界条件。
+这些命令指定块输入处外部驱动器的供电，以及块输出处外部负载的供电。
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item SolvNetPlus 文章 24582，《UPF in DC Explorer Application Note》
+\end{itemize}
+\end{seeAlsoBox}
+
+% ============================================================
+\section{报告功耗探索结果}
+\subsection*{Reporting Power Exploration Results}
+
+可随时使用 \cmd{check\_mv\_design} 命令检查供电架构。
+使用 \cmd{compile\_exploration} 综合拟议设计后，可使用 \cmd{report\_area}、\cmd{report\_timing} 与 \cmd{report\_mv\_qor} 命令估计面积、时序与功耗。
+
+要单独获取隔离单元或电平移位单元的漏电功耗，使用 \cmd{report\_mv\_qor} 命令。
+默认情况下，\cmd{report\_mv\_qor} 报告所有电源域中的总漏电功耗、面积与单元数。
+指定 \opt{-verbose} 选项时，命令分别报告隔离单元、电平移位单元、always-on 单元、宏、I/O pad 与标准单元的漏电功耗。
+
+\subsection{Design Vision GUI}
+\subsubsection*{Design Vision GUI}
+
+可使用 Design Vision GUI（由 \cmd{gui\_start} 命令打开）查看设计的 UPF 意图并分析设计问题。
+要选择 GUI 分析工具，使用 Power 下拉菜单。
+
+有关 GUI 分析功能的更多信息，见 \textit{Design Vision User Guide}。

@@ -1,0 +1,761 @@
+% 附录 C Layout Integrity Management
+\biappendix{版图完整性管理}{Layout Integrity Management}
+\label{app:c}
+
+本附录介绍 IC Validator 工具提供的版图完整性管理（layout integrity management）功能。
+
+版图完整性管理包括以下各节：
+\begin{itemize}
+  \item 使用版图完整性管理（Using Layout Integrity Management）
+  \item 版图完整性管理示例（Layout Integrity Management Examples）
+  \item \cmd{icv\_lidb} 实用程序（The icv\_lidb Utility）
+  \item \cmd{icv\_lidb\_report} 实用程序（The icv\_lidb\_report Utility）
+\end{itemize}
+
+% ============================================================
+\section{使用版图完整性管理}
+\subsection*{Using Layout Integrity Management}
+
+版图完整性管理用于验证黄金（golden）知识产权（IP）、标准单元版图或任意其他版图单元的完整性。它提供一种便捷方式，在不做完整版图对版图比较的情况下，验证某些版图单元是否未发生变化。\cmd{icv\_lidb} 实用程序从输入版图创建版图完整性数据库（LIDB）；随后可在 IC Validator 运行中使用该 LIDB，在读取设计时检查版图单元。\cmd{icv\_lidb\_report} 实用程序用于查看 LIDB 内容。
+
+\begin{noteBox}
+尽管误匹配（false match）极不可能，该流程并不能替代流片前的完整验证运行。
+\end{noteBox}
+
+对每个单元，LIDB 包含：
+\begin{itemize}
+  \item 每层几何数据与文本的一个校验和；
+  \item 每个唯一子单元名的全部引用的一个校验和。
+\end{itemize}
+
+LIDB 中每个单元可有多组校验和。若设计单元与该单元在 LIDB 中存储的任一组校验和匹配，则视为匹配。这使得单个 LIDB 可为具有不同校验和的等价单元服务。例如，不同版图格式可能生成略有不同的校验和，或流程中的工具可能改变数据（如合并相邻或重叠形状）。在这些情况下，可将新的一组校验和合并进现有 LIDB，使该单元的任一版本都能通过版图完整性检查。
+
+设计中单元的版图完整性检查有三种方式：
+\begin{itemize}
+  \item 使用 \cmd{icv\_lidb} 对照现有 LIDB 验证输入版图，而无需完整 IC Validator 运行。实用程序按单元名将版图单元与 LIDB 中的一组校验和匹配。
+  \item 在 IC Validator runset 中使用 \cmd{layout\_integrity\_by\_cell()}，按名称检查单元。若设计单元计算出的校验和与 \cmd{layout\_integrity\_options()} 中任一输入 LIDB 里同名单元的任一组校验和匹配，则视为匹配。
+  \item 在 runset 中使用 \cmd{layout\_integrity\_by\_marker\_layer()}，按标记层检查单元。若设计单元计算出的校验和与任一输入 LIDB 中在标记层上有数据的单元的任一组校验和匹配，则视为匹配。
+\end{itemize}
+
+IC Validator 运行中发现的版图完整性不匹配存入错误数据库，报告在 \cmd{LAYOUT\_ERRORS} 文件中，并可在 VUE 中查看。这些错误无特定坐标，因此 VUE 中不会高亮显示。
+
+版图完整性检查结果可用于控制随后在这些单元中发现的 DRC 错误的处理：可丢弃、按正常方式报告，或使用 DRC 分类。
+
+% ============================================================
+\section{版图完整性管理示例}
+\subsection*{Layout Integrity Management Examples}
+
+以下各节给出版图完整性管理功能的若干示例：
+\begin{itemize}
+  \item 基本示例（Basic Example）
+  \item 在不同版图格式上运行（Running on a Different Layout Format）
+  \item 合并 LIDB 的不匹配报告（Reporting of Mismatches From a Merged LIDB）
+  \item 标记层检查（Marker Layer Check）
+  \item 混合 Milkyway 与 GDSII 流程（Mixed Milkyway and GDSII Flow）
+\end{itemize}
+
+\subsection{基本示例}
+\subsubsection*{Basic Example}
+
+下例展示按单元名的基本版图完整性检查。首先从输入版图创建 LIDB：
+
+\begin{lstlisting}
+icv_lidb -i EX_ADDER_3.GDS -o orig.lidb
+\end{lstlisting}
+
+然后在 runset 中加入下列内容，IC Validator 即可按计划运行：
+
+\begin{lstlisting}[style=pxl]
+layout_integrity_options(
+   databases = {
+     { db_name = "orig.lidb" }
+   }
+);
+
+{
+    @ "Layout Integrity Check";
+    layout_integrity_by_cell(
+       cells = {"*"}
+    );
+}
+\end{lstlisting}
+
+本次运行因输入版图与生成 LIDB 的版图相同，\cmd{LAYOUT\_ERRORS} 中不会报告版图完整性不匹配。但可通过检查 \cmd{run\_details/lidb.log} 确认已执行完整性检查：
+
+\begin{lstlisting}
+-------------------------------------------------------------------------
+                       Layout Integrity Processing Log
+                            11/08/2010 08:12:50
+-------------------------------------------------------------------------
+
+Processing layout cell VIA
+  Cell check:
+    Result       = Matched
+    Matched Cell = VIA
+    Database     = /home/user/orig.lidb
+
+Processing layout cell INV
+  Cell check:
+    Result       = Matched
+    Matched Cell = INV
+    Database     = /home/user/orig.lidb
+...
+\end{lstlisting}
+
+每个被检查单元的版图完整性状态也可见于 \cmd{run\_details/hierarchy/cell.tree0} 文件：
+
+\begin{lstlisting}
+CELL = AD4FUL
+        Cell Status                     = USED
+        GDSII Library                   = MAINLIB
+        Layout Integrity Check          = Passed Completely
+\end{lstlisting}
+
+\cmd{cell.tree0} 中版图完整性检查状态有三种可能值：
+\begin{itemize}
+  \item \textbf{Passed Completely}：该单元及其下放置的全部单元均已检查并匹配。
+  \item \textbf{Passed}：该单元本身通过检查，但至少一个子单元未检查或检查失败。
+  \item \textbf{Failed}：未找到该单元的版图完整性匹配。
+\end{itemize}
+
+\subsection{在不同版图格式上运行}
+\subsubsection*{Running on a Different Layout Format}
+
+下例展示对同一设计的不同版图格式运行的结果。使用不同格式可能导致不同的校验和数据。常见原因包括：
+\begin{itemize}
+  \item 某些格式（如 Milkyway）可有单元边界层，而另一些（如 GDSII）没有。
+  \item 某些格式以不同方式表示单元放置。例如 OASIS 不直接支持 AREF 概念，阵列放置表示为带 repetition 的多次 SREF；而 IC Validator 内部可能将这些放置解释为 AREF。
+  \item 几何数据在格式间可有多种差异但仍物理等价，例如点序、重叠形状合并、共线点去除等。版图完整性管理按原样检查原始输入版图，不做任何变换。
+\end{itemize}
+
+当上一示例的 IC Validator 运行改用等价的 Milkyway 输入时，会因单元边界层而报告版图完整性不匹配：
+
+\begin{lstlisting}
+ Layout Integrity Check
+    layout_integrity_by_cell:layer_mismatch ....... 9 violations found.
+...
+
+runset1.rs:17:layout_integrity_by_cell:layer_mismatch
+- - - - - - - - - - - - - - - - - - - - -
+Structure Layer   LIDB      Golden Layout
+- - - - - - - - - - - - - - - - - - - - -
+AD4FUL    (255;0) orig.lidb
+VIA       (255;0) orig.lidb
+ADFULAH   (255;0) orig.lidb
+POLYHD    (255;0) orig.lidb
+INV       (255;0) orig.lidb
+INVH      (255;0) orig.lidb
+DGATE     (255;0) orig.lidb
+CONT      (255;0) orig.lidb
+TGATE     (255;0) orig.lidb
+\end{lstlisting}
+
+在等价 OASIS 版图上运行时，会因单元放置被解释为 AREF 而报告不匹配：
+
+\begin{lstlisting}
+ Layout Integrity Check
+    layout_integrity_by_cell:placement_mismatch .... 6 violations found.
+...
+
+runset1.rs:17:layout_integrity_by_cell:placement_mismatch
+- - - - - - - - - - - - - - - - - - - - - -
+Structure Child Cell LIDB      Golden Layout
+- - - - - - - - - - - - - - - - - - - - - -
+AD4FUL    ADFULAH    orig.lidb
+AD4FUL    VIA        orig.lidb
+ADFULAH   INV        orig.lidb
+ADFULAH   INVH       orig.lidb
+DGATE     TGATE      orig.lidb
+DGATE     VIA        orig.lidb
+\end{lstlisting}
+
+由于这三种版图等价，可合并为单个 LIDB；该 LIDB 在三种格式上均能通过：
+
+\begin{lstlisting}
+icv_lidb -i EX_ADDER_3 EX_ADDER_3.GDS EX_ADDER_3.oas -o merged.lidb
+\end{lstlisting}
+
+\subsection{合并 LIDB 的不匹配报告}
+\subsubsection*{Reporting of Mismatches From a Merged LIDB}
+
+由于单个单元可有多组校验和，某些校验和可匹配而另一些不能。仅当某一组 LIDB 校验和中的全部层与放置校验和均匹配时，单元才视为匹配。下例展示合并 LIDB 中不同场景下的错误报告差异：
+
+\begin{lstlisting}
+validate_layout.rs:14:layout_integrity_by_cell:layer_mismatch
+- - - - - - - - - - - - - - - - - - - - -
+Structure Layer LIDB        Golden Layout
+- - - - - - - - - - - - - - - - - - - - -
+TOP       (1;0) merged.lidb 2.gds
+TOP       (2;0) merged.lidb 1.gds
+TOP       (3;0) merged.lidb
+\end{lstlisting}
+
+上例中单元 TOP 无完整匹配。层 1 匹配版图 \cmd{1.gds} 中的 TOP，但不匹配 \cmd{2.gds}，故不匹配相对黄金版图 \cmd{2.gds} 报告；层 2 匹配 \cmd{2.gds} 而不匹配 \cmd{1.gds}，相对 \cmd{1.gds} 报告；层 3 不匹配任何黄金版图，该列留空。
+
+同一场景下的单元放置不匹配：
+
+\begin{lstlisting}
+validate_layout.rs:15:layout_integrity_by_cell:placement_mismatch
+- - - - - - - - - - - - - - - - - - - - - - -
+Structure Child Cell LIDB        Golden Layout
+- - - - - - - - - - - - - - - - - - - - - - -
+TOP       A          merged.lidb LIB2
+TOP       B          merged.lidb LIB1
+TOP       C          merged.lidb
+\end{lstlisting}
+
+上例中 TOP 无完整匹配。子单元 A 的放置匹配 LIB1 中 TOP 的放置而不匹配 LIB2，故相对 LIB2 报告；子单元 B 匹配 LIB2 而不匹配 LIB1，相对 LIB1 报告；子单元 C 不匹配任何黄金版图，该列留空。
+
+\subsection{层次模式}
+\subsubsection*{Hierarchical Mode}
+
+IC Validator 的版图完整性检查有两种操作模式：
+\begin{itemize}
+  \item \textbf{单元级（Cell level）}：单独考虑每个单元，不考虑层次中任何子单元是否通过或失败。此为默认模式。
+  \item \textbf{层次（Hierarchical）}：考虑层次中子单元的状态。子单元的任何版图完整性不匹配也会作为父单元中的放置不匹配报告，并一直向上传播到整个层次。
+\end{itemize}
+
+不匹配仅在检查函数所指定的单元中报告：
+\begin{itemize}
+  \item \cmd{layout\_integrity\_by\_cell()}：由 \cmd{cells} 参数指定单元。
+  \item \cmd{layout\_integrity\_by\_marker\_layer()}：单元为在 \cmd{marker\_layer} 指定层上含多边形的单元。
+\end{itemize}
+
+\subsection{层次单元检查示例}
+\subsubsection*{Hierarchical Cell Check Example}
+
+本例展示 \cmd{layout\_integrity\_by\_cell()} 在层次模式下的检查行为。设计层次见图~\ref{fig:app-c-hier-cell}。
+
+\figplaceholder{Figure 143: Design Hierarchy for Hierarchical Cell Check Example}{层次单元检查示例的设计层次}{fig:app-c-hier-cell}
+
+本例中，单元 A 的某层形状与版图完整性数据库中的校验和不同。
+
+\begin{noteBox}
+尽管示例使用放置单元且单元名匹配，层次模式并不要求如此。检查单元下放置的单元须有相同内容，但不必有相同单元名。
+\end{noteBox}
+
+下列代码在层次模式下检查全部单元：
+
+\begin{lstlisting}[style=pxl]
+layout_integrity_by_cell(
+   cells = { "*" },
+   processing_mode = HIERARCHICAL
+);
+\end{lstlisting}
+
+差异报告在 A、C 与 TOP。\cmd{LAYOUT\_ERRORS} 输出为：
+
+\begin{lstlisting}
+test.rs:15:layout_integrity_by_cell:layer_mismatch
+- - - - - - - - - - - - - - - - - - - -
+Structure Layer LIDB        Golden Layout
+- - - - - - - - - - - - - - - - - - - -
+A         (31;0) test.lidb
+
+test.rs:15:layout_integrity_by_cell:placement_mismatch
+- - - - - - - - - - - - - - - - - - - - - -
+Structure Child Cell LIDB      Golden Layout
+- - - - - - - - - - - - - - - - - - - - - -
+TOP       A          test.lidb
+TOP       C          test.lidb
+C         A          test.lidb
+\end{lstlisting}
+
+下列代码检查单元 C 与 TOP，但不检查单元 A：
+
+\begin{lstlisting}[style=pxl]
+layout_integrity_by_cell(
+   cells = { "*", "!A" },
+   processing_mode = HIERARCHICAL
+);
+\end{lstlisting}
+
+差异仍报告在 C 与 TOP。层次模式规定：被检查的特定单元之下的一切也会被考虑。输出为：
+
+\begin{lstlisting}
+test.rs:15:layout_integrity_by_cell:placement_mismatch
+- - - - - - - - - - - - - - - - - - - - - -
+Structure Child Cell LIDB      Golden Layout
+- - - - - - - - - - - - - - - - - - - - - -
+TOP       A          test.lidb
+TOP       C          test.lidb
+C         A          test.lidb
+\end{lstlisting}
+
+\cmd{run\_details/lidb.log} 含额外细节，指示层次中每个单元的状态。本例中单元 A 被处理，但因未在 \cmd{layout\_integrity\_by\_cell()} 中指定，没有 “Cell check” 条目：
+
+\begin{lstlisting}
+-----------------------------------------------------------------------
+                       Layout Integrity Processing Log
+                            04/23/2014 06:13:36
+-----------------------------------------------------------------------
+Processing layout cell A
+  Database: test.lidb
+    All Layers: No hierarchically equivalent cells found
+
+Processing layout cell B
+  Database: test.lidb
+    All Layers: Hierarchically equivalent cells found
+  Cell check (hierarchical):
+    Result       = Matched
+    Matched Cell = B
+    Database     = test.lidb
+
+Processing layout cell C
+  Database: test.lidb
+    All Layers: No hierarchically equivalent cells found
+  Cell check (hierarchical):
+    Result       = No Match Found
+
+Processing layout cell TOP
+  Database: test.lidb
+    All Layers: No hierarchically equivalent cells found
+  Cell check (hierarchical):
+    Result       = No Match Found
+\end{lstlisting}
+
+\subsection{层次标记层检查示例}
+\subsubsection*{Hierarchical Marker Layer Check Example}
+
+本例展示 \cmd{layout\_integrity\_by\_marker\_layer()} 在层次模式下的检查行为。设计层次见图~\ref{fig:app-c-hier-marker}。
+
+\figplaceholder{Figure 144: Design Hierarchy for Hierarchical Layer Check Example}{层次标记层检查示例的设计层次}{fig:app-c-hier-marker}
+
+本例中，仅单元 M1--M6 在标记层上有数据。单元 B 在层 3 上有差异；单元 M5 在层 4 上有差异。
+
+\begin{noteBox}
+尽管示例使用放置单元且单元名匹配，层次模式并不要求如此。检查单元下放置的单元须有相同内容，但不必有相同单元名。
+\end{noteBox}
+
+若干层次模式检查示例如下：
+
+\begin{lstlisting}[style=pxl]
+// 报告 M1、M2、M4、M5 中的不匹配
+layout_integrity_by_marker_layer(
+   marker_layer = {1},
+   processing_mode = HIERARCHICAL
+);
+
+// 仅报告 M2、M5：被检查且有差异的层仅为层 4
+layout_integrity_by_marker_layer(
+   marker_layer = {1},
+   check_layers = { {2}, {4} },
+   processing_mode = HIERARCHICAL
+);
+
+// 仅报告 M1、M4：被检查且有差异的层仅为层 3
+layout_integrity_by_marker_layer(
+   marker_layer = {1},
+   check_layers = { {3} },
+   processing_mode = HIERARCHICAL
+);
+
+// 无报告：被检查层中无差异
+layout_integrity_by_marker_layer(
+   marker_layer = {1},
+   check_layers = { {2} },
+   processing_mode = HIERARCHICAL
+);
+\end{lstlisting}
+
+不匹配在 \cmd{LAYOUT\_ERRORS} 中报告：
+
+\begin{lstlisting}
+test2.rs:17:layout_integrity_by_marker_layer:cell_mismatch
+- - - - - - - - - - -
+Structure Marker Layer
+- - - - - - - - - - -
+M1        (1;0)
+M2        (1;0)
+M4        (1;0)
+M5        (1;0)
+
+test2.rs:22:layout_integrity_by_marker_layer:cell_mismatch
+- - - - - - - - - - -
+Structure Marker Layer
+- - - - - - - - - - -
+M2        (1;0)
+M5        (1;0)
+
+test2.rs:28:layout_integrity_by_marker_layer:cell_mismatch
+- - - - - - - - - - -
+Structure Marker Layer
+- - - - - - - - - - -
+M1        (1;0)
+M4        (1;0)
+\end{lstlisting}
+
+每个单元状态的细节报告在 \cmd{run\_details/lidb.log} 中（节选）：
+
+\begin{lstlisting}
+Processing layout cell C
+  Database: test.lidb
+    All Layers: Hierarchically equivalent cells found
+    Layers (3;0): Hierarchically equivalent cells found
+    Layers (4;0) (2;0): Hierarchically equivalent cells found
+    Layers (2;0): Hierarchically equivalent cells found
+  Marker Layer Check:
+    Result       = No Data on Marker Layer
+
+Processing layout cell B
+  Database: test.lidb
+    All Layers: No hierarchically equivalent cells found
+    Layers (3;0): No hierarchically equivalent cells found
+    Layers (4;0) (2;0): Hierarchically equivalent cells found
+    Layers (2;0): Hierarchically equivalent cells found
+  Marker Layer Check:
+    Result       = No Data on Marker Layer
+
+Processing layout cell M6
+  ...
+  Marker Layer Check:
+    Result       = Matched
+    Marker Layer = (1;0)
+    Matched Cell = M6
+    Database     = test.lidb
+
+Processing layout cell M5
+  ...
+  Marker Layer Check:
+    Result       = Matched
+    Marker Layer = (1;0)
+    Matched Cell = M5
+    Database     = test.lidb
+
+Processing layout cell TOP
+  Marker Layer Check:
+    Result       = No Data on Marker Layer
+\end{lstlisting}
+
+\subsection{标记层检查}
+\subsubsection*{Marker Layer Check}
+
+\cmd{layout\_integrity\_by\_marker\_layer()} 不按名称检查单元，而是检查在指定标记层上有数据的任意单元。它在输入 LIDB 中查找同样在标记层上有数据的任意单元的任一组匹配校验和。
+
+\begin{lstlisting}[style=pxl]
+{
+    @ "Layout Integrity Check";
+    layout_integrity_by_marker_layer(
+       marker_layer = { 8,0 }
+    );
+}
+\end{lstlisting}
+
+本例以层 8 为标记层检查单元。\cmd{run\_details/lidb.log} 中匹配与不匹配单元示例如下：
+
+\begin{lstlisting}
+-------------------------------------------------------------------------
+                       Layout Integrity Processing Log
+                            11/08/2010 09:45:33
+-------------------------------------------------------------------------
+
+Processing layout cell VIA
+  Marker Layer Check:
+    Result       = No Match Found
+    Marker Layer = (8;0)
+
+Processing layout cell INV
+  Marker Layer Check:
+    Result       = Matched
+    Marker Layer = (8;0)
+    Matched Cell = INV
+    Database     = /home/user/orig.lidb
+\end{lstlisting}
+
+从 \cmd{cell.LAYOUT\_ERRORS} 可见，标记层检查的不匹配按通过/失败报告，不报告单个层或单元引用的不匹配：
+
+\begin{lstlisting}
+ Layout Integrity Check
+    layout_integrity_by_marker_layer:cell_mismatch ... 3 violations found.
+...
+
+runset8.rs:17:layout_integrity_by_marker_layer:cell_mismatch
+- - - - - - - - - - -
+Structure Marker Layer
+- - - - - - - - - - -
+AD4FUL    (8;0)
+VIA       (8;0)
+TGATE     (8;0)
+\end{lstlisting}
+
+若只想检查被标记单元中的特定层，使用 \cmd{check\_layers} 参数：
+
+\begin{lstlisting}[style=pxl]
+{
+    @ "Layout Integrity Check";
+    layout_integrity_by_marker_layer(
+       marker_layer = { 8,0 },
+       check_layers = { {==6}, {==8}, {==10} }
+    );
+}
+\end{lstlisting}
+
+上例中，若单元在层 6、8、10 上均匹配，则视为完整匹配。
+
+\subsection{混合 Milkyway 与 GDSII 流程}
+\subsubsection*{Mixed Milkyway and GDSII Flow}
+
+对于混合 Milkyway 与 GDSII 流程，\cmd{layout\_integrity\_options()} 指定用于检查 Milkyway 单元的 LIDB。要对替换用的 GDSII 或 OASIS 文件执行版图完整性检查，须在 \cmd{milkyway\_merge\_library\_options()} 中为每个替换库指定 LIDB。
+
+\begin{lstlisting}[style=pxl]
+library(
+   library_name = "EX_ADDER_3",
+   format = MILKYWAY,
+   cell = "AD4FUL"
+);
+
+milkyway_merge_library_options(
+  libraries = {
+    {
+      library_name = "EX_ADDER_3",
+      replacement_libraries = {
+        {
+          file = "EX_ADDER_3.GDS",
+          format = GDSII,
+          layout_integrity = {
+            { db_name = "gds.lidb" }
+          }
+        }
+      }
+    }
+  }
+);
+
+layout_integrity_options(
+   databases = {
+     { db_name = "milkyway.lidb" }
+   }
+);
+
+{
+    @ "Layout Integrity Check";
+    layout_integrity_by_cell(
+       cells = {"*"}
+    );
+}
+\end{lstlisting}
+
+IC Validator 运行后，\cmd{run\_details/lidb.log} 显示 Milkyway 单元对照 \cmd{milkyway.lidb} 检查，而 GDSII 单元对照 \cmd{gds.lidb} 检查：
+
+\begin{lstlisting}
+-------------------------------------------------------------------------
+                       Layout Integrity Processing Log
+                            11/08/2010 09:56:43
+-------------------------------------------------------------------------
+
+Processing layout cell AD4FUL
+  Cell check:
+    Result       = Matched
+    Matched Cell = AD4FUL
+    Database     = /home/user/milkyway.lidb
+
+Processing layout cell VIA
+  Cell check:
+    Result       = Matched
+    Matched Cell = VIA
+    Database     = /home/user/gds.lidb
+\end{lstlisting}
+
+% ============================================================
+\section{icv\_lidb 实用程序}
+\subsection*{The icv\_lidb Utility}
+
+\cmd{icv\_lidb} 实用程序管理 LIDB。可用于：
+\begin{itemize}
+  \item 从输入版图创建 LIDB；
+  \item 合并多个 LIDB；
+  \item 使用现有 LIDB 快速验证输入版图。
+\end{itemize}
+
+\subsection{命令行选项}
+\subsubsection*{Command-Line Options}
+
+\cmd{icv\_lidb} 的命令行语法支持三种简单使用模型。
+\begin{itemize}
+  \item 从输入版图生成 LIDB：
+\begin{lstlisting}
+icv_lidb -i input_layout -o output_lidb [-c top_cell]
+\end{lstlisting}
+  \item 使用现有 LIDB 验证输入版图：
+\begin{lstlisting}
+icv_lidb -i input_layout -validate golden_lidb [-c top_cell]
+\end{lstlisting}
+  \item 合并多个 LIDB：
+\begin{lstlisting}
+icv_lidb -merge lidb1 lidb2... -o output_lidb
+\end{lstlisting}
+\end{itemize}
+
+表~\ref{tab:app-c-lidb-opts} 说明该实用程序的命令行选项。
+
+\begin{longtable}{@{}>{\ttfamily\raggedright\arraybackslash}p{0.32\textwidth} p{0.62\textwidth}@{}}
+\caption{icv\_lidb 实用程序命令行选项}\\
+\label{tab:app-c-lidb-opts}\\
+\toprule
+\textbf{\rmfamily 语法} & \textbf{说明} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{\rmfamily 语法} & \textbf{说明} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+
+-c \textit{cell} &
+输入版图的顶层单元。省略时处理库中全部单元。 \\
+\midrule
+
+-elpc \textit{num}\newline
+-error\_limit\_per\_check \textit{num} &
+设置每类检查的错误上限。默认值为 100。
+\textit{注意：}设为 \cmd{ERROR\_LIMIT\_MAX} 时存储直至工具定义最大上限的全部错误。也可给出具体数字提高上限；但对大量错误可能降低性能并增加磁盘占用，不推荐。设为 0 抑制存储全部错误。 \\
+\midrule
+
+-help &
+显示命令行选项列表并退出。 \\
+\midrule
+
+-i \textit{input\_layout} \ldots &
+创建 LIDB 或对照现有 LIDB 验证版图时的输入版图名。创建 LIDB 时可指定多个文件，将全部版图的校验和纳入输出 LIDB。各格式示例：
+\begin{itemize}[nosep,leftmargin=1.2em]
+  \item GDSII：\cmd{icv\_lidb -i /path/to/file.gds}
+  \item OASIS：\cmd{icv\_lidb -i /path/to/file.oas}
+  \item Milkyway：\cmd{icv\_lidb -i /library/path/LIBRARY\_NAME}
+  \item OpenAccess：\cmd{icv\_lidb -i /path/to/lib.defs/LIBRARY\_NAME}
+\end{itemize} \\
+\midrule
+
+-lf \textit{filename} &
+选择写入版图完整性数据库的层与对象类型（多边形、边、文本）子集。例如，仅当层文件含包含 \cmd{layer1} 的 \cmd{assign\_edge()} 时，层1上的边才写入数据库。层文件存入 LIDB，使对照该数据库的任何验证运行都限制在层文件中的层与对象类型。层文件不得含 options 或 runset 函数。若文件为空或不含 assign 语句，则忽略该选项，行为如同未指定。 \\
+\midrule
+
+-merge \textit{lidb} \ldots \textit{lidb} &
+将指定的输入 LIDB 合并到输出数据库。 \\
+\midrule
+
+-o \textit{output\_lidb} &
+生成的输出版图完整性数据库（LIDB）。若文件已存在则覆盖。 \\
+\midrule
+
+-oa\_layer\_map \textit{layer\_mapping\_file} &
+OpenAccess 数据库的可选层映射文件。映射文件中不存在的层上的数据不读取。见 \cmd{openaccess\_options()} 的 \cmd{layer\_mapping\_file} 参数。 \\
+\midrule
+
+-oa\_view \textit{view\_name} &
+OpenAccess 数据库顶层单元的可选视图。 \\
+\midrule
+
+-of \textit{options\_file} &
+可选文件，含 IC Validator runset OPTIONS 节。可含任意 OPTIONS 节函数，包括 \cmd{gds\_options()}、\cmd{milkyway\_options()}、\cmd{oasis\_options()}。 \\
+\midrule
+
+-V &
+显示实用程序版本并退出。 \\
+\midrule
+
+-validate \textit{golden\_lidb} &
+对照指定的黄金 LIDB 对输入版图执行版图完整性检查。结果在 \cmd{cell.LAYOUT\_ERRORS} 文件中。 \\
+\end{longtable}
+
+\subsection{退出状态}
+\subsubsection*{Exit Status}
+
+\cmd{icv\_lidb} 的退出状态见表~\ref{tab:app-c-lidb-exit}。
+
+\begin{table}[htbp]
+\centering
+\caption{icv\_lidb 退出状态值}
+\label{tab:app-c-lidb-exit}
+\begin{tabular}{@{}lp{0.55\textwidth}@{}}
+\toprule
+退出状态值 & 定义 \\
+\midrule
+0 & 成功运行。若验证输入版图，则未发现差异。 \\
+1 & 成功运行且发现差异。 \\
+负数 & 发生错误。 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{输出文件}
+\subsubsection*{Output Files}
+
+\cmd{icv\_lidb} 的输出文件见表~\ref{tab:app-c-lidb-out}。
+
+\begin{longtable}{@{}>{\ttfamily\raggedright\arraybackslash}p{0.38\textwidth} p{0.56\textwidth}@{}}
+\caption{icv\_lidb 输出文件}\\
+\label{tab:app-c-lidb-out}\\
+\toprule
+\textbf{\rmfamily 文件名} & \textbf{说明} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{\rmfamily 文件名} & \textbf{说明} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+
+lidb\_details/icv\_lidb.sum &
+摘要文件，含运行信息；屏幕全部输出写入该文件。含：所用命令行选项；输入输出文件信息；运行时间与内存；成功或失败指示。 \\
+\midrule
+
+lidb\_details/icv\_lidb.log &
+版图验证或数据库生成运行中所处理全部单元的日志。验证运行中可能指出设计单元是否匹配黄金 LIDB 单元，以及匹配的是哪个黄金 LIDB 单元。 \\
+\midrule
+
+cell.LAYOUT\_ERRORS &
+版图验证运行中发现的全部版图完整性错误。若未给出顶层单元，文件名为 \cmd{cell.LAYOUT\_ERRORS}。 \\
+\end{longtable}
+
+% ============================================================
+\section{icv\_lidb\_report 实用程序}
+\subsection*{The icv\_lidb\_report Utility}
+
+\cmd{icv\_lidb\_report} 实用程序报告 LIDB 内容。对数据库中每一组校验和，显示黄金版图路径、用户 ID 与时间戳，并列出有条目的单元。输出发送到屏幕，以及当前目录中的 \cmd{icv\_lidb\_report.sum} 摘要文件。
+
+\subsection{命令行选项}
+\subsubsection*{Command-Line Options}
+
+命令行语法为：
+
+\begin{lstlisting}
+icv_lidb_report -i input_lidb
+\end{lstlisting}
+
+表~\ref{tab:app-c-lidb-report-opts} 说明命令行选项。
+
+\begin{table}[htbp]
+\centering
+\caption{icv\_lidb\_report 命令行选项}
+\label{tab:app-c-lidb-report-opts}
+\begin{tabular}{@{}>{\ttfamily\raggedright\arraybackslash}p{0.32\textwidth} p{0.62\textwidth}@{}}
+\toprule
+\textbf{\rmfamily 语法} & \textbf{说明} \\
+\midrule
+-help & 显示命令行选项列表并退出。 \\
+-i \textit{input\_lidb} & 要报告的输入版图完整性数据库。 \\
+-V & 显示实用程序版本并退出。 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{输出文件}
+\subsubsection*{Output Files}
+
+输出文件见表~\ref{tab:app-c-lidb-report-out}。
+
+\begin{table}[htbp]
+\centering
+\caption{icv\_lidb\_report 输出文件}
+\label{tab:app-c-lidb-report-out}
+\begin{tabular}{@{}>{\ttfamily\raggedright\arraybackslash}p{0.38\textwidth} p{0.56\textwidth}@{}}
+\toprule
+\textbf{\rmfamily 文件名} & \textbf{说明} \\
+\midrule
+icv\_lidb\_report.sum &
+摘要文件，含运行信息；屏幕全部输出写入该文件。含：所用命令行选项；输入输出文件信息。 \\
+\bottomrule
+\end{tabular}
+\end{table}

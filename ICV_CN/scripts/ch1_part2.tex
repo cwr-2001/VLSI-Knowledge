@@ -1,0 +1,1176 @@
+% ============================================================
+% IC Validator User Guide X-2025.06 第 1 章后半（Compiler Directives 至章末）
+% 章节正文片段；不含 \documentclass / preamble
+% ============================================================
+
+\section{编译器指令}
+\subsection*{Compiler Directives}
+
+\subsection{对 64 位坐标的支持}
+\subsubsection*{Support for 64-Bit Coordinates}
+
+IC Validator 工具会将坐标数据转换到有符号 32~位整数坐标空间。
+当芯片尺寸很大而数据库分辨率（database resolution）又很小时，可能需要更大的整数空间，否则会发生坐标溢出（coordinate overflow）错误。
+
+要扩大坐标空间，可使用 \cmd{-64} 命令行选项。仅在确实需要时才使用 \cmd{-64}，因为启用后内存占用会增加。
+
+32~位整数的取值范围为：
+\begin{itemize}
+  \item 最大正值：2{,}147{,}483{,}647
+  \item 最大负值：$-$2{,}147{,}483{,}648
+\end{itemize}
+
+在下列示例中：
+\begin{itemize}
+  \item \cmd{Rcoord} 为实数 $xy$ 坐标值；
+  \item \cmd{Icoord} 为转换后的整数坐标。
+\end{itemize}
+
+假定：
+\begin{itemize}
+  \item \cmd{Rcoord} $= 25{,}000.1234$~mm（距 $0.0000$ 为 $2.50001234$~cm）
+  \item 工作分辨率（working resolution）$= 2\times$
+\end{itemize}
+
+当数据库分辨率为 $0.0001$~mm 时，\cmd{Rcoord} 不会溢出 32~位整数坐标空间：
+\begin{lstlisting}
+Icoord = 25,000.1234*(1/0.0001)*2 = 500,002,468 < 2,147,483,647
+\end{lstlisting}
+
+当数据库分辨率为 $0.00001$ 时，\cmd{Rcoord} 会溢出 32~位整数坐标空间：
+\begin{lstlisting}
+Icoord = 25,000.1234*(1/0.00001)*2 = 5,000,024,680 > 2,147,483,647
+\end{lstlisting}
+
+不过，并非所有溢出情形都相同。在使用 \cmd{-64} 选项之前，应确认是否已充分利用可用坐标空间。如图~\ref{fig:icv-coord-overflow} 所示，若只使用正坐标值，会人为限制最大可容纳的芯片尺寸。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 1：Overflow of the 32-Bit Integer Coordinate Space）}\\[0.3em]
+\small 请参阅原版 PDF 插图；可将截图放入 \texttt{figures/} 目录后用 \texttt{\textbackslash includegraphics} 替换。
+\vspace{1.5cm}}}
+\caption{32~位整数坐标空间溢出示意}
+\label{fig:icv-coord-overflow}
+\end{figure}
+
+将芯片关于原点居中放置，可最大化可用坐标空间，如图~\ref{fig:icv-coord-no-overflow} 所示。此时无需使用 \cmd{-64} 选项即可避免溢出。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 2：No Overflow of the 32-Bit Integer Coordinate Space）}\\[0.3em]
+\small 请参阅原版 PDF 插图；可将截图放入 \texttt{figures/} 目录后用 \texttt{\textbackslash includegraphics} 替换。
+\vspace{1.5cm}}}
+\caption{32~位整数坐标空间无溢出示意（芯片相对原点居中）}
+\label{fig:icv-coord-no-overflow}
+\end{figure}
+
+IC Validator 的错误数据库已增强为可变宽度坐标格式，可容纳 32~位或 64~位整数坐标。该能力同时适用于错误数据库（PYDB）与错误分类数据库（cPYDB）；后者可导出用于 DRC 错误分类。
+
+\cmd{pydb\_export} 工具也已增强，可在多种坐标格式之间转换错误分类数据库（cPYDB），以便在必要时保持兼容性。
+
+\begin{noteBox}
+当前及后续版本的 IC Validator 工具仍支持读取采用旧式固定 32~位或 64~位坐标格式的错误数据库。但版本早于 L-2016.06 的 IC Validator 工具无法读取新的坐标格式。
+\end{noteBox}
+
+\subsection{仅运行（Run-Only）执行}
+\subsubsection*{Run-Only Execution}
+
+按下列步骤进行 run-only 执行。
+
+\begin{enumerate}
+  \item 用下列指令标识 runset 中希望执行所需检查的区段：
+\begin{lstlisting}[style=pxl]
+#pragma runonly begin
+
+#pragma runonly end
+\end{lstlisting}
+  可在同一 runset 中定义多个 run-only 区段。
+
+  \item 调用 IC Validator 时加上 \cmd{-ro}（run-only）命令行选项，以：
+  \begin{enumerate}[label=\alph*.]
+    \item 解析 runset；
+    \item 裁剪（prune）那些没有数据流进入 run-only 代码区段的 runset 函数；
+    \item 执行经裁剪后的 runset。
+  \end{enumerate}
+\begin{noteBox}
+若 IC Validator 在 runset 中未找到任何 run-only 区段，则不会执行该 runset。
+\end{noteBox}
+
+  \item 或者，若希望在为 run-only 执行完成解析与裁剪后即停止执行，可同时使用 \cmd{-pcr} 与 \cmd{-ro}。例如：
+\begin{lstlisting}
+% icv -ro -pcr outfile
+\end{lstlisting}
+
+  \item 当将已裁剪的 run-only 输出用作源 runset 时，应使用 \cmd{-nro} 命令行选项。若不使用 \cmd{-nro}，默认的裁剪优化可能会删除 run-only 代码区段内部的函数。
+\end{enumerate}
+
+\begin{noteBox}
+所有 \cmd{\#pragma run-only} 指令会保留在经裁剪的 run-only 输出中。正因如此，可用 \cmd{icv -ro runonly.rs} 命令行直接执行该输出文件 \cmd{runonly.rs}。
+\end{noteBox}
+
+\subsection{环境变量}
+\subsubsection*{Environment Variables}
+
+变量名前的 \cmd{\$} 表示该变量为环境变量。例如：
+\begin{lstlisting}[style=pxl]
+$ENV_ABC
+\end{lstlisting}
+
+该变量必须已在环境中设置；否则会发生解析错误。所有环境变量均视为字符串。例如：
+\begin{lstlisting}[style=pxl]
+if( $ENV_ABC == "XYZ") {
+   x = abc(XYZ);
+}
+else {
+   x = abc(NOT_XYZ)
+}
+\end{lstlisting}
+
+\subsection{向编译器提供附加信息}
+\subsubsection*{Providing Additional Information to the Compiler}
+
+编译器指令 \cmd{\#pragma envvar} 用于与环境变量交互，可：
+\begin{itemize}
+  \item 打印指定环境变量的名称与取值列表：
+\begin{lstlisting}[style=pxl]
+#pragma envvar report variable ... variable
+\end{lstlisting}
+  若任一变量不存在，则报错。例如：
+\begin{lstlisting}
+error: #pragma envvar references undefined environment variable 'e'
+\end{lstlisting}
+
+  \item 探测环境中是否存在指定变量：
+\begin{lstlisting}[style=pxl]
+// input file
+#pragma envvar default x "aa"
+#pragma envvar default y "bb"
+#pragma envvar default z $x "__" $y // Use $X notation to
+                                    // reference defined
+                                    // variables
+#pragma envvar report x y z
+
+// output from compiler
+a.rs:4: x=aa
+a.rs:4: y=bb
+a.rs:4: z=aa__bb
+\end{lstlisting}
+  \begin{itemize}
+    \item 若指定变量已存在，则不采取任何操作；
+    \item 若指定变量不存在，则将其在环境中的值设为该行其余部分的拼接结果。拼接内容必须是字符串字面量、对其他环境变量的引用，或二者的组合。
+  \end{itemize}
+\begin{lstlisting}[style=pxl]
+#pragma envvar default variable ...
+\end{lstlisting}
+\end{itemize}
+
+\begin{noteBox}
+若有多条 \cmd{\#pragma envvar default} 语句定义同一变量，后续出现时会将该变量视为已由首次出现设置到环境中。
+\end{noteBox}
+
+\subsection{由环境变量创建预处理器定义}
+\subsubsection*{Creating Preprocessor Definitions From Environment Variables}
+
+预处理器指令 \cmd{\#pragma PXL define\_from\_envvar} 可在环境变量已设置时，据此创建预处理器定义。语法为：
+\begin{lstlisting}[style=pxl]
+#pragma PXL define_from_envvar cpp_var env_var
+\end{lstlisting}
+
+名为 \cmd{cpp\_var} 的预处理器定义会被赋予名为 \cmd{env\_var} 的环境变量之值，效果如同执行了 \cmd{\#define}。若该环境变量未设置，则不采取任何操作，从而使 \cmd{cpp\_var} 保持未定义，或保留其先前定义。
+
+\cmd{\#pragma PXL define\_from\_envvar} 接受两个参数：
+\begin{itemize}
+  \item 第一个参数：若环境变量已设置，则要重定义的预处理器定义名称；
+  \item 第二个参数：取值来源的环境变量名称。
+\end{itemize}
+
+\begin{lstlisting}[style=pxl]
+#include <icv.rh>
+
+#define str(x) #x
+#define qstr(x) str(x)
+
+#if defined(FOO_DEF)
+note("Before pragma, defined as: " + qstr(FOO_DEF));
+#else
+note("Not defined before pragma");
+#endif
+
+#pragma PXL define_from_envvar FOO_DEF FOO_ENV
+
+#if defined(FOO_DEF)
+note("After pragma, defined as: " + qstr(FOO_DEF));
+
+#if FOO_DEF == 2
+note("... and satisfies test for == 2");
+#elif FOO_DEF == 3
+note("... and satisfies test for == 3");
+#endif
+#else
+note("Not defined after pragma");
+#endif
+\end{lstlisting}
+
+当按如下方式运行时：
+\begin{lstlisting}
+% export FOO_ENV=3
+% icv -verbose -D FOO_DEF=2 define_from_envvar.rs
+\end{lstlisting}
+
+输出为：
+\begin{lstlisting}
+define_from_envvar.rs:10: Before pragma, defined as: 2
+define_from_envvar.rs:17: After pragma, defined as: 3
+define_from_envvar.rs:21: ... and satisfies test for == 3
+\end{lstlisting}
+
+注意：由于命令行传入的预处理器定义，原始值为 2；\cmd{define\_from\_envvar} pragma 将 \cmd{FOO\_DEF} 重定义为 3。
+若未设置 \cmd{FOO\_ENV}，则 \cmd{FOO\_DEF} 保持为 2。若命令行上也未定义 \cmd{FOO\_DEF}，则在余下预处理过程中它保持未定义。
+
+可将 \cmd{\#if definition(identifier, string, case\_sensitivity)} 函数与 \cmd{define\_from\_envvar} pragma 配合使用，以查询环境变量 \cmd{\$envvar\_name} 的值是否等于 \cmd{string}。
+
+在用户环境中设置：
+\begin{lstlisting}
+setenv BEOL_STACK 9M_3Mx_2Fx_2Dx_1Gx_1Iz_LB
+\end{lstlisting}
+
+runset 可写为：
+\begin{lstlisting}[style=pxl]
+#pragma PXL define_from_envvar d_ENV_BEOL_STACK BEOL_STACK
+
+#if definition(d_ENV_BEOL_STACK, "9M_3Mx_2Fx_2Dx_1Gx_1Iz_LB", 0)
+...
+#endif
+#if definition(d_ENV_BEOL_STACK, "8M_2Mx_2Fx_2Dx_1Gx_1Iz_LB", 0)
+...
+#endif
+\end{lstlisting}
+
+\begin{itemize}
+  \item 第三个参数 \cmd{case\_sensitivity} 用于 \cmd{definition(identifier, string, case\_sensitivity)}；它在 runset 中被显式 \cmd{\#define}，无需借助 envvar。取值为 0 时，对标识符取值与指定字符串做大小写不敏感比较；取值为 1 时做大小写敏感比较。
+\end{itemize}
+
+\subsection{裁剪层}
+\subsubsection*{Pruning Layers}
+
+\cmd{\#pragma prune\_assign} 编译器指令指示 IC Validator 仅从输入设计中读取所需的 runset 层，并创建所需的 runset 层。可用该指令启用或禁用裁剪：
+\begin{lstlisting}[style=pxl]
+#pragma icv compiler [enable|disable] prune_assign
+\end{lstlisting}
+
+若未使用该编译器指令，或将其设为 \cmd{disable}，且未使用 \cmd{-prune\_assign} 命令行选项，则 IC Validator 会读取输入设计中的全部 runset 层。无论何种情况，不必要的 runset 层都不会出现在 summary 文件中。runset 中 \cmd{prune\_assign} 指令的设置优先于 \cmd{-prune\_assign} 命令行选项。
+
+\subsection{提升函数调度优先级}
+\subsubsection*{Prioritizing the Scheduling of Functions}
+
+\cmd{\#pragma prioritize} 指令会提高该函数及其所依赖函数的调度优先级。将该指令紧置于目标命令或代码块之前。该指令也可能为这些被优先的函数分配额外线程。例如：
+\begin{lstlisting}[style=pxl]
+#pragma prioritize
+ not_rectangles(M5);
+\end{lstlisting}
+
+如下例所示，\cmd{\#pragma prioritize} 会提高两个 \cmd{not\_rectangles()} 函数的优先级：
+\begin{lstlisting}[style=pxl]
+#pragma prioritize
+ERR_M4 @= { @ "M4 non-rectangles";
+  not_rectangles(M4);
+  not_rectangles(M5);
+}
+\end{lstlisting}
+
+相关命令行选项见表~15。
+
+% ============================================================
+\section{Runset 配置}
+\subsection*{Runset Configuration}
+
+Runset 配置用于更改 Options 与 Compare 相关函数的配置。更多信息见 IC Validator 命令行选项中的 \cmd{-runset\_config}。
+
+Runset 配置支持下列 IC Validator 函数：
+
+\begin{longtable}{p{0.32\textwidth}p{0.32\textwidth}p{0.26\textwidth}}
+\caption{支持的 Runset 配置函数}\label{tab:icv-runset-config-funcs}\\
+\toprule
+OPTIONS 函数 & Compare setup 函数 & \cmd{compare()} \\
+\midrule
+\endfirsthead
+\caption[]{支持的 Runset 配置函数（续）}\\
+\toprule
+OPTIONS 函数 & Compare setup 函数 & \cmd{compare()} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\cmd{compatibility\_options()} & \cmd{check\_property()} & \cmd{compare()} \\
+\cmd{drc\_black\_box\_options()} & \cmd{check\_property\_off()} & \\
+\cmd{debug\_options()} & \cmd{filter()} & \\
+\cmd{error\_options()} & \cmd{filter\_off()} & \\
+\cmd{gds\_options()} & \cmd{get\_filtered\_devices()} & \\
+\cmd{hierarchy\_auto\_options()} & \cmd{map\_capacitor()} & \\
+\cmd{hierarchy\_options()} & \cmd{map\_gendev()} & \\
+\cmd{incremental\_options()} & \cmd{map\_inductor()} & \\
+\cmd{layout\_drawn\_options()} & \cmd{map\_nmos()} & \\
+\cmd{layout\_grid\_options()} & \cmd{map\_np()} & \\
+\cmd{milkyway\_options()} & \cmd{map\_npn()} & \\
+\cmd{ndm\_options()} & \cmd{map\_pmos()} & \\
+\cmd{oasis\_options()} & \cmd{map\_pn()} & \\
+\cmd{openaccess\_options()} & \cmd{map\_pnp()} & \\
+\cmd{pattern\_options()} & \cmd{map\_resistor()} & \\
+\cmd{prototype\_options()} & \cmd{match()} & \\
+\cmd{resolution\_options()} & \cmd{merge\_parallel()} & \\
+\cmd{run\_options()} & \cmd{merge\_parallel\_off()} & \\
+\cmd{text\_net\_global\_options()} & \cmd{merge\_series()} & \\
+\cmd{text\_options()} & \cmd{merge\_series\_off()} & \\
+\cmd{equiv\_options()} & \cmd{recognize\_gate()} & \\
+\cmd{lvs\_black\_box\_options()} & \cmd{recognize\_gate\_off()} & \\
+\cmd{lvs\_options()} & \cmd{recaclulate\_property()} & \\
+\cmd{net\_options()} & \cmd{short\_equivalent\_nodes()} & \\
+\cmd{waiver\_options()} & \cmd{short\_equivalent\_nodes\_off()} & \\
+\cmd{milkyway\_error\_options()} & \cmd{short\_equivalent\_stack\_nodes()} & \\
+ & \cmd{short\_equivalent\_stack\_nodes\_off()} & \\
+\end{longtable}
+
+\cmd{-runset\_config} 文件中的函数按下列准则处理：
+\begin{itemize}
+  \item 所有 OPTIONS 函数实际上插入到 runset 中最后一个 option 之后；
+  \item 所有 ``compare setup'' 函数插入到最后一个 ``compare setup'' 函数之后；
+  \item \cmd{compare()} 自身中指定的任何选项用于更新 runset 中的 \cmd{compare}。
+\end{itemize}
+
+% ============================================================
+\section{Runset 插入}
+\subsection*{Runset Insertion}
+
+Runset 插入允许你用次级 runset 定制主 runset，而无需修改主 runset 本身。若主 runset 包含必要的 pragma 语句以标明可插入代码的位置，即可在单独文件中提供附加 runset 代码。
+
+主 runset 中的语法为 \cmd{\#pragma icv insert <label>}。每个 \cmd{<label>} 只能使用一次。所有这些 pragma 必须独占一行。
+
+指定插入 pragma 之后，可用 \cmd{\#pragma icv label <label> begin} 与 \cmd{\#pragma icv label <label> end} 标记代码块。这些 pragma 必须出现在对应的 insert pragma 之后；不可嵌套或重叠。允许多个代码块使用同一 \cmd{<label>}，它们按定义顺序插入到同一目标位置。
+
+% ============================================================
+\section{退出码}
+\subsection*{Exit Codes}
+
+表~\ref{tab:icv-gen-exit-codes} 列出通用退出码。
+
+\begin{longtable}{lp{0.28\textwidth}p{0.52\textwidth}}
+\caption{通用退出码}\label{tab:icv-gen-exit-codes}\\
+\toprule
+编号 & 类型 & 说明 \\
+\midrule
+\endfirsthead
+\caption[]{通用退出码（续）}\\
+\toprule
+编号 & 类型 & 说明 \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+0 & \cmd{EXIT\_COMPLETE} & 运行完成。 \\
+30 & \cmd{EXIT\_COMPLETE\_WERROR} & 运行完成，但在 \cmd{cell.LAYOUT\_ERRORS} 文件中报告了错误，或在 \cmd{cell.LVS\_ERRORS} 文件中报告了 LVS 失败。仅当使用 \cmd{-ece} 命令行选项时才启用此退出码。干净版图若仅报告已豁免（waived）错误或方法论（methodology）警告，不会发出此退出码。 \\
+32 & \cmd{EXIT\_USER\_INT} & 运行被用户以 Ctrl+C 中断。 \\
+33 & \cmd{EXIT\_USER\_ERR} & 由用户引起的错误，例如解析器错误或文件未找到。 \\
+34 & \cmd{EXIT\_OS} & 系统错误，例如除零、总线错误、磁盘满、交换空间不足，或无法创建目录/文件。 \\
+35 & \cmd{EXIT\_PANIC} & 发生内部致命错误。 \\
+44 & \cmd{EXIT\_DATABASE\_ERROR} & 表示发生数据库处理错误，且仅有部分结果可用。 \\
+\end{longtable}
+
+表~\ref{tab:icv-lic-exit-codes} 列出与许可证管理器相关的退出码。
+
+\begin{longtable}{lp{0.28\textwidth}p{0.52\textwidth}}
+\caption{许可证管理器相关退出码}\label{tab:icv-lic-exit-codes}\\
+\toprule
+编号 & 类型 & 说明 \\
+\midrule
+\endfirsthead
+\caption[]{许可证管理器相关退出码（续）}\\
+\toprule
+编号 & 类型 & 说明 \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+64 & \cmd{EXIT\_LIC\_TOO\_MANY} & 检出的许可证过多。 \\
+65 & \cmd{EXIT\_LIC\_NOT\_ALLOWED} & 本站点未获授权运行该产品。 \\
+66 & \cmd{EXIT\_LIC\_NO\_REPLY} & 无法联系许可证服务器。 \\
+67 & \cmd{EXIT\_LIC\_DENIED} & 许可证被拒绝，未给出说明。 \\
+($-$1) & \cmd{EXIT\_NONE} & 未初始化的退出状态变量。 \\
+\end{longtable}
+
+% ============================================================
+\section{内联函数}
+\subsection*{Inlined Functions}
+
+当以 \cmd{-ndg} 命令行选项运行 IC Validator 时：
+\begin{itemize}
+  \item 任何调用内联 runset 函数的用户函数，都需用 \cmd{inline} 限定符标记。内联 runset 函数列表见表~\ref{tab:icv-inline-funcs}。例如：
+\begin{lstlisting}[style=pxl]
+my_options : inline function ( void ) returning void
+{
+   . . .
+   error_options(...);
+   gds_options(...);
+   . . .
+}
+\end{lstlisting}
+
+  \item 调用带 cell 列表的 runset 函数、以及用于构造 cell 列表的 runset 函数的用户函数，也必须用 \cmd{inline} 限定符标记。相关函数列表见表~\ref{tab:icv-cell-list-funcs}。例如：
+\begin{lstlisting}[style=pxl]
+add_strings_to_list : inline function (string_list : in_out list of
+  string, new_strings : list of string) returning void
+{
+    string_list = string_list.merge(new_strings);
+}
+
+get_cell_extent : inline function (layer1 : polygon_layer, cells :
+  list of string) returning result : polygon_layer
+{
+    result = cell_extent(layer1, cells);
+}
+
+cells : list of string = {};
+
+add_strings_to_list(cells, {"AX", "AY", "AZ"});
+add_strings_to_list(cells, {"BX", "BZ"});
+
+part_extent = get_cell_extent(part, cells);
+\end{lstlisting}
+\end{itemize}
+
+若某用户函数需要 \cmd{inline} 限定符却未标记，运行时错误为：
+\begin{lstlisting}
+error: unable to extract cell list for no explode options
+\end{lstlisting}
+
+表~\ref{tab:icv-inline-funcs} 列出带 \cmd{inline} 限定符标记的 runset 函数。
+
+\begin{longtable}{p{0.48\textwidth}p{0.48\textwidth}}
+\caption{带 \cmd{inline} 限定符标记的 Runset 函数}\label{tab:icv-inline-funcs}\\
+\toprule
+函数 & 函数 \\
+\midrule
+\endfirsthead
+\caption[]{带 \cmd{inline} 限定符标记的 Runset 函数（续）}\\
+\toprule
+函数 & 函数 \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\cmd{assign()} & \cmd{assign\_edge()} \\
+\cmd{assign\_openaccess()} & \cmd{assign\_openaccess\_edge()} \\
+\cmd{assign\_openaccess\_text()} & \cmd{assign\_text()} \\
+\cmd{equiv\_options()} & \cmd{error\_options()} \\
+\cmd{exclude\_milkyway\_cell\_types()} & \cmd{exclude\_milkyway\_net\_types()} \\
+\cmd{exclude\_milkyway\_route\_guide\_layers()} & \cmd{exclude\_milkyway\_route\_types()} \\
+\cmd{exclude\_ndm\_blockage\_types()} & \cmd{exclude\_ndm\_design\_types()} \\
+\cmd{exclude\_ndm\_net\_types()} & \cmd{exclude\_ndm\_shape\_uses()} \\
+\cmd{gds\_options()} & \cmd{get\_netlist\_connect\_database()} \\
+\cmd{get\_top\_cell()} & \cmd{hierarchy\_auto\_options()} \\
+\cmd{hierarchy\_options()} & \cmd{incremental\_options()} \\
+\cmd{init\_device\_matrix()} & \cmd{instance\_property\_number()} \\
+\cmd{layout\_drawn\_options()} & \cmd{layout\_grid\_options()} \\
+\cmd{layout\_integrity\_by\_cell()} & \cmd{layout\_integrity\_by\_marker\_layer()} \\
+\cmd{layout\_integrity\_options()} & \cmd{library()} \\
+\cmd{library\_create()} & \cmd{library\_import()} \\
+\cmd{lvs\_black\_box\_options()} & \cmd{lvs\_options()} \\
+\cmd{milkyway\_merge\_library\_options()} & \cmd{milkyway\_options()} \\
+\cmd{ndm\_options()} & \cmd{ndm\_merge\_library\_options()} \\
+\cmd{net\_options()} & \cmd{oasis\_options()} \\
+\cmd{openaccess\_options()} & \\
+\cmd{pattern\_options()} & \cmd{prototype\_options()} \\
+\cmd{read\_layout\_netlist()} & \cmd{resolution\_options()} \\
+\cmd{run\_options()} & \cmd{text\_options()} \\
+\end{longtable}
+
+表~\ref{tab:icv-cell-list-funcs} 列出带 cell 列表的 runset 函数，以及用于构造 cell 列表的函数。
+
+\begin{longtable}{p{0.48\textwidth}p{0.48\textwidth}}
+\caption{带 Cell 列表及用于构造 Cell 列表的 Runset 函数}\label{tab:icv-cell-list-funcs}\\
+\toprule
+函数 & 函数 \\
+\midrule
+\endfirsthead
+\caption[]{带 Cell 列表及用于构造 Cell 列表的 Runset 函数（续）}\\
+\toprule
+函数 & 函数 \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\cmd{cell\_extent()} & \cmd{cell\_extent\_layer()} \\
+\cmd{compare()} & \cmd{copy\_by\_cells()} \\
+\cmd{create\_ports()} & \cmd{flatten\_by\_cells()} \\
+\cmd{text\_origin()} & \\
+\end{longtable}
+
+% ============================================================
+\section{分布式处理}
+\subsection*{Distributed Processing}
+
+可在多种分布式处理场景下运行 IC Validator，包括在单台主机上使用多个 CPU，以及使用多台主机。
+
+以分布式处理运行 IC Validator 可提供下列能力：
+\begin{itemize}
+  \item 可扩展性随所用 CPU 数量增加而提升；
+  \item 可向已有 IC Validator 作业灵活添加 CPU；
+  \item 同时多线程（simultaneous multithreading）。
+\end{itemize}
+
+分布式处理在下列各小节中说明：
+\begin{itemize}
+  \item 指定主机名与 CPU 数量
+  \item 许可证要求
+\end{itemize}
+
+\subsection{指定主机名与 CPU 数量}
+\subsubsection*{Specifying Host Names and CPU Counts}
+
+IC Validator 会利用主机上的多个 CPU，并自动决定启动并行任务还是多线程。你必须告知工具希望使用该主机上多少个 CPU，可通过 \cmd{-host\_init} 命令行选项完成。
+
+例如，要在单台主机上使用 8 个 CPU：
+\begin{lstlisting}
+icv -host_init 8 runset.rs
+\end{lstlisting}
+
+也可以指定在哪台主机上运行。上例省略了主机名，因此假定为本地主机。若指定其他主机名，IC Validator 会在该主机上启动。下例在 \cmd{hostA} 上使用 8 个 CPU：
+\begin{lstlisting}
+icv -host_init hostA:8 runset.rs
+\end{lstlisting}
+
+由于指定了远程主机，IC Validator 必须建立到该主机的连接。默认情况下，工具尝试用 \cmd{rsh} 命令连接。若希望使用其他连接方式，可使用 \cmd{-host\_login} 命令行选项（某些 IT 环境可能禁用 \cmd{rsh}，或要求使用其他连接方法）。下例在 \cmd{hostA} 上使用 8 个 CPU，并以 \cmd{ssh} 连接：
+\begin{lstlisting}
+icv -host_init hostA:8 -host_login /bin/ssh runset.rs
+\end{lstlisting}
+
+\begin{noteBox}
+IC Validator 在可用时默认使用 \cmd{rsh} 作为主机登录程序。使用 \cmd{rsh} 可能被视为安全风险，因此常被劝阻或禁用。若环境中禁用了 \cmd{rsh}，IC Validator 会自动改用 \cmd{ssh}。在系统级禁用 \cmd{rsh} 是对网络上所有用户强制安全策略的推荐做法。也可将 \cmd{-host\_login} 设为始终使用 \cmd{ssh} 启动 IC Validator（例如 \cmd{-host\_login ssh}）。
+\end{noteBox}
+
+可以列出多台主机。此时 IC Validator 会使用所列全部主机及其指定的 CPU 数量。下例共使用 32 个 CPU：本地主机 8 个；\cmd{hostA} 上 8 个；\cmd{hostB} 上 16 个（因未指定 \cmd{-host\_login}，以 \cmd{rsh} 连接各主机）：
+\begin{lstlisting}
+icv -host_init 8 hostA:8 hostB:16 runset.rs
+\end{lstlisting}
+
+可在支持同时多线程（SMT）的主机上启用额外线程。下例中，在每核有两个逻辑 CPU 的主机上，IC Validator 将 8 个 CPU 专用于命令，并另用 8 个 CPU 做线程：
+\begin{lstlisting}
+icv -host_init 8 -host_thread_mode SMT
+\end{lstlisting}
+
+更多信息见 IC Validator 命令行选项中的 \cmd{-host\_init} 与 \cmd{-host\_login}。
+
+\begin{noteBox}
+若指定了主机名但省略了 CPU 数量，则使用该主机上的全部 CPU。
+\end{noteBox}
+
+作业运行后还可添加更多 CPU。主机与 CPU 的指定方式相同，使用 \cmd{-host\_add} 命令行选项。注意：该作业必须与原始 IC Validator 作业在同一工作目录中运行。若初始运行用 \cmd{-rd} 指定了 \cmd{run\_details} 目录，则本次运行也必须用 \cmd{-rd} 指定同一目录。
+
+\subsection{修改运行中作业的资源}
+\subsubsection*{Modifying Resources for a Running Job}
+
+可以向正在运行的 IC Validator 作业添加更多 CPU。主机与 CPU 用 \cmd{-host\_add} 指定，方式与 \cmd{-host\_init} 相同。
+
+下例向运行中的作业在 \cmd{hostC} 上添加 16 个 CPU：
+\begin{lstlisting}
+icv -host_add hostC:16
+\end{lstlisting}
+
+\begin{noteBox}
+使用 \cmd{-host\_add} 时，多数其他命令行选项既不必要也不允许。更多信息见表~3 中的 \cmd{-host\_add}。
+\end{noteBox}
+
+也可以从运行中的作业移除主机。用 \cmd{-host\_remove} 指定主机；只能移除整台主机。下例从运行中的作业移除全部 \cmd{hostC}（及其全部 CPU）：
+\begin{lstlisting}
+icv -host_remove hostC
+\end{lstlisting}
+
+还可指示 IC Validator 自动向运行中的作业添加与移除主机：当排队命令过多时添加主机，主机空闲时移除。可在作业初始启动时指定，也可在作业运行后指定。必须提供 IC Validator 用于获取新主机的命令；该命令必须在所获取主机上包含 \cmd{icv -host\_add}。
+
+对于 \cmd{-host\_init}、\cmd{-host\_add} 与 \cmd{-host\_elastic} 命令行选项，该 IC Validator 调用必须与运行中的作业在同一工作目录中执行。此外，若初始运行用 \cmd{-rd} 指定了 \cmd{run\_details} 目录，则本次运行也必须用 \cmd{-rd} 指定。除下列例外外，所有命令行选项都会被忽略：\cmd{-rd} 会被上述三个选项使用；\cmd{-host\_login}/\cmd{-host\_disk} 会被 \cmd{-host\_add} 使用。
+
+\subsection{在 Platform LSF 中运行}
+\subsubsection*{Running in Platform LSF}
+
+在 LSF 中运行时，前述语法与示例仍然适用。下例展示如何用 \cmd{bsub} 启动一个在单台主机上以 16 个 CPU 运行 IC Validator 的 LSF 作业：
+\begin{lstlisting}
+bsub -n 16 -R "span[ptile=16]" <bsub options> icv -host_init 16
+runset.rs
+\end{lstlisting}
+
+类似地，要用 \cmd{-host\_add} 向运行中的 IC Validator 作业在一台主机上添加 16 个 CPU，例如：
+\begin{lstlisting}
+bsub -n 16 -R "span[ptile=16]" <bsub options> icv -host_add 16
+\end{lstlisting}
+
+为方便起见，IC Validator 可自动确定主机配置，并将 \cmd{-host\_login} 设为 \cmd{blaunch}。要启用该功能，将 \cmd{LSF} 作为 \cmd{-host\_init} 的参数。下例用 \cmd{bsub} 在单台主机上请求 16 个 CPU，并通过 \cmd{-host\_init} 的 \cmd{LSF} 参数加以识别：
+\begin{lstlisting}
+bsub -n 16 -R "span[ptile=16]" <bsub options> icv -host_init LSF
+runset.rs
+\end{lstlisting}
+
+该功能在请求多台主机时最有用。下例同样适用于多主机（2 台主机，各 16 个 CPU）：
+\begin{lstlisting}
+bsub -n 32 -R "span[ptile=16]" <bsub options> icv -host_init LSF
+runset.rs
+\end{lstlisting}
+
+\cmd{LSF} 参数也可与 \cmd{-host\_add} 配合使用。下例向运行中的作业共添加 64 个 CPU：8 台主机，各 8 个 CPU：
+\begin{lstlisting}
+bsub -n 64 -R "span[ptile=8]" <bsub options> icv -host_add LSF
+\end{lstlisting}
+
+要弹性地向作业添加主机，向 \cmd{host\_elastic} 命令行选项指定一个 \cmd{bsub} 命令，用于获取机器并启动 IC Validator。下例请求单台主机、8 个 CPU。（视环境而定，可能还需向 \cmd{bsub} 提供额外参数。）
+\begin{lstlisting}
+bsub -n 8 'span[hosts=1]' icv -host_add LSF
+\end{lstlisting}
+
+将整段字符串加入 \cmd{host\_elastic} 命令行选项，或写在单独脚本中。完整的 IC Validator 命令可如下：
+\begin{lstlisting}
+icv -host_init 16 -host_elastic "bsub -n 8 'span[hosts=1]' icv -host_add
+ LSF" runset.rs
+\end{lstlisting}
+
+\subsection{在 Univa Grid Engine 中运行}
+\subsubsection*{Running in Univa Grid Engine}
+
+在 SGE 中运行时，前述语法与示例仍然适用。下例展示如何用 \cmd{qsub} 启动一个在单台主机上以 16 个 CPU 运行 IC Validator 的 SGE 作业：
+\begin{lstlisting}
+qsub -pe mt 16 <qsub options> icv -host_init 16 runset.rs
+\end{lstlisting}
+
+类似地，要用 \cmd{-host\_add} 向运行中的 IC Validator 作业在一台主机上添加 16 个 CPU，例如：
+\begin{lstlisting}
+qsub -pe mt 16       <qsub options> icv -host_add 16
+\end{lstlisting}
+
+为方便起见，IC Validator 可自动确定主机配置，并将 \cmd{-host\_login} 设为 \cmd{qrsh -inherit}。要启用该功能，将 \cmd{SGE} 作为 \cmd{-host\_init} 的参数。下例用 \cmd{qsub} 在单台主机上请求 16 个 CPU，并通过 \cmd{-host\_init} 的 \cmd{SGE} 参数加以识别：
+\begin{lstlisting}
+qsub -mt 16 < qsub options> icv -host_init SGE runset.rs
+\end{lstlisting}
+
+该功能在请求多台主机时最有用。下例同样适用于多主机（2 台主机，各 16 个 CPU）：
+\begin{lstlisting}
+qsub -pe dp16 32 <qsub options> icv -host_init SGE runset.rs
+\end{lstlisting}
+
+\cmd{SGE} 参数也可与 \cmd{-host\_add} 配合使用。下例向运行中的作业共添加 64 个 CPU：8 台主机，各 8 个 CPU：
+\begin{lstlisting}
+qsub -pe dp8 64 <qsub options> icv -host_add SGE
+\end{lstlisting}
+
+要弹性地向运行中的作业添加主机，对 \cmd{host\_elastic} 命令行选项使用请求机器并启动 IC Validator 的 \cmd{qsub} 命令。例如，请求单台主机、8 个 CPU：
+\begin{lstlisting}
+qsub -cwd -V -pe mt 8 icv -host_add SGE
+\end{lstlisting}
+
+将整段字符串作为 \cmd{host\_elastic} 选项的参数，或写在单独脚本中。完整的 IC Validator 命令可如下：
+\begin{lstlisting}
+icv -host_init 16 -host_elastic "qsub -cwd -V -pe mt 8 icv -host_add SGE"
+ runset.rs
+\end{lstlisting}
+
+\subsection{许可证要求}
+\subsubsection*{License Requirements}
+
+对于 Elite 许可证，多核分布式处理所需许可证数量示例见表~\ref{tab:icv-elite-lic}。
+
+\begin{longtable}{p{0.28\textwidth}p{0.22\textwidth}p{0.40\textwidth}}
+\caption{多核分布式处理的 Elite 许可证}\label{tab:icv-elite-lic}\\
+\toprule
+情形 & 所需许可证 & 说明 \\
+\midrule
+\endfirsthead
+\caption[]{多核分布式处理的 Elite 许可证（续）}\\
+\toprule
+情形 & 所需许可证 & 说明 \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+16 核上的 DRC & 4 个许可证 & 第一个许可证启用 4 核，另加 3 个许可证各启用 4 核 \\
+4 核上的 LVS & 1 个许可证 & \\
+9 核上的 Metal fill & 3 个许可证 & 前两个许可证各启用 4 核，第三个许可证再启用 1 核 \\
+62 核上的 Pattern matching & 16 个许可证 & 前 15 个许可证各启用 4 核，第 16 个许可证再启用 2 核 \\
+\end{longtable}
+
+有关 IC Validator 许可证的更多信息，见 \textit{IC Validator User Guide} 中的 Licensing and Resource Requirements 一章。
+
+% ============================================================
+\section{Runset 缓存}
+\subsection*{Runset Caching}
+
+IC Validator 的 runset 缓存功能可缩短工具启动时间。在 runset 完成解析与优化后，其内部数据结构会保存到 runset 缓存文件。后续使用同一 runset 的 IC Validator 运行会加载该缓存文件，而不再重新解析与优化 runset。
+
+可用 \cmd{-norscache} 命令行选项关闭 runset 缓存；在调试某次运行时可能希望使用该选项。
+
+\begin{noteBox}
+若对多 corner 的寄生参数提取（PEX）函数使用 runset 缓存，IC Validator 在运行时之前不会标示任何文件命名冲突。
+\end{noteBox}
+
+\begin{seeAlsoBox}
+有关在启用 runset 缓存时使用命令行选项的说明，见第~69~页「将 IC Validator 命令行选项与 Runset 缓存配合使用」。
+\end{seeAlsoBox}
+
+\subsection{缓存文件}
+\subsubsection*{Cache Files}
+
+当 IC Validator 写入 runset 缓存文件时，会向屏幕输出如下消息，指出缓存文件路径：
+\begin{lstlisting}
+Saved runset to cache: /remote/us54h1/myname/.icvrscache/
+e3b32d5de337d888106672bbba370041-rod-3908.rscache
+Parsing Finished
+Runset Compile Time=0:00:03 User=3.37 Sys=0.16 Mem=0.182 GB
+\end{lstlisting}
+
+当 IC Validator 读取 runset 缓存文件时，会向屏幕输出如下消息，指出所读取的缓存文件路径：
+\begin{lstlisting}
+Loaded runset from cache:
+/remote/us54h1/myname/.icvrscache/
+e3b32d5de337d888106672bbba370041-rod-3908.rscache
+Cached Runset Compile Time=0:00:00 User=0.25 Sys=0.04 Mem=0.108 GB
+\end{lstlisting}
+
+你可以确定缓存目录中哪个缓存文件与特定 runset 关联。查看缓存文件内容时，会看到类似如下文本：
+\begin{lstlisting}
+Cached runset file created from ICV runset:
+/remote/seg-scratch/myname/S475264/pxl.ev
+. . .
+\end{lstlisting}
+
+第二行即为生成该缓存文件所用 runset 的完整路径。
+
+\subsection{配置 Runset 缓存}
+\subsubsection*{Configuring Runset Caching}
+
+可用若干环境变量配置 runset 缓存。
+
+\paragraph{\cmd{ICV\_RUNSET\_CACHE\_DIR\_SHARED}}
+设置 IC Validator 使用的共享 runset 缓存目录。
+\begin{lstlisting}
+% setenv ICV_RUNSET_CACHE_DIR_SHARED directory
+\end{lstlisting}
+
+该缓存目录不特定于某一用户；多名用户可指向同一共享缓存目录。启用后，IC Validator 执行下列检查：
+\begin{itemize}
+  \item 在共享缓存目录中检查是否命中或未命中符合 runset 条件的缓存；
+  \item 若未命中，则检查本地缓存目录：
+  \begin{itemize}
+    \item 若命中，则使用本地缓存文件；
+    \item 若未命中，则编译并将缓存存入本地缓存目录（对用户本地）。
+  \end{itemize}
+\end{itemize}
+须手动将缓存文件移至共享目录，才能供多名用户使用。
+
+\paragraph{\cmd{ICV\_RUNSET\_CACHE\_DIR}}
+设置 IC Validator 存储缓存文件时使用的 runset 缓存目录。
+\begin{lstlisting}
+% setenv ICV_RUNSET_CACHE_DIR directory
+\end{lstlisting}
+
+默认 runset 缓存目录为 \texttt{\textasciitilde/.icvrscache}。
+
+Runset 缓存目录特定于用户。也就是说，多名用户不能通过将其 \cmd{ICV\_RUNSET\_CACHE\_DIR} 设为同一目录来共享同一 runset 缓存目录。
+
+\paragraph{\cmd{ICV\_RUNSET\_CACHE\_MAXFILES}}
+限制 IC Validator 写入 runset 缓存目录的缓存文件数量。
+\begin{lstlisting}
+% setenv ICV_RUNSET_CACHE_MAXFILES num_files_to_keep
+\end{lstlisting}
+
+运行 IC Validator 时，在达到 \cmd{ICV\_RUNSET\_CACHE\_MAXFILES} 或 \cmd{ICV\_RUNSET\_CACHE\_MAXSIZE} 限制之前，不会删除任何已有的 runset 缓存文件。任一限制达到后，工具按最近最少使用（least-recently used）顺序删除文件；即最近加载过的缓存文件会保留，较旧的文件会被删除。
+
+\paragraph{\cmd{ICV\_RUNSET\_CACHE\_MAXSIZE}}
+限制 IC Validator 可用于存储 runset 缓存文件的磁盘空间。默认情况下，工具将 runset 缓存文件所用空间限制为 200~MB。
+\begin{lstlisting}
+% setenv ICV_RUNSET_CACHE_MAXSIZE max_size
+\end{lstlisting}
+
+\cmd{max\_size} 值为数值，后可跟可选字母表示单位：\cmd{K}（千字节）、\cmd{M}（兆字节）、\cmd{G}（吉字节）或 \cmd{T}（太字节）。若不指定单位，则假定 \cmd{max\_size} 以兆字节计。
+
+\paragraph{\cmd{ICV\_RUNSET\_CACHE\_DEBUG}}
+报告有助于定位配置问题或意外行为来源的消息。若 runset 缓存行为异常，可使用该变量。消息会显示配置参数，并为 runset 缓存目录中每个候选缓存文件给出加载或不加载的原因。
+\begin{lstlisting}
+% setenv ICV_RUNSET_CACHE_DEBUG
+\end{lstlisting}
+
+例如：
+\begin{lstlisting}
+...
+RUNSET-CACHE: cache directory : ./RSCACHE/
+RUNSET-CACHE: cache max size : 307200
+RUNSET-CACHE: cache max files : -1
+RUNSET-CACHE: version string : <platform> <ICV version> <date>
+RUNSET-CACHE: opendir() opened cachedir : ./RSCACHE/
+RUNSET-CACHE: readdir() read filename :
+3cb51a5a7c3d1da800be5d6ee862da29-rod-16372.rscache
+RUNSET-CACHE: 0 cache files matched runset MD5:
+1de3cbc1c76cd3f7b05877718fa83cae
+RUNSET-CACHE: no matching cache file found!
+\end{lstlisting}
+
+\paragraph{\cmd{ICV\_DISABLE\_RUNSET\_CACHE}}
+禁用 runset 缓存。
+\begin{lstlisting}
+% setenv ICV_DISABLE_RUNSET_CACHE
+\end{lstlisting}
+
+也可使用 \cmd{-norscache} 命令行选项。
+
+\subsection{将 Runset 与缓存文件匹配}
+\subsubsection*{Matching a Runset to a Cache File}
+
+仅当满足下列条件时，IC Validator 才会将 runset 与已有 runset 缓存文件匹配：
+\begin{itemize}
+  \item 预处理指令必须与缓存文件中存储的指令匹配。其中部分指令由 IC Validator 内部生成，另一些则直接来自命令行的 \cmd{-D}、\cmd{-U} 与 \cmd{-I} 选项；
+  \item 各次运行之间，\cmd{-svn}、\cmd{-uvn}、\cmd{-svc}、\cmd{-uvc}、\cmd{-sfn} 与 \cmd{-ufn} 命令行选项未发生变化；
+  \item 经预处理的 runset 必须与缓存文件中的一致（由哈希算法判定）；
+  \item 当前 IC Validator 版本必须与缓存文件一致；
+  \item 保存缓存时与当前运行（尝试加载缓存）所用架构的字节序（endianness）必须一致。例如，AIX 与 Sun 均为 big endian 平台，因此可共享缓存文件；
+  \item runset 中引用的 UNIX 环境变量取值必须与生成缓存文件时相同。
+\end{itemize}
+
+\begin{noteBox}
+使用 \cmd{-ln} 与 \cmd{-lnf} 覆盖 \cmd{read\_layout\_netlist()} 函数 \cmd{layout\_file} 参数中指定的文件名与格式，不会导致缓存未命中。
+\end{noteBox}
+
+% ============================================================
+\section{使用 IC Validator 运行 Knowledge Assistant}
+\subsection*{Running Knowledge Assistant Using IC Validator}
+
+要从命令行启动 IC Validator Knowledge Assistant，使用 \cmd{icv -copilot} 命令。
+
+运行该命令前，请确保正确设置了 \cmd{SNPSAI\_COPILOT\_HOME} 环境变量。若无法通过 \cmd{SNPSAI\_COPILOT\_HOME} 或系统搜索路径找到 \cmd{snpsai\_copilot} 二进制文件，IC Validator 会显示下列错误消息并终止：
+\begin{lstlisting}
+Error: 'snpsai_copilot' could not be found in env var SNPSAI_COPILOT_HOME
+\end{lstlisting}
+
+不应与 \cmd{-copilot} 选项一起使用其他命令行参数；任何额外参数都会被忽略。
+
+可用 \cmd{icv -copilot} 在前台运行 Knowledge Assistant，或用 \cmd{icv -copilot \&} 在后台运行。约 10--15 秒后，Knowledge Assistant 启动，如图~\ref{fig:icv-knowledge-assistant} 所示。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 3：IC Validator Knowledge Assistant）}\\[0.3em]
+\small 请参阅原版 PDF 插图；可将截图放入 \texttt{figures/} 目录后用 \texttt{\textbackslash includegraphics} 替换。
+\vspace{1.5cm}}}
+\caption{IC Validator Knowledge Assistant}
+\label{fig:icv-knowledge-assistant}
+\end{figure}
+
+关闭 Knowledge Assistant GUI 后，IC Validator 会自动退出。
+
+IC Validator Knowledge Assistant 会验证是否存在任何有效的 IC Validator 许可证，但不会检出 IC Validator 许可证；而是检出 \cmd{GenAI\_KA\_Copilot} 许可证以运行。
+
+% ============================================================
+\section{将 IC Validator 命令行选项与 Runset 缓存配合使用}
+\subsection*{Using IC Validator Command-Line Options With Runset Caching}
+
+在启用 runset 缓存的情况下首次运行某 runset 后，后续对同一 runset 的运行通常会读取缓存文件，而非完整解析 runset。某些 IC Validator 命令行选项会改变 runset 内容，从而影响 runset 缓存的使用。这些更改会使 IC Validator 写入新缓存。只要 runset 被修改，runset 缓存就会受到影响。
+
+\begin{noteBox}
+下列各节未特别提及的选项，一般与 runset 缓存兼容。
+\end{noteBox}
+
+\subsection{兼容的命令行选项}
+\subsubsection*{Compatible Command-Line Options}
+
+下列 IC Validator 选项与 runset 缓存兼容。可在命令行上添加、移除或修改这些选项；IC Validator 仍会使用先前生成的缓存：
+\begin{itemize}
+  \item \cmd{-c}
+  \item \cmd{-g}
+  \item \cmd{-i}
+  \item \cmd{-p}
+  \item \cmd{-f}
+  \item \cmd{-rd}
+  \item \cmd{-stc}
+\end{itemize}
+
+\subsection{影响 Runset 缓存的命令行选项}
+\subsubsection*{Command-Line Options That Affect Runset Caching}
+
+下列选项会改变经预处理的 runset 内容。因此，当在命令行上添加这些选项或其参数发生变化时，经预处理的 runset 不会哈希到同一缓存文件。runset 会正常解析并写入新缓存文件。若这些选项未改变，后续对同一 runset 的运行会哈希到该缓存文件：
+\begin{itemize}
+  \item \cmd{-64}
+  \item \cmd{-D}
+  \item \cmd{-U}
+  \item \cmd{-il}
+  \item \cmd{-iln}
+  \item \cmd{-sfn}
+  \item \cmd{-svc}
+  \item \cmd{-svn}
+  \item \cmd{-ufn}
+  \item \cmd{-uvc}
+  \item \cmd{-uvn}
+  \item \cmd{-verbose}
+\end{itemize}
+
+\subsection{不兼容的命令行选项}
+\subsubsection*{Incompatible Command-Line Options}
+
+由于处理下列选项的流程特殊，使用它们时会禁用 runset 缓存：
+\begin{itemize}
+  \item \cmd{-debug}
+  \item \cmd{-debug\_source}
+  \item \cmd{-ndg}
+\end{itemize}
+
+下列选项因会更改解析器内部选项而影响 runset 缓存。使用该选项时，IC Validator 会生成单独的缓存文件：
+\begin{itemize}
+  \item \cmd{-nro}
+\end{itemize}
+
+% ============================================================
+\section{层映射}
+\subsection*{Layer Mapping}
+
+层映射有两种类型：
+\begin{itemize}
+  \item \textbf{Runset 层映射}：修改你的 runset 以创建新的 runset；
+  \item \textbf{数据层映射}：在读入数据时修改数据，通过更改数据的 layer 与 datatype 属性实现。
+\end{itemize}
+
+在多库上运行时，可同时使用这两种映射。
+
+\subsection{Runset 层映射}
+\subsubsection*{Runset Layer Mapping}
+
+Runset 层映射是将 runset 的 ASSIGN 段中指定的 layer/datatype 编号，替换为数据库中数据的实际 layer/datatype 编号的过程。例如，当数据库中的 layer/datatype 编号与晶圆厂提供的 runset 中指定的不一致时，就需要进行层映射。
+
+用 \cmd{-lf} 命令行选项指定映射文件。见第~25~页 IC Validator 命令行选项。
+
+映射文件的第一行必须始终为：
+\begin{lstlisting}
+RUNSET(*,*) = Library(*,*)
+\end{lstlisting}
+
+该语句将每一层映射到其自身（恒等映射，identity mapping），从而确保每一层都有映射。映射文件的后续行针对选定层覆盖恒等映射。
+
+例如：
+\begin{lstlisting}
+Runset(*,*) = Library(*,*)
+Runset(15,0) = Library(1,0)
+Runset(16,0) = Library(2,0)
+Runset(17,0) = Library(3,0)
+\end{lstlisting}
+
+文件中按下列格式指定映射：
+
+\begin{noteBox}
+\cmd{Runset(i,j)} 指 runset 的 ASSIGN 段中的 layer/datatype 编号。\\
+\cmd{Library(i,j)} 指数据库中数据的实际 layer/datatype 编号。
+\end{noteBox}
+
+\begin{itemize}
+  \item \cmd{Runset(A,B) = Library(C,D)}\\
+  下例中，对 layer/datatype $(1,5)$ 的 assign 引用会被替换为 $(2,0)$：
+\begin{lstlisting}
+Runset(1,5) = Library(2,0)
+\end{lstlisting}
+
+  \item \cmd{Runset(A,B) = Library(C1...Cm,D1...Dn)}\\
+  下例中，对 layer/datatype $(5,0)$ 的任何 assign 引用都会被替换为四个 layer/datatype 对 $(10,0)$、$(10,4)$、$(12,0)$ 与 $(12,4)$：
+\begin{lstlisting}
+Runset(5,0) = Library(10 12,0 4)
+\end{lstlisting}
+
+  \item \cmd{Runset(A1...Am,B1...Bn) = Library(C1...Cm,D1...Dn)}
+\begin{noteBox}
+Runset 层元素个数与 Library 层元素个数必须相等。\\
+Runset datatype 元素个数与 Library datatype 元素个数必须相等。
+\end{noteBox}
+  下例中进行了四次 layer/datatype 替换：
+  \begin{itemize}
+    \item \cmd{assign (2,6)} 替换为 $(10,0)$
+    \item \cmd{assign (2,8)} 替换为 $(10,4)$
+    \item \cmd{assign (4,6)} 替换为 $(12,0)$
+    \item \cmd{assign (4,8)} 替换为 $(12,4)$
+  \end{itemize}
+\begin{lstlisting}
+Runset(2 4,6 8) = Library(10 12,0 4)
+\end{lstlisting}
+\end{itemize}
+
+映射文件的语法规则如下：
+\begin{itemize}
+  \item 允许用通配符代替列表。例如：
+\begin{lstlisting}
+Runset(1,*) = Library(2,*)
+\end{lstlisting}
+  表示 assign 层 1、所有 datatype，替换为层 2、所有 datatype。
+
+  \item layer/datatype 范围用短划线指定。例如：
+\begin{lstlisting}
+Runset(2 5-8,*) = Library(10-12 17 20,*)
+\end{lstlisting}
+
+  \item 列表元素必须按升序排列。
+\end{itemize}
+
+当使用层映射文件执行 IC Validator 时，任何对 assign layer/datatype 编号的替换都会报告在 \cmd{cell.sum} 文件中相应 assign 语句之下。报告示例如下：
+\begin{lstlisting}
+L1_all = assign({ { 11 } })
+ Function: assign
+ Inputs: L1_all.polygonlayer.0001
+ Outputs: L1_all.polygonlayer.0002
+Layer list {{11}} was replaced with {{1}}
+\end{lstlisting}
+
+\subsection{数据层映射}
+\subsubsection*{Data Layer Mapping}
+
+当合并多个库且对应数据位于不同 layer 或 datatype 上时，使用数据层映射。例如，若主设计库中 metal1 在层 41，次级库中 metal1 在层 31，则需用数据层映射合并这些库，使全部 metal1 数据读入同一层——本例中为层 41。
+
+通常用 \cmd{library()} 函数指定主设计库。\cmd{library()} 不对主库提供数据层映射能力；但在指定附加库时可使用数据层映射。因此，可将附加库中的数据映射到主设计库所用的对应 layer 与 datatype。
+
+若使用 \cmd{library\_create()} 而非 \cmd{library()}，则所有库都通过 \cmd{library\_import()} 指定，并均可使用数据层映射。就数据层映射而言，可将任一库视为主库，并将其余库映射到该主库。
+
+除数据层映射外，同一运行中还可使用 runset 层映射，将 runset 层映射到主库所用的层。下列示例说明该场景。
+
+本例中，主库与次级库在 \cmd{library()} 函数中指定：
+\begin{itemize}
+  \item 主库 \cmd{one.oasis} 由 \cmd{library()} 指定，其 metal1 在层 41；
+  \item 次级库 \cmd{two.oasis} 的 metal1 在层 31；
+  \item runset 假定 metal1 在层 5。
+\end{itemize}
+
+读入时，\cmd{two.oasis} 中层 31 上的 metal1 数据被映射到层 41，从而确保全部输入 metal1 数据读入层 41。随后 runset 层映射将 \cmd{assign(\{\{5\}\})} 变换为 \cmd{assign(\{\{41\}\})}，以确保运行按预期执行。runset 片段如下：
+\begin{lstlisting}[style=pxl]
+library(library_name    = "one.oasis",
+        cell            = "A",
+        format          = OASIS,
+        merge_libraries = {{library_name = "two.oasis", format=OASIS,
+                            layer_map_file="two_layer_map"}});
+
+metal1 = assign({{5}});
+\end{lstlisting}
+
+\cmd{two\_layer\_map} 文件包含 \cmd{two.oasis} 的数据层映射：
+\begin{lstlisting}
+41   31
+\end{lstlisting}
+
+用 \cmd{-lf} 命令行选项指定的 runset 层映射文件内容为：
+\begin{lstlisting}
+RUNSET(*,*) = LIBRARY(*,*)
+RUNSET(5,*) = LIBRARY(41,*)
+\end{lstlisting}
+
+下例中，主库由 \cmd{library()} 指定，次级库由 \cmd{library\_import()} 指定。当不希望发生 cell 合并时，可用此方法导入多个库。各库彼此保持独立，从而使 assign 函数可从某一个库导入数据而不从另一个导入。
+\begin{itemize}
+  \item 主库 \cmd{one.oasis} 由 \cmd{library()} 指定，其 metal1 在层 41；
+  \item 次级库 \cmd{two.gds} 的 metal1 在层 31；
+  \item runset 假定 metal1 在层 5。
+\end{itemize}
+
+\cmd{two\_layer\_map} 文件与 runset 层映射与上一示例相同。runset 片段如下：
+\begin{lstlisting}[style=pxl]
+lib1 = library(library_name = "one.oasis",
+               cell         = "A",
+               format       = OASIS);
+
+lib2 = library_import(library_name   = "two.gds",
+                      cell           = "A",
+                      cell_prefix    = "TWO_",
+                      format         = GDSII,
+                      layer_map_file = "two_layer_map");
+
+metal1 = assign({{5}});
+\end{lstlisting}
+
+下例中，主库由 \cmd{library()} 指定，次级库由 \cmd{milkyway\_merge\_library\_options()} 指定。这些库既不合并也不彼此隔离；Milkyway cell 数据会按 cell 被等效 GDSII 数据替换。更多信息见 \cmd{milkyway\_merge\_library\_options()} 函数。
+\begin{itemize}
+  \item 主 Milkyway 库 \cmd{one} 由 \cmd{library()} 指定，其 metal1 在层 41；
+  \item 次级 GDSII 库 \cmd{two.gds} 的 metal1 在层 31；
+  \item runset 假定 metal1 在层 5。
+\end{itemize}
+
+\cmd{two\_layer\_map} 文件与 runset 层映射与第一个示例相同。runset 片段如下：
+\begin{lstlisting}[style=pxl]
+library(library_name = "one",
+        cell         = "A",
+        format       = MILKYWAY,
+        library_path = "./");
+
+milkyway_merge_library_options(
+   libraries    = {{"one", "./", {{"two.gds", GDSII,
+                                   layer_map_file="two_layer_map"}}}},
+   missing_cell = ABORT);
+
+metal1 = assign({{5}});
+\end{lstlisting}
+
+% ============================================================
+\section{使用 PXL Runset 加密}
+\subsection*{Using PXL Runset Encryption}
+
+Runset 加密是一种向最终用户隐藏 runset 内容的方法。使用加密可限制最终用户对晶圆厂工艺参数的了解，或对执行某些设计规则检查或变换所需步骤的了解。
+
+\subsection{操作}
+\subsubsection*{Operation}
+
+在以纯文本创建 runset 之后，可将部分内容转换为加密块。加密块内容可包含 PXL 构造以及任意标准预处理器指令。纯文本也称为明文（clear text）。
+
+使用 \cmd{pxlcrypt} 工具加密 runset。它仅加密明文块。该工具包含在 IC Validator 发行版安装目录中。语法为：
+\begin{lstlisting}
+% pxlcrypt cleartext_runset encrypted_runset
+\end{lstlisting}
+
+\cmd{pxlcrypt} 无法逆转加密过程。
+
+随后将加密后的 runset 交付给最终用户，由其用 IC Validator 执行。
+
+所有被加密的 runset 函数在 summary 文件中，以及在使用 \cmd{-verbose} 选项时的标准输出上，均报告为 ``encrypted function''。尽管函数列为加密函数，机器用量、生成的多边形数量，以及智能删除层（smart-deleted layers，即因不再有任何依赖而不再需要的层）的名称仍会报告。
+
+\subsection{加密指令}
+\subsubsection*{Encryption Directives}
+
+标记加密区段起点与终点的指令为：
+\begin{lstlisting}[style=pxl]
+#pragma PXL encrypt begin
+
+#pragma PXL encrypt end
+\end{lstlisting}
+
+同一 runset 中可加密多个区段；但加密区段不可嵌套在另一加密区段之内。runset 中加密区段示例如下：
+\begin{lstlisting}[style=pxl]
+...
+#pragma PXL encrypt begin
+e2 @= { @ "e2 violation";
+        external2( l1, l2, distance < 2.0, extension = NONE,
+                   look_thru = COINCIDENT);}
+#pragma PXL encrypt end
+...
+\end{lstlisting}
+
+不可加密不完整的构造。例如，下列部分构造是不允许的：
+\begin{lstlisting}[style=pxl]
+...
+external2( l1, l2, distance < 2.0, extension = NONE,
+#pragma PXL encrypt begin
+           look_thru = COINCIDENT);}
+#pragma PXL encrypt end
+...
+\end{lstlisting}
+
+\cmd{pxlcrypt} 会自动在被包含文件周围断开加密块。例如，若 runset 有如下代码：
+\begin{lstlisting}[style=pxl]
+#pragma PXL encrypt begin
+...
+#include "file1.rh"
+...
+#pragma PXL encrypt end
+\end{lstlisting}
+
+则加密后变为：
+\begin{lstlisting}[style=pxl]
+#pragma PXL encrypt begin
+...
+#pragma PXL encrypt end
+#include "file1.rh"
+#pragma PXL encrypt begin
+...
+#pragma PXL encrypt end
+\end{lstlisting}

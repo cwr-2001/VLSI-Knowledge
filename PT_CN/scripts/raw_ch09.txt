@@ -1,0 +1,1539 @@
+                                                                                            Feedback
+
+
+
+
+9
+Operating Conditions
+     Semiconductor device parameters vary with process, voltage, and temperature (PVT)
+     conditions. The ASIC vendor typically characterizes the device parameters under varying
+     conditions and then specifies the parameter values under different sets of conditions in the
+     logic library. The set of operating conditions used for timing analysis affects the analysis
+     results. To learn about specifying operating conditions for timing analysis, see
+     •   Operating Conditions
+     •   Operating Condition Analysis Modes
+     •   Minimum and Maximum Delay Calculations
+     •   Specifying the Analysis Mode
+     •   Using Two Libraries for Analysis
+     •   Derating Timing Delays
+     •   Clock Reconvergence Pessimism Removal
+     •   Clock On-Chip Variation Pessimism Reduction
+
+
+Operating Conditions
+     Integrated circuits exhibit different performance characteristics for different operating
+     conditions: fabrication process variations, power supply voltage, and temperature. The
+     logic library defines nominal values for these parameters and specifies delay information
+     under those conditions.
+     A set of operating conditions contains the following values:
+
+     Operating condition      Description
+
+     Process derating factor This value is related to the scaling of device parameters resulting from
+                             variations in the fabrication process. A process number less than the
+                             nominal value usually results in smaller delays.
+
+     Ambient temperature      The chip temperature affects device delays. The temperature of the chip
+                              depends on several factors, including ambient air temperature, power
+                              consumption, package type, and cooling method.
+
+
+
+PrimeTime® User Guide                                                                                   304
+T-2022.03
+                                                                                           Feedback
+Chapter 9: Operating Conditions
+Operating Conditions
+
+
+      Operating condition     Description
+
+      Supply voltage          A higher supply voltage usually results in smaller delays.
+
+      Interconnect model type This value defines an RC tree topology that PrimeTime uses to estimate
+                              net capacitance and resistance during prelayout analysis.
+
+
+     The delay information for each timing arc is specified at nominal process, temperature,
+     and voltage conditions. If your operating conditions are different from this, PrimeTime
+     applies scaling factors to account for the variations in these conditions. Many libraries use
+     linear scaling for process, temperature, and voltage.
+     If the logic library contains scaled cell information, you can include the exact delay tables
+     or coefficients for specific operating conditions. This method can be very accurate for
+     library cells that do not scale linearly. For more information, see the Library Compiler and
+     Design Compiler documentation.
+     You can use a single set of operating conditions to do analysis (for setup and hold) or you
+     can specify minimum and maximum conditions. If you do not set operating conditions on
+     your design, PrimeTime uses the default set of operating conditions if the main library
+     contains them, or the nominal values of the main library.
+
+
+     Interconnect Model Types
+     PrimeTime uses interconnect model information when it calculates net delays for prelayout
+     designs, when annotated net delays and parasitic information are not available. Two nets
+     with the same total resistance and capacitance, but different RC tree topologies, can have
+     different pin-to-pin delays.
+     This topic provides background information about interconnect model types. You
+     cannot modify the types in PrimeTime. For more information, see the Library Compiler
+     documentation.
+     The interconnect model is defined by the tree_type specification in each logic library’s
+     set of operating conditions. A tree_type specification indicates the type of wire resistance
+     and capacitance topology: best_case_tree, worst_case_tree, or balanced_tree. For
+     example:
+     operating_conditions(BEST) {
+           process     : 1.1;
+           temperature : 11.0;
+           voltage     : 4.6;
+           tree_type   : "best_case_tree";
+      }
+     operating_conditions(TYPICAL) {
+           process     : 1.3;
+           temperature : 31.0;
+
+
+PrimeTime® User Guide                                                                             305
+T-2022.03
+                                                                                            Feedback
+Chapter 9: Operating Conditions
+Operating Conditions
+
+
+             voltage         : 4.6;
+             tree_type       : "balanced_tree";
+       }
+     operating_conditions(WORST) {
+          process      : 1.7;
+          temperature : 55.0;
+          voltage      : 4.2;
+          tree_type    : "worst_case_tree";
+     }
+
+     If the logic library does not define the tree type, PrimeTime uses the balanced_tree
+     model. The following figure shows the tree type model networks.
+
+Figure 89     RC interconnect topologies for fanout of N
+
+                          Rdriver                                                  Rwire
+            Best-case
+            RC tree                          Cwire       C1          C2      CN
+                                  Cout
+
+
+
+                            Rdriver        Rwire
+            Worst-case
+            RC tree                                                  C1      C2        CN
+                                    Cout             Cwire
+
+
+
+
+                                                                     Cwire        C1
+                                                             Rwire    N
+                                                              N
+                              Rdriver
+            Balanced-case
+            RC tree                                                  Cwire        C2
+                                      Cout                   Rwire    N
+                                                              N
+
+
+                                                                     Cwire        CN
+                                                             Rwire    N
+                                                              N
+
+
+
+
+     Setting Operating Conditions
+     To specify the process, temperature, and voltage conditions for timing analysis, use the
+     set_operating_conditions command.
+
+
+
+
+PrimeTime® User Guide                                                                             306
+T-2022.03
+                                                                                           Feedback
+Chapter 9: Operating Conditions
+Operating Conditions
+
+
+     The operating conditions you specify must be defined in a specified library or a
+     library in the link path. To create custom operating conditions for a library, use the
+     create_operating_conditions command. Use the report_lib command to
+     get a list of the available operating conditions in a logic library before you use the
+     set_operating_conditions command.
+
+     To set WCCOM from the tech_lib library as a single operating condition, enter
+     pt_shell> set_operating_conditions WCCOM -library tech_lib
+
+     To set WCCOM as the maximum condition and BCCOM as the minimum condition for on-
+     chip variation analysis, enter
+     pt_shell> set_operating_conditions -analysis_type on_chip_variation \
+                 -min BCCOM -max WCCOM
+
+     Because you do not specify a library, PrimeTime searches all libraries in the link path.
+     After you set the operating conditions, you can report or remove operating conditions.
+
+
+     Creating Operating Conditions
+     A logic library contains a fixed set of operating conditions. To create new operating
+     conditions in a library, use the create_operating_conditions command. You can use
+     these custom operating conditions to analyze your design during the current session. You
+     cannot write these operating conditions to a library .db file.
+     To see the operating conditions defined for a library, use the report_lib command. To
+     set operating conditions on the current design, use the set_operating_conditions
+     command.
+     To create a new operating condition called WC_CUSTOM in the library tech_lib , enter
+     pt_shell> create_operating_conditions -name WC_CUSTOM \
+                 -library tech_lib -process 1.2 \
+                 -temperature 30.0 -voltage 2.8 \
+                 -tree_type worst_case_tree
+
+
+     Operating Condition Information
+     These commands report, remove, or reset operating condition information.
+
+Command                            Action
+
+report_design                      Lists the operating condition settings for the design
+
+remove_operating_conditions        Removes operating conditions from the current design
+
+
+
+
+PrimeTime® User Guide                                                                            307
+T-2022.03
+                                                                                               Feedback
+Chapter 9: Operating Conditions
+Operating Condition Analysis Modes
+
+
+Command                               Action
+
+reset_design                          Resets operating conditions to the default and remove all
+                                      user-specified data, such as clocks, input and output delays
+
+
+
+
+Operating Condition Analysis Modes
+     Semiconductor device parameters can vary with conditions such as fabrication
+     process, operating temperature, and power supply voltage. In PrimeTime, the
+     set_operating_conditions command specifies the operating conditions for analysis, so
+     that PrimeTime can use the appropriate set of parameter values in the logic library.
+     PrimeTime provides the following methods of setting operating conditions for timing
+     analysis:
+     •   Single operating condition mode – Uses a single set of delay parameters for the entire
+         design, based on one set of process, temperature, and voltage conditions.
+     •   On-chip variation (OCV) mode – Performs a conservative analysis that allows both
+         minimum and maximum delays to apply to different paths at the same time. For a setup
+         check, it uses maximum delays for the launch clock path and data path, and minimum
+         delays for the capture clock path. For a hold check, it uses minimum delays for the
+         launch clock path and data path, and maximum delays for the capture clock path.
+     •   Advanced on-chip variation (AOCV) mode – Determines derating factors based on
+         metrics of path logic depth and the physical distance traversed by a particular path.
+     •   Parametric on-chip variation (POCV) mode – Calculates delay, required time, and slack
+         values as statistical distributions.
+     The following table shows the clock arrival times, delays, operating conditions, and delay
+     derating used for setup and hold checks under each of the operating condition analysis
+     modes.
+     Table 16          Timing Parameters Used for Setup and Hold Checks
+
+Analysis       Timing       Launch clock path          Data path                  Capture clock path
+mode           check
+
+Single         Setup        Late clock, maximum         Maximum delay, single     Early clock, minimum
+operating                   delay in clock path, single operating condition (no   delay in clock path, single
+condition                   operating condition (no     derating)                 operating condition (no
+                            derating)                                             derating)
+
+               Hold         Early clock, minimum        Minimum delay, single     Late clock, maximum
+                            delay in clock path, single operating condition (no   delay in clock path, single
+                            operating condition (no     derating)                 operating condition (no
+                            derating)                                             derating)
+
+
+PrimeTime® User Guide                                                                                  308
+T-2022.03
+                                                                                           Feedback
+Chapter 9: Operating Conditions
+Minimum and Maximum Delay Calculations
+
+
+     Table 16         Timing Parameters Used for Setup and Hold Checks (Continued)
+
+Analysis      Timing       Launch clock path           Data path              Capture clock path
+mode          check
+
+OCV mode      Setup        Late clock, maximum         Maximum delay, late    Early clock, minimum
+                           delay in clock path, late   derating, worst-case   delay in clock path, early
+                           derating, worst-case        operating condition    derating, best-case
+                           operating condition                                operating condition
+
+              Hold         Early clock, minimum       Minimum delay, early    Late clock, maximum
+                           delay in clock path, early derating, best-case     delay in clock path, late
+                           derating, best-case        operating condition     derating, worst-case
+                           operating condition                                operating condition
+
+
+
+
+Minimum and Maximum Delay Calculations
+     The set_operating_conditions command defines the operating conditions for timing
+     analysis and specifies the analysis type, either single or on-chip variation. The operating
+     conditions must be defined in a specified library or pair of libraries.
+     By default, PrimeTime performs analysis under one set of operating conditions at a
+     time (single operating condition mode). Using this mode, you need to perform multiple
+     analysis runs to handle multiple operating conditions. Typically, you need to analyze at
+     least two operating conditions to ensure that the design has no timing violations: best case
+     (minimum path report) for hold checks and worst case (maximum path report) for setup
+     checks.
+     In the on-chip variation (OCV) mode, PrimeTime performs a conservative analysis that
+     allows both minimum and maximum delays to apply to different paths at the same time.
+     For setup checks, it uses maximum delays for the launch clock path and data path, and
+     minimum delays for the capture clock path. For hold checks, it uses minimum delays for
+     the launch clock path and data path, and maximum delays for the capture clock path.
+     In the OCV mode, when a path segment is shared between the clock paths that launch
+     and capture data, the path segment might be treated as having two different delays at
+     the same time. Not accounting for the shared path segment can result in a pessimistic
+     analysis. For a more accurate analysis, this pessimism can be corrected. For more
+     information, see Clock Reconvergence Pessimism Removal.
+     A minimum-maximum analysis considers the minimum and maximum values specified for
+     the following design parameters:
+     •   Input and output external delays
+     •   Delays annotated from Standard Delay Format (SDF)
+     •   Port wire load models
+
+
+PrimeTime® User Guide                                                                               309
+T-2022.03
+                                                                                     Feedback
+Chapter 9: Operating Conditions
+Minimum and Maximum Delay Calculations
+
+
+     •   Port fanout number
+     •   Net capacitance
+     •   Net resistance
+     •   Net wire load model
+     •   Clock latency
+     •   Clock transition time
+     •   Input port driving cell
+     For example, to calculate a maximum delay, PrimeTime uses the longest path, worst-case
+     operating conditions, latest-arriving clock edge, maximum cell delays, longest transition
+     times, and so on.
+     You can perform minimum-maximum analysis using a single library with minimum and
+     maximum operating conditions specified, or two libraries, one for the best-case conditions
+     and one for the worst-case conditions. For more information, see Using Two Libraries for
+     Analysis.
+     Enable minimum-maximum analysis by using one of these methods:
+     •   Set the minimum and maximum operating conditions with the
+         set_operating_conditions command:
+         pt_shell> set_operating_conditions -analysis_type on_chip_variation \
+                   -min BCCOM -max WCCOM
+
+     •   Read in an SDF file using the option to read both the minimum and maximum delay
+         values from the SDF file:
+         pt_shell> read_sdf -analysis_type on_chip_variation my_design.sdf
+
+
+     Minimum-Maximum Cell and Net Delay Values
+     Each timing arc can have a minimum and a maximum delay to account for variations in
+     operating conditions. You can specify these values in either of the following ways:
+     •   Annotate delays from one or two SDF files
+     •   Have PrimeTime calculate the delay
+
+
+
+
+PrimeTime® User Guide                                                                       310
+T-2022.03
+                                                                                        Feedback
+Chapter 9: Operating Conditions
+Minimum and Maximum Delay Calculations
+
+
+     To annotate delays from one or two SDF files, use one of the following:
+     •   Minimum and maximum from the SDF triplet
+     •   Two SDF files
+     •   Either of the preceding choices, with additional multipliers for maximum and minimum
+         values
+     To have PrimeTime calculate the delay, use one of the following:
+     •   A single operating condition with timing derating factors to model variation
+     •   Two operating conditions (best-case and worst-case) to model the possible OCV
+     •   Either of the preceding choices with timing derating factors for the minimum and
+         maximum value
+     •   Separate derating factors for cells versus nets
+     •   Separate derating factors for different timing checks (setup, hold, and so forth)
+     The following table shows the usage of minimum and maximum delays from SDF triplet
+     data.
+     Table 17        Minimum-Maximum Delays From SDF Triplet Data
+
+Analysis mode      Delay based on operating conditions          One SDF file   Two SDF files
+
+Single operating   Setup                                        Setup
+condition          • Max data at operating condition            - (a:b:c)
+                   • Min capture clock at operating condition   - (a:b:c)
+                   Hold                                         Hold
+                   • Min data at operating condition            - (a:b:c)
+                   • Max capture clock at operating condition   - (a:b:c)
+
+On-chip variation Setup                                         Setup          Setup
+                  • Max data at worst case                      - (a:b:c)      SDF1 - (a:b:c)
+                  • Min capture clock at best case              - (a:b:c)      SDF2 - (a:b:c)
+                  Hold                                          Hold           Hold
+                  • Min data best case                          - (a:b:c)      SDF1 - (a:b:c)
+                  • Max capture clock at worst case             - (a:b:c)      SDF2 - (a:b:c)
+
+PrimeTime uses the triplet value displayed in bold italic.
+
+
+
+
+PrimeTime® User Guide                                                                           311
+T-2022.03
+                                                                                        Feedback
+Chapter 9: Operating Conditions
+Minimum and Maximum Delay Calculations
+
+
+
+     Setup and Hold Checks
+     For examples of how setup and hold timing checks are done for a single operating
+     condition and for OCV, see
+     •   Path Delay Tracing for Setup and Hold Checks
+     •   Setup Timing Check for Worst-Case Conditions
+     •   Hold Timing Check for Best-Case Conditions
+
+     Path Delay Tracing for Setup and Hold Checks
+     The following figure shows how PrimeTime performs setup and hold checks.
+
+Figure 90     Design Example
+
+                                                   data_path_max
+
+                                            DL1                        data       DL2
+                                   data d      q       Combinational          d
+                                                         logic
+               clock_path1                                                     setup
+                                                                               hold
+                             CT3         ck        data_path_min              ck
+
+
+                                                   clock_path2
+                   CT1       CT2
+             CLK
+
+
+     •   The setup timing check from pin DL2/ck to DL2/d considers
+         ◦   Maximum delay for clock_path1
+         ◦   Maximum delay for data path (data_path_max)
+         ◦   Minimum delay for clock_path2
+     •   The hold timing check from pin DL2/ck to DL2/d considers
+         ◦   Minimum delay for clock_path1
+         ◦   Minimum delay for data path (data_path_min)
+         ◦   Maximum delay for clock_path2
+     The data_path_min and data_path_max values can be different due to multiple topological
+     paths in the combinational logic that connects DL1/q to DL2/d.
+
+
+
+
+PrimeTime® User Guide                                                                         312
+T-2022.03
+                                                                                           Feedback
+Chapter 9: Operating Conditions
+Minimum and Maximum Delay Calculations
+
+
+     Setup Timing Check for Worst-Case Conditions
+     The following figure shows how cell delays are computed for worst-case conditions. To
+     simplify the example, the net delays are ignored.
+
+Figure 91    Setup Check Using Worst-Case Conditions
+
+                                                    3.8                   data
+                                             DL1                                     DL2
+                                    data d      q         Combinational          d
+                                                            logic
+                              0.6                                                 setup
+                                                    2.0                           0.2
+                            CT3          ck                                      ck
+
+
+                  0.8         0.65
+                  CT1        CT2
+            CLK
+
+
+     PrimeTime checks for a setup violation as follows:
+        clockpath1 + datapathmax – clockpath2 + setup ≤ clockperiod
+     where
+        clockpath1 = 0.8 + 0.6 = 1.4
+        datapathmax = 3.8
+        clockpath2 = 0.8 + 0.65 = 1.45
+        setup = 0.2
+     The clock period must be at least 1.4 + 3.8 – 1.45 + 0.2 = 3.95.
+
+     Hold Timing Check for Best-Case Conditions
+     The following figure shows how cell delays are computed for best-case conditions.
+
+
+
+
+PrimeTime® User Guide                                                                            313
+T-2022.03
+                                                                                                       Feedback
+Chapter 9: Operating Conditions
+Minimum and Maximum Delay Calculations
+
+
+Figure 92    Hold Check Using Best-Case Conditions
+                                                                 3.1                   data
+                                                     DL1                                           DL2
+                                          data             q           Combinational          d
+                                                 d
+                                                                         logic
+                                    0.3                                                            hold
+                                                                 1.6                               0.1
+                                   CT3           ck                                               ck
+
+
+                         0.5           0.35
+
+                        CT1        CT2
+                 CLK
+
+
+     PrimeTime checks for a hold violation as follows:
+        clockpath1 + datapathmax – clockpath2 – hold ≥ 0
+     where
+        clockpath1 = 0.5 + 0.3 = 0.8
+        datapathmax = 1.6
+        clockpath2 = 0.5 + 0.35 = 0.85
+        hold = 0.1
+     No hold violation exists because 0.8 + 1.6 – 0.85 – 0.1 = 1.45, which is greater than 0.
+
+
+     Path Tracing in the Presence of Delay Variation
+     In the following figure, each delay of a cell or a net has an uncertainty because of OCV.
+     For example, you can specify that OCV can be between 80 percent and 100 percent of the
+     nominal delays for worst-case conditions.
+
+Figure 93    OCV for Worst-Case Conditions
+
+                                                               3.04/3.80               data
+                                                     DL1                                          DL2
+                                         data    d         q           Combinational          d
+                                                                         logic
+                                 0.48/0.60                                                         setup
+                                                               1.60/2.00                           0.2
+                                   CT3           ck                                           ck
+
+
+                     0.64/0.80    0.52/0.65
+
+                        CT1        CT2
+                 CLK
+
+
+
+
+PrimeTime® User Guide                                                                                        314
+T-2022.03
+                                                                                     Feedback
+Chapter 9: Operating Conditions
+Specifying the Analysis Mode
+
+
+     In this mode, for a given path, the maximum delay is computed at 100 percent of worst
+     case, and the minimum delay is computed at 80 percent of worst case. PrimeTime checks
+     for a setup violation as follows:
+         clockpath1 + datapathmax – clockpath2 – setup ≤ 0
+     where
+         clockpath1 = 0.80 + 0.60 = 1.40 (at 100% of worst case)
+         datapath_max = 3.80 (at 100% of worst case)
+         clockpath2 = 0.64 + 0.52 = 1.16 (at 80% of worst case)
+         setup = 0.2
+     The clock period must be at least 1.40 + 3.80 - 1.16 + 0.2 = 4.24
+     On-chip variation affects the clock latencies; therefore, you only need it when you
+     are using propagated clock latency. If you specify ideal clock latency, you can
+     have PrimeTime consider OCV by increasing the clock uncertainty values with the
+     set_clock_uncertainty command.
+
+
+
+Specifying the Analysis Mode
+     For examples that show how to run timing analysis with different operating conditions, see
+     •   Single Operating Condition Analysis
+     •   On-Chip Variation Analysis
+
+
+     Single Operating Condition Analysis
+     The following example runs timing analysis with the best-case operating conditions:
+     pt_shell> set_operating_conditions BEST
+     pt_shell> report_timing -delay_type min
+
+
+
+
+PrimeTime® User Guide                                                                       315
+T-2022.03
+                                                                                               Feedback
+Chapter 9: Operating Conditions
+Specifying the Analysis Mode
+
+
+Figure 94     Timing path for one operating condition – best case
+                                                       min_path@BEST
+                                            DL1                          data       DL2
+                                        d      q         Combinational          d
+                                                            logic                   hold@BEST
+            min_path@BEST
+                                            ck                                  ck
+
+
+                                                  max_path@BEST
+            CLK
+
+
+
+     The following example runs timing analysis with the worst-case operating conditions:
+     pt_shell> set_operating_conditions WORST
+     pt_shell> report_timing -delay_type max
+
+Figure 95     Timing path for one operating condition – worst case
+
+                                                       max_path@WORST
+                                          DL1                         data DL2
+                                        d    q          Combinational     d
+                                                           logic            setup@WORST
+                  max_path@WORST
+                                            ck                                  ck
+                                                                                          ck
+
+
+                                                 min_path@WORST
+            CLK
+
+
+
+
+     On-Chip Variation Analysis
+     To perform OCV analysis,
+     1. Specify the operating conditions:
+         pt_shell> set_operating_conditions \
+                     -analysis_type on_chip_variation \
+                     -min MIN -max MAX
+
+     2. Report the timing for setup and hold analysis:
+         pt_shell> report_timing -delay_type min
+         pt_shell> report_timing -delay_type max
+
+
+
+
+PrimeTime® User Guide                                                                                316
+T-2022.03
+                                                                                                 Feedback
+Chapter 9: Operating Conditions
+Specifying the Analysis Mode
+
+
+     The following figure shows the paths reported for OCV analysis.
+
+Figure 96     Timing path reported during OCV analysis
+        Minimum
+      Hold         Delay Timing
+           check reported for    Path Reported for                          Early at MIN
+                                                                DL1                               data       DL2
+            Best Case-Worst
+        theoperating
+      OCV            condition Case Operating Condition
+                                                            d         q          Combinational           d
+                                                                                   logic
+                                   Early at MIN                                                              HOLD
+                                                             ck                                          ck
+
+
+
+                                                                  Late at MAX
+                             CLK
+
+
+
+
+        Maximum
+      Setup        Delay Timing
+            check reported  for  Path Reported for                          Late at MAX
+        theoperating
+            Best Case-Worst                                     DL1                               data
+      OCV            condition Case Operating Condition                                                      DL2
+                                                            d         q          Combinational           d
+                                                                                   logic
+                                   Late at MAX
+                                                                                                             SETUP
+                                                             ck                                          ck
+
+
+
+                                                                  Early at MIN
+                             CLK
+
+
+
+
+     In the following figure, the early arrival time at the AND gate is 0.5 ns and the late arrival
+     time is 1.5 ns, assuming the gate delay is zero.
+
+Figure 97     Early and late arrival time
+
+                   0.5 0
+                   1.0 0                    Early arrival time = 0.5
+                   1.5 0                    Late arrival time = 1.5
+
+
+
+
+PrimeTime® User Guide                                                                                    317
+T-2022.03
+                                                                                    Feedback
+Chapter 9: Operating Conditions
+Using Two Libraries for Analysis
+
+
+      Example 1
+      This command sequence performs timing analysis for OCV 20 percent below the worst-
+      case commercial (WCCOM) operating condition.
+      pt_shell> set_operating_conditions -analysis_type \
+                  on_chip_variation WCCOM
+
+      pt_shell> set_timing_derate -early 0.8
+
+      pt_shell> report_timing
+
+      Example 2
+      This command sequence performs timing analysis for OCV between two predefined
+      operating conditions: WCCOM_scaled and WCCOM.
+      pt_shell> set_operating_conditions -analysis_type \
+                  on_chip_variation -min WCCOM_scaled -max WCCOM
+
+      pt_shell> report_timing
+
+      Example 3
+      This command sequence performs timing analysis with OCV. For cell delays, the OCV
+      is between 5 percent above and 10 percent below the SDF back-annotated values. For
+      net delays, the OCV is between 2 percent above and 4 percent below the SDF back-
+      annotated values. For cell timing checks, the OCV is 10 percent above the SDF values for
+      setup checks and 20 percent below the SDF values for hold checks.
+      pt_shell> set_timing_derate -cell_delay -early 0.90
+      pt_shell> set_timing_derate -cell_delay -late 1.05
+      pt_shell> set_timing_derate -net_delay -early 0.96
+      pt_shell> set_timing_derate -net_delay -late 1.02
+      pt_shell> set_timing_derate -cell_check -early 0.80
+      pt_shell> set_timing_derate -cell_check -late 1.10
+
+
+
+Using Two Libraries for Analysis
+      The set_min_library command directs PrimeTime to use two logic libraries
+      simultaneously for minimum-delay and maximum-delay analysis. For example, you can
+      choose two libraries that have the following characteristics:
+      •   Best-case and worst-case operating conditions
+      •   Optimistic and pessimistic wire load models
+      •   Minimum and maximum timing delays
+
+
+
+
+PrimeTime® User Guide                                                                      318
+T-2022.03
+                                                                                       Feedback
+Chapter 9: Operating Conditions
+Derating Timing Delays
+
+
+     To perform an analysis of this type, use the set_min_library command to create a
+     minimum/maximum association between two libraries. Specify one library to be used for
+     maximum delay analysis and another to be used for minimum delay analysis. Only the
+     maximum library should be present in the link path.
+     When you use the set_min_library command, PrimeTime first checks the library cell
+     in the maximum library, and then looks in the minimum library to see if a match exists. If
+     a library cell with the same name, the same pins, and the same timing arcs exists in the
+     minimum library, PrimeTime uses that timing information for minimum analysis. Otherwise,
+     it uses the information in the maximum library.
+
+
+Derating Timing Delays
+     You can derate calculated delays to model the effects of on-chip variation. Derating
+     multiplies the calculated delays by a factor that you specify, which changes the delay and
+     slack values reported by the report_timing command and other reporting commands.
+     The set_timing_derate command specifies the early or late delay adjustment factor and
+     optionally the scope of the design affected by derating. For example,
+     pt_shell> set_timing_derate -early 0.9
+     pt_shell> set_timing_derate -late 1.2
+
+     The first command decreases all early (shortest-path) cell and net delays by 10 percent,
+     such as those in the data path of a hold check. The second command increases late
+     (longest-path) cell and net delays by 20 percent, such as those in the data path of a setup
+     check. These adjustments result in a more conservative analysis.
+     Using the set_timing_derate command implicitly changes the tool to on-chip variation
+     mode, if not already in that mode, like using the following command:
+     pt_shell> set_operating_conditions -analysis_type on_chip_variation
+
+     In on-chip variation mode, the tool applies worst-case delay adjustments, both early and
+     late, at the same time. For example, for a setup check, it applies late derating on the
+     launch clock path and data path, and early derating on the capture clock path. For a hold
+     check, it does the opposite.
+     In the set_timing_derate command, you must use either -early or -late to specify
+     either shortest-path or longest-path delays for applying the derating. To set both early and
+     late derating, use two separate commands.
+     You must also specify the derating factor, a floating-point number. To get a more
+     conservative analysis that considers the effects of on-chip variation, use a derating factor
+     less than 1.0 for early derating or greater than 1.0 for late derating.
+     To report derating that has been set, use the report_timing_derate command.
+
+
+
+PrimeTime® User Guide                                                                          319
+T-2022.03
+                                                                                             Feedback
+Chapter 9: Operating Conditions
+Derating Timing Delays
+
+
+     To report the derating factor used for each incremental delay in a timing report, use the
+     -derate option in the report_timing command:
+     pt_shell> report_timing -derate
+      ...
+      Path Type: max
+
+         Point                                         Derate   Incr      Path
+         -----------------------------------------------------------------------
+         clock PCI_CLK (rise edge)                             0.000     0.000
+         clock network delay (propagated)                      1.802     1.802
+         I_ORCA_TOP/I_PCI_CORE/pad_en_reg/CP (sdcrq1)          0.000     1.802 r
+         I_ORCA_TOP/I_PCI_CORE/pad_en_reg/Q (sdcrq1)   1.200   0.485 &   2.287 r
+         U7/I (inv0d1)                                 1.200   0.010 &   2.297 r
+         U7/ZN (inv0d1)                                1.100   0.063 &   2.360 f
+         U62/I (inv0d1)                                1.100   0.005 &   2.365 f
+         U62/ZN (inv0d1)                               1.200   0.046 &   2.410 r
+         U63/A2 (or02d7)                               1.200   0.005 &   2.415 r
+         U63/Z (or02d7)                                1.200   0.318 &   2.733 r
+         ...
+
+     To cancel all derating, use the reset_timing_derate command.
+
+
+     Derating Options
+     By default, the set_timing_derate command applies the specified early or late derating
+     factor to all early or late timing paths in the whole design. You can optionally modify the
+     scope of the command in several ways:
+     •    To derate only clock paths or only data paths, use the -clock or -data option.
+     •    To derate only net delays or only cell delays, use the -net_delay or -cell_delay
+          option.
+     •    To derate only rising-edge delays, use the -rise option. The derating applies only to
+          cell and net delays that end with a rising transition. Similarly, to derate only falling-edge
+          delays, use the -fall option.
+     •    To derate only certain nets, cell instances, or library cells, enter an object list in the
+          command. You can use an embedded get_nets, get_cells, or get_lib_cells
+          command to generate the list.
+     •    To derate only the static or dynamic component of net delay, use the -net_delay
+          option together with the -static or -dynamic option. By default, both the static and
+          dynamic components are derated. The static component is the net delay without
+          considering crosstalk. The dynamic component is the change in net delay (delta delay)
+          caused by crosstalk.
+
+
+
+
+PrimeTime® User Guide                                                                                  320
+T-2022.03
+                                                                                            Feedback
+Chapter 9: Operating Conditions
+Derating Timing Delays
+
+
+     •   To derate cell timing check constraints instead of delays, use the -cell_check option.
+         Cell timing check constraints are the cell hold and removal time requirements for early
+         derating, or the cell setup and recovery time requirements for late derating. By default,
+         cell timing checks are not derated.
+     •   To apply derating to advanced on-chip variation (AOCV) analysis or parametric on-
+         chip variation (POCV) analysis, use the -aocvm_guardband, -pocvm_guardband, or
+         -pocvm_coefficient_scale_factor option. By default, the set_timing_derate
+         command affects ordinary cell and net delays, not AOCV or POCV analysis.
+     To report the derating options that have been set, use the report_timing_derate
+     command. For example,
+  pt_shell> report_timing_derate -significant_digits 2
+...
+                            ---- Clock ----           ----- Data -----
+                         Rise            Fall         Rise           Fall
+                    Early Late      Early Late   Early Late      Early Late
+-----------------------------------------------------------------------------
+design: MYDESIGN
+  Net delay static 0.90     1.20    0.90    1.10 0.90    1.20    0.90     1.10
+  Net delay dynamic 0.90    1.20    0.90    1.10 0.90    1.20    0.90     1.10
+  Cell delay        0.90    1.20    0.90    1.10 0.90    1.20    0.90     1.10
+  Cell check         --       --     --       --  --       --     --       --
+net: net198
+  Net delay static 0.90            1.30       0.90     1.30     0.90      1.30       0.90     1.30
+  Net delay dynamic 0.90           1.30       0.90     1.30     0.90      1.30       0.90     1.30
+
+     If you set derating on a net or leaf-level cell, the command implicitly matches the derating
+     type to the object type: net derating for a net, or cell derating for a leaf-level cell. Derating
+     set on a net applies to the whole net, even as it crosses into a lower level of hierarchy.
+     To set derating on a hierarchical cell, you must explicitly specify the type of derating by
+     using the -net_delay or -cell_delay option (or both), or the -cell_check option.
+     To enable derating of minimum pulse width and minimum period constraints, set the
+     timing_use_constraint_derates_for_pulse_checks variable to true. In that case,
+     the tool applies the derating factors set with the -cell_check and -late options of the
+     set_timing_derate command.
+
+     Another way to derate minimum pulse width and minimum period constraints is to use the
+     -min_pulse_width and -min_period. options of the set_timing_derate command. In
+     that case, the timing_use_constraint_derates_for_pulse_checks variable must be
+     left set to false (the default).
+     # Set min pulse width and min period derating
+     set_timing_derate -min_pulse_width rise 1.2
+     set_timing_derate -min_period fall 1.1
+
+     # Report derating settings
+     report_timing_derate -min_pulse_width
+
+
+
+PrimeTime® User Guide                                                                                321
+T-2022.03
+                                                                                         Feedback
+Chapter 9: Operating Conditions
+Derating Timing Delays
+
+
+     report_timing_derate -min_period
+
+     # Report min pulse width and min period
+     report_min_pulse_width ...
+     report_min_period ...
+
+     # Reset min pulse width and min period derating
+     reset_timing_derate -min_pulse_width
+     reset_timing_derate -min_period
+
+     This feature works with POCV analysis. In the set_timing_derate
+     command, use the new options together with the -pocvm_guardband and
+     -pocvm_coefficient_scale_factor options.
+
+
+     Conflicting Derating Settings
+     A new set_timing_derate command overrides any derating value set previously on
+     the same scope of the design. In case of conflicting settings that overlap in scope, the
+     command with the narrower scope has priority. In the following script example, the earlier
+     commands are more specific in scope than the later ones, so the earlier ones have priority.
+     # Derate a collection of cell instances
+     set_timing_derate -late -cell_delay 1.4 [get_cells U2*]
+
+     # Derate a collection of library cells
+     set_timing_derate -late -cell_delay 1.3 [get_lib_cells libAZ/ND*]
+
+     # Derate all cell delays
+     set_timing_derate -late -cell_delay 1.2
+
+     # Derate the design (all cell and net delays)
+     set_timing_derate -late -1.1
+
+
+     Derating Negative Delays
+     Delays can be negative in some unusual situations. For example, if a cell’s input transition
+     is slow and its output transition is fast, and if the input-to-output delay is very short, the
+     output signal can reach the 50 percent trip point before the input signal, resulting in a
+     negative delay for the cell. A similar situation can occur for a change in net delay caused
+     by crosstalk.
+     In general, delays are adjusted according to the following formula:
+     delay_new = old_delay + ( (derating_factor – 1.0) * abs(old_delay) )
+     When the delay is a positive value (the usual case), this equation is reduced to:
+     delay_new = old_delay * derating_factor
+
+
+
+PrimeTime® User Guide                                                                           322
+T-2022.03
+                                                                                     Feedback
+Chapter 9: Operating Conditions
+Clock Reconvergence Pessimism Removal
+
+
+     For negative delay, the delay adjustment equation is reduced to:
+     delay_new = old_delay * ( 2.0 – derating_factor )
+     When both the static and dynamic components of a net delay are derated, the two
+     components are derated separately first, and then combined, so that a negative delta
+     delay is properly derated before it is combined with a positive static delay.
+
+
+Clock Reconvergence Pessimism Removal
+     Clock reconvergence pessimism is an accuracy limitation that occurs when two different
+     clock paths partially share a common physical path segment and the shared segment is
+     assumed to have a minimum delay for one path and a maximum delay for the other path.
+     This condition can occur any time that launch and capture clock paths use different delays,
+     most commonly with OCV analysis. Automated correction of this inaccuracy is called clock
+     reconvergence pessimism removal (CRPR).
+     CRPR is enabled by default. You can disable CRPR to save runtime and memory at the
+     cost of accuracy (increased pessimism). Applying CRPR reduces pessimism, so it can
+     only increase the reported slack. Therefore, if the design has no violations with CRPR
+     disabled, it will also have no violations with CRPR enabled.
+     To disable CRPR, set the timing_remove_clock_reconvergence_pessimism variable
+     to false before you begin timing analysis. Note that any change in this variable causes a
+     complete timing update.
+     The tool performs CRPR at the same time as regular timing analysis. The following
+     examples show how pessimism removal works.
+
+
+     On-Chip Variation Example
+     Consider the following command sequence for running OCV analysis and the
+     corresponding design in the following figure:
+     pt_shell> set_operating_conditions -analysis_type \
+               on_chip_variation -min MIN -max MAX
+
+     pt_shell> set_timing_derate -net_delay -early 0.80
+
+     pt_shell> report_timing -delay_type min
+
+     pt_shell> report_timing -delay_type max
+
+
+
+
+PrimeTime® User Guide                                                                       323
+T-2022.03
+                                                                                         Feedback
+Chapter 9: Operating Conditions
+Clock Reconvergence Pessimism Removal
+
+
+Figure 98    Clock reconvergence pessimism example
+
+                                                          0.48
+                                               CP-Q      “0.60”         Data path
+                                                                            2.56
+                                                      D           Q                 D         Q
+                                                          LD1                3.20       LD2
+                                  0.48    U2
+                                 “0.60”
+                                                         CP                             CP
+                   0.64
+                  “0.80”                         0.52                 Clock path        setup
+                           U1             U3
+                                                “0.65”                                  “0.2”
+            CLK
+
+
+                                          Common point
+
+
+
+     Each delay (considered equal for rising and falling transitions to simplify this example)
+     has a minimum value and a maximum value computed for the minimum and maximum
+     operating conditions.
+     The setup check at LD2/CP considers the clock path to the source latch (CLK to LD1/CP)
+     at 100 percent worst case, and the clock path to the destination latch (CLK to LD2/CP) at
+     80 percent worst case.
+     Although this is a valid approach, the test is pessimistic because clock path1 (CLK to LD1/
+     CP) and clock path2 (CLK to LD2/CP) share the clock tree until the output of U1. The
+     shared segment is called the common portion, consisting of just cell U1 in this example.
+     The last cell output in the shared clock segment is called the common point, which is the
+     output of U1 in this case.
+     The setup check considers that cell U1 simultaneously has two different delays, 0.64 and
+     0.80, resulting in a pessimistic analysis in the amount of 0.16. This amount, obtained by
+     subtracting the earliest arrival time from the latest arrival time at the common point, is
+     called the clock reconvergence pessimism .
+     This inaccuracy also occurs in an analogous way for the hold test at the LD2 latch.
+
+
+     Reconvergent Logic Example
+     The following figure shows a situation where clock reconvergence can occur, even in
+     the absence of OCV analysis. In this example, there is reconvergent logic in the clock
+     network. The two clock paths that feed into the multiplexer cannot be active at the same
+     time, but an analysis could consider both the shorter and longer paths for one setup or
+     hold check.
+
+
+PrimeTime® User Guide                                                                             324
+T-2022.03
+                                                                                       Feedback
+Chapter 9: Operating Conditions
+Clock Reconvergence Pessimism Removal
+
+
+Figure 99    Reconvergent logic in a clock network
+
+
+                                                                       D        Q          D        Q
+                                                         MUX
+                                                          A
+
+     Clk                                                                   CP                  CP
+
+
+
+
+     Minimum Pulse Width Checking Example
+     The report_constraint command checks for minimum pulse width violations in clock
+     networks (as specified by the set_min_pulse_width command) and at cell inputs (as
+     specified in the logic library). CRPR increases the accuracy of this checking.
+     For example, consider the circuit shown in Figure 100. The external clock source has early
+     and late source latency set on it. In addition, the two buffers in the path have minimum and
+     maximum rise and fall delay values defined.
+     The report_constraint command checks the pulse width of the clock signal in the clock
+     network and upon reaching the flip-flop. For level-high pulse width checking, PrimeTime
+     considers maximum delay for the rising edge and minimum delay for the falling edge of the
+     clock (and conversely for level-low pulse width checking).
+     For the example shown in Figure 100, in the absence of CRPR, the worst-case pulse
+     width is very small and violates the pulse width constraint of the flip-flop. However, this
+     analysis is pessimistic because it assumes simultaneous worst-case delays for rising and
+     falling edges. In a real circuit, rising-edge and falling-edge delays are at least somewhat
+     correlated. For example, for the delay from the external clock source to the CLK input port,
+     if the rising-edge delay is at the minimum, –1.3, the falling-edge delay is probably equal or
+     close to –1.3, and not at the maximum of +1.4.
+     With CRPR enabled, the tool adds a certain amount of slack back into the minimum pulse
+     width calculation. The amount added is equal to the range of minimum rise delay or the
+     range maximum fall delay for the path, whatever is smaller:
+        crp = min[(Mr – mr), (Mf – mf)]
+     where
+        crp = clock reconvergence pessimism
+        Mr = cumulative maximum rise delay
+
+
+PrimeTime® User Guide                                                                           325
+T-2022.03
+                                                                                                       Feedback
+Chapter 9: Operating Conditions
+Clock Reconvergence Pessimism Removal
+
+
+        mr = cumulative minimum rise delay
+        Mf = cumulative maximum fall delay
+        mf = cumulative minimum fall delay
+     For an example of this calculation applied to pulse width checking, see the following figure.
+
+Figure 100     Minimum pulse width analysis
+
+                     minimum / maximum                                 rise 0.80 / 1.80
+                                                                        fall 0.85 / 2.03               D         Q
+
+
+               rise –1.3 / 1.4                   rise 1.0 / 1.0
+                fall –1.3 / 1.4                   fall 1.0 / 1.0              CT2                          FF1
+                                                                                               Pulse
+                                                      A            Z                           width
+                                                                                               check
+               External               CLK                  CT1
+               clock source           port
+
+
+             Minimum rise = –1.3 + 1.0 + 0.80 = 0.50                   Minimum fall = –1.3 + 1.0 + 0.85 = 0.55
+             Maximum rise = 1.4 + 1.0 + 1.80 = 4.20                    Maximum fall = 1.4 + 1.0 + 2.03 = 4.43
+             Rise range = 4.20 – 0.50 = 3.70                           Fall range = 4.43 – 0.55 = 3.88
+
+             Clock reconvergence pessimism = smaller of rise range or fall range = 3.70
+
+             Minimum pulse width check: maximum rise = 4.20, minimum fall = 0.55
+
+
+
+                      Clock
+                      source                 Max. rise
+                                               4.20
+
+                                                                           Min. fall
+                                                                            0.55
+                      Clock               Pessimism
+                                           removed        3.70
+                      at FF1
+
+
+                                  0   1      2    3        4       5      6       7        8
+
+
+
+
+PrimeTime® User Guide                                                                                            326
+T-2022.03
+                                                                                         Feedback
+Chapter 9: Operating Conditions
+Clock Reconvergence Pessimism Removal
+
+
+
+     CRPR Reporting
+     Clock reconvergence pessimism adjustments are reported by the report_timing ,
+     report_constraint , report_analysis_coverage , and report_bottleneck detailed
+     reports. The following example shows a timing report for the design in On-Chip Variation
+     Example:
+     pt_shell> report_timing -delay_type max
+     ...
+     Startpoint: LD1 (rising edge-triggered flip-flop clocked by CLK)
+       Endpoint: LD2 (rising edge-triggered flip-flop clocked by CLK)
+       Path Group: CLK
+       Path Type: max
+
+       Point                                    Incr       Path
+       --------------------------------------------------------
+       clock CLK (rise edge)                    0.00       0.00
+       clock network delay (propagated)         1.40       1.40
+       LD1/CP (FD2)                             0.00       1.40 r
+       LD1/Q (FD2)                              0.60       2.00 f
+       U1/z (AN2)                               3.20       5.20 f
+       data arrival time                                   5.20
+
+       clock CLK (rise edge)                    6.00       6.00
+       clock network delay (propagated)         1.16       7.16
+       clock reconvergence pessimism            0.16       7.32
+       clock uncertainty                        0.00       7.32
+       LD2/CP (FD2)                                        7.32 r
+       library setup time                      -0.20       7.12
+       data required time                                  7.12
+       --------------------------------------------------------
+       data required time                                  7.12
+       data arrival time                                  -5.20
+       --------------------------------------------------------
+       slack (MET)                                         1.92
+
+     Derating CRPR for Different Transitions at the Common Point
+     The timing_clock_reconvergence_pessimism variable specifies how to find the
+     latest common point in the launch and capture clock paths with respect to mismatching
+     transitions. With the normal (default) setting, the tool finds the latest topological common
+     point in the paths, even if the launch and capture transitions are different at that point (one
+     rising, one falling). With the same_transition setting, the tool finds the latest point that
+     also shares the same transition type. The following figure shows an example.
+
+
+
+
+PrimeTime® User Guide                                                                            327
+T-2022.03
+                                                                                        Feedback
+Chapter 9: Operating Conditions
+Clock Reconvergence Pessimism Removal
+
+
+Figure 101   Common Point for Different timing_clock_reconvergence_pessimism Settings
+
+                                      CRPR common point,
+                                        normal setting        rising-edge-        falling-edge-
+                                                           triggered launch    triggered capture
+                                                                D   Q               D   Q
+
+                              D   Q
+
+
+
+
+                       CRPR common point,
+                     same_transition setting
+
+
+     The normal setting is appropriate when the rising and falling transition arrival times are
+     highly correlated. In situations where they are not highly correlated, the same_transition
+     setting ensures a conservative (but possibly pessimistic) analysis.
+     Different-Transition Derating of CRP
+     You can use the normal (default) common point search method and derate the calculated
+     clock reconvergence pessimism (CRP) when the transitions are different at the common
+     point. This adjusts the pessimism correction for uncorrelated rising and falling transitions,
+     while still allowing usage of a later common point and therefore more pessimism removal.
+     To use this feature, set the controlling variable as shown in the following example:
+     set_app_var timing_crpr_different_transition_derate 0.90
+
+     If the launch and capture transitions are different at the common point, this setting causes
+     the CRP value to be reduced to 90 percent of its original calculated value before it is
+     added back to the calculated slack. This results in a more conservative analysis than the
+     default behavior of adding 100 percent of the CRP value.
+     Different-Transition Derating of POCV CRP Variation
+     In parametric on-chip variation (POCV) analysis, to derate the variation of the CRP as well
+     as the nominal value, set both the nominal and variation-related control variables:
+     set_app_var timing_crpr_different_transition_derate 0.90
+     set_app_var timing_crpr_different_transition_variation_derate 0.90
+
+     These variables have no effect when the launch and capture transitions are of the same
+     type (both rising or both falling) at the common point. They also have no effect when the
+     timing_clock_reconvergence_pessimism variable is set to same_transition.
+
+     The default for the first variable is 1.0 (no derating of the nominal) and for the second
+     variable is 0.0 (full derating or zeroing of the CRP variation). Therefore, by default, random
+
+
+
+PrimeTime® User Guide                                                                              328
+T-2022.03
+                                                                                    Feedback
+Chapter 9: Operating Conditions
+Clock Reconvergence Pessimism Removal
+
+
+     variation does not contribute to pessimism removal, resulting in a conservative approach
+     for mixed edge types at the common point (for example, in a minimum pulse width check).
+
+     Minimum Pulse Width Example
+     For the minimum pulse width checking example shown in Minimum Pulse Width Checking
+     Example, you could set up the analysis with a script similar to this:
+     set_operating_conditions -analysis_type on_chip_variation
+     create_clock -period 8 CLK
+     set_propagated_clock [all_clocks]
+     set_clock_latency -source -early -1.3 CLK
+     set_clock_latency -source -late 1.4 CLK
+     set_annotated_delay -cell -from CT1/A -to CT1/Z 1
+     set_annotated_delay -cell -from CT2/A -to CT2/Z -min -rise 0.8
+     set_annotated_delay -cell -from CT2/A -to CT2/Z -max -rise 1.8
+     set_annotated_delay -cell -from CT2/A -to CT2/Z -min -fall 0.85
+     set_annotated_delay -cell -from CT2/A -to CT2/Z -max -fall 2.03
+
+     With CRPR enabled, a report_constraint path report looks like this:
+     Point                                    Incr       Path
+     ----------------------------------------------------------
+     clock CLK (rise edge)                    0.00       0.00
+     clock network delay (propagated)         4.20       4.20 r
+     FF1/CP                                   0.00       4.20 r
+     open edge arrival time                              4.20
+
+     clock CLK (fall edge)                    4.00       4.00
+     clock network delay (propagated)         0.55       4.55 f
+     FF1/CP                                   0.00       4.55 f
+     clock reconvergence pessimism            3.70       8.25
+     close edge arrival time                             8.25
+     ----------------------------------------------------------
+     required pulse width (high)                         3.50
+     actual pulse width                                  4.05
+     ----------------------------------------------------------
+     slack                                               0.55
+
+     CRPR Merging Threshold
+     For computational efficiency, the tool merges multiple points in a path when the
+     CRP differences between adjacent points are smaller than a certain threshold. The
+     timing_crpr_threshold_ps variable specifies the threshold in picoseconds. The default
+     is 5, which causes adjacent nodes to be merged when the difference is 5 ps or less.
+     For a good balance between performance and accuracy, set this variable to one-half the
+     stage delay of a typical gate in the clock network. (The stage delay is gate delay plus
+     net delay.) You can use a larger value during the design phase for faster analysis and a
+     smaller value for signoff accuracy.
+
+
+
+PrimeTime® User Guide                                                                       329
+T-2022.03
+                                                                                       Feedback
+Chapter 9: Operating Conditions
+Clock Reconvergence Pessimism Removal
+
+
+
+     CRPR and Crosstalk Analysis
+     When you perform crosstalk analysis using PrimeTime SI, a change in delay due to
+     crosstalk along the common segment of a clock path can be pessimistic, but only for a
+     zero-cycle check. A zero-cycle check occurs when the same clock edge drives both the
+     launch and capture events for the path. For other types of paths, a change in delay due to
+     crosstalk is not pessimistic because the change cannot be assumed to be identical for the
+     launch and capture clock edges.
+     Accordingly, the CRPR algorithm removes crosstalk-induced delays in a common portion
+     of the launch and capture clock paths only if the check is a zero-cycle check. In a zero-
+     cycle check, aggressor switching affects both the launch and capture signals in the same
+     way at the same time.
+     Here are some cases where the CRPR might apply to crosstalk-induced delays:
+     •   Standard hold check
+     •   Hold check on a register with the Q-bar output connected to the D input, as in a divide-
+         by-2 clock circuit
+     •   Hold check with crosstalk feedback due to parasitic capacitance between the Q-bar
+         output and D input of a register
+     •   Hold check on a multicycle path set to zero, such as circuit that uses a single clock
+         edge for launch and capture, with designed-in skew between launch and capture
+     •   Certain setup checks where transparent latches are involved
+
+
+     CRPR With Dynamic Clock Arrivals
+     A similar scenario to CRPR with crosstalk can occur if dynamic annotations have been set
+     in the clock network. Dynamic annotations include dynamic clock latency and dynamic rail
+     voltage, which are set by set_clock_latency and set_voltage commands, respectively.
+     These dynamic annotations can lead to dynamic clock arrivals. CRPR handles these
+     dynamic clock arrivals in the same way as it handles delays due to crosstalk. The CRPR
+     value is calculated using dynamic clock arrivals for zero cycle paths only. For all other
+     paths, only the static component of the clock arrival is used thus producing more accurate
+     results.
+     An example of such dynamic annotations is as follows:
+     pt_shell> set_clock_latency -early -source 2.5               \
+               -dynamic -0.5 [get_clocks CLK]
+
+     pt_shell> set_clock_latency -source -late 5.5               \
+               -dynamic 0.5 [get_clocks CLK]
+
+
+
+
+PrimeTime® User Guide                                                                            330
+T-2022.03
+                                                                                       Feedback
+Chapter 9: Operating Conditions
+Clock Reconvergence Pessimism Removal
+
+
+     The first of these two commands specifies a total early source latency of 2.5, consisting
+     of static source latency of 3.0 and dynamic source latency of –0.5. The second command
+     specifies a total late source latency of 5.5, consisting of static source latency of 5.0 and
+     dynamic source latency of 0.5. In this case, the static CRP is equal to 2 (5 minus 3). The
+     dynamic CRP is equal to 3 (5.5 minus 2.5).
+
+
+     Transparent Latch Edge Considerations
+     For a path that ends at a transparent latch, PrimeTime calculates two clock reconvergence
+     pessimism values: one for rising edges and one for falling edges at the common node.
+     The opening and closing clock edges are effectively shifted, each by an amount equal to
+     its corresponding pessimism value.
+
+Figure 102   CRPR for latches
+                                                              Rise CRPR          Fall CRPR
+
+
+                 Path endpoint    D       Q
+
+
+                                      G              G
+
+
+
+                                                         Opening edge        Closing edge
+
+
+
+     In practice, the opening-edge pessimism value affects the slack of nonborrowing paths
+     and also reduces the amount of time borrowed for borrowing paths. Meanwhile, the
+     closing-edge pessimism value increases the maximum amount of time borrowing allowed
+     at a latch and reduces the amount of the violation for a path that fails to meet its setup
+     constraint.
+     To get a report about the calculation of clock reconvergence pessimism values for level-
+     sensitive latches, use the report_crpr command.
+
+
+     Reporting CRPR Calculations
+     The report_crpr command reports the calculation of clock reconvergence pessimism
+     (CRP) between two register clock pins or ports. It reports the time values calculated for
+     both static and dynamic conditions, and the choice from among those values actually used
+
+
+
+
+PrimeTime® User Guide                                                                          331
+T-2022.03
+                                                                                         Feedback
+Chapter 9: Operating Conditions
+Clock On-Chip Variation Pessimism Reduction
+
+
+     for pessimism removal. In the command, you specify the pins of the launch and capture
+     registers, the clock, and type of check (setup or hold). For example:
+     pt_shell> report_crpr -from [get_pins ffa/CP] \
+                 -to [get_pins ffd/CP] \
+                 -from_clock CLK -setup
+
+     The command reports the location of the common node, the launch and capture edge
+     types (rising or falling), the four calculated arrival times at the common point (early/
+     late, rise/fall), the calculated CRP values (rise and fall), and the values actually used for
+     opening-edge and closing-edge pessimism removal.
+     The amount of CRP reported by the report_crpr command can be slightly different
+     from the amount reported by the report_timing command. This is because the
+     report_timing command, for computational efficiency, merges multiple points for
+     CRPR calculations when the CRP differences between adjacent points are too small
+     to be significant. The timing_crpr_threshold_ps variable sets the time threshold for
+     merging, which is 5 picoseconds by default. When the report_crpr and report_timing
+     commands give different CRP values, the value reported by report_crpr command is
+     more accurate because it does not merge adjacent points.
+
+
+Clock On-Chip Variation Pessimism Reduction
+     The set_timing_derate command can be used to model the effects of on-chip variation
+     (OCV). The command specifies a factor by which the delays of long path delays are
+     increased or the delays of short paths are decreased. When there is a common segment
+     between the launch and capture clock paths, the clock reconvergence pessimism removal
+     (CRPR) algorithm, if enabled, removes the pessimism caused by the derating of delay
+     times along the common segment. However, by default, pessimism removal occurs
+     only after the final slack has been calculated for the timing path. No pessimism removal
+     occurs during the calculation of crosstalk arrival windows. If the clock paths leading up
+     to the aggressor net and victim net share a common segment, then the calculated arrival
+     windows are wider than necessary, possibly causing the aggressor and victim arrival
+     windows to marginally overlap. This can cause a crosstalk situation to occur that would not
+     occur with accurate CRPR accounting during arrival window overlap analysis.
+     The following example shows pessimism caused by derating a long clock path. There is
+     cross-coupling capacitance between two wires in the fanout of FF1 and FF2, both of which
+     are clocked by the same clock signal.
+
+
+
+
+PrimeTime® User Guide                                                                            332
+T-2022.03
+                                                                                          Feedback
+Chapter 9: Operating Conditions
+Clock On-Chip Variation Pessimism Reduction
+
+
+Figure 103     Clock reconvergence pessimism in crosstalk arrival windows
+
+                        Delay 3.0
+
+
+
+                                            FF1                       Aggressor net
+
+
+                                                                                      9        10   11    12
+
+                                    Delay 1.0
+
+                                                                      7     8   9         10
+
+                                            FF2              Victim net
+
+
+
+
+                              Common point
+
+       Arrival times:     6    7       8    9
+
+
+     In the absence of derating, the arrival windows are 1.0 time units wide. Because of the
+     differences in delay along the paths leading up to the aggressor and victim nets, the
+     windows do not overlap and no crosstalk delay effects are possible. For example, if the
+     aggressor transition occurs between 9.0 and 10.0 time units, the victim transition has
+     already occurred, at some time between 7.0 and 8.0 time units. However, with derating
+     applied, the long clock path leading up to the common point has an early arrival at time 6.0
+     and a late arrival at time 9.0. This widens the aggressor and victim windows to 3.0 time
+     units, causing them to overlap and produce a crosstalk situation where none could actually
+     exist in the real circuit.
+     To get the best possible accuracy during path-based analysis, you can optionally
+     have CRPR applied during arrival window overlap analysis, thus removing
+     the pessimism caused by different early and late arrival times at the common
+     point leading up to the aggressor and victim. To invoke this option, set the
+     pba_enable_xtalk_delay_ocv_pessimism_reduction variable to true. The default
+     setting is false. When the variable is set to true, and if CRPR is enabled, during
+     path-based analysis, PrimeTime SI applies CRPR during calculation of aggressor and
+     victim arrival windows, resulting in more accurate arrival windows, at the cost of some
+     additional runtime. Path-based analysis occurs when you use the -pba_mode option
+
+
+
+
+PrimeTime® User Guide                                                                               333
+T-2022.03
+                                                                           Feedback
+Chapter 9: Operating Conditions
+Clock On-Chip Variation Pessimism Reduction
+
+
+     with the get_timing_paths or report_timing command. CRPR is enabled when the
+     timing_remove_clock_reconvergence_pessimism variable is set to true.
+
+
+
+
+PrimeTime® User Guide                                                               334
+T-2022.03
+

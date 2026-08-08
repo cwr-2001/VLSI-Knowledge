@@ -1,0 +1,731 @@
+% 第 7 章 Defining Design Constraints
+\bichapter{定义设计约束}{Defining Design Constraints}
+\label{chap:constraints}
+
+约束是以可度量的电路特性（如时序、面积与电容）定义设计目标的声明。
+DC Explorer 需要这些约束才能有效优化设计。
+
+要了解定义设计约束所需的概念与任务，见：
+\begin{itemize}
+  \item DC Explorer 约束类型
+  \item 定义设计规则约束
+  \item 对特殊网络禁用设计规则修复
+  \item 在层次化设计中传播约束
+\end{itemize}
+
+% ============================================================
+\section{DC Explorer 约束类型}
+\subsection*{DC Explorer Constraint Types}
+
+DC Explorer 使用下列两类约束优化设计：
+\begin{itemize}
+  \item \textbf{设计规则约束（Design Rule Constraints）}\\
+        逻辑库定义这些隐式约束。
+        它们是设计正确工作的要求，适用于使用该库的任何设计。
+        默认情况下，设计规则约束的优先级高于优化约束。
+  \item \textbf{优化约束（Optimization Constraints）}\\
+        由您显式定义。
+        优化约束在整个 \cmd{de\_shell} 会话期间作用于当前处理的设计，表示设计目标。
+\end{itemize}
+
+可在命令行交互指定约束，或在约束文件中指定。
+DC Explorer 会尝试同时满足设计规则约束与优化约束，但设计规则约束优先于优化约束。
+
+图~\ref{fig:dce-major-cons} 给出 DC Explorer 的主要设计规则约束与优化约束，以及 \cmd{de\_shell} 接口中用于设置约束的命令。
+
+\figplaceholder{Figure 27: Major DC Explorer Constraints}{DC Explorer 主要约束}{fig:dce-major-cons}
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 约束优先级
+  \item 设计规则约束的优先顺序
+  \item 生成约束报告
+\end{itemize}
+\end{seeAlsoBox}
+
+\subsection{设计规则约束}
+\subsubsection*{Design Rule Constraints}
+
+设计规则约束反映设计按预期功能工作所必须满足的工艺相关要求。
+设计规则约束作用于设计的网络，但作为与逻辑库单元引脚关联的属性维护。
+多数逻辑库指定默认设计规则。
+
+设计规则约束类型包括：
+\begin{itemize}
+  \item 最大转换时间（Maximum Transition Time）
+  \item 最大扇出（Maximum Fanout）
+  \item 最大电容（Maximum Capacitance）
+  \item 最小电容（Minimum Capacitance）
+  \item 单元退化（Cell Degradation）
+\end{itemize}
+
+不能移除逻辑库中设置的 \texttt{max\_transition}、\texttt{max\_fanout}、\texttt{max\_capacitance} 与 \texttt{min\_capacitance} 属性，因为它们是逻辑库的要求；但可设置更严格的值以覆盖默认值。
+
+\subsubsection{最大转换时间}
+\subsubsection*{Maximum Transition Time}
+
+最大转换时间是设计规则约束。
+网络的最大转换时间是其驱动引脚改变逻辑值所需的最长时间。
+许多逻辑库对引脚的最大转换时间有限制，从而为使用这些库的设计创建隐式转换时间约束。
+若设计使用多个逻辑库且各库对 \texttt{max\_transition} 属性的默认值不同，DC Explorer 在全局使用最严格的值。
+
+\subsubsection{最大扇出}
+\subsubsection*{Maximum Fanout}
+
+最大扇出是设计规则约束。
+许多逻辑库对驱动引脚有扇出限制，从而为使用这些库的设计中的驱动引脚创建隐式扇出约束。
+DC Explorer 通过将 \texttt{fanout\_load} 属性与各输入引脚关联、将 \texttt{max\_fanout} 属性与单元各输出（驱动）引脚关联来建模扇出限制，如图~\ref{fig:dce-fanout-attr} 所示。
+
+\figplaceholder{Figure 28: The fanout\_load and max\_fanout Attributes}{\texttt{fanout\_load} 与 \texttt{max\_fanout} 属性}{fig:dce-fanout-attr}
+
+要评估驱动引脚（如图~\ref{fig:dce-fanout-attr} 中的 X 引脚）的扇出，DC Explorer：
+\begin{enumerate}
+  \item 计算由 X 引脚驱动的所有输入的 \texttt{fanout\_load} 属性之和。\\
+        扇出负载是无量纲数，不是电容；它表示对总有效扇出的数值贡献。
+  \item 将 \texttt{max\_fanout} 属性的指定值与该和比较。\\
+        若和小于指定值，则满足扇出约束；否则 DC Explorer 尝试通过选择更高驱动的组件来满足约束。
+\end{enumerate}
+
+\subsubsection{最大电容}
+\subsubsection*{Maximum Capacitance}
+
+最大电容是设计规则约束。
+它作为引脚级属性设置，定义输出引脚可驱动的最大总电容负载。
+也就是说，该引脚不能连接到总电容（负载引脚电容与互连电容）大于或等于该引脚所定义最大电容的网络。
+
+DC Explorer 通过将网络线电容与连接到该网络的引脚电容相加来计算网络电容。
+要判断网络是否满足电容约束，DC Explorer 将计算出的电容值与驱动该网络的引脚的 \texttt{max\_capacitance} 属性值比较。
+
+\subsubsection{最小电容}
+\subsubsection*{Minimum Capacitance}
+
+最小电容是设计规则约束。
+某些逻辑库指定最小电容。
+最小电容约束规定单元可驱动的最小负载。
+优化期间，DC Explorer 确保单元驱动的负载满足该单元的最小电容约束。
+发生违例时，DC Explorer 通过对驱动器调尺寸（sizing）来修复。
+可对连接到输入端口的网络设置最小电容，以判断输入边界处驱动单元是否出现违例。
+若 compile 后报告违例，可通过重新综合驱动这些端口的模块来修复。
+
+\subsubsection{单元退化}
+\subsubsection*{Cell Degradation}
+
+单元退化是设计规则约束。
+某些逻辑库包含单元退化表。
+表列出单元在其输入转换时间作为函数时可驱动的最大电容。
+compile 期间，若逻辑库指定了单元退化表，DC Explorer 会尽量保证网络电容值小于指定值。
+若逻辑库未指定单元退化表，可使用 \cmd{set\_cell\_degradation} 命令在输入端口上显式设置 \texttt{cell\_degradation} 属性。
+默认情况下，端口没有 \texttt{cell\_degradation} 属性。
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 约束优先级
+  \item 设计规则约束的优先顺序
+  \item 定义设计规则约束
+\end{itemize}
+\end{seeAlsoBox}
+
+\subsection{优化约束}
+\subsubsection*{Optimization Constraints}
+
+优化约束表示您希望达到、但对设计工作未必至关重要的时序与面积目标及限制。
+时序约束的优先级高于面积约束。
+默认情况下，优化约束次于设计规则约束。
+
+优化约束包括：
+\begin{itemize}
+  \item 输入与输出延时（时序约束）
+  \item 最大与最小延时（时序约束）
+  \item 最大面积
+\end{itemize}
+
+\subsubsection{定义时序约束}
+\subsubsection*{Defining Timing Constraints}
+
+定义时序约束时，应考虑设计可能同时包含同步路径与异步路径。
+\begin{itemize}
+  \item 要约束同步路径，使用 \cmd{create\_clock} 命令在设计中指定时钟。
+        指定时钟后，还应使用 \cmd{set\_input\_delay} 与 \cmd{set\_output\_delay} 命令指定输入与输出端口时序规范。
+  \item 要约束异步路径，使用 \cmd{set\_max\_delay} 与 \cmd{set\_min\_delay} 命令指定点到点最小与最大延时值。
+\end{itemize}
+
+\paragraph{最大延时}
+\paragraph*{Maximum Delay}
+
+最大延时是优化约束。
+DC Explorer 内置静态时序分析器以评估时序约束。
+静态时序分析器根据逻辑库中的时序值与工作条件，由本地门与互连延时计算路径延时，但不仿真设计。
+DC Explorer 时序分析器执行关键路径追踪，检查设计中每条时序路径的最小与最大延时。
+在时序设计中，最关键路径不一定是最长组合路径，因为路径可能相对于路径起点与终点处的不同时钟。
+
+DC Explorer 在考虑时钟波形与 skew、库 setup 时间、外部延时、多周期或伪路径规范，以及由 \cmd{set\_max\_delay} 设置的值之后，确定设计中每条时序路径的最大延时目标值。
+负载、驱动、工作条件及其他因素也会被考虑。
+
+\paragraph{最小延时}
+\paragraph*{Minimum Delay}
+
+尽管最小延时是优化约束，DC Explorer 在修复设计规则违例时也会修复最小延时约束违例。
+最小延时约束由 \cmd{set\_min\_delay} 显式设置，或因 hold 时间要求隐式设置。
+到引脚或端口的最小延时必须大于目标延时。
+
+\paragraph{最大面积}
+\paragraph*{Maximum Area}
+
+最大面积是优化约束。
+最大面积表示设计中的门数，而非设计占据的物理面积。
+设计的面积要求通常表述为满足性能目标的最小设计。
+默认情况下，DC Explorer 在时序优化完成后自动对面积进行优化。
+您不能为设计定义最大面积约束。
+
+DC Explorer 在计算电路面积时忽略下列组件：
+\begin{itemize}
+  \item 未知组件
+  \item 面积未知的组件
+  \item 与工艺无关的通用（generic）单元
+\end{itemize}
+
+单元面积与工艺相关，取自逻辑库。
+
+更多信息见 \textit{Synopsys Timing Constraints and Optimization User Guide}。
+
+\subsection{约束优先级}
+\subsubsection*{Constraint Priorities}
+
+DC Explorer 尝试最小化总约束代价。
+每类约束有相对代价，从而将更多努力用于满足更重要的约束，必要时可能牺牲其他约束。
+表~\ref{tab:dce-cons-prio} 给出默认优先级顺序。
+默认情况下，设计规则约束的优先级高于优化约束。
+
+\begin{table}[htbp]
+\centering
+\caption{约束优先级的默认顺序}
+\label{tab:dce-cons-prio}
+\begin{tabular}{@{}lll@{}}
+\toprule
+优先级（降序） & 说明 \\
+\midrule
+connection classes & \\
+\texttt{min\_capacitance} & 设计规则约束 \\
+\texttt{max\_transition} & 设计规则约束 \\
+\texttt{max\_fanout} & 设计规则约束 \\
+\texttt{max\_capacitance} & 设计规则约束 \\
+\texttt{cell\_degradation} & 设计规则约束 \\
+\texttt{max\_delay} & 优化约束 \\
+\texttt{min\_delay} & 优化约束 \\
+power & 优化约束 \\
+area & 优化约束 \\
+cell count & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+当出现多个设计规则违例时，DC Explorer 从最高优先级开始修复。
+可能时，它也会评估并选择能减少其他设计规则违例的替代方案。
+对优化延时违例，DC Explorer 采用相同方法。
+必要时，DC Explorer 可违犯优化约束以避免违犯设计规则约束。
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 设计规则约束的优先顺序
+  \item 优化约束
+  \item 定义设计规则约束
+  \item 生成约束报告
+\end{itemize}
+\end{seeAlsoBox}
+
+\subsection{设计规则约束的优先顺序}
+\subsubsection*{Precedence of Design Rule Constraints}
+
+DC Explorer 按下列降序优先顺序解决设计规则约束之间的冲突。
+\begin{enumerate}
+  \item 最小电容
+  \item 最大转换时间
+  \item 最大扇出
+  \item 最大电容
+  \item 单元退化
+\end{enumerate}
+
+有关设计规则约束优先顺序的细节如下：
+\begin{itemize}
+  \item 最大转换时间优先于最大扇出。
+        若最大扇出约束未满足，请检查是否存在冲突的最大转换时间约束。
+  \item DC Explorer 按库的不同以两种方式计算网络转换时间。
+  \begin{itemize}
+    \item 对使用 CMOS 延时模型的库，DC Explorer 使用驱动单元的驱动电阻与网络电容负载计算转换时间。
+    \item 对使用非线性延时模型的库，DC Explorer 使用查表与插值计算转换时间；它是输出引脚电容与输入转换时间的函数。
+  \end{itemize}
+  \item 取决于逻辑库，\cmd{set\_driving\_cell} 命令行为不同。
+  \begin{itemize}
+    \item 对使用 CMOS 延时模型的库，驱动电阻为常数。
+    \item 对使用非线性延时模型的库，\cmd{set\_driving\_cell} 根据表中的负载动态计算转换时间。
+  \end{itemize}
+\end{itemize}
+
+\cmd{set\_driving\_cell} 命令影响端口转换时间；该命令在受影响端口上放置设计规则约束。
+
+\cmd{set\_load} 命令在端口或网络上放置负载。
+该负载的单位必须与逻辑库一致。
+该值用于时序优化，不用于最大扇出优化。
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 约束优先级
+  \item 定义设计规则约束
+\end{itemize}
+\end{seeAlsoBox}
+
+\subsection{生成约束报告}
+\subsubsection*{Generating Constraint Reports}
+
+要检查设计规则与优化目标，使用 \cmd{report\_constraint} 命令为当前设计生成约束报告。
+
+对当前设计中的每个约束，约束报告列出：
+\begin{itemize}
+  \item 约束是否满足或违例，以及违例程度
+  \item 最严重违例者对应的设计对象
+\end{itemize}
+
+约束报告按优先级顺序汇总约束。设计中不存在的约束不会出现在报告中。
+
+\subsubsection{生成最大电容报告}
+\subsubsection*{Generating Maximum Capacitance Reports}
+
+要仅报告违例网络上的最大电容，按如下方式使用 \cmd{report\_constraint}：
+\begin{lstlisting}
+de_shell> report_constraint -all_violators -max_capacitance
+...
+                Required       Actual
+Net            Capacitance   Capacitance      Slack
+---------------------------------------------------------------
+n_6            0.0014226     0.0128121     -0.0113895 (VIOLATED)
+n_16           0.0014226     0.0115580     -0.0101354 (VIOLATED)
+n_121          0.0014226     0.0114569     -0.0100343 (VIOLATED)
+n_21           0.0014226     0.0113311     -0.0099085 (VIOLATED)
+div_18_17/n_2  0.0014226     0.0044171     -0.0029945 (VIOLATED)
+div_18_17/n_4  0.0014226     0.0042607     -0.0028381 (VIOLATED)
+...
+\end{lstlisting}
+
+要报告所有网络上的最大电容，按如下方式使用 \cmd{report\_net}：
+\begin{lstlisting}
+de_shell> report_net -max_capacitance
+...
+Net:    Required Capacitance  Actual Capacitance   Slack
+---------------------------------------------------------------
+CMD[0]         1.25                 0.25           1.0(Met)
+CMD[1]         2.50                 4.50          -2.0(Violated)
+...
+\end{lstlisting}
+
+这些命令报告网络的下列细节：
+\begin{itemize}
+  \item 用户定义或由库推导的要求电容
+  \item 工具计算的实际电容
+  \item Slack（要求电容减去实际电容）
+\end{itemize}
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 约束优先级
+\end{itemize}
+\end{seeAlsoBox}
+
+% ============================================================
+\section{定义设计规则约束}
+\subsection*{Defining Design Rule Constraints}
+
+定义设计规则约束时，应考虑下列典型设计规则场景：
+\begin{itemize}
+  \item \cmd{set\_max\_fanout} 与 \cmd{set\_max\_transition} 命令
+  \item \cmd{set\_max\_fanout} 与 \cmd{set\_max\_capacitance} 命令
+\end{itemize}
+
+通常，逻辑库会为 \texttt{max\_transition} 或 \texttt{max\_capacitance} 属性之一指定默认值，但不会两者都指定。
+为获得最佳结果，不要同时为设计指定 \texttt{max\_transition} 与 \texttt{max\_capacitance} 属性。
+
+要了解如何设置设计规则约束，见：
+\begin{itemize}
+  \item 定义最大转换时间
+  \item 定义最大扇出
+  \item 定义最大电容
+  \item 定义最小电容
+  \item 定义单元退化
+  \item 定义连接类
+\end{itemize}
+
+\subsection{定义最大转换时间}
+\subsubsection*{Defining Maximum Transition Time}
+
+要在时钟组、端口或设计上指定最大转换时间，使用 \cmd{set\_max\_transition} 命令设置 \texttt{max\_transition} 属性。
+compile 期间，DC Explorer 确保网络转换时间小于指定值，例如通过对驱动门输出缓冲。
+
+例如，要将 \texttt{adder} 设计的最大转换时间设为 3.2 单位，输入：
+\begin{lstlisting}
+de_shell> set_max_transition 3.2 [get_designs adder]
+\end{lstlisting}
+
+要复位 \cmd{set\_max\_transition} 设置的值，使用 \cmd{remove\_attribute} 命令：
+\begin{lstlisting}
+de_shell> remove_attribute [get_designs adder] max_transition
+\end{lstlisting}
+
+若设置的 \texttt{max\_transition} 属性在库中也有定义，DC Explorer 尝试满足更严格的值。
+
+\subsubsection{指定基于时钟的最大转换时间}
+\subsubsection*{Specifying Clock-Based Maximum Transition Time}
+
+\texttt{max\_transition} 属性的值可随单元工作频率变化。
+该频率定义为驱动某逻辑锥的寄存器的最高时钟频率。
+要对包含多个时钟频率的设计中特定时钟组的引脚设置 \texttt{max\_transition} 属性，使用 \cmd{set\_max\_transition} 命令。
+
+例如，下列命令将 Clk 时钟组中所有引脚的 \texttt{max\_transition} 属性设为 5 单位：
+\begin{lstlisting}
+de_shell> set_max_transition 5 [get_clocks Clk]
+\end{lstlisting}
+
+DC Explorer 在确定 \texttt{max\_transition} 属性值时遵循下列规则：
+\begin{itemize}
+  \item 当在设计或端口以及时钟组上都设置了 \texttt{max\_transition} 属性时，采用最严格约束。
+  \item 若多时钟启动同一路径，采用最严格约束。
+  \item 若逻辑库中已指定 \texttt{max\_transition} 属性，DC Explorer 在 compile 期间尝试满足这些约束。
+\end{itemize}
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 设计规则约束
+  \item 约束优先级
+\end{itemize}
+\end{seeAlsoBox}
+
+\subsection{定义最大扇出}
+\subsubsection*{Defining Maximum Fanout}
+
+要为一个或多个输入端口指定最大扇出负载，使用 \cmd{set\_max\_fanout} 命令设置 \texttt{max\_fanout} 属性。
+可对整个库设置更保守的扇出约束，或为库中个别单元的特定引脚定义扇出约束。
+若指定的 \texttt{max\_fanout} 属性在库中也有定义，DC Explorer 尝试满足更严格的值。
+
+例如，要对名为 ADDER 的设计中每个驱动引脚与输入端口设置最大扇出约束，输入：
+\begin{lstlisting}
+de_shell> set_max_fanout 8 [get_designs ADDER]
+\end{lstlisting}
+
+图~\ref{fig:dce-max-fanout} 说明对设计施加的最大扇出约束。
+
+\figplaceholder{Figure 29: Calculation of Maximum Fanout}{最大扇出的计算}{fig:dce-max-fanout}
+
+要检查 Z 驱动引脚是否满足最大扇出约束，DC Explorer 将 \texttt{max\_fanout} 属性的指定值与扇出负载比较。
+本例中，总扇出负载为 $1.0 + 1.0 + 3.0 + 2.0 = 7.0$，小于 8；因此该网络满足约束。
+
+被驱动单元（U3）施加的扇出负载不一定为 1.0。
+库可定义更高扇出负载以建模内部单元扇出效应。
+也可在输出端口（OUT1）上设置扇出负载以建模外部扇出效应。
+
+要复位在输入端口或设计上设置的最大扇出值，使用 \cmd{remove\_attribute} 命令。例如：
+\begin{lstlisting}
+de_shell> remove_attribute [get_ports port_name] max_fanout
+de_shell> remove_attribute [get_designs design_name] max_fanout
+\end{lstlisting}
+
+\subsubsection{为输出端口定义预期扇出}
+\subsubsection*{Defining Expected Fanout for Output Ports}
+
+要在输出端口上指定外部扇出负载，使用 \cmd{set\_fanout\_load} 命令设置 \texttt{fanout\_load} 属性。
+DC Explorer 将该扇出负载值加到驱动各指定端口的引脚上的所有其他负载，并尽量使总负载小于该引脚的最大扇出负载。
+
+例如，下列命令为所有输出设置 2 单位的扇出负载：
+\begin{lstlisting}
+de_shell> set_fanout_load 2 [all_outputs]
+\end{lstlisting}
+
+要复位 \cmd{set\_fanout\_load} 在输出端口上设置的值，使用 \cmd{remove\_attribute} 命令。例如：
+\begin{lstlisting}
+de_shell> remove_attribute port_name fanout_load
+\end{lstlisting}
+
+要确定扇出负载，使用 \cmd{get\_attribute} 命令。
+下例查找 \texttt{libA} 库中 AND2 库单元输入引脚上的扇出负载：
+\begin{lstlisting}
+de_shell> get_attribute "libA/AND2/i" fanout_load
+\end{lstlisting}
+
+要查找逻辑库 \texttt{libA} 上设置的默认扇出负载，输入：
+\begin{lstlisting}
+de_shell> get_attribute libA default_fanout_load
+\end{lstlisting}
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 设计规则约束
+  \item 约束优先级
+\end{itemize}
+\end{seeAlsoBox}
+
+\subsection{定义最大电容}
+\subsubsection*{Defining Maximum Capacitance}
+
+要为连接到具名端口的网络或所有网络指定最大电容，使用 \cmd{set\_max\_capacitance} 命令设置 \texttt{max\_capacitance} 属性。
+可用 \cmd{set\_max\_capacitance} 在输入端口或设计上指定电容值。
+该值应小于或等于驱动该网络的引脚的 \texttt{max\_capacitance} 属性值。
+
+例如，要将 \texttt{adder} 设计的最大电容设为 3 单位，输入：
+\begin{lstlisting}
+de_shell> set_max_capacitance 3 [get_designs adder]
+\end{lstlisting}
+
+要复位 \cmd{set\_max\_capacitance} 设置的值，使用 \cmd{remove\_attribute} 命令：
+\begin{lstlisting}
+de_shell> remove_attribute [get_designs adder] max_capacitance
+\end{lstlisting}
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 设计规则约束
+  \item 约束优先级
+\end{itemize}
+\end{seeAlsoBox}
+
+\subsection{定义最小电容}
+\subsubsection*{Defining Minimum Capacitance}
+
+要为连接到输入或双向端口的网络指定最小电容，使用 \cmd{set\_min\_capacitance} 命令设置 \texttt{min\_capacitance} 属性。
+若库 \texttt{min\_capacitance} 属性与输入端口 \texttt{min\_capacitance} 属性同时存在，DC Explorer 尝试满足更严格的值。
+默认情况下，最小电容约束的优先级高于最大转换时间、最大扇出与最大电容约束。
+
+下例在 \texttt{high\_drive} 端口上设置最小电容值为 12.0 单位：
+\begin{lstlisting}
+de_shell> set_min_capacitance 12.0 high_drive
+\end{lstlisting}
+
+要仅报告最小电容约束信息，对 \cmd{report\_constraint} 使用 \opt{-min\_capacitance} 选项。
+要获取当前端口设置信息，使用 \cmd{report\_port} 命令。
+要复位 \cmd{set\_min\_capacitance} 的设置，使用 \cmd{remove\_attribute} 命令。
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 设计规则约束
+  \item 约束优先级
+\end{itemize}
+\end{seeAlsoBox}
+
+\subsection{定义单元退化}
+\subsubsection*{Defining Cell Degradation}
+
+要在输入端口上显式设置 \texttt{cell\_degradation} 属性，使用 \cmd{set\_cell\_degradation} 命令。
+\texttt{cell\_degradation} 属性要求网络电容值小于单元退化值。
+
+可将单元退化约束与其他约束一起使用，但最大电容约束的优先级高于单元退化约束。
+
+\begin{noteBox}
+使用 \cmd{set\_cell\_degradation} 命令需要 DC Ultra 许可证。
+\end{noteBox}
+
+下例在 \texttt{late\_riser} 端口上设置最大电容值为 2.0 单位：
+\begin{lstlisting}
+de_shell> set_cell_degradation 2.0 late_riser
+\end{lstlisting}
+
+要仅报告单元退化约束信息，对 \cmd{report\_constraint} 使用 \opt{-cell\_degradation} 选项。
+要移除 \texttt{cell\_degradation} 属性，使用 \cmd{remove\_attribute} 命令。
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 设计规则约束
+  \item 约束优先级
+\end{itemize}
+\end{seeAlsoBox}
+
+\subsection{定义连接类}
+\subsubsection*{Defining Connection Class}
+
+端口上的连接类约束描述给定工艺的连接要求。
+只有具有相同连接类标签的负载与驱动器才能合法连接。
+该约束可在库中指定。
+要在端口上设置连接类约束，使用 \cmd{set\_connection\_class} 命令。
+
+例如，下列命令在当前设计的 \texttt{xyz} 端口上设置名为 \texttt{internal} 的连接类：
+\begin{lstlisting}
+de_shell> set_connection_class internal xyz
+\end{lstlisting}
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 设计规则约束
+  \item 约束优先级
+\end{itemize}
+\end{seeAlsoBox}
+
+% ============================================================
+\section{对特殊网络禁用设计规则修复}
+\subsection*{Disabling Design Rule Fixing on Special Nets}
+
+可使用 \cmd{set\_auto\_disable\_drc\_nets} 命令对时钟、常数或扫描网络启用或禁用设计规则修复。
+可对当前设计中给定类型的所有网络这样做，例如所有时钟网络、所有常数网络、所有扫描网络，或这三类网络的任意组合。
+被设置为禁用设计规则修复的网络会标记 \texttt{auto\_disable\_drc\_nets} 属性。
+默认情况下，工具对时钟与常数网络禁用设计规则修复，但不对扫描网络禁用。
+
+\begin{noteBox}
+时钟网络默认是理想网络。
+使用 \cmd{set\_auto\_disable\_drc\_nets} 启用设计规则修复不会影响时钟网络的理想时序属性。
+必须使用 \cmd{set\_propagated\_clock} 命令更改时钟网络的理想时序。
+\end{noteBox}
+
+不能使用 \cmd{set\_auto\_disable\_drc\_nets} 命令覆盖带有 \texttt{ideal\_networks} 属性的理想网络上已禁用的设计规则修复。
+该命令从不覆盖由 \cmd{set\_ideal\_net} 或 \cmd{set\_ideal\_network} 命令指定的设置。
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 设计规则约束
+  \item 定义设计规则约束
+\end{itemize}
+\end{seeAlsoBox}
+
+% ============================================================
+\section{在层次化设计中传播约束}
+\subsection*{Propagating Constraints in Hierarchical Designs}
+
+层次化设计由子设计组成。
+可使用下列方法沿层次向上或向下传播约束：
+\begin{itemize}
+  \item \textbf{表征子设计（Characterizing Subdesigns）}\\
+        表征方法捕获特定单元实例的环境信息，并将信息作为属性赋给这些单元所链接的设计。
+  \item \textbf{建模（Modeling）}\\
+        建模方法将已表征设计创建为库单元。
+  \item \textbf{沿层次向上传播约束}\\
+        该方法将时钟、时序例外与禁用时序弧从较低层子设计传播到当前设计。
+\end{itemize}
+
+\subsection{表征子设计}
+\subsubsection*{Characterizing Subdesigns}
+
+当分别综合子设计时，边界条件（如输入驱动强度、输入信号延时（到达时间）与输出负载）可从父设计推导并设置到各子设计上。
+可使用 \cmd{set\_driving\_cell}、\cmd{set\_input\_delay}、\cmd{set\_output\_delay} 与 \cmd{set\_load} 命令完成。
+
+多数情况下，表征设计会移除先前表征的效果并替换相关信息。
+但在后标注（\cmd{set\_load}、\cmd{set\_resistance}、\cmd{read\_timing}、\cmd{set\_annotated\_delay}、\cmd{set\_annotated\_check}）情况下，表征会移除标注，且不能覆盖子设计上已有标注。
+此时必须在再次表征前使用 \cmd{reset\_design} 命令显式移除子设计上的标注。
+
+\subsubsection{表征子设计的端口信号接口}
+\subsubsection*{Characterizing Port Signal Interfaces of Subdesigns}
+
+可使用下列命令手动设置端口信号信息：
+\begin{lstlisting}
+create_clock
+set_clock_latency
+set_clock_uncertainty
+set_driving_cell
+set_input_delay
+set_load
+set_max_delay
+set_min_delay
+set_output_delay
+set_propagated_clock
+\end{lstlisting}
+
+\paragraph{组合设计示例}
+\paragraph*{Combinational Design Example}
+
+图~\ref{fig:dce-char-comb} 给出名为 \texttt{top} 的组合设计中的子设计块。
+
+\figplaceholder{Figure 30: Characterizing Drive, Timing, and Load Values of a Combinational Design}{表征组合设计的驱动、时序与负载值}{fig:dce-char-comb}
+
+下列脚本给出如何手动设置端口接口属性的示例：
+\begin{lstlisting}
+current_design top
+set_input_delay 0 A
+set_max_delay 10 -to B
+current_design block1
+set_driving_cell -lib_cell INV {C}
+set_input_delay 3.3 C
+set_load 1.3 D
+set_max_delay 9.2 -to D
+current_design top
+\end{lstlisting}
+
+该脚本将 n2 网络的到达时间设为 3.3 单位，将 U3 的负载设为 1.3 单位，并将继承的最大延时设为 $10 - 0.8 = 9.2$ 单位（每个反相器 0.4）。
+
+\paragraph{时序设计示例}
+\paragraph*{Sequential Design Example}
+
+图~\ref{fig:dce-char-seq} 给出名为 \texttt{top} 的时序设计中的子设计块。
+
+\figplaceholder{Figure 31: Characterizing Sequential Design Drive, Timing, and Load Values}{表征时序设计的驱动、时序与负载值}{fig:dce-char-seq}
+
+下列脚本给出如何手动设置端口接口信息的示例：
+\begin{lstlisting}
+current_design top
+create_clock -period 10 -waveform {0 5} clock
+current_design block
+create_clock -name clock -period 10 -waveform {0 5} clock1
+create_clock -name clock_bar -period 10 \
+   -waveform {5 10} clock2
+set_input_delay -clock clock 1.8 in1
+set_output_delay -clock clock 1.2 out1
+set_driving_cell -lib_cell INV -input_transition_rise 1 in1
+set_driving_cell -lib_cell CKINV clock1
+set_driving_cell -lib_cell CKBUF clock2
+set_load 0.85 out1
+current_design top
+\end{lstlisting}
+
+该脚本将从 ff1/CP 到 u5/in1 的输入延时设为 1.8 单位，将经 u4 加上 ff2 setup 时间的输出延时设为 1.2 单位，并将 out1 网络上的外部负载设为 0.85 单位。
+
+\paragraph{表征子设计逻辑端口连接的示例}
+\paragraph*{Example of Characterizing Logical Port Connections of Subdesigns}
+
+图~\ref{fig:dce-char-port} 给出名为 \texttt{top} 的设计中的子设计块。
+
+\figplaceholder{Figure 32: Characterizing Port Connection Attributes}{表征端口连接属性}{fig:dce-char-port}
+
+可使用下列脚本手动设置逻辑端口连接：
+\begin{lstlisting}
+current_design block
+set_opposite    { E F }
+set_logic_zero  { G }
+set_unconnected { J }
+\end{lstlisting}
+
+\subsection{沿层次向上传播约束}
+\subsubsection*{Propagating Constraints Up the Hierarchy}
+
+对层次化设计，若先综合较低层块再综合较高层块（自底向上综合），可使用 \cmd{propagate\_constraints} 命令将时钟、时序例外与禁用时序弧从较低层 \texttt{.ddc} 文件传播到当前设计。
+该命令将约束从较低层块传播到当前设计。
+若不使用该命令，则无法将较低层块上设置的约束传播到实例化它的较高层块。
+
+\begin{noteBox}
+使用 \cmd{propagate\_constraints} 命令可能增加内存使用。
+\end{noteBox}
+
+下列脚本给出向上传播约束的方法。假定 A 为顶层块，B 为较低层块。
+\begin{lstlisting}
+current_design B
+source constraints.tcl
+compile
+current_design A
+propagate_constraints -design B
+report_timing_requirements
+compile
+report_timing
+\end{lstlisting}
+
+要生成所有向上传播约束的报告，使用 \opt{-verbose} 与 \opt{-dont\_apply} 选项并将输出重定向到文件。例如：
+\begin{lstlisting}
+de_shell> propagate_constraints \
+   -design name -verbose -dont_apply -output report.cons
+\end{lstlisting}
+
+使用 \opt{-format} \texttt{ddc} 选项保存带已传播约束的 \texttt{.ddc} 文件，这样在重启新的 \cmd{de\_shell} 会话时无需重复传播步骤。
+
+\subsubsection{设计之间的冲突}
+\subsubsection*{Conflicts Between Designs}
+
+较低层与顶层块发生冲突时适用下列规则：
+\begin{itemize}
+  \item \textbf{时钟名冲突}\\
+        当较低层时钟与当前设计或另一块的时钟同名时，该时钟不传播。DC Explorer 发出警告。
+  \item \textbf{时钟源冲突}\\
+        当较低层块的时钟源已被定义为较高层块的时钟源时，较低层块不传播。DC Explorer 发出警告。
+  \item \textbf{来自或指向未传播时钟的例外}\\
+        可以是虚时钟，或因冲突而未从该块传播的时钟。
+  \item \textbf{例外}\\
+        较低层例外会覆盖在同一路径上定义的较高层例外。
+\end{itemize}

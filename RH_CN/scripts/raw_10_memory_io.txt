@@ -1,0 +1,658 @@
+CHAPTER 10 — Memory and I/O Modeling                                           RedHawk User Manual          | 284
+Introduction
+
+
+                                                         Chapter 10
+                                            Memory and I/O Modeling
+Introduction
+
+               RedHawk determines a chip’s Dynamic Voltage Drop (DvD) using high time resolution
+               full-chip transient analysis, including package models, on-chip RLC extraction, and cell/
+               macro VDD/VSS switching current profiles. In 90 nm scale and beyond process
+               technologies, memories and I/O cells play an increasing role and are key contributors to
+               large switching currents
+               Embedded memories are taking an increasing share of real estate in SoC designs. Given
+               their increasing complexity and power consumption, it is necessary to model embedded
+               memory blocks accurately to consider their impact in a full-chip dynamic voltage drop
+               (DvD) analysis. Voltage drop inside memory blocks poses a problem for deep sub-micron
+               designs. Also, high power demand from memory instances can cause DvD in the
+               surrounding logic, thus impacting their timing and functionality. At a full-chip level, the
+               concern lies in ensuring that the memory blocks get adequate power based on their
+               specifications.
+               I/O cells are key contributors to the large switching currents in I/O VDD and I/O VSS.
+               While the I/O VDD is often isolated from the core VDD, I/O VSS can be shared with the
+               core VSS. If the VSS is shared, the large current from the simultaneous switching of the I/
+               O buffers can contribute significantly to the VSS bounce of the core, possibly resulting in
+               functional or timing failures for the chip. The I/O buffers are usually only available in LEF
+               and GDSII data.
+               RedHawk offers several options for modeling memories and I/Os, with varying levels of
+               abstraction--from fully detailed models for accurate block level analysis to more abstract
+               models for full-chip dynamic analysis. Table 10-1 highlights these different options.
+                        Table 10-1       RedHawk memory and I/O modeling options
+
+                                    Power        Sink, Cap     Memory Current,
+        Model Option                                                                  I/O Current Values
+                                     Grid        Locations      Decap Values
+   Black-box                      LEF /          At the pins   Based on .lib, AVM,     Based on .lib / power
+                                  Pin-based                    sim2iprof               specified
+                                                               specifications
+
+   Grey box - considering         As in layout   At the pins   Based on .lib, AVM,     Based on .lib / power
+   power grid                                                  sim2iprof               specified
+                                                               specifications.
+
+   White box - considering        As in layout   Distributed   Using .lib, AVM,        Using .lib / power
+   power grid and internal                       internally    sim2iprof               specified / APL
+   current sinks                                               specifications.
+
+               This chapter describes RedHawk’s memory and I/O characterization flow, including input
+               data requirements, data preparation, and usage model. Memory modeling for use in
+               RedHawk is partitioned into two parts: (1) extraction of the power grid and assignment of
+               current sources and decaps, and (2) generation of the switching current profiles, leakage
+               currents, and decap values. For the first part, several utilities are available to perform the
+               extraction and current source/decap assignment for the required levels of abstraction. For
+               the second part, several methods are available to capture the power draw, average static
+
+
+
+ANSYS, Inc.
+CHAPTER 10 — Memory and I/O Modeling                                                RedHawk User Manual   | 285
+Introduction
+
+              current, and dynamic switching current. Figure 10-1 illustrates this modeling methodology
+              for memory blocks.
+
+
+
+
+                                                                                    Power
+                                                                                    Grid
+                                                                                    Extraction
+
+
+
+                                           dec         Array                        Identification
+                                                 ode                                of core region
+                                   Array               r                       es
+                                                                  IO   S lic
+                                                           m   p/
+                                                   se A
+                                             Sen
+
+
+
+                                                                                      Assignm ent
+                                                                                      of current
+                                                                                      sources &
+                                                                                      decaps
+
+
+
+              Figure 10-1     RedHawk modeling methodology for memories and I/P
+
+              Besides I/O buffers, there are VDD/VSS pads, gap filling pads, bumps, and RDL
+              (Redistribution Layer) data that often are only available in GDSII format, without any
+              detailed routing information in DEF. RedHawk can take the input data in GDSII form and
+              convert it to DEF using gds2def/gds2rh, as shown in Figure 10-2. See section "gds2rh/
+              gds2def", page E-890, and section "gds2rh -m and gds2def -m", page E-931 for details.
+
+
+
+
+              Figure 10-2     C4 bump and RDL layer converted from GDSII using the
+                              gds2def/gds2rh utility
+
+
+ANSYS, Inc.
+CHAPTER 10 — Memory and I/O Modeling                                            RedHawk User Manual      | 286
+Memory and I/O Modeling Methodology
+
+Memory and I/O Modeling Methodology
+
+              Black-box Modeling
+
+              For the initial set of runs, especially at the full-chip level, it is a good idea to abstract all
+              memories, I/O cells and VDD/VSS pad cells, as black-boxes to ensure correct
+              connectivity and to debug data-related issues. Black-boxed memories and I/Os consume
+              significantly less physical memory and run much faster, allowing successive runs during
+              the initial data preparation stages.
+              To run memories and I/Os as black-boxed abstractions, no additional data preparation is
+              required. No design representation (that is, DEF information) for the memory blocks and I/
+              Os is required. However, LEF and LIB models should exist for all memory blocks and I/
+              Os. The power pins from the LEF files are considered in the memory and I/O models.
+              For black-box modeling, the memories are considered without their internal power grids
+              and all current demand is distributed among the power pins of the blocks as defined in
+              their LEF files.
+              Sometimes the black-box modeling of the I/Os and VDD/VSS pads have incomplete
+              geometry information on the pins, which can result in problems, such as VDD/VSS shorts
+              or very large static IR drop. In this case, use a more detailed level of abstraction for I/O
+              modeling.
+
+              Pin and Grid-Based Abstractions
+
+              In grid-based modeling, the memories and I/Os are considered with their internal power
+              grids. The current draw is distributed among the power pins of the block that connect to
+              the top level grid. This method of modeling is particularly useful in designs for which full-
+              chip power grid connectivity is maintained through the power grid of the memory blocks
+              and I/Os. For example, if the top-level power grid of a design is in metal layers 3 and 4,
+              and the memory blocks and I/Os have power grids in metal layers 3 and 4, then the
+              inclusion of the memory blocks and I/Os along with their power grids will ensure
+              connectivity for the power routes in metal layers 3 and 4. If these blocks were black-
+              boxed, then the continuity and connectivity of the power routes in these layers would be
+              lost. Figure 10-3 illustrates this situation for memories.
+
+
+                MEMORY BLOCK
+
+                                    Pins
+
+
+
+
+                METAL4 Power Lines
+
+                METAL3 Power Lines
+
+                                            Black boxed modeling             Pin and Grid based modeling
+                                            Loss in connectivity in          Continuity in top level grid
+                                            top level power gird             preserved from the inclusion of
+                                                                             block level PG network.
+
+
+              Figure 10-3       Modeling memories with and without their internal power
+                                networks.
+
+
+ANSYS, Inc.
+CHAPTER 10 — Memory and I/O Modeling                                        RedHawk User Manual     | 287
+Detailed Memory Block Modeling
+
+              However, in a grid-based modeling framework, the current draw is considered at the pins
+              of the memory block. So it is useful when faster run-times are required or when memory
+              capacity is an issue. Considering the current demand inside the memories or I/Os down to
+              the lower levels of metals, as opposed to at the pins, adds significant overhead in
+              computation time and physical memory usage. But this method has the advantage over
+              the black-boxed modeling in that it considers the memory and I/O power grids during
+              analysis.
+              To abstract the memory and I/O power grids for grid-based modeling, use the gds2def/
+              gds2rh utility to create the necessary design files from the GDSII. The gds2def/gds2rh
+              utility requires the following input data:
+               • Configuration file. Please refer to the gds2def/gds2rh information for memories in
+                 section "gds2rh -m and gds2def -m", page E-931, for details. Please refer to the
+                 gds2def/gds2rh information for I/Os in the following section.
+               • Layer map file containing the information for mapping the GDSII layer numbers to the
+                 corresponding layers defined in the LEF/DEF.
+               • GDSII file for the memory blocks and I/Os.
+               • LEF file for the memory blocks and I/Os (optional in GDSII flow). Needed for I/O cells
+                 that draw current; but not needed for VDD/VSS pads that do not draw current.
+              The output from the utility gds2def/gds2rh is a DEF file (<toplevel>.def) containing the
+              power network information for the memory and I/O blocks . This DEF file should be
+              included in the list of DEF files given as input to RedHawk during dynamic analysis. In
+              addition, if the LEF file is available and defined, a new LEF file (<toplevel>_adsgds.lef)
+              containing information, such as the PINS section, is created.
+                  Note: Neither the Spice-based flow nor the contact-based pin creation flow are
+                  supported in GDS2RH. Customers should use the Totem transistor-level flow.
+              The next sections describe in detail the modeling of memory blocks and I/O cells.
+
+
+
+Detailed Memory Block Modeling
+
+              Extraction
+
+              In detailed modeling, the power grid of a memory block is extracted and current sources,
+              along with decoupling capacitances, are placed at appropriate locations inside the
+              memory. This allows for an accurate consideration of current flow inside the memory
+              blocks. It also allows for modeling of a memory’s dynamic switching effect on its
+              surrounding logic.
+              For detailed modeling of memories, use the gds2def -m or gds2rh -m to generate the
+              detailed view. The gds2def -m/ gds2rh -m utility requires the following input data:
+               • Configuration file. Please refer to gds2def -m or gds2rh -m information in section
+                 "gds2rh -m and gds2def -m", page E-931 for details.
+               • Layer map file containing the information for mapping the GDSII layer numbers to the
+                 corresponding layers defined in the LEF/DEF.
+               • GDSII file for the memory blocks.
+               • LEF file for the memory blocks required for extracting pin information.
+              The output from gds2def -m / gds2rh -m is a set of DEF, LEF, and *.pratio files for each
+              memory block, which contain placement information for the current sources and created
+              decaps, power/ground routing geometries, cell abstraction, and each cell’s relative power
+
+
+
+ANSYS, Inc.
+CHAPTER 10 — Memory and I/O Modeling                                          RedHawk User Manual      | 288
+Detailed Memory Block Modeling
+
+              dissipation. The .pratio files specify weighting factors for the current distribution for P/G
+              pins in the memory. These files should be included as input files for RedHawk analysis.
+              For greater accuracy, you should provide the hierarchical SPICE netlist for the memory
+              block with x,y coordinate information for the transistors:
+              The size and location of the transistors in the Spice netlist control the placement and
+              properties of the current sources inside the memory model. For a full-chip transient
+              dynamic analysis, it is computationally impossible to include all transistors in the
+              simulation. Hence, gds2def -m / gds2rh -m groups transistors together, based on their
+              size and location, to form virtual cells that provide a level of abstraction without much loss
+              in accuracy.
+              The inclusion of the memory power grids and the consideration of current sources
+              connected to the bottom layers of metal allow for complete modeling at the full-chip level
+              and for an accurate transient dynamic analysis. Full-chip run-times or physical memory
+              usage is not affected when the number of memory blocks is small. However, run-time and
+              physical memory usage can be an issue for a large number of memory blocks. This is due
+              to the large number of nodes introduced from the inclusion of the lower levels of metals in
+              the block P/G networks and the creation of large number of passive elements. To
+              circumvent such scenarios, gds2def -m / gds2rh -m has some advanced features that
+              allow for selective extraction of metal layers. Two such procedures are described below.
+               • Extraction of specified layers only:
+                 Users can choose to extract only certain layers from the memory GDSII file by using
+                 the keyword
+                       EXTRACTION_STARTING_LAYER <lowest_metal_layer> ? traceall?
+                 in the gds2def -m / gds2rh -m configuration file. The P/G network in the starting layer
+                 and higher layers, then are extracted. The current sources and decoupling
+                 capacitances are hooked up to the lowest layer of specified metal.
+                 If layers lower than the starting layer have been used to connect to higher layers, use
+                 the ‘traceall’ option, which considers connected elements on all metal layers during
+                 network tracing. However, if the option ‘traceall’ is specified, note that GDS2RH has
+                 different behavior than GDS2DEF. GDS2DEF, after tracing through all metal layers,
+                 discards all geometries below the specified EXTRACTION_STARTING_LAYER.
+                 GDS2RH internally invokes the APACHE_PHYSICAL_MODEL approach, which does
+                 not discard geometries at all layers below the EXTRACTION_STARTING_LAYER, but
+                 keeps connections between the pins (current sources/sinks) created at the ESL layer,
+                 through lower metal/via layers, for better voltage-drop modeling of the block.
+               • Selective extraction of metals from certain regions.
+                 Typically, the current draw from the power grid inside the memory array regions is
+                 small and can be ignored without much loss in accuracy for a voltage drop analysis,
+                 especially at the full-chip level. If the geometries and segments from the lower metal
+                 layers in the memory array regions only form local connections to the devices in the
+                 array region, then their exclusion will not affect the full-chip analysis. Figure 10-4
+                 shows the metal 2 geometries inside the memory core region of a memory block. As
+                 evident from the figure, the metal 2 geometries do not form power routes, but serve
+                 more as local interconnects. These geometries, if excluded from the analysis, do not
+                 affect the power analysis accuracy, but can provide significant savings in the node
+                 count, thereby allowing for considerable savings in physical memory usage and run-
+                 times.
+
+
+
+
+ANSYS, Inc.
+CHAPTER 10 — Memory and I/O Modeling                                        RedHawk User Manual     | 289
+Detailed Memory Block Modeling
+
+
+
+
+              Figure 10-4      Metal 2 geometries in the memory core region of a memory
+
+              The gds2def -m / gds2rh -m utility can automatically identify the memory bit cell and
+              subsequently identify the memory array region from GDSII. It can then extract only certain
+              layers from the array region, while extracting all other layers from the other parts of the
+              memory. This helps to preserve all metal geometries in the high power consumption
+              regions, such as row decoders, drivers, and sense-amplifiers, while preserving the
+              connectivity of the memory block to the top-level power grids in all the layers.
+              To utilize these capabilities, the keyword CORE_EXTRACTION_STARTING_LAYER
+              <layer_name> should be specified in the gds2def -m / gds2rh -m configuration file. This
+              directs the gds2def -m / gds2rh -m utility to extract all layers including and above the
+              specified layer from the memory array region. For the rest of the memory block, the layer
+              specified in the keyword EXTRACTION_STARTING_LAYER is honored. If either of these
+              two keywords is not specified, then by default all layers, starting from the lowest layer
+              specified in the layer map file, are extracted in the respective regions. If
+              EXTRACTION_STARTING_LAYER is specified and
+              CORE_EXTRACTION_STARTING_LAYER is not, then the gds2def -m / gds2rh -m
+              utility extracts all layers starting two layers above the layer specified in
+              EXTRACTION_STARTING_LAYER.
+              To use the CORE_EXTRACTION_STARTING_LAYER option requires proper
+              identification of the memory array region, which can be achieved in following three
+              methods.
+               • By using the keyword MEMORY_CELL auto_detect <cellname>, for bit cells in the
+                 Spice netlist, you can use the automatic cell detection capability built into gds2def -m
+                 / gds2rh -m.
+               • By using the keyword MEMORY_BIT_CELL auto_detect <cellname>, for bit cells in
+                 GDSII, you can use the automatic bit cell detection capability built into gds2def -m /
+                 gds2rh -m.
+               • You can specify the name(s) of the memory bit cell(s) using the keyword
+
+
+ANSYS, Inc.
+CHAPTER 10 — Memory and I/O Modeling                                         RedHawk User Manual     | 290
+Detailed Memory Block Modeling
+
+                 MEMORY_BIT_CELL { } and gds2def -m / gds2rh -m identifies the memory array
+                 region from the location of the specified bit-cells in the GDSII file.
+               • For certain complex memories, the auto-detection of the memory core region can be
+                 incorrect. In this case, you can choose to explicitly specify the rectangular regions that
+                 make up the memory core region through the keyword MEMORY_CORE_REGIONS
+                 <file_name>, where the specified file lists all the rectangular regions.
+              Figure 10-5 illustrates the extraction of metal 1 P/G grid network of a memory for: (a) all
+              regions of the block, and (b) all regions except the array region of the memory block. Only
+              metal layer 3 and above are extracted.
+
+
+
+
+              Figure 10-5      Global and selective extraction of metal1 P/G network for a
+                               memory block.
+
+              GDS2DEF/ GDS2RH Configuration File for Memories
+
+              This section summarizes the configuration file keywords needed for the memory modeling
+              modes described previously. See section "Creating the gds2rh/gds2def Configuration
+              File", page E-893, for more detailed information on keyword syntax and usage for
+              memories.
+
+              Required GDS2DEF/ GDS2RH keywords
+               • TOP_CELL
+               • GDS_FILE
+               • GDS_MAP_FILE
+               • LEF_FILE
+               • VDD_NETS
+               • GND_NETS
+
+              Optional GDS2DEF/GDS2RH keywords:
+               • OUTPUT_DIRECTORY
+               • DATATYPE
+               • NET_NAME_CASE_SENSITIVE 1
+               • EXTRACTION_STARTING_LAYER
+               • GENERATE_PLOC
+
+
+ANSYS, Inc.
+CHAPTER 10 — Memory and I/O Modeling                                        RedHawk User Manual     | 291
+Detailed Memory Block Modeling
+
+               • LEF_PIN_POWER
+               • USE_LEF_PINS_FOR_TRACING
+               • BUSBITCHARS
+
+              gds2def -m/ gds2rh -m Configuration File Syntax
+              The following section describes the gds2def -m / gds2rh -m configuration file keyword
+              syntax, both those that are required first to run the program, and then the optional ones.
+              Required keywords:
+                  TOP_CELL $cell
+                  GDS_FILE $cell.gds
+                  GDS_MAP_FILE layer_map_file
+                  LEF_FILE memory_lef_file
+                  VDD_NETS
+                       {
+                       <power_net_name_to_be_used_in_output_DEF> {
+                           <power_net_name> @ <gds_layer_number>
+                         <gds_x_position> <gds_y_position>
+                       (...)
+                       <power_pin_name_in_LEF>
+                       <power_net_name_in_GDS>
+                       (...)
+                       }
+                       }
+                  GND_NETS
+                       {
+                       <ground_net_name_to_be_used_in_output_DEF> {
+                           <ground_net_name> @ <gds_layer_number>
+                         <gds_x_position> <gds_y_position>
+                       (...)
+                       <ground_pin_name_in_LEF>
+                       <ground_net_name_in_GDS>
+                       (...)
+                       }
+                       }
+              Optional keywords:
+                   DATATYPE
+                   NET_NAME_CASE_SENSITIVE 1
+                   SPICE_NETLIST
+                   SPICE_XY_SCALE
+                   MEMORY_CELL [ auto_detect | OFF ]
+                   MEMORY_CELL {
+                        <names of memory cell subcircuit in core array>
+                   }
+                   NMOS_MODEL_NAME {
+                        <NMOS model names in Spice netlist>
+                   }
+                   ...
+                   PMOS_MODEL_NAME {
+                        <PMOS model names in Spice netlist>
+                   }
+
+
+ANSYS, Inc.
+CHAPTER 10 — Memory and I/O Modeling                                        RedHawk User Manual     | 292
+Detailed Memory Block Modeling
+
+                   ...
+                   WORD_LINE_DIMENSION <number of word lines>
+                   BUSBITCHARS <char>
+                   USE_LEF_PINS_FOR_TRACING 1
+                   MEMORY_CORE_REGIONS <file name>
+                   MEMORY_BIT_CELL [ auto_detect | OFF ]
+                   MEMORY_BIT_CELL {
+                       <names of the memory bit cell(s) in core array>
+                   }
+                   EXTRACTION_STARTING_LAYER <lowest metal layer> [traceall]
+                   CORE_EXTRACTION_STARTING_LAYER <lowest metal layer-memory>
+
+              The following keywords are related to Switch Memory modeling:
+               • DEFINE_SWITCH_CELLS - see usage in section "DEFINE_SWITCH_CELLS", page
+                 E-916
+               • EXTRACT_SWITCH_CELLS - see usage in section "EXTRACT_SWITCH_CELLS",
+                 page E-916
+               • LEF_FILES
+               • SWITCH_CELLS
+               • VP_PAIRS
+
+              Current Profile Generation
+
+              Static Analysis
+              For static analysis, a power number is required to estimate the current drawn in the
+              memories. RedHawk can estimate the number directly from the library models of the
+              memories, or you can choose to specify the power numbers through the GSR keyword,
+              BLOCK_POWER_FOR_SCALING. The triangular waveform based on .lib power data is
+              scaled according to the value of BLOCK_POWER_FOR_SCALING.
+              You can estimate the power of the memory from (a) datasheets of the memory blocks, (b)
+              the memory vendor or memory design teams, or (c) other power estimation tools. The
+              power you estimate should consider different modes of operation of the memory block
+              and should also include the memory leakage current.
+
+              Dynamic Analysis
+              Dynamic analysis in RedHawk is a true transient analysis. Thus for every instance,
+              current profiles are needed as a function of time for each mode of operation. There are
+              four different ways current profiles can be generated for memories.
+               • Triangular profiles using static average power values. This form of modeling is the
+                 least accurate, but requires less effort and can be used if the other more accurate
+                 means of providing the current profiles are not available. Based on the static average
+                 power number, RedHawk generates single or double triangular current profiles.
+               • Rule-based switching current profile generation. The AVM (Apache Virtual
+                 Memory) utility generates switching current profiles for different modes of operation.
+                 This utility requires a configuration file, which is described in the section "Memory and
+                 IP Characterization", page 9-264. The configuration file describes power consumption,
+                 access time, setup time, and load information for each of the different operation
+                 modes. AVM generates rule-based current profiles that are tailored for different
+                 families of embedded memories such as SRAMs, Register Files, or DRAMs. This
+                 utility also generates leakage current and the decoupling capacitance information for
+
+
+ANSYS, Inc.
+CHAPTER 10 — Memory and I/O Modeling                                          RedHawk User Manual     | 293
+Detailed I/O Cell Modeling
+
+                 the memory blocks. AVM can be run either outside RedHawk using the command
+                       avm <avm_configuration_file>
+                 or within RedHawk through the GUI or TCL interface.
+               • Accurate switching current profile generation. The sim2iprof utility uses third-party
+                 simulation output files, such as fsdb, hout, tr0, or pwl format files as inputs to obtain
+                 Read/Write/Standby mode data for memories, and generates accurate current profiles
+                 in a cell.current file for RedHawk power analysis. For details on using sim2iprof, see
+                 section "sim2iprof", page E-940.
+
+Detailed I/O Cell Modeling
+
+              Extraction
+
+              In detailed modeling, the power grid of an I/O block is extracted and current sources along
+              with decoupling capacitances, are placed at appropriate locations inside the I/O. This
+              allows for an accurate consideration of current flow inside the I/O blocks. It also allows for
+              modeling of an I/O’s dynamic switching effect on its surrounding logic.
+              Detailed modeling of I/Os is similar to memories and requires the gds2def/gds2rh utility to
+              generate the detailed view. The gds2def/gds2rh utility requires the following input data:
+               • Configuration file. Please refer to Chapter 8 for details.
+               • Layer map file containing the information for mapping the GDSII layer numbers to the
+                 corresponding layers defined in the LEF/DEF.
+               • GDSII file for the I/O blocks.
+               • LEF file for the I/O blocks required for extracting pin information.
+              The output from gds2def/gds2rh is a set of DEF, LEF, and *.pratio files for each I/O block
+              containing placement information for the current sources and created decaps, power/
+              ground routing geometries, cell abstraction, and each cell’s relative power dissipation.
+              The .pratio files specify weighting factors for the current distribution among P/G pins in
+              memory. These files should be included in input files for RedHawk analysis.
+              For greater accuracy, you should provide the following additional information.
+               • Hierarchical SPICE netlist for the I/O block, with x,y coordinate information for the
+                 transistors:
+               • The size and location of the transistors in the Spice netlist control the placement and
+                 properties of the current sources inside the I/O model. For a full-chip transient
+                 dynamic analysis, it is computationally impossible to include all transistors in the
+                 simulation. Hence, gds2def/gds2rh groups transistors together, based on their size
+                 and location, to form virtual cells that provide a level of abstraction without much loss
+                 in accuracy.
+               • The inclusion of the I/O power grids and the consideration of current sources
+                 connected to the bottom layers of metal allow for complete modeling at the full-chip
+                 level and for an accurate transient dynamic analysis. Full-chip run-times or physical
+                 memory usage is usually not affected much when including all the I/Os if the number
+                 are not more than hundreds.
+
+              GDS2DEF/GDS2RH Configuration File for I/Os
+
+              This section describes configuration files needed for the I/O modeling modes described
+              earlier. The GDS2DEF/GDS2RH utility also can extract P/G grids from bump or RDL
+              layers to be included in RedHawk analysis.
+
+
+ANSYS, Inc.
+CHAPTER 10 — Memory and I/O Modeling                                         RedHawk User Manual     | 294
+Detailed I/O Cell Modeling
+
+              To prepare to run GDS2DEF/GDS2RH, create a configuration file, including the keywords
+              described in this section, as needed. The I/O configuration file keywords are listed below.
+              For descriptions and syntax of the keywords, see section "Creating the gds2rh/gds2def
+              Configuration File", page E-893.
+
+              Required GDS2DEF/GDS2RH Keywords
+               • TOP_CELL
+               • GDS_MAP_FILE
+               • VDD_NETS
+               • GND_NETS
+               • GDS_FILE
+
+              Optional GDS2DEF/GDS2RH Keywords for I/Os
+               • APACHE_PHYSICAL_MODEL
+               • ADJUST_POLYGON
+               • BUSBITCHARS
+               • CREATE_LEF_MACRO_FOR_BOX_CELLS
+               • CREATE_LEF_MACRO_FOR_BOX_CELLS
+               • DEF_FILE_DEFINITIONS
+               • EXTRACTION_STARTING_LAYER
+               • GENERATE_PLOC
+               • INTERNAL_DBUNIT
+               • LEF_FILE
+               • LEF_PIN_POWER
+               • MULTI_TASKS
+               • NET_NAME_CASE_SENSITIVE
+               • OUTPUT_DIRECTORY
+               • USE_LEF_PINS_FOR_TRACING
+
+              Current Profile Generation
+
+              Static Analysis
+              For static analysis, a power number is required to estimate the current drawn in the I/Os.
+              RedHawk can estimate the number directly from the library models of the I/Os, or you can
+              choose to specify the power numbers using the GSR keyword,
+              BLOCK_POWER_FOR_SCALING.
+
+              Dynamic Analysis
+              Dynamic analysis in RedHawk is a high time resolution true transient analysis. Thus, for
+              every instance, current profiles should be provided as a function of time for each mode of
+              operation. The following describes the different ways that the current profiles as a function
+              of time can be generated.
+               • Triangular profiles using static average power values. This form of modeling is the
+                 least accurate, but requires less effort and can be used if the other means of providing
+                 the current profiles are not available. Based on the average static power, RedHawk
+                 will generate the triangular current profiles.
+
+
+
+ANSYS, Inc.
+CHAPTER 10 — Memory and I/O Modeling                                        RedHawk User Manual    | 295
+Detailed I/O Cell Modeling
+
+               • SPICE profiles using APL. If you prefer to use SPICE-based current profiles in your
+                 RedHawk analyses you can use APL to characterize the I/O blocks. APL automatically
+                 generates the input vectors based on the parameters defined in the input configuration
+                 file. Using these input vectors, APL characterizes the I/O blocks using NSPICE.
+                 Currently, core VDD and VSS current profiles are captured during APL
+                 characterization. If the core VSS is shared with I/O VSS, the current in core VSS is
+                 much larger than the current in core VDD of the I/O cells. RedHawk is able to take in
+                 asymmetric current profiles in VDD and VSS for dynamic analysis. With the large
+                 capacity and fast run-time capabilities of NSPICE, the characterization of I/O blocks is
+                 typically not an issue. Please see Chapter 9, "Characterization Using Apache Power
+                 Library", for more details on APL.
+
+              Results and Analysis Including I/Os
+
+              With the inclusion of I/Os, the following demonstrates some of RedHawk’s capabilities for
+              analyzing results. Figure 10-6 shows the power density map of a chip without the
+              simultaneous switching I/O buffers, while Figure 10-7 shows a power density map with
+              switching I/O buffers. After DvD analysis, the power density map shows the instances in
+              which actual switching occurs. Power density is defined as the power dissipated per unit
+              area. Power density is a good indication of potential problem regions, since a higher
+              power density indicates more power demand is concentrated in a small region.
+
+
+
+
+              Figure 10-6      Power density map without simultaneous switching I/Os
+
+
+
+
+ANSYS, Inc.
+CHAPTER 10 — Memory and I/O Modeling                                        RedHawk User Manual     | 296
+Detailed I/O Cell Modeling
+
+
+
+
+              Figure 10-7      Power density map with simultaneous switching I/Os
+
+              Figure 10-8 shows the static IR drop of the VSS network. However, with dynamic voltage
+              drop, the VSS bounce can be much higher, as seen in Figure 10-9 (without switching I/
+              Os) and Figure 10-10 (with switching I/Os). Equally important is that the regions with high
+              static IR drop can be completely different than the regions with high dynamic voltage
+              drop. This demonstrates that I/O switching-induced VSS bounce can no longer be
+              ignored, especially when VSS is shared between the I/O and the core.
+
+
+
+
+              Figure 10-8      Static IR-drop with simultaneous switching I/Os; Maximum
+
+
+
+
+ANSYS, Inc.
+CHAPTER 10 — Memory and I/O Modeling                           RedHawk User Manual   | 297
+Detailed I/O Cell Modeling
+
+                             VSS at 30mV
+
+
+
+
+              Figure 10-9    Dynamic voltage drop (DvD) without simultaneous switching
+                             I/Os; Maximum VSS bounce at 150mV
+
+
+
+
+              Figure 10-10   DvD with simultaneous switching I/Os; Maximum VSS
+                             bounce at 200mV
+
+
+
+
+ANSYS, Inc.
+

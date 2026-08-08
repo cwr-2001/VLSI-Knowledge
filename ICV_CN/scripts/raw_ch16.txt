@@ -1,0 +1,861 @@
+                                                                                         Feedback
+
+
+
+
+16
+Pattern Matching
+
+     This chapter provides an introduction to IC Validator pattern matching. The pattern
+     matching functions are described in the IC Validator Reference Manual.
+
+     The IC Validator pattern matching feature is described in the following sections:
+      • Overview
+      • Using the Pattern Matching Flow
+      • Creating the Pattern Library
+      • Viewing and Locking a Pattern Library
+      • Checking a Layout
+      • Detecting and Repairing Hotspots Within the IC Compiler Tool
+
+
+Overview
+     IC Validator pattern matching compares two geometrical configurations (patterns) to
+     determine if they match. In pattern matching process, you match a target pattern from a
+     design layout with a reference pattern from an existing pattern library to determine if the
+     patterns match. Figure 105 illustrates this step.
+     The reference pattern represents any combination of geometric shapes that cannot be
+     manufactured, such as a lithography hotspot, or are difficult to be interpreted accurately
+     with standard DRC rules, such as a complex two-dimensional geometric measurements.
+     Reference patterns are pre-identified through robust verification and validation techniques,
+     and they are precisely specified and added to a pattern library before matching.
+     An advantage of pattern matching as a DRC-based flow is that it is much faster than the
+     simulation-based lithography detection, which is extremely computationally expensive and
+     time consuming. Therefore, pattern matching offers a cost-effective approach to identify
+     lithography-induced or process-induced hotspots earlier in the design flow, and it makes
+     real-time verification and repairing possible.
+
+
+
+
+IC Validator User Guide                                                                        376
+X-2025.06
+                                                                                      Feedback
+Chapter 16: Pattern Matching
+Using the Pattern Matching Flow
+
+
+Figure 105    Pattern Matching Flow
+
+
+
+
+Using the Pattern Matching Flow
+     To use the patching matching flow, you provide a set of source patterns in the form of
+     design pattern layers and location marker layers. These layers are identified either at a
+     manufacturing site known as yield detractors or at a fabless company for methodology
+     checking. Figure 106 shows a top-level IC Validator pattern-matching flow for pattern
+     library creation and pattern matching.
+
+
+
+
+IC Validator User Guide                                                                          377
+X-2025.06
+                                                                                        Feedback
+Chapter 16: Pattern Matching
+Using the Pattern Matching Flow
+
+
+Figure 106    Pattern Matching Flowchart
+
+
+
+
+     During pattern library creation, pattern information is extracted from the source pattern and
+     written to a pattern library. The pattern library is called during the pattern matching step as
+     a reference for identifying the same or similar patterns in the input design layout.
+     The pattern_learn() function creates a pattern library. The pattern match() function
+     performs pattern matching. See Chapter 1, “Tables of Runset Functions” in the IC
+     Validator Reference Manual for a summary of all of the pattern matching functions.
+
+
+     Creating the Pattern Library
+     This section shows an example of the pattern library creation flow using the
+     pattern_learn() function.
+
+     Preparing the Input Layout
+     Source patterns in the GDSII or OASIS formats are captured and registered to a pattern
+     library through a pattern definition process, which contains specifications to precisely
+     describe a pattern.
+
+
+
+
+IC Validator User Guide                                                                         378
+X-2025.06
+                                                                                       Feedback
+Chapter 16: Pattern Matching
+Using the Pattern Matching Flow
+
+
+     Required Input
+     Three user-defined inputs are required for creating a pattern library. These inputs are
+     part of the input layout, or they are generated through runset operations before the
+     pattern_learn() function call. Figure 107 shows an example of required input.
+
+      • Pattern layers. Specifies that a pattern contains single or multiple pattern layers, such
+        as a pattern consisting of metal and via layers.
+      • Pattern marker. Specifies a rectangular polygon that is placed on each source pattern
+        to mark the location of interest, such as the pinch or bridge location, or a DRC violation.
+        The pattern marker is output during pattern matching to report the match between the
+        pattern library and the design.
+      • Pattern extent. Specifies the bounding region of a pattern. Pattern layers in this
+        region are processed and registered to the pattern library. The pattern extent can
+        also be generated through the ambit_mode and match_ambit arguments of the
+        pattern_learn() function.
+
+Figure 107    Required Input for Creating a Pattern Library
+
+
+
+
+IC Validator User Guide                                                                        379
+X-2025.06
+                                                                                          Feedback
+Chapter 16: Pattern Matching
+Using the Pattern Matching Flow
+
+
+     Optional Input
+     You might also need to provide the following specifications for your pattern definition.
+     Figure 108 shows an example of optional input.
+      • Edge tolerance layers. Specifies a set of polygon layers that define the allowed edge
+        placement variation for each pattern layer edge.
+      • Ignore region layers. Contains one or more rectilinear polygons defining areas on the
+        source pattern that are excluded from the matching process.
+      • Optional pattern marker layers. Contains polygons that can be attached to a pattern
+        and retrieved for certain post-pattern matching operations. For example, it can be user-
+        defined fix guidance for a particular pattern.
+      • Pattern text ID layer. Contains the text ID of the source patterns. If the text ID layer is
+        not provided, a tool-generated text ID is used.
+      • Pattern text property layers. Contains the text information defined for a
+        source pattern, for example, the pattern ID, pattern type, or minimum CD.
+        You attach these properties to the pattern during pattern library creation and
+        retrieve them by using the select_marker_by_double_property() and
+        select_marker_by_string_property() functions for post-pattern matching
+        operations.
+
+
+
+
+IC Validator User Guide                                                                           380
+X-2025.06
+                                                                                       Feedback
+Chapter 16: Pattern Matching
+Using the Pattern Matching Flow
+
+
+Figure 108    Optional Input for Creating a Pattern Library
+
+
+
+
+     Additional Pattern Specifications
+     You might need to set additional pattern specifications during pattern library creation, such
+     as:
+      • Pattern fuzziness. Specifies the pattern matching mode. You can choose the exact or
+        fuzzy matching mode. The pattern fuzziness is edge-based and is specified individually
+        and globally.
+      • Pattern reflection and rotation. Specifies whether to report a pattern as a match when it
+        has a different orientation from the original shape.
+      • Pattern type. Specifies whether the source patterns are one-dimensional or two-
+        dimensional patterns. Mixed pattern types are not supported.
+     See the IC Validator Reference Manual for more information about the pattern_learn()
+     function.
+
+
+
+
+IC Validator User Guide                                                                        381
+X-2025.06
+                                                                                       Feedback
+Chapter 16: Pattern Matching
+Using the Pattern Matching Flow
+
+
+     Example of Creating a Pattern Library
+     You create a standard DRC runset file to create a pattern library. The runset must include
+     the following sections:
+      • Layout database specifics
+      • General options
+      • Pattern library path definition using the pattern_options() function
+      • Layer assignments
+      • Pattern library creation using the pattern_learn() function
+     A pattern matching runset that is used to create a pattern library is described in the
+     following steps:
+      1. Beginning of the runset
+         #include <icv.rh>
+
+      2. User-defined environment variables
+         Environment variables in the runset are optional and can be customized.
+         Two environment variables are defined for pattern library creation. The
+         PATTERN_LIB_PATH environment variable specifies the location where the pattern
+         library is saved. The PM_LIB_NAME environment variable specifies the name of the
+         pattern library. For example,
+         #pragma envvar default PM_LIB_PATH "/pattern_library"
+         #pragma envvar default PM_LIB_NAME "MET"
+
+      3. Layout database specifications
+         The library() function defines the design library, and it is required in the runset.
+         library (
+                 format       = GDSII,
+                 library_name = "TOP.gds",
+                 cell         = "TOP"
+         );
+
+         Use the IC Validator command-line options to override arguments specified in the
+         library() function. For example, use the -i command-line option to override the
+         library name specified by library_name or the -f command-line option to override
+         the library format specified by format. See the IC Validator Command-Line Options
+         section in the “IC Validator Basics” chapter of the IC Validator User Guide for more
+         information.
+      4. General Options
+
+
+IC Validator User Guide                                                                         382
+X-2025.06
+                                                                                       Feedback
+Chapter 16: Pattern Matching
+Using the Pattern Matching Flow
+
+
+         Set error_limit_per_check to ERROR_LIMIT_MAX in the error_options() function
+         to store and report all of the violations all of the errors up to a tool-defined maximum
+         limit reported by the pattern_learn() and pattern_match() functions. The default is
+         100.
+         error_options (
+               error_limit_per_check = ERROR_LIMIT_MAX
+               );
+
+         Setting error_limit_per_check to ERROR_LIMIT_MAX or other very high values can
+         result in decreased performance and increased disk usage for very large numbers of
+         errors, and is therefore not recommended.
+      5. Call the pattern_options() function to define the pattern library path.
+         The pattern_options() function defines the path of a pattern library for the
+         pattern_learn() and pattern_match() functions. The pattern_options() function
+         can be called only one time in the runset. See the Runset Functions chapters of
+         IC Validator Reference Manual for more information.
+         pattern_options (
+               pattern_library_path = $PM_LIB_PATH
+               );
+
+         Note:
+             The pattern library path specified by the pattern_library_path argument
+             must exist before pattern library creation. Otherwise a runtime error occurs.
+      6. Layer assignments
+         metal : polygon_layer = assign ( {{3,0}} );
+         pattern_marker : polygon_layer = assign ( {{4,0}, {5,0}} );
+         pattern_text_id : text_layer = assign_text( {{6,0}} );
+         error_list : list of write_error_map_s = {};
+
+      7. Call the pattern_learn() function to create a pattern library.
+          ◦ Define parameters for pattern library creation.
+             This optional section of the runset provides access to a list of values for any
+             parameter of the pattern_learn() function. See the descriptions of the
+             pattern_learn() function in IC Validator Reference Manual for more information
+             about the values for parameters in the pattern_learn() function.
+             match_ambit : ambit_values_s = {0.2,0.2,0.2,0.2};
+             ambit_mode : pattern_ambit_mode_e = PM_MARKER_CENTER;
+             pattern_fuzziness : pattern_fuzzy_e = PM_EDGE_UNIFORM;
+             uniform_fuzzy_size : double = 0.004;
+             pattern_reflect : boolean = true;
+             pattern_rotate : boolean = true;
+
+
+
+IC Validator User Guide                                                                      383
+X-2025.06
+                                                                                      Feedback
+Chapter 16: Pattern Matching
+Using the Pattern Matching Flow
+
+
+          ◦ Pattern library creation
+             Call the pattern_learn() function to create a pattern library. You can call
+             this function multiple times in a runset. The following example of calling the
+             pattern_learn() function to create a single pattern layer library with edge uniform
+             matching mode. The pattern extent is 0.4 x 0.4 μm and is created by the tool from
+             the center of the pattern marker with 0.2 μm match_abmit.
+             tmp_violation @= {
+                 @"pattern_learn result";
+                 pattern_learn (
+                     pattern_library_name = $PM_LIB_NAME,
+                     pattern_layers = {metal},
+                     pattern_marker = pattern_marker,
+                     pattern_text_id = pattern_text_id,
+                     match_ambit = match_ambit,
+                     ambit_mode = ambit_mode,
+                     pattern_fuzziness = pattern_fuzziness,
+                     uniform_fuzzy_size = uniform_fuzzy_size,
+                     pattern_reflect = pattern_reflect,
+                     pattern_rotate = pattern_rotate
+                     );
+             }
+
+             A pattern library directory with a name defined by the PM_LIB_NAME environment
+             variable is generated and stored in the path defined by the PM_LIB_PATH
+             environment variable.
+             The error output from the pattern_learn() function is stored as the pattern_learn
+             result. See “Examining the Output of Pattern Library Creation” for more information
+             about the error output from the pattern_learn() function.
+      8. Output layout database
+         In this optional section, you write the output from the pattern_learn() function to
+         either a GDSII or OASIS file.
+         //DEBUG output only
+         error_list.push_back({tmp_violation,{0,0}});
+         output_lib=gds_library("out.gds");
+         write_gds(
+                 output_library=output_lib,
+                 errors=error_list
+                 );
+
+     Examining the Output of Pattern Library Creation
+     The output files produced by the IC Validator runset for pattern library creation include the
+     pattern libraries and the same set of files as you use to perform DRC. See the Output Files
+     chapter of the IC Validator User Guide for more details.
+
+
+
+IC Validator User Guide                                                                        384
+X-2025.06
+                                                                                        Feedback
+Chapter 16: Pattern Matching
+Using the Pattern Matching Flow
+
+
+      • Error Output
+         The IC Validator tool creates the cell.LAYOUT_ERRORS file when the DRC run
+         completes. For pattern library creation, this file is used as a quick summary of the
+         pattern creation statistics rather than a violation report.
+         The following TOP.LAYOUT_ERRORS file reports an ERROR result:
+                                  LAYOUT ERRORS RESULTS: ERRORS
+
+                           ##### #### ####     ### ####      ###
+                           #     #   # #   # #    # #    # #
+                           #### #### #### #       # ####     ###
+                           #     # # # # #        # # #          #
+                           ##### #   # #   # ### #       # ####
+         ======================================================================
+         Library name:    ../../testcase/hotspot_clips.oas
+         Structure name: TOP
+         Generated by:    IC Validator RHEL64 Release I-2013.12.SP1.4010 2014/
+         01/09
+                                ERROR SUMMARY
+         Runset name: icv runset.rs
+         User name: juser
+         Time started: 2016/03/02 07:35:12AM
+         Time ended: 2016/03/02 07:35:51AM
+
+         Called as: icv runset.rs
+         pattern_learn result
+            pattern_learn ................................ 6 violations found.
+
+         pattern_learn result/Invalid input: first pattern
+         layer has no corner within the pattern extent
+            pattern_learn ................................ 1 violation found.
+
+         pattern_learn result:pattern_1
+            pattern_learn ................................ 4 violations found.
+
+         pattern_learn result:pattern_5
+             pattern_learn ................................ 2 violations found.
+
+         In this report, six source patterns are processed by the pattern_learn() function.
+         Two of the six patterns are identified as pattern_5 and four are identified as pattern_1.
+         Therefore, two unique patterns are captured in the pattern library.
+         The pattern_learn() function also identifies one pattern as an invalid
+         two-dimensional pattern because it has no corner within the pattern extent.
+         Therefore, it cannot be added to a two-dimensional pattern library. Check the
+         cell.LAYOUT_ERRORS file after pattern library creation to determine if there are invalid
+         patterns.
+      • Pattern Library
+
+
+
+IC Validator User Guide                                                                         385
+X-2025.06
+                                                                                       Feedback
+Chapter 16: Pattern Matching
+Using the Pattern Matching Flow
+
+
+         You can store more than one pattern library under the same pattern library path defined
+         by the pattern_library_path argument of the pattern_options() function. You call
+         one or multiple pattern libraries during pattern matching.
+         The pattern_learn() function writes pattern information to the binary pattern.dat
+         file, and it outputs a log file in the same directory defined by pattern_library_path
+         argument.
+         Example 51 shows the log file generated for the pattern library, MET.
+
+   Example 51 Log File
+         [Tue Nov 5 15:19:22 2013]: Created pattern library.
+         version= 1.0
+         dbu=0.000500
+         learn_version=3
+         num_pattern_layers=1
+         num_optional_marker_layers=0
+         ambit_mode=PM_MARKER_CENTER
+         match_ambit.left=0.200000
+         match_ambit.bottom=0.200000
+         match_ambit.right=0.200000
+         match_ambit.top=0.200000
+         pattern_fuzziness=PM_EDGE_UNIFORM
+         pattern_grouping=PM_NONE
+         uniform_fuzzy_size=0.005000
+         edge_jog_size=0.000000
+         has_user_anchor=false
+         has_pattern_extent_layer=false
+         ignore_extra_polygons=false
+         pattern_type=PM_TWO_DIMENSIONAL
+         pattern_length=PM_GE
+         viewable=true
+         writable=true
+
+         [Tue Nov 5 15:19:22 2013]: Learned new pattern(s).
+         Registered 2 new unique pattern(s); total # of unique pattern(s)=2.
+         Created reflected/rotated pattern(s); total # of pattern(s)=16.
+         Derived 16 index pattern(s) using ambit = (0.195000, 0.195000,
+           0.195000, 0.195000).
+         viewable=true; writable=true.
+
+         At the beginning of the log file, you see the parameters and their corresponding values
+         applied for generating this pattern library for the first time. To add new patterns to an
+         existing pattern library, use the same set of parameters and values. Otherwise an error
+         occurs.
+
+
+
+
+IC Validator User Guide                                                                        386
+X-2025.06
+                                                                                            Feedback
+Chapter 16: Pattern Matching
+Using the Pattern Matching Flow
+
+
+         At the end of the log file, you see the number of unique patterns that are registered for
+         each pattern_learn() function call.
+         The last line of the log file indicates that this pattern library is writable, that is, the new
+         patterns can be added to it. This pattern library can be converted to either the GDSII or
+         OASIS format for viewing, if it is viewable.
+
+
+     Viewing and Locking a Pattern Library
+     You store the pattern library in a binary format. To view its content, convert it to a GDSII or
+     OASIS file.
+     The pattern_libary_read() function is required for conversion. See the Runset
+     Functions chapter in IC Validator Reference Manual for an example of how to convert a
+     pattern library to a GDSII file.
+     By default, a pattern library is viewable and writable. The pattern_library_lock()
+     function adds read and write protection to a pattern library that, after locked, is neither
+     accessible by the pattern_learn() function for adding new patterns, nor by the
+     pattern_library_read() function for converting it to a graphical format file. The
+     following line, viewable=false; writable=false, is appended to the existing log file of
+     the locked pattern library.
+     The locked pattern library is then delivered to the end users. See Chapter 3, “Runset
+     Functions: J - Z,” in IC Validator Reference Manual for an example of how to lock a pattern
+     library.
+     Alternatively, you can use the pdb_utility.pl script, which is in the IC Validator contrib
+     directory, to perform the functionality of both the pattern_library_read() and
+     pattern_library_lock() functions without executing a runset:
+     Usage: pdb_utility.pl <pdb_lib_path> <pdb_lib_name> -read/-lock
+      [output_name]
+
+     Options:
+     <pdb_path>.............pattern library path
+     <pdb_name>.............pattern library name
+     -read..................converting a pattern library to a graphical
+      output.
+     -lock..................adds the write and view protection to a pattern
+      library.
+     <output_name>..........optional, specifies the graphical output file
+      name, [default:pdb_view.gds]
+
+     This example converts the met pattern library, which is located in the /test/pattern_lib
+     directory, to the hs.gds output GDSII file.
+     ICV_INSTALL_DIRECTORY/contrib/pdb_utility.pl /test/pattern_lib met -read
+      hs.gds
+
+
+
+IC Validator User Guide                                                                             387
+X-2025.06
+                                                                                      Feedback
+Chapter 16: Pattern Matching
+Using the Pattern Matching Flow
+
+
+
+     Checking a Layout
+     This section shows an example of the pattern matching flow using the pattern_match()
+     function.
+
+     Runset Example of Pattern Matching
+     You create a standard DRC runset file to run the IC Validator tool to perform pattern
+     matching on a design layout. The runset file must include the following sections:
+      • Layout database specifics
+      • General options
+      • Pattern library path definition using the pattern_options() function
+      • Layer assignments
+      • Performs pattern matching with the pattern_match() function
+     A runset that uses the pattern matching flow for has these components:
+      1. Beginning of the runset
+         Include icv.rh at the beginning of the runset.
+         #include <icv.rh>
+
+      2. User-defined environment variables
+         Environment variables in the runset are optional and can be customized.
+         #pragma envvar default PM_LIB_PATH "/pattern_library"
+         #pragma envvar default PM_LIB_NAME "MET"
+         #pragma envvar default PM_TOP_MET "10"
+
+      3. Layout database specifics
+         The library() function defines the design library used in the pattern matching check.
+         library (
+                 format       = GDSII,
+                 library_name = "TOP.gds",
+                 cell         = "TOP"
+         );
+
+         If you use a Milkyway library, set format to MILKYWAY and specify the library_path to
+         the parent directory of the Milkyway library.
+      4. General options
+
+
+
+
+IC Validator User Guide                                                                      388
+X-2025.06
+                                                                                      Feedback
+Chapter 16: Pattern Matching
+Using the Pattern Matching Flow
+
+
+         To store and report all of the violations generated by pattern_match() function up to a
+         tool-defined maximum limit, set error_limit_per_check to ERROR_LIMIT_MAX in the
+         error_options() function. The default is 100.
+         error_options (
+                  error_limit_per_check = ERROR_LIMIT_MAX
+                ;
+
+         Setting error_limit_per_check to ERROR_LIMIT_MAX or other very high values can
+         result in decreased performance and increased disk usage for very large numbers of
+         errors, and is therefore not recommended.
+      5. Call the pattern_options() function to define the pattern library path.
+         pattern_options (
+            pattern_library_path = $PM_LIB_PATH
+         );
+
+         The pattern_options() function defines the path of a pattern library, and it can be
+         called only one time in the runset. This function specifies the path you need to access a
+         single or multiple pattern libraries.
+      6. Layer assignments
+         MET1 : polygon_layer = assign ( {{15,0}} );
+         MET2 : polygon_layer = assign ( {{17,0}} );
+         MET3 : polygon_layer = assign ( {{19,0}} );
+         MET4 : polygon_layer = assign ( {{21,0}} );
+         MET5 : polygon_layer = assign ( {{23,0}} );
+         MET6 : polygon_layer = assign ( {{25,0}} );
+         MET7 : polygon_layer = assign ( {{27,0}} );
+         MET8 : polygon_layer = assign ( {{29,0}} );
+         MET9 : polygon_layer = assign ( {{31,0}} );
+         MET10 : polygon_layer = assign ( {{33,0}} );
+
+         metal_layer_list : list of polygon_layer = {MET1, MET2, MET3, MET4,
+          MET5, MET6, MET7, MET8, MET9, MET10};
+         metal_error_list : list of write_error_map_s = {};
+
+         In this example, MET1 through MET10 are assigned and subjected to a pattern
+         matching check.
+      7. Call the pattern_match() function to perform pattern matching.
+         You must call the pattern_match() function to perform pattern matching. This
+         function can be called multiple times within a runset. The following example shows
+         the pattern_match() function executing pattern matching on the metal layers of the
+         TOP.gds file.
+         for(i = 0 to strtoi($PM_TOP_MET)-1) {
+             layer_index : integer = i + 1;
+
+
+
+IC Validator User Guide                                                                       389
+X-2025.06
+                                                                                   Feedback
+Chapter 16: Pattern Matching
+Using the Pattern Matching Flow
+
+
+              tmp_violation @= {
+                  @"METAL"+layer_index+" PM RESULT: ";
+                  pattern_match (
+                      pattern_library_name = $PM_LIB_NAME,
+                      pattern_layers = {metal_layer_list[i]}
+                        ;
+         }
+                 out_layer_index = layer_index;
+                 metal_error_list.push_back({tmp_violation,
+         {out_layer_index,0}});
+            }
+
+      8. Output layout database
+         Optionally, you can write the output from the pattern_match() function to a GDSII or
+         OASIS file.
+         output_lib=gds_library("out.gds");
+         write_gds(
+                 output_library=output_lib,
+                 errors=metal_error_list
+                 );
+
+     Examining Pattern Matching Output
+     The IC Validator tool creates the cell.LAYOUT_ERRORS error file when the DRC run
+     completes. The beginning of the file states that the run is either CLEAN or has ERRORS.
+     In pattern matching, the ERRORS result means that one or more matched patterns are
+     identified. The CLEAN result means that no matched patterns are found.
+     The following TOP.LAYOUT_ERRORS file reports violations (matches):
+                        LAYOUT ERRORS RESULTS: ERRORS
+                        ##### #### ####      ### ####      ###
+                        #     #    # #   # #    # #    # #
+                        #### #### #### #        # ####     ###
+                        #     # # # # #         # # #          #
+                        ##### #    # #   # ### #       # ####
+     ===================================================================
+     Library name:     ./test.gds
+     Structure name: TOP
+     Generated by:     IC Validator RHEL64 Release H-2013.06.SP2.4035 2013/08/
+     28
+                                ERROR SUMMARY
+     METAL2 PM RESULT:
+        pattern_match ..............................873 violations found.
+
+     METAL3 PM RESULT:
+        pattern_match ...............................69 violations found.
+
+     METAL4 PM RESULT:
+        pattern_match ................................2 violations found.
+
+
+
+IC Validator User Guide                                                                    390
+X-2025.06
+                                                                                       Feedback
+Chapter 16: Pattern Matching
+Using the Pattern Matching Flow
+
+
+                              ERROR DETAILS
+     --------------------------------------------------------------------
+     METAL2 PM RESULT:
+     -------------------------------------------------------------------
+     /match.rs:38:pattern_match
+     - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+     Structure (lower left x, y ) (upper right x, y ) Pattern     Orientation
+     - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+     TOP   (8.1600, 528.2500)   (8.4000, 528.7200)   pattern_78 R90
+     TOP   (2.1400, 528.6700)   (2.3800, 529.1400)   pattern_57 R90
+     TOP   (100.1450, 529.3000) (100.3850, 529.7700) pattern_107 R90FX
+     TOP   (100.1450, 529.2300) (100.3850, 529.7000) pattern_108 R90
+     TOP   (107.9800, 531.7500) (108.2200, 532.2200) pattern_80 R0
+     TOP   (83.7900, 534.7600) (84.0300, 535.2300) pattern_7     R180
+     TOP   (86.0000, 534.8300) (86.2400, 535.3000) pattern_94 R90FY
+     TOP   (87.6800, 540.2900) (87.9200, 540.7600) pattern_78 R90
+     ……
+
+     The error summary section contains the number of matched patterns on each metal layer
+     produced by the pattern_match() function. The error details section lists the coordinates
+     of the pattern marker and pattern ID of each matched pattern.
+     You can review pattern matching results in VUE, just as you do for other DRC violations.
+
+     Post Pattern-Matching Operations
+     Use the following functions in the post pattern-matching process to select matched
+     patterns based on their properties or retrieve optional pattern markers of certain patterns
+     for additional DRC operations.
+      • marker_merge(). Merges the marker layer into the polygon layer. The marker layer
+        does not merge; it can be processed only by several IC Validator runset functions.
+        The marker layer must be converted to a polygon layer to be processed by other DRC
+        functions.
+      • optional_pattern_markers(). Retrieves all optional pattern markers attached to a
+        pattern. Optional pattern marker layers are polygon layers.
+      • select_marker_by_string_property(). Retrieves the pattern markers based on the
+        specified string properties.
+      • select_marker_by_double_property(). Retrieves the pattern markers based on the
+        specified double properties.
+      • milkyway_route_directives(). Passes user-defined fix guidance to the router for
+        hotspot repair.
+      • drc_features_marker(). Outputs the marker layer.
+     See the IC Validator Reference Manual for examples of each function.
+
+
+
+IC Validator User Guide                                                                       391
+X-2025.06
+                                                                                      Feedback
+Chapter 16: Pattern Matching
+Using the Pattern Matching Flow
+
+
+
+     Detecting and Repairing Hotspots Within the IC Compiler Tool
+     To meet the design-for-manufacturing requirements for advanced nodes, the IC Validator
+     tool provides In-Design DFM technology in the implementation environment. This physical
+     verification approach enables early detection and repairing of DRC violations, with
+     negligible physical or timing impacts within the IC Compiler tool. For more information
+     about the Automatic DRC Repair (ADR) flow, see the Synopsys white paper, “In-Design
+     Physical Verification - Automatic DRC Repair (ADR).”
+     The ADR flow enables In-Design hotspot detection and correction using IC Validator
+     pattern matching during design implementation. With a usage model similar to DRC, you
+     can use a foundry-certified DFM package (containing pattern library and matching runset)
+     or your own yield detractor pattern library to search a design for potential manufacturing
+     related hotspots to perform automatic fixing and revalidation for all errors. This improves
+     the overall manufacturability of the design.
+     You run IC Validator pattern matching within the IC Compiler tool using the same
+     set of IC Compiler commands used to perform signoff DRC checking. You use the
+     signoff_drc command to do pattern matching and the signoff_autofix_drc command
+     to automatically fix the violations (hotspots) detected by the signoff_drc command. See
+     the IC Compiler Implementation User Guide, which is available on SolvNetPlus, or the
+     IC Compiler man pages for detailed command syntax and usage.
+     The following sections describe how to detect and correct hotspots using the signoff DRC
+     commands in the IC Compiler tool (not applicable in the IC Compiler II tool).
+
+     Setting Up the Physical Signoff Options
+     Before you use the signoff_drc and signoff_autofix_drc commands to run pattern
+     matching, set up the physical signoff options that apply to these commands.
+     For more information, see the “Performing Signoff Design Rule Checking” section in the
+     IC Compiler Implementation User Guide.
+
+     Running Pattern Matching for Hotspot Detection
+     Use the signoff_drc command to perform hotspot detection on the routing layers.
+     For more information, see the “Performing Signoff Design Rule Checking” section in the
+     IC Compiler Implementation User Guide.
+
+     Automatically Fixing Hotspot Patterns
+     Use the signoff_drc command to automatically fix detected hotspots.
+     For more information, see the “Performing Signoff Design Rule Checking” section in the
+     IC Compiler Implementation User Guide.
+
+
+
+
+IC Validator User Guide                                                                      392
+X-2025.06
+                                                                                       Feedback
+Chapter 16: Pattern Matching
+Using the Pattern Matching Flow
+
+
+     Repairing Hotspots With User-Defined Fix Guidance
+     In addition to the default ADR correction, the IC Validator tool also enables you to
+     implement user-defined fix guidance. The steps for implementing fix guidance in the
+     pattern matching flow are:
+      1. Specify fix guidance as the optional pattern markers during pattern library creation. A
+         single pattern can have multiple guidance.
+         The pattern in Figure 109 shows a single user-defined fix guidance that to add to a
+         rectangle at the end of the L-shape polygon.
+
+   Figure 109     User-Defined Fix Guidance
+
+
+
+
+   Example 52 Attaching Fix Guidance During Pattern Library Creation
+         //Layer Assignment
+         metal : polygon_layer = assign ( {{3,0}} );
+         pattern_marker : polygon_layer = assign ( {{1,0}} );
+         pattern_extent : polygon_layer = assign ( {{2,0}} );
+         pattern_add : polygon_layer = assign ( {{4,0}} );
+         optional_markers: list of polygon_layer =
+          {pattern_extent,pattern_marker,pattern_add};
+
+         //Create Pattern Library
+         pattern_learn (
+
+
+IC Validator User Guide                                                                        393
+X-2025.06
+                                                                                       Feedback
+Chapter 16: Pattern Matching
+Using the Pattern Matching Flow
+
+
+                          pattern_library_name = "met",
+                          pattern_layers = {metal},
+                          pattern_marker = marker_layer,
+                          optional_pattern_markers = optional_markers,
+                          pattern_text_id = text_layer,
+                          pattern_extent = pattern_extent,
+                          pattern_fuzziness = PM_EXACT,
+                          pattern_reflect = true,
+                          pattern_rotate = true
+                          );
+
+      2. Retrieve and pass the fix guidance after pattern matching.
+         You use the optional_markers() function to retrieve the fix guidance and the
+         milkyway_route_directives() function to pass the fixing guidance to the router.
+
+   Example 53 Retrieving and Passing Fix Guidance
+         //Output hotspot marker layer
+         hotspot_marker = pattern_match (
+                     pattern_library_name = "met",
+                     pattern_layers = {metal_layer_list[i]});
+
+         //Retrieve all the optional pattern marker layers defined in step 1
+         optional_markers = optional_pattern_markers("met", hotspot_marker);
+
+         //Retrieve the add shape layer
+         pattern_add = optional_markers[2];
+
+         //Pass fixing guidance to IC Compiler
+         milkyway_route_directives(
+                           display_marker = optional_markers[1],
+                           group_marker = optional_markers[0],
+                           error_layers = { {optional_markers[1]} },
+                           route_directives = { {pattern_add, dummy_sub} } );
+
+      3. Run ADR within the IC Compiler tool for hotspot detection and fixing.
+         Write an IC Compiler TCL script to execute ADR in the icc_shell, or use the
+         IC Compiler GUI to execute the commands.
+
+   Example 54 IC Compiler TCL Script
+         open_mw_lib ./design
+         copy_mw_cel -from eco_route_routeopt -to pm_flow_add
+         open_mw_cel pm_flow_add
+
+         set_physical_signoff_options -exec icv -drc_runset {/runset/ \
+         match_add.rs}
+         signoff_drc -run_dir {./signoff_drc_run} -ignore_child_cell_errors
+
+         signoff_autofix_drc -run_dir {./signoff_autofix_drc_run} \
+          -init_drc_error_db signoff_drc_run
+
+
+IC Validator User Guide                                                                      394
+X-2025.06
+                                                                                      Feedback
+Chapter 16: Pattern Matching
+Using the Pattern Matching Flow
+
+
+
+         save_mw_cel -as pm_flow_add
+         close_mw_cel
+
+         The IC Compiler tool starts with user-defined fix guidance based on a defined order. In
+         Figure 110, you see the corrected results of pattern_122 by the user-defined guidance
+         and the default ADR flow, respectively.
+
+   Figure 110     Example of Hotspot Correction
+
+
+
+
+IC Validator User Guide                                                                      395
+X-2025.06
+

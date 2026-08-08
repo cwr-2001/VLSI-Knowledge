@@ -1,0 +1,1548 @@
+
+===== PAGE 979 =====
+Chapter 13: ECO Flow
+Updating Supply Nets for ECO Cells
+Feedback
+Mapping ECO Cells to Logically Equivalent Spare Cells
+When the tool maps an ECO cell, it looks for a spare cell with the same library cell name. 
+If it is unable to find such a spare cell, the ECO cells remains unmapped. To identify and 
+map such ECO cells to logically equivalent (LEQ) spare cells, use the following steps:
+1. Identify the ECO cells that do not have matching spare cells by using the 
+check_freeze_silicon  command.
+2. Find logically equivalent spare cells for these ECO cells by using the 
+create_freeze_silicon_leq_change_list  command.
+Specify
+◦
+The names of the unmapped ECO cells by using the -cells  option
+◦
+A name for the output file by using the -output  option
+This output file is a Tcl script with netlist editing commands. The commands replace 
+each ECO cell with logically equivalent spare cells, which can be a
+▪
+Single spare cell with the same logical functionality, but a different library cell 
+name
+▪
+Combination of up to two spare cells that give the same logical functionality
+3. View the output Tcl file to ensure that the ECO mapping is satisfactory, and edit it if 
+necessary.
+4. Source the Tcl file in the tool to replace the ECO cells with their logical equivalents.
+Updating Supply Nets for ECO Cells
+To update the supply nets for ECO cells, use the eco_update_supply_net  command. 
+By default, it updates the supply nets for all cell added by using the following ECO 
+commands:
+•
+size_cell  in freeze-silicon mode
+•
+add_buffer
+•
+add_eco_repeater
+•
+split_fanout
+•
+add_buffer_on_route
+To update the supply nets for specific cells, use the eco_update_supply_net -cells 
+command.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+979
+
+===== PAGE 980 =====
+Chapter 13: ECO Flow
+Recording the Changes Made to a Layout
+Feedback
+Recording the Changes Made to a Layout
+You can record the changes you make to a layout and generate a Tcl file containing the 
+changes by using the record_layout_editing  command, as shown in the following 
+example:
+fc_shell> record_layout_editing -start
+fc_shell> remove_shapes RECT_32_0
+fc_shell> record_layout_editing -stop -output layout_changes1.tcl
+You can make the following layout changes:
+•
+Create or remove layout objects by using Tcl commands
+•
+Set attributes by using the set_attribute  command
+•
+Move or resize objects by using the GUI
+With this feature, multiple users can make ECO changes to different parts of a layout in 
+parallel. Each user can output a Tcl file that contains the layout changes they make by 
+using the record_layout_editing  command, and all the Tcl files can be applied to the 
+original layout.
+Performing Prerequisite Check for Group Repeater Insertion and 
+Placement
+Use the -check_prerequisites  option of the place_group_repeaters  or 
+add_group_repeaters  command to perform a prerequisite check for a design. This 
+prerequisite check detects the design errors at the beginning of the command flow.
+•
+For the place_group_repeaters  command, use the -check_prerequisites  option 
+with the following options to provide necessary information for the check:
+place_group_repeaters
+   -cells | -repeater_groups
+   [-lib_cell_input]
+   [-lib_cell_output]
+   -check_prerequisites
+•
+For the add_group_repeaters  command, use the -check_prerequisites  option with 
+the following options to provide necessary information for the check:
+add_group_repeaters
+   -nets | -bundles
+   [-lib_cell_input]
+   [-lib_cell_output]
+   -check_prerequisites
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+980
+
+===== PAGE 981 =====
+Chapter 13: ECO Flow
+Adding a Group of Repeaters
+Feedback
+•
+The prerequisite check validates the following in a design and search region:
+◦
+Site rows are present in the design.
+◦
+Each net has only one driver and can have multiple loads.
+◦
+Locations of pins or ports are assigned.
+◦
+For pins on standard cells, the standard cells are placed.
+◦
+Supernets must be routed.
+◦
+Route ends must not be more than 5 μm away from the driver, load pins, or ports in 
+the search region.
+◦
+The routes are defined for a driver or load in the search region.
+◦
+Load is connected to a driver.
+◦
+When the end of a route is open, no other route of the same net is present in the 
+vicinity of the pin or port.
+◦
+Routes must be assigned to the net of the supernet driver pin.
+◦
+Vias must be created for routes.
+◦
+Repeaters have a physical library cell.
+The following example shows the usage of -check_prerequisites  option using the 
+add_group_repeaters  command:
+fc_shell> add_group_repeaters -bundles bundle_wo_load \
+   -lib_cell ref_lib1/libCell1 -lib_cell_input A -lib_cell_output X \
+   -repeater_distance 10 -check_prerequisite
+Error: The net net_wo_load does not have loads. (ECO-329)
+Error: The cell driver1 of the pin driver1/X is not placed. (ECO-331)
+Error: 0
+        Use error_info for more info. (CMD-013)
+Adding a Group of Repeaters
+To add a group of repeaters, use the add_group_repeaters  command as described in the 
+following sections:
+•
+Defining a group of repeaters
+•
+Grouping a list of repeaters
+•
+Setting Constraints for a Group of Repeaters
+•
+Adding Voltage Area Aware Group Repeaters
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+981
+
+===== PAGE 982 =====
+Chapter 13: ECO Flow
+Adding a Group of Repeaters
+Feedback
+•
+Reporting the Constraints Assigned to a Group of a Repeaters
+•
+Removing Constraints for a Group of Repeaters
+•
+Placing Group Repeaters Before Routing
+•
+Performing On Route Placement of Repeaters
+•
+Placing Group Repeaters For Multibit Registers
+•
+Specifying Locations for Repeater Groups
+•
+Allowing Repeater Groups Over Macros
+•
+Specifying Cut Space and Cut Distance for Repeater Groups
+•
+Specifying Horizontal and Vertical Spacing for Repeater Groups
+•
+Specifying Library Cells as Repeaters
+•
+Avoiding Overlapping Repeaters With Existing Tap Cells
+•
+Avoiding Crosstalk During Group Repeater Insertion
+•
+Previewing Repeater Groups
+•
+Unplacing the Repeaters
+•
+Removing Repeater Groups
+Defining a group of repeaters
+To define a group of repeaters for cutline support, use the set_repeater_group  or 
+create_repeater_groups  command.
+The following examples show the command usage.
+set_repeater_group -group_id group_id \
+   -check_connection  \
+   [-cells cell_list] \
+   [-cutline { {{x1 y} {x2 y}} | {{x y1} {x y2}} }] \
+   [-driver_group_id group_id] \
+   [-path_drivers pin_port_list] \
+   [-path_loads pin_port_list] \
+   [-override]
+   [-lib_cell_input string]
+   [-lib_cell_output string]
+   [-clear]
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+982
+
+===== PAGE 983 =====
+Chapter 13: ECO Flow
+Adding a Group of Repeaters
+Feedback
+Grouping a list of repeaters
+To automatically group a list of repeaters or repeaters of supernets, use the 
+create_repeater_groups  command.
+This command takes a list of repeaters, a list of supernets, or bundles of supernets and 
+returns a list of repeater groups created by the set_repeater_group  command.
+The command supports both single load and multiple loads supernets.
+create_repeater_groups -supernets supernet_list | \
+   -supernet_bundles supernet_bundle_list | \
+   -cells cell_list \
+   -lib_cells lib_cell_list \
+   [-lib_cell_input lib_pin] \
+   [-lib_cell_output lib_pin] \
+   [-group_pin_spacing spacing] \
+   [-ignore_pin_layers]
+Setting Constraints for a Group of Repeaters
+To define the constraints for a group of repeaters, use the 
+set_repeater_group_constraints  command.
+The set_repeater_group_constraints  command has a lower priority 
+than the corresponding command options in the add_group_repeaters  and 
+place_group_repeaters  commands.
+set_repeater_group_constraints -type type_list \
+   [-horizontal_repeater_spacing spacing] \
+   [-vertical_repeater_spacing spacing] \
+   [-layer_cutting_distance layer_scale_list]
+Adding Voltage Area Aware Group Repeaters
+Voltage area aware group repeaters choose legal library cells for repeaters based on the 
+corresponding voltage area and updates supply nets for repeaters to meet multivoltage 
+constraints. You can use the add_group_repeaters  command with specific options to 
+add voltage area aware group repeaters in three different ways, depending on the design 
+methodology:
+•
+When the design is single-rail buffer only, use the -va_aware  option
+fc_shell> add_group_repeaters -lib_cell <lib_cell> -va_aware
+•
+When the design is single-rail buffer based on voltage area, use the 
+-voltage_area_specific_lib_cell  option
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+983
+
+===== PAGE 984 =====
+Chapter 13: ECO Flow
+Adding a Group of Repeaters
+Feedback
+fc_shell> add_group_repeaters -lib_cell <default_lib_cell> \
+   -voltage_area_specific_lb_cell {{VA1 libcell1}} {{VA2 libcell2}}
+•
+When the design is single- and dual-rail buffers, use the -select_mv_buffer  option
+fc_shell> add_group_repeaters -lib_cell <default_lib_cell> \
+   -select_mv_buffer {{VA1 SingleRail1 DualRail1}} \
+   {{VA1 SingleRail2 DualRail2}}
+Voltage area aware group repeaters help resolve multivoltage violations by choosing the 
+library cell based on voltage area and repeater location.
+Reporting the Constraints Assigned to a Group of a Repeaters
+To report the constraints that were assigned to a group of repeaters 
+using the place_group_repeaters, add_group_repeaters, 
+or set_repeater_group_constraints  commands, use the 
+report_repeater_group_constraints  command. For example:
+fc_shell> report_repeater_group_constraints
+Removing Constraints for a Group of Repeaters
+To remove the constraints that were assigned to a group of repeaters, use 
+remove_repeater_group_constraints  command. For example:
+fc_shell> remove_repeater_group_constraints -type type_list
+Placing Group Repeaters Before Routing
+Use the preplace_group_repeaters  command to place the group repeaters before the 
+routing. This command places the group repeaters either in an ascending or descending 
+order, default is ascending. The ascending order means that the command places the cells 
+in a group from the lowest or left-most available track to the highest or right-most track.
+Note:
+A FAA-Base-Beta license is required to run the preplace_group_repeaters 
+command.
+You must specify either the cell collections or group IDs of the group repeaters.
+The following example places group repeaters when the cell collections are specified.
+fc_shell> preplace_group_repeaters     \
+   -repeater_group_locations { { $cellGroup1, M2, {720 363.5}, \
+    north, descending} {$cellGroup2, M2, {920 363.5}, east, ascending} \
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+984
+
+===== PAGE 985 =====
+Chapter 13: ECO Flow
+Adding a Group of Repeaters
+Feedback
+   {$cellGroup3, M2, {1230 328.5}, east, ascending} \
+   {$cellGroup4, M2, {1430 328.5}}, east}
+The following example places group repeaters when the group ID is specified.
+fc_shell> preplace_group_repeaters \
+   -repeater_group_locations { { 1,M2, {720 363.5}, south, ascending} \
+   {2, M2, {920 363.5},west, ascending} {3, M2, {1230 328.5}, \
+   south, ascending} {4, M2, {1430 328.5}, west, descending}}
+Performing On Route Placement of Repeaters
+To perform on route placement of interconnect repeaters, use the 
+place_group_repeaters  command.
+place_group_repeaters \
+   -cells cell_list | -repeater_groups group_id_list \
+   [-lib_cell_input pin_name] \
+   [-lib_cell_output pin_name] \
+   [-max_distance_for_incomplete_route distance] \
+   [-first_distance distance] \
+   [-last_distance distance] \
+   [-blockage_aware] \
+   [-horizontal_repeater_spacing spacing] \
+   [-vertical_repeater_spacing spacing] \
+   [-layer_cutting_distance layer_scale_list]
+   [-verbose]
+Placing Group Repeaters For Multibit Registers
+To place group repeaters for multibit registers, use the create_repeater_groups 
+command with the -multi_bit  option with the following command options:
+create_repeater_groups
+ -cells | -supernet_bundles | -supernets
+ -multi_bit
+ -pin_mapping {{lib_cell1 {inp1 outp1} {inp2 outp2}…}
+The -multi_bit  option determines the order of a multibit repeater based on the path 
+driver and creates the repeater groups for the multibit repeaters. In a design, when a net 
+has no route defined, this option places the group repeaters based on their location.
+To verify the support for multibit register placement, use the following command:
+fc_shell> preplace_group_repeater
+   -repeater_group_locations repeater_group_location_list
+The format for the repeater_group_location_list argument is
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+985
+
+===== PAGE 986 =====
+Chapter 13: ECO Flow
+Adding a Group of Repeaters
+Feedback
+{ {cell_collection, layer, location, potential routing direction, placing 
+ order} ...}
+or
+ { {group_id, layer, location, potential routing direction, placing 
+ order} ...}.
+Specifying Locations for Repeater Groups
+Use one of the following mutually exclusive options to control repeater group location:
+•
+-repeater_distance  specifies the distance between repeater groups. This option 
+supports the following additional options:
+◦
+-first_distance  specifies the distance between the driver and the center of the 
+first repeater group.
+◦
+-min_distance_repeater_to_load  specifies the minimum distance between the 
+last repeater group and the load. The default is one half of the value specified for 
+the -repeater_distance  option.
+◦
+-tolerance  specifies the maximum delta distance over the value specified for 
+-repeater_distance. The default is 5 μm.
+•
+-relative_distance  specifies the distance between the driver and the first repeater 
+group, the distance between the first and second repeater groups, the distance 
+between the second and third repeater group, and so on.
+•
+-location  specifies the location of the center of each repeater group.
+•
+-number_of_repeater_groups  specifies the total number of repeater groups to be 
+inserted evenly along the route.
+•
+-cutlines  specifies the location pairs that define the cutlines. Cutlines must be 
+perpendicular to the routes and the repeater groups are centered around the cutlines.
+Allowing Repeater Groups Over Macros
+Use the -allow_insertion_over_block  option to allow repeater groups to be added on 
+top of soft or hard macros.
+Note:
+If the repeater cell is an inverter, you are responsible for ensuring logical 
+correctness.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+986
+
+===== PAGE 987 =====
+Chapter 13: ECO Flow
+Adding a Group of Repeaters
+Feedback
+Specifying Cut Space and Cut Distance for Repeater Groups
+Use one of the following mutually exclusive options to control cutting for repeater groups:
+•
+-layer_cutting_spacing  specifies the cut space of the routes to the driver pin. The 
+cut starts from the driver side.
+•
+-layer_cutting_distance  specifies the cut distance from the repeater center to the 
+input and output routes.
+Specifying Horizontal and Vertical Spacing for Repeater Groups
+Use one of the following mutually exclusive options to control spacing for repeater groups:
+•
+-horizontal_repeater_spacing  specifies the horizontal spacing between repeaters 
+by cell site width.
+•
+-vertical_repeater_spacing  specifies the vertical spacing between repeaters by 
+site row height.
+Specifying Library Cells as Repeaters
+Use the -lib_cell  option to specify a library cell as a repeater. This option supports the 
+following additional options:
+•
+-lib_cell_input  specifies the input pin of the library cell to connect, if it has multiple 
+inputs.
+•
+-lib_cell_output  specifies the output pin of the library cell to connect, if it has 
+multiple outputs.
+Avoiding Overlapping Repeaters With Existing Tap Cells
+Use the -honor_special_cell  option to avoid overlapping with existing tap cells when 
+inserting repeaters.
+Avoiding Crosstalk During Group Repeater Insertion
+The crosstalk management is only supported in the create_group_repeaters_guidance 
+and add_group_repeaters  commands flow.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+987
+
+===== PAGE 988 =====
+Chapter 13: ECO Flow
+Adding a Group of Repeaters
+Feedback
+The flow to avoid crosstalk during group repeater insertion is as follows:
+1. Use the following command to query interleaving groups:
+create_group_repeaters_guidance -net 
+ -number_of_interleaving_groups number
+By default, the number argument is set to 1.
+For example, if the value of the number is 2, one net group is separated into two 
+interleaving net groups.
+2. Use the following command to manage crosstalk during group repeater insertion:
+add_group_releaters
+   -nets | -bundles
+   -first_distance_of_net_groups
+       { {group_id1 $first_dist1} {group_id2
+   $first_dist2} …}
+     -repeater_distance $dist
+or
+add_group_releaters
+    -nets | -bundles
+    -cutlines_of_net_groups
+       { {group_id1 $cutline_list1} {group_id2 $cutline_list2} …}
+◦
+If the option -first_distance_of_net_groups  is specified, the command groups 
+the nets based on the existing group IDs on nets and inserts repeaters based on 
+the specified first distance for the various net groups. The repeater distance is same 
+for all net groups.
+◦
+If the option -cutlines_of_net_groups  is specified, the command groups the 
+nets based on the existing group IDs of the nets and inserts repeaters based on the 
+cutlines for the various net groups.
+Previewing Repeater Groups
+Use the -preview  option to preview repeater group locations before insertion. The 
+repeaters are represented by annotation objects at the same locations where they are to 
+be inserted, with the same width and height as a repeater lib cell, and with the group ID 
+eco_preview_id.
+Note:
+Before previewing the repeater groups again, you must first remove 
+the annotation objects using either the gui_remove_annotations  or 
+gui_remove_all_annotations  command.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+988
+
+===== PAGE 989 =====
+Chapter 13: ECO Flow
+Querying Group Repeater
+Feedback
+Unplacing the Repeaters
+To unplace the previous placement of repeaters, use the unplace_group_repeaters 
+command.
+unplace_group_repeaters \
+   -cells cell_list | -repeater_groups group_id_list \
+   [-lib_cell_input pin_name] \
+   [-lib_cell_output pin_name]
+Removing Repeater Groups
+To remove a group of repeaters, use the remove_eco_repeater  command. The nets are 
+restored to their original names and routes shapes.
+Querying Group Repeater
+The group repeater query commands provide improved ease of use for interconnect 
+repeater while planning. The group repeater query
+•
+Provides capability to query group repeater path info
+•
+Supports cross-session query operation
+•
+Supports query operation before group repeater placement
+To query the group repeater during planning, you must be familiar with the following key 
+information
+•
+Cells of a repeater group
+•
+Cutline of a repeater group
+•
+Group virtual connection
+If a group has either driver group or path drivers, then it is categorized as group virtual 
+connection. Cell connection between groups depend on cell order in a group.
+The following topics describe the steps in this flow
+•
+Performing Auto Grouping Flow
+•
+Performing Manual Grouping Flow
+•
+Cell Input Mode
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+989
+
+===== PAGE 990 =====
+Chapter 13: ECO Flow
+Querying Group Repeater
+Feedback
+Performing Auto Grouping Flow
+Auto repeater group creation allows you to derive virtual connections for register 
+paths. For repeater group input mode, place_group_repeaters  applies cutline based 
+placement. You must specify cutline for each group. Repeaters are placed based on the 
+intersection point between cutline and route.
+Build connectivity based on real connections for target cells.
+1. To group a list of repeaters or repeaters of supernets, use the 
+create_repeater_groups  command. Also, specify the constraint option.
+The command automatically performs cell grouping and groups virtual connection with 
+the following attributes:
+◦
+group_repeater_driver
+◦
+group_repeater_loads
+◦
+pin_pair
+◦
+group_id
+2. Verify the path with the get_attribute, report_repeater_group, and 
+get_repeater_path_info  commands. The get_attribute  command reports the 
+attributes of the group_repeater_driver  or group_repeater_loads  command. 
+The command report_repeater_groups  reports group information for specified 
+groups or all groups, and reports repeater paths for all groups if -verbose  is on. The 
+get_repeater_paths_info  command returns cells on repeater paths that include 
+input cells.
+3. Specify the cutline for a group manually with the set_repeater_group -group_id-
+cutline  command.
+4. Place interconnect repeaters on route with cutline for input repeater groups.
+Performing Manual Grouping Flow
+Auto grouping is based on the create_repeater_groups  command. Use manual 
+grouping in case the auto grouping command result does not meet the requirement.
+Check your target cell connection before placement. Perform the following steps for 
+manual grouping:
+1. Group your cells by -cells, cell order intends the cell connection.
+2. Define group virtual connection by -driver_group_id or -path_drivers.
+3. Specify the cutline by -cutline.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+990
+
+===== PAGE 991 =====
+Chapter 13: ECO Flow
+Swapping Variant Cell
+Feedback
+1. To define register path connections (virtual connection) for each set of repeater groups, 
+use the set_repeater_group  command.
+◦
+To check cell connection before placement, use the set_repeater_group 
+-check_connection  command. If the cell connection is not placed as expected, 
+repeat a reset repeater group for desired cell connection. It also adds new options 
+to record pin pair for the -check_connection  option. The pin_pair  option is used 
+to find cell real connection based on specified lib cell pin name.
+2. Verify the path with the get_attribute, report_repeater_group, and 
+get_repeater_path_info  commands. The get_attribute  command reports the 
+attributes of the group_repeater_driver  or group_repeater_loads  commands. The 
+report_repeater_groups  command reports group information for specified groups or 
+all groups, and reports repeater paths for all groups if -verbose  is on. The command 
+get_repeater_paths_info  returns cells on repeater paths that include input cells.
+3. Check and report invalid paths based on real connection with the 
+set_repeater_group -check connection  command.
+4. Place interconnect repeaters on route with cutline for input repeater groups.
+Cell Input Mode
+Cell input mode enables to set distance based on route placement. By default, repeaters 
+are placed based on even distance on route for one repeater path. This mode allows you 
+to set the -first_distance  or -last_distance  option to control the distance at driver 
+side or load side.
+1. Use the place_group_repeaters -cells -blockage_aware  command, to 
+internally enable auto grouping . To internally enable auto grouping use the 
+create_repeater_groups -cells  command and derive cutline based on distance. 
+Then, define repeater group by using the set_repeater_group -group_id -cutline 
+command,
+After placing group repeaters, you can query repeater groups using the 
+report_repeater_groups  command and repeater paths info using the 
+get_repeater_paths_info  command.
+2. To establish cell connection based on real connection and apply distance based 
+placement, use the place_group_repeaters -cells  command. No repeater group is 
+created.
+Swapping Variant Cell
+The add_group_repeater  and place_group_repeater  commands support variant cell in 
+group repeater insertion and placement.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+991
+
+===== PAGE 992 =====
+Chapter 13: ECO Flow
+Swapping Variant Cell
+Feedback
+The following topics describe the steps in this flow
+•
+Setting Constraints of Variant Cell
+•
+Setting Application Option
+•
+Grouping Variant Cell
+•
+Running and Placing Group Repeaters
+•
+Troubleshooting
+Setting Constraints of Variant Cell
+To set the constraints of variant cell:
+1. Use the set_repeater_group_constraints -type variant_cell_swapping 
+command to set the variant for cell swapping.
+2. Use the report_repeater_group_constraints  command to view the report of the 
+repeater group constraint settings, after setting the variant for cell swapping. The report 
+provides the
+◦
+Track pattern of the variant cell group
+◦
+Variant site ids
+◦
+Honor cell group not sharing timing
+◦
+First track alignment
+3. Use the remove_repeater_group_constraints  command to remove the constraints 
+and reset the settings based on the report.
+Setting Application Option
+To set application option before using the add group repeaters  and 
+place_group_repeaters  commands, use the set_app_option -name 
+eco.placement.variant_cell_swapping -value true  command.
+Based on the requirement, you can plan the variant cell flow. The rules of variant reference 
+swapping differ in various variant cell flows. By default, the variant cell support in the 
+eco_change_legal_reference  command detects the variant mode and settings 
+automatically.
+The eco_change_legal_reference  command checks whether the current reference of 
+the cell is legal or illegal for the placed location. If it is illegal, the command attempts to find 
+a legal reference from its variant cell group defined to swap with the illegal one.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+992
+
+===== PAGE 993 =====
+Chapter 13: ECO Flow
+Swapping Variant Cell
+Feedback
+To use the variant cell features directly for other cells, use the 
+eco_change_legal_reference  command.
+For complicated scenarios, you can switch the variant mode and tune the settings 
+manually. Following are the new application options for variant cell support:
+•
+To set variant mode for different customers and different design flows, use the 
+set_app_options -name eco.placement.variant_cell_group_mode -value 
+command.
+•
+To honor the variant cell groups, which are not sharing 
+timing view, use the set_app_options -name 
+eco.placement.honor_cell_group_not_sharing_timing -value  command.
+Grouping Variant Cell
+In the same variant cell group, the library cell variants differ from the master-variant only in 
+mask color (or small geometry), while the timing data is same for these variants.
+The variant cell feature supports the following
+•
+track_pattern mode
+•
+siteId_based mode
+track_pattern mode
+To specify the first metal layer for track alignment checking in track_pattern mode, use the 
+set_app_options -name eco.placement.first_track_alignment_layer -value 
+name  command.
+Figure 221 shows the cell group with two variants.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+993
+
+===== PAGE 994 =====
+Chapter 13: ECO Flow
+Swapping Variant Cell
+Feedback
+Figure 221
+Cell Group With Two Variants
+Based on the first track offset of library cells and the pitch value, you can define and derive 
+the variant library cell types, which start from 0.
+Figure 222 shows variant type id definition.
+Figure 222
+Variant Type id Definition
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+994
+
+===== PAGE 995 =====
+Chapter 13: ECO Flow
+Swapping Variant Cell
+Feedback
+You can detect the variant type id for target cell current location. You can also check if 
+the current reference is legal or illegal. If it is not legal, select the legal reference from cell 
+group and swap it.
+Figure 223 shows the check and swap with legal reference for target cell.
+Figure 223
+Check and Swap With Legal Reference for Target Cell.
+siteId_based mode
+The variant mapping and flipped mapping information are defined in the cell group. 
+Following is an example of the report_cell_groups  command.
+Figure 224 shows the cell group definition for mapping id and flipped mapping id.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+995
+
+===== PAGE 996 =====
+Chapter 13: ECO Flow
+Swapping Variant Cell
+Feedback
+Figure 224
+Cell Group Definition for Mapping id and Flipped Mapping id
+There are two sub flows for siteId_based mode: 2-Variants and N-Variant.
+Figure 225 shows the 2-Variants and N-Variants sub flows in siteId_based mode
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+996
+
+===== PAGE 997 =====
+Chapter 13: ECO Flow
+Swapping Variant Cell
+Feedback
+Figure 225
+2-Variants and N-Variants Sub Flows in siteId_based Mode
+Each variant reference has both legal mapping id and flipped mapping id.
+Figure 226 shows the variant mapping and flipped mapping id.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+997
+
+===== PAGE 998 =====
+Chapter 13: ECO Flow
+Swapping Variant Cell
+Feedback
+Figure 226
+Variant Mapping and Flipped Mapping id
+For variant siteId, you can get the cycle and offset from site rows first, then use the cell 
+placed location to do the calculation.
+Figure 227 shows the calculation for variant siteId
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+998
+
+===== PAGE 999 =====
+Chapter 13: ECO Flow
+Swapping Variant Cell
+Feedback
+Figure 227
+Calculation for Variant siteId
+Running and Placing Group Repeaters
+Use the add_group_repeaters  and place_group_repeaters  commands to display the 
+summary report for variant cell swapping in command cell collections.
+Troubleshooting
+Table 73 lists the messages of group repeater placement and insertion for the problems 
+encountered during defining the group repeaters.
+Table 73
+Group Repeater Placement and Insertion Troubleshooting
+Command
+Error Code
+Message
+Troubleshooting 
+Tips
+place_group_repeat
+ers
+ECOUI-136
+Error: The repeater group 
+(%d) is invalid.
+Check if the input 
+group id exists 
+by running the 
+report_repeater_g
+roups  command.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+999
+
+===== PAGE 1000 =====
+Chapter 13: ECO Flow
+Swapping Variant Cell
+Feedback
+Table 73
+Group Repeater Placement and Insertion Troubleshooting (Continued)
+Command
+Error Code
+Message
+Troubleshooting 
+Tips
+place_group_repeat
+ers
+ECO-220
+Warning: Failed to 
+connect to route for %d 
+object: {%s }.
+Check the pin shape 
+of object and route 
+shapes. The object 
+as driver or load can 
+be port, macro pin, 
+and placed cell.
+place_group_repeat
+ers
+ECO-224
+Error: The option 
+-repeater_groups 
+cannot be used when 
+the app option 
+eco.placement.eco_enable_
+pipeline_register_placer 
+is false.
+Check the pin shape 
+of object and route 
+shapes. The object 
+as driver or load can 
+be port, macro pin, 
+and placed cell.
+place_group_repeat
+ers
+ECO-227
+Warning: Failed to place 
+%d repeaters for %d 
+drivers in collection 
+(%s), and failed cells 
+are in collection (%s).
+Check the failed 
+drivers by running 
+the query_objects, 
+get_ports, 
+get_pins  and 
+get_cells 
+commands. The 
+driver can be port, 
+macro pin, and 
+placed cell.
+place_group_repeat
+ers
+ECO-228
+Warning: Some repeaters 
+from path driver (%s) 
+have same repeater group 
+id. The cells belonging 
+to the path are {%s}.
+Check if the group 
+id of cells are on 
+the same path. 
+The command 
+skips to place some 
+repeaters. The group 
+id of cells on one 
+path should be 
+different.
+place_group_repeat
+ers
+ECO-229
+Warning: Failed to find 
+intersection of cutline 
+%s and route for cell 
+{%s}.
+place_group_repeat
+ers
+ECO-231
+Error: The repeater group 
+(%d) has no cutline or 
+invalid cutline.
+Check the right 
+cutline for this group. 
+Set right cutline for 
+this group using the 
+set_repeater_gr
+oup  command.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+1000
+
+===== PAGE 1001 =====
+Chapter 13: ECO Flow
+Swapping Variant Cell
+Feedback
+Table 73
+Group Repeater Placement and Insertion Troubleshooting (Continued)
+Command
+Error Code
+Message
+Troubleshooting 
+Tips
+place_group_repeat
+ers
+ECO-232
+Error: Cutline {{%s} 
+{%s}} is invalid.
+Check the format of 
+the cutline. The valid 
+format of cutline is 
+{{x1 y} {x2 y}} or {{x 
+y1} {x y2}}.
+place_group_repeat
+ers 
+unplace_group_repeat
+ers
+ECO-233
+Error: The cells in 
+collection (%s) are 
+invalid since they have 
+no target input pin name 
+(%s) and output pin name 
+(%s).
+Check the input 
+and output pin 
+name. The input pin 
+name and output 
+pin name can be 
+specified by using the 
+-lib_cell_input 
+and 
+-lib_cell_output 
+options if needed, 
+or filter out invalid 
+cells from input. The 
+default value for 
+-lib_cell_input 
+is D. The 
+default value for 
+-lib_cell_output 
+is Q.
+place_group_repeat
+ers
+ECO-234
+Warning: There is no 
+repeater to be placed for 
+the path driver (%s).
+place_group_repeat
+ers
+ECO-235
+Warning: There is no 
+route on driver net (%s).
+place_group_repeat
+ers
+ECO-236
+Warning: There is no 
+target load for path 
+driver (%s).
+place_group_repeat
+ers
+ECO-237
+Warning: Some cell to be 
+placed has no load for 
+path driver (%s).
+place_group_repeat
+ers
+ECO-239
+Info:%s.
+Check the place and 
+connection mode. 
+Show the place mode 
+(cutline/distance) 
+and connection 
+mode (virtual 
+connection/real 
+connection) on this 
+command.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+1001
+
+===== PAGE 1002 =====
+Chapter 13: ECO Flow
+Swapping Variant Cell
+Feedback
+Table 73
+Group Repeater Placement and Insertion Troubleshooting (Continued)
+Command
+Error Code
+Message
+Troubleshooting 
+Tips
+place_group_repeat
+ers 
+unplace_group_repeat
+ers
+ECO-240
+Error: The option 
+-cells cannot be used 
+when the app option 
+eco.placement.eco_enable_
+virtual_connection is 
+true.
+Check the command 
+for virtual connection. 
+Specify the 
+-repeater_groups 
+command if you 
+need to use virtual 
+connection.
+place_group_repeat
+ers
+ECO-241
+Warning: The distance 
+based placement does not 
+support multi-fanout path 
+driver(%s).
+Check the cutline 
+based placement for 
+the multi-fanout path 
+driver.
+place_group_repeat
+ers 
+unplace_group_repeat
+ers
+ECO-242
+Warning: The cell (%s) 
+has no driver or load 
+(number of driver: %d, 
+number of load: %d).
+place_group_repeat
+ers
+ECO-243
+Error: The cells in 
+collection (%s) are 
+invalid since they have 
+no driver or load.
+Check for invalid 
+cells. Ensure the cell 
+that is placed has 
+both driver and load. 
+Else, remove such 
+cells from input.
+place_group_repeat
+ers
+ECO-244
+Warning: The %s %s has no 
+shape.
+Check if the top port 
+or macro pin has 
+shape.
+place_group_repeat
+ers
+ECO-246
+Warning: Skip the path 
+driver (%s) since the 
+driver or load for the 
+path has no shape.
+place_group_repeat
+ers
+ECO-251
+Info: Place group 
+repeaters successfully.
+Check if all the input 
+cells are placed 
+successfully.
+place_group_repeat
+ers
+ECO-252
+Warning: Failed to place 
+repeaters for repeater 
+path which driver is %s.
+place_group_repeat
+ers
+ECO-253
+Warning: The cutline 
+information %s for cell 
+%s is not on valid route.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+1002
+
+===== PAGE 1003 =====
+Chapter 13: ECO Flow
+Swapping Variant Cell
+Feedback
+Table 73
+Group Repeater Placement and Insertion Troubleshooting (Continued)
+Command
+Error Code
+Message
+Troubleshooting 
+Tips
+place_group_repeat
+ers
+ECO-254
+Warning: Failed to cut 
+route for cell %s.
+Check if the 
+command failed to 
+cut route for cell.
+place_group_repeat
+ers
+ECO-255
+Warning: Gap %s between 
+driver and nearest route 
+is larger than placing 
+distance %s
+Check if the route 
+to the nearest pin 
+distance is larger 
+than placing distance 
+for driver or load.
+place_group_repeat
+ers
+ECO-256
+Warning: The first 
+distance (%s) specified 
+by command option is 
+shorter than the gap (%s) 
+between pin and route for 
+driver (%s). (warning) 
+The last distance (%s) 
+specified by command 
+option is shorter than 
+the gap (%s) between pin 
+and route for load (%s).
+Check if the 
+-first_distance 
+or -last_distance 
+option specified is 
+shorter than the gap 
+between pin and 
+route for driver or 
+load.
+place_group_repeat
+ers
+ECO-257
+Warning: Cannot find 
+cutline information for 
+cell %s.
+place_group_repeat
+ers
+ECO-258
+Info: The app option 
+about virtual connection 
+is turned on. Please 
+make sure the cells in 
+repeater group keep in 
+order.
+Check if the 
+eco.placement.eco
+_enable_virtual_c
+onnection  option is 
+set to true and the 
+place_group_repea
+ters 
+-repeater_groups 
+option is specified.
+place_group_repeat
+ers 
+unplace_group_repeat
+ers
+ECO-259
+Warning: The number of 
+cells from repeater group 
+(%d) is not consistent 
+with the number of 
+drivers from driver group 
+(%s).
+place_group_repeat
+ers 
+unplace_group_repeat
+ers
+ECO-260
+Warning: The number of 
+cells from repeater group 
+(%d) is not consistent 
+with the number of loads 
+from load group (%s).
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+1003
+
+===== PAGE 1004 =====
+Chapter 13: ECO Flow
+Swapping Variant Cell
+Feedback
+Table 73
+Group Repeater Placement and Insertion Troubleshooting (Continued)
+Command
+Error Code
+Message
+Troubleshooting 
+Tips
+place_group_repeat
+ers 
+unplace_group_repeat
+ers
+ECO-261
+Warning: The number of 
+path loads is less than 
+the number of cells in 
+group (%d), so skip these 
+path loads.
+place_group_repeat
+ers 
+unplace_group_repeat
+ers
+ECO-262
+Warning: The number of 
+path loads is not an 
+integral multiple of the 
+number of cells in group 
+(%d), so use path loads 
+in order.
+place_group_repeat
+ers
+ECO-265
+Warning: The pin shape 
+{%s} of %s (%s) is 
+projected to route %s 
+{%s}.
+Check if the route is 
+far away from driver 
+or loads. The tool 
+projects the closest 
+pin shape to the 
+route.
+unplace_group_repeat
+ers
+ECO-266
+Warning: The cells in 
+collection %s which 
+are not placed before 
+cannot be unplaced by 
+unplace_group_repeaters.
+Check if the cells are 
+not placed. The cells 
+that are not placed 
+cannot be unplaced. 
+Also, only the 
+cells added by the 
+add_group_repeat
+ers  command 
+and placed by the 
+placed_group_repe
+aterscommand can 
+be unplaced by the 
+unplace_group_rep
+eaters  command.
+unplace_group_repeat
+ers
+ECO-267
+Error: Input and output 
+routes are not merged 
+after unplacing repeater 
+%s since the routes are 
+not aligned or not at the 
+same layer.
+Check if the routes 
+are merged after 
+unplacing repeaters. 
+This error occurs 
+when the routes are 
+not aligned or not at 
+the same layer since 
+they are not merged.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+1004
+
+===== PAGE 1005 =====
+Chapter 13: ECO Flow
+Swapping Variant Cell
+Feedback
+Table 73
+Group Repeater Placement and Insertion Troubleshooting (Continued)
+Command
+Error Code
+Message
+Troubleshooting 
+Tips
+place_group_repeat
+ers
+ECO-268
+Error: The cells in 
+collection (%s) are 
+invalid since they 
+are placed before. 
+Apply the command 
+unplace_group_repeaters 
+to unplace them.
+Check if the cells 
+were placed before 
+and added by the 
+add_group_repeat
+ers  command 
+or placed the by 
+place_group_repea
+ters  command.
+add_group_repeaters 
+place_group_repeat
+ers
+ECO-269
+Error: Unable to check 
+the current reference of 
+cell '%s': %s.
+Check the reported 
+reason and other 
+printed messages 
+for more details. 
+Use the appropriate 
+command to check if 
+the current reference 
+of cell is legal 
+or illegal for the 
+reported issue.
+add_group_repeaters 
+place_group_repeat
+ers
+ECO-270
+Error: Unable to find 
+swappable variant 
+reference for cell '%s': 
+%s.
+Check if the current 
+reference of cell 
+is illegal for the 
+reported issue.
+add_group_repeaters 
+place_group_repeat
+ers
+ECO-271
+Error: Candidate 
+reference '%s' and 
+reference (%s) of cell 
+(%s) are not in the same 
+variant cell group.
+Check errors 
+for compatible 
+issues between 
+the candidate and 
+current reference of 
+cell. Error also occurs 
+if they do not belong 
+to the same variant 
+cell group.
+unplace_group_repeat
+ers
+ECO-272
+Error: The mixed 
+input cells are not 
+supported, which includes 
+the cells added by 
+add_group_repeaters 
+and the cells placed by 
+place_group_repeaters.
+unplace_group_repeat
+ers
+ECO-273
+Error: There are no 
+placed cells to be 
+unplaced. Please double 
+check the cell status.
+Check if there are 
+placed cells that are 
+not qualified.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+1005
+
+===== PAGE 1006 =====
+Chapter 13: ECO Flow
+Fixing Multivoltage Violations
+Feedback
+Table 73
+Group Repeater Placement and Insertion Troubleshooting (Continued)
+Command
+Error Code
+Message
+Troubleshooting 
+Tips
+ECO-274
+Warning: You are 
+deleting cell %s with 
+eco_repeater_group_id %d.
+Check if you are 
+trying to delete a 
+cell belonging to a 
+repeater group.
+place_group_repeat
+ers
+ECO-275
+Error: Failed to traverse 
+cutlines. The nets may 
+have too many blockages.
+Check the location 
+to insert cell 
+groups. Remove 
+blockages or find 
+cutlines and use the 
+-repeater_group 
+option.
+add_group_repeaters
+ECO-276
+Warning: Unable to find 
+free area for repeater on 
+net (%s) at location (%s) 
+within range {%s}.
+Check if 
+checkerboard 
+snapping service can 
+find free space for a 
+repeater
+set_repeater_group
+ECO-277
+Warning: You are trying 
+to override cells of 
+repeater group %d. Use 
+-override if you have to 
+override cells.
+Check if you are 
+trying to override 
+cells without using 
+the -override 
+option.
+create_repeater_gro
+ups
+ECO-278
+Error: Get 0 transparent 
+cells from all supernets.
+Check if the input 
+supernets have no 
+transparent cells to 
+group.
+create_repeater_gro
+ups
+ECO-279
+Error: %s has 
+multiple(%lu) inputs.
+Check if a cell or load 
+has multiple inputs.
+Fixing Multivoltage Violations
+Design changes in the ECO flow sometimes result in isolation or voltage violations. The 
+fix_mv_design  command can identify and fix violations for buffer trees and diodes.
+You must use either the -buffer  or -diode  option with the fix_mv_design  command. For 
+more information, see the following topics:
+•
+Fixing Buffers
+•
+Fixing Diodes
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+1006
+
+===== PAGE 1007 =====
+Chapter 13: ECO Flow
+Fixing Multivoltage Violations
+Feedback
+If the UPF has not already been committed, the fix_mv_design  command automatically 
+commits the UPF before performing any operations.
+Netlist changes that the tool makes as a result of the fix_mv_design  command are not 
+guaranteed to be placement or timing legal. You must check the design after running the 
+fix_mv_design  command.
+Fixing Buffers
+The -buffer  option of the fix_mv_design  command fixes isolation violations and illegal 
+library cells in buffer trees throughout the design. The command can perform the following 
+changes:
+•
+Minimize the number of dual-rail buffers or inverters
+•
+Fix isolation violations in buffer trees
+•
+Fix buffers and inverters that have illegal settings, as follows:
+◦
+Process, voltage, and temperature settings
+◦
+Library cell purpose or subset settings
+◦
+Target library subset settings
+◦
+Bias voltages
+•
+Fix a mismatch between a buffer's power domain and the voltage area in which the 
+buffer or inverter is physically placed
+The command can change the netlist as follows:
+•
+Swap buffer library cells to fix illegal settings
+•
+Swap single-rail buffers for dual-rail buffers
+•
+Swap dual-rail buffers for single-rail buffers
+•
+Change the backup supplies of dual-rail buffers and inverters
+•
+Change the input or output supplies of level shifters
+•
+Fix a mismatch between a buffer's power domain and a voltage area by using a 
+physical or logical feedthrough
+•
+Fix a mismatch between a buffer's power domain and a gas station voltage area by 
+using a physical or logical feedthrough
+The fix_mv_design  command keeps the placement of the original buffers or inverters and 
+honors the repeater strategies associated with existing buffers and inverters. In addition, 
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+1007
+
+===== PAGE 1008 =====
+Chapter 13: ECO Flow
+Fixing Multivoltage Violations
+Feedback
+the command only uses supplies that are available in the voltage area or voltage area 
+region.
+The fix_mv_design  command does not insert isolation cells or level-shifter cells to fix 
+existing isolation or voltage violations. Netlist changes caused by the command do not 
+introduce new isolation or voltage violations.
+To specify a buffer tree, use the -from  option with the name of a net or driver pin. If you 
+specify a net name, its driver pin is used. In both cases, the driver pin defines a full or 
+partial buffer tree. Wildcards are supported.
+The -lib_cells  option specifies a list of single-rail and dual-rail buffer or inverter library 
+cells that the fix_mv_design  command can use as replacement cells. By default, the 
+command does not swap dual-rail and single-rail cells if the swap is not necessary to fix 
+isolation violations. However, if you also specify the -minimize_dual_rail  option, the 
+tool tries to minimize the usage of dual-rail buffers to save area.
+If the tool inserts a new library cell as a result of the fix_mv_design  command, the new 
+cell is chosen according to the following rules, in priority order:
+•
+A cell from the same library as the original library cell
+•
+A cell from a library with a name similar to the original library
+•
+A cell with a name similar to the original library cell name
+By default, buffer trees stop at level-shifter cells. Specify the -level_shifter  option to 
+allow the fix_mv_design  command to modify the input or output supplies of level-shifter 
+cells. However, the command does not change level-shifter library cells.
+To report the changes that the tool recommends without making any netlist changes, use 
+the -report_only  option.
+Fixing Diodes
+The -diode  option of the fix_mv_design  command fixes mismatches between power 
+domains and voltage areas for diodes throughout the design. The fix_mv_design 
+-diode  command examines all diodes, including diodes inserted by the create_cell, 
+create_diodes, and add_port_protection_diodes  commands, as well as several 
+routing commands that insert diodes to fix antenna violations.
+If a power domain and voltage area mismatch for a diode is found, the tool uses the 
+voltage area to explicitly assign a corresponding power domain. If multiple power domains 
+exist in a single voltage area, the tool picks one of the available power domains. Any of the 
+available power domains is acceptable because all diode cells are single-rail cells and all 
+power domains in the same voltage area have the same primary supply.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+1008
+
+===== PAGE 1009 =====
+Chapter 13: ECO Flow
+Fixing Multivoltage Violations
+Feedback
+To obtain a report of the changes that the tool recommends without making any netlist 
+changes, use the -report_only  option. To obtain detailed information in the report, use 
+the -verbose  option. These are the only two options that you can use with the -diode 
+option.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+1009

@@ -1,0 +1,743 @@
+% ============================================================
+\section{更新 ECO 单元的电源 net}
+\subsection*{Updating Supply Nets for ECO Cells}
+
+要用 \cmd{eco\_update\_supply\_net} 更新 ECO 单元的电源 net。
+默认更新由下列 ECO 命令添加的全部单元的电源 net：
+\begin{itemize}
+  \item freeze-silicon 模式下的 \cmd{size\_cell}
+  \item \cmd{add\_buffer}
+  \item \cmd{add\_eco\_repeater}
+  \item \cmd{split\_fanout}
+  \item \cmd{add\_buffer\_on\_route}
+\end{itemize}
+要对特定单元更新，使用 \cmd{eco\_update\_supply\_net} \opt{-cells}。
+
+% ============================================================
+\section{记录对版图所做的更改}
+\subsection*{Recording the Changes Made to a Layout}
+
+可用 \cmd{record\_layout\_editing} 记录对版图所做的更改并生成包含更改的 Tcl 文件，示例如下：
+\begin{lstlisting}
+fc_shell> record_layout_editing -start
+fc_shell> remove_shapes RECT_32_0
+fc_shell> record_layout_editing -stop -output layout_changes1.tcl
+\end{lstlisting}
+
+可做下列版图更改：
+\begin{itemize}
+  \item 用 Tcl 命令创建或移除版图对象；
+  \item 用 \cmd{set\_attribute} 设置属性；
+  \item 用 GUI 移动或调整对象大小。
+\end{itemize}
+
+借助此功能，多名用户可并行地对版图不同部分做 ECO 更改。每位用户可用 \cmd{record\_layout\_editing} 输出含其版图更改的 Tcl 文件，再将这些 Tcl 文件全部应用到原始版图。
+
+% ============================================================
+\section{执行成组中继器插入与放置的先决条件检查}
+\subsection*{Performing Prerequisite Check for Group Repeater Insertion and Placement}
+
+使用 \cmd{place\_group\_repeaters} 或 \cmd{add\_group\_repeaters} 的 \opt{-check\_prerequisites} 选项，对设计执行先决条件检查，以便在命令流程开始时检测设计错误。
+
+\begin{itemize}
+  \item 对 \cmd{place\_group\_repeaters}，与下列选项一起使用以提供检查所需信息：
+\begin{lstlisting}
+place_group_repeaters
+   -cells | -repeater_groups
+   [-lib_cell_input]
+   [-lib_cell_output]
+   -check_prerequisites
+\end{lstlisting}
+  \item 对 \cmd{add\_group\_repeaters}：
+\begin{lstlisting}
+add_group_repeaters
+   -nets | -bundles
+   [-lib_cell_input]
+   [-lib_cell_output]
+   -check_prerequisites
+\end{lstlisting}
+\end{itemize}
+
+先决条件检查在设计与搜索区域中验证下列内容：
+\begin{itemize}
+  \item 设计中存在 site 行；
+  \item 每条 net 只有一个驱动端，可有多个负载；
+  \item pin 或端口已分配位置；
+  \item 对于标准单元上的 pin，标准单元已放置；
+  \item 超网（supernets）必须已布线；
+  \item 布线端点距搜索区域内的驱动端、负载 pin 或端口不得超过 5\,$\mu$m；
+  \item 搜索区域内驱动端或负载的布线已定义；
+  \item 负载已连接到驱动端；
+  \item 当布线端点开路时，同一 net 的其他布线不得出现在该 pin 或端口附近；
+  \item 布线必须分配给超网驱动 pin 的 net；
+  \item 必须为布线创建 via；
+  \item 中继器具有物理库单元。
+\end{itemize}
+
+下列示例展示用 \cmd{add\_group\_repeaters} 的 \opt{-check\_prerequisites}：
+\begin{lstlisting}
+fc_shell> add_group_repeaters -bundles bundle_wo_load \
+  -lib_cell ref_lib1/libCell1 -lib_cell_input A -lib_cell_output X \
+  -repeater_distance 10 -check_prerequisite
+Error: The net net_wo_load does not have loads. (ECO-329)
+Error: The cell driver1 of the pin driver1/X is not placed. (ECO-331)
+Error: 0
+        Use error_info for more info. (CMD-013)
+\end{lstlisting}
+
+% ============================================================
+\section{添加一组中继器}
+\subsection*{Adding a Group of Repeaters}
+
+要用 \cmd{add\_group\_repeaters} 添加一组中继器，见下列各节：
+\begin{itemize}
+  \item 定义一组中继器
+  \item 将中继器列表分组
+  \item 为中继器组设置约束
+  \item 添加电压区域感知的成组中继器
+  \item 报告分配给中继器组的约束
+  \item 移除中继器组的约束
+  \item 布线前放置成组中继器
+  \item 执行沿布线（on-route）的中继器放置
+  \item 为多比特寄存器放置成组中继器
+  \item 指定中继器组位置
+  \item 允许中继器组位于宏之上
+  \item 指定中继器组的切割间距与切割距离
+  \item 指定中继器组的水平与垂直间距
+  \item 指定用作中继器的库单元
+  \item 避免中继器与既有 tap 单元重叠
+  \item 成组中继器插入期间避免串扰
+  \item 预览中继器组
+  \item 取消中继器放置
+  \item 移除中继器组
+\end{itemize}
+
+\subsection{定义一组中继器}
+\subsubsection*{Defining a group of repeaters}
+
+要为切割线（cutline）支持定义一组中继器，使用 \cmd{set\_repeater\_group} 或 \cmd{create\_repeater\_groups}。命令用法示例如下：
+\begin{lstlisting}
+set_repeater_group -group_id group_id \
+  -check_connection  \
+  [-cells cell_list] \
+  [-cutline { {{x1 y} {x2 y}} | {{x y1} {x y2}} }] \
+  [-driver_group_id group_id] \
+  [-path_drivers pin_port_list] \
+  [-path_loads pin_port_list] \
+  [-override]
+  [-lib_cell_input string]
+  [-lib_cell_output string]
+  [-clear]
+\end{lstlisting}
+
+\subsection{将中继器列表分组}
+\subsubsection*{Grouping a list of repeaters}
+
+要用 \cmd{create\_repeater\_groups} 自动将中继器列表或超网的中继器分组。
+该命令接受中继器列表、超网列表或超网束（bundles），并返回由 \cmd{set\_repeater\_group} 创建的中继器组列表。
+支持单负载与多负载超网。
+\begin{lstlisting}
+create_repeater_groups -supernets supernet_list | \
+  -supernet_bundles supernet_bundle_list | \
+  -cells cell_list \
+  -lib_cells lib_cell_list \
+  [-lib_cell_input lib_pin] \
+  [-lib_cell_output lib_pin] \
+  [-group_pin_spacing spacing] \
+  [-ignore_pin_layers]
+\end{lstlisting}
+
+\subsection{为中继器组设置约束}
+\subsubsection*{Setting Constraints for a Group of Repeaters}
+
+要用 \cmd{set\_repeater\_group\_constraints} 定义中继器组约束。
+该命令的优先级低于 \cmd{add\_group\_repeaters} 与 \cmd{place\_group\_repeaters} 中对应的命令选项。
+\begin{lstlisting}
+set_repeater_group_constraints -type type_list \
+  [-horizontal_repeater_spacing spacing] \
+  [-vertical_repeater_spacing spacing] \
+  [-layer_cutting_distance layer_scale_list]
+\end{lstlisting}
+
+\subsection{添加电压区域感知的成组中继器}
+\subsubsection*{Adding Voltage Area Aware Group Repeaters}
+
+电压区域感知的成组中继器根据对应电压区域选择合法库单元，并更新中继器的电源 net 以满足多电压约束。
+可根据设计方法，用 \cmd{add\_group\_repeaters} 的特定选项以三种方式添加：
+\begin{itemize}
+  \item 仅单轨缓冲器：用 \opt{-va\_aware}
+\begin{lstlisting}
+fc_shell> add_group_repeaters -lib_cell <lib_cell> -va_aware
+\end{lstlisting}
+  \item 按电压区域的单轨缓冲器：用 \opt{-voltage\_area\_specific\_lib\_cell}
+\begin{lstlisting}
+fc_shell> add_group_repeaters -lib_cell <default_lib_cell> \
+  -voltage_area_specific_lb_cell {{VA1 libcell1}} {{VA2 libcell2}}
+\end{lstlisting}
+  \item 单轨与双轨缓冲器：用 \opt{-select\_mv\_buffer}
+\begin{lstlisting}
+fc_shell> add_group_repeaters -lib_cell <default_lib_cell> \
+  -select_mv_buffer {{VA1 SingleRail1 DualRail1}} \
+  {{VA1 SingleRail2 DualRail2}}
+\end{lstlisting}
+\end{itemize}
+电压区域感知成组中继器根据电压区域与中继器位置选择库单元，有助于解决多电压违例。
+
+\subsection{报告分配给中继器组的约束}
+\subsubsection*{Reporting the Constraints Assigned to a Group of a Repeaters}
+
+要用 \cmd{report\_repeater\_group\_constraints} 报告由 \cmd{place\_group\_repeaters}、\cmd{add\_group\_repeaters} 或 \cmd{set\_repeater\_group\_constraints} 分配的约束。例如：
+\begin{lstlisting}
+fc_shell> report_repeater_group_constraints
+\end{lstlisting}
+
+\subsection{移除中继器组的约束}
+\subsubsection*{Removing Constraints for a Group of Repeaters}
+
+要用 \cmd{remove\_repeater\_group\_constraints} 移除已分配的约束。例如：
+\begin{lstlisting}
+fc_shell> remove_repeater_group_constraints -type type_list
+\end{lstlisting}
+
+\subsection{布线前放置成组中继器}
+\subsubsection*{Placing Group Repeaters Before Routing}
+
+用 \cmd{preplace\_group\_repeaters} 在布线前放置成组中继器。按升序或降序放置（默认升序）：升序表示从最低或最左侧可用 track 放到最高或最右侧 track。
+
+\begin{noteBox}
+运行 \cmd{preplace\_group\_repeaters} 需要 FAA-Base-Beta 许可证。
+\end{noteBox}
+
+必须指定单元集合或成组中继器的组 ID。指定单元集合的示例：
+\begin{lstlisting}
+fc_shell> preplace_group_repeaters \
+  -repeater_group_locations { { $cellGroup1, M2, {720 363.5}, \
+   north, descending} {$cellGroup2, M2, {920 363.5}, east, ascending} \
+  {$cellGroup3, M2, {1230 328.5}, east, ascending} \
+  {$cellGroup4, M2, {1430 328.5}}, east}
+\end{lstlisting}
+
+指定组 ID 的示例：
+\begin{lstlisting}
+fc_shell> preplace_group_repeaters \
+  -repeater_group_locations { { 1,M2, {720 363.5}, south, ascending} \
+  {2, M2, {920 363.5},west, ascending} {3, M2, {1230 328.5}, \
+  south, ascending} {4, M2, {1430 328.5}, west, descending}}
+\end{lstlisting}
+
+\subsection{执行沿布线的中继器放置}
+\subsubsection*{Performing On Route Placement of Repeaters}
+
+要用 \cmd{place\_group\_repeaters} 对互连中继器执行沿布线放置：
+\begin{lstlisting}
+place_group_repeaters \
+  -cells cell_list | -repeater_groups group_id_list \
+  [-lib_cell_input pin_name] \
+  [-lib_cell_output pin_name] \
+  [-max_distance_for_incomplete_route distance] \
+  [-first_distance distance] \
+  [-last_distance distance] \
+  [-blockage_aware] \
+  [-horizontal_repeater_spacing spacing] \
+  [-vertical_repeater_spacing spacing] \
+  [-layer_cutting_distance layer_scale_list]
+  [-verbose]
+\end{lstlisting}
+
+\subsection{为多比特寄存器放置成组中继器}
+\subsubsection*{Placing Group Repeaters For Multibit Registers}
+
+要用带 \opt{-multi\_bit} 的 \cmd{create\_repeater\_groups}：
+\begin{lstlisting}
+create_repeater_groups
+ -cells | -supernet_bundles | -supernets
+ -multi_bit
+ -pin_mapping {{lib_cell1 {inp1 outp1} {inp2 outp2}…}
+\end{lstlisting}
+
+\opt{-multi\_bit} 根据路径驱动端确定多比特中继器顺序并创建中继器组。当 net 未定义布线时，该选项根据位置放置成组中继器。
+
+要验证多比特寄存器放置支持，使用：
+\begin{lstlisting}
+fc_shell> preplace_group_repeater \
+  -repeater_group_locations repeater_group_location_list
+\end{lstlisting}
+
+\texttt{repeater\_group\_location\_list} 参数格式为：
+\begin{quote}
+\texttt{\{\{cell\_collection, layer, location, potential routing direction, placing order\} ...\}}\\
+或\\
+\texttt{\{\{group\_id, layer, location, potential routing direction, placing order\} ...\}}。
+\end{quote}
+
+\subsection{指定中继器组位置}
+\subsubsection*{Specifying Locations for Repeater Groups}
+
+用下列互斥选项之一控制中继器组位置：
+\begin{itemize}
+  \item \opt{-repeater\_distance}：中继器组之间的距离。支持：
+  \begin{itemize}
+    \item \opt{-first\_distance}：驱动端到第一个中继器组中心的距离；
+    \item \opt{-min\_distance\_repeater\_to\_load}：最后一个中继器组到负载的最小距离（默认是 \opt{-repeater\_distance} 的一半）；
+    \item \opt{-tolerance}：相对 \opt{-repeater\_distance} 的最大增量距离（默认 5\,$\mu$m）。
+  \end{itemize}
+  \item \opt{-relative\_distance}：依次指定驱动端到第一组、第一组到第二组、第二组到第三组等的距离；
+  \item \opt{-location}：每个中继器组中心的位置；
+  \item \opt{-number\_of\_repeater\_groups}：沿布线均匀插入的中继器组总数；
+  \item \opt{-cutlines}：定义切割线的位置对。切割线须垂直于布线，中继器组以切割线为中心。
+\end{itemize}
+
+\subsection{允许中继器组位于宏之上}
+\subsubsection*{Allowing Repeater Groups Over Macros}
+
+用 \opt{-allow\_insertion\_over\_block} 允许在软宏或硬宏上添加中继器组。
+
+\begin{noteBox}
+若中继器单元是反相器，须自行确保逻辑正确性。
+\end{noteBox}
+
+\subsection{指定中继器组的切割间距与切割距离}
+\subsubsection*{Specifying Cut Space and Cut Distance for Repeater Groups}
+
+用下列互斥选项之一控制切割：
+\begin{itemize}
+  \item \opt{-layer\_cutting\_spacing}：布线到驱动 pin 的切割间距，切割从驱动端开始；
+  \item \opt{-layer\_cutting\_distance}：从中继器中心到输入/输出布线的切割距离。
+\end{itemize}
+
+\subsection{指定中继器组的水平与垂直间距}
+\subsubsection*{Specifying Horizontal and Vertical Spacing for Repeater Groups}
+
+用下列互斥选项之一控制间距：
+\begin{itemize}
+  \item \opt{-horizontal\_repeater\_spacing}：按单元 site 宽度指定中继器水平间距；
+  \item \opt{-vertical\_repeater\_spacing}：按 site 行高度指定中继器垂直间距。
+\end{itemize}
+
+\subsection{指定用作中继器的库单元}
+\subsubsection*{Specifying Library Cells as Repeaters}
+
+用 \opt{-lib\_cell} 指定用作中继器的库单元，并支持：
+\begin{itemize}
+  \item \opt{-lib\_cell\_input}：库单元有多个输入时要连接的输入 pin；
+  \item \opt{-lib\_cell\_output}：库单元有多个输出时要连接的输出 pin。
+\end{itemize}
+
+\subsection{避免中继器与既有 tap 单元重叠}
+\subsubsection*{Avoiding Overlapping Repeaters With Existing Tap Cells}
+
+用 \opt{-honor\_special\_cell} 在插入中继器时避免与既有 tap 单元重叠。
+
+\subsection{成组中继器插入期间避免串扰}
+\subsubsection*{Avoiding Crosstalk During Group Repeater Insertion}
+
+串扰管理仅在 \cmd{create\_group\_repeaters\_guidance} 与 \cmd{add\_group\_repeaters} 命令流程中受支持。流程如下：
+\begin{enumerate}
+  \item 用下列命令查询交错组（interleaving groups）：
+\begin{lstlisting}
+create_group_repeaters_guidance -net \
+ -number_of_interleaving_groups number
+\end{lstlisting}
+  默认 \texttt{number} 为 1。例如取值为 2 时，一个 net 组被分成两个交错 net 组。
+  \item 用下列命令在成组中继器插入期间管理串扰：
+\begin{lstlisting}
+add_group_releaters
+   -nets | -bundles
+   -first_distance_of_net_groups
+       { {group_id1 $first_dist1} {group_id2 $first_dist2} …}
+     -repeater_distance $dist
+\end{lstlisting}
+或
+\begin{lstlisting}
+add_group_releaters
+    -nets | -bundles
+    -cutlines_of_net_groups
+       { {group_id1 $cutline_list1} {group_id2 $cutline_list2} …}
+\end{lstlisting}
+\end{enumerate}
+
+\begin{itemize}
+  \item 若指定 \opt{-first\_distance\_of\_net\_groups}，命令按 net 上既有组 ID 分组 net，并按各 net 组指定的首距插入中继器；各组中继器间距相同。
+  \item 若指定 \opt{-cutlines\_of\_net\_groups}，命令按 net 既有组 ID 分组，并按各组切割线插入中继器。
+\end{itemize}
+
+\subsection{预览中继器组}
+\subsubsection*{Previewing Repeater Groups}
+
+用 \opt{-preview} 在插入前预览中继器组位置。中继器用注解对象表示，位置、宽度与高度与中继器库单元相同，组 ID 为 \texttt{eco\_preview\_id}。
+
+\begin{noteBox}
+再次预览前，须先用 \cmd{gui\_remove\_annotations} 或 \cmd{gui\_remove\_all\_annotations} 移除注解对象。
+\end{noteBox}
+
+\subsection{取消中继器放置}
+\subsubsection*{Unplacing the Repeaters}
+
+要用 \cmd{unplace\_group\_repeaters} 取消先前的中继器放置：
+\begin{lstlisting}
+unplace_group_repeaters \
+  -cells cell_list | -repeater_groups group_id_list \
+  [-lib_cell_input pin_name] \
+  [-lib_cell_output pin_name]
+\end{lstlisting}
+
+\subsection{移除中继器组}
+\subsubsection*{Removing Repeater Groups}
+
+要用 \cmd{remove\_eco\_repeater} 移除一组中继器。net 恢复为其原始名称与布线图形。
+
+% ============================================================
+\section{查询成组中继器}
+\subsection*{Querying Group Repeater}
+
+成组中继器查询命令改善了互连中继器规划时的易用性。成组中继器查询：
+\begin{itemize}
+  \item 提供查询成组中继器路径信息的能力；
+  \item 支持跨会话查询；
+  \item 支持在成组中继器放置之前查询。
+\end{itemize}
+
+规划期间查询成组中继器时，须熟悉下列关键信息：
+\begin{itemize}
+  \item 中继器组的单元；
+  \item 中继器组的切割线；
+  \item 组虚拟连接（group virtual connection）。
+\end{itemize}
+
+若组具有驱动组或路径驱动端，则归类为组虚拟连接。组之间的单元连接取决于组内单元顺序。
+
+下列主题描述该流程中的步骤：
+\begin{itemize}
+  \item 执行自动分组流程
+  \item 执行手动分组流程
+  \item 单元输入模式（Cell Input Mode）
+\end{itemize}
+
+\subsection{执行自动分组流程}
+\subsubsection*{Performing Auto Grouping Flow}
+
+自动中继器组创建允许为寄存器路径推导虚拟连接。对于中继器组输入模式，\cmd{place\_group\_repeaters} 应用基于切割线的放置；须为每组指定切割线。中继器根据切割线与布线的交点放置。
+
+基于目标单元的实际连接构建连通性。
+\begin{enumerate}
+  \item 用 \cmd{create\_repeater\_groups}（并指定约束选项）对中继器列表或超网中继器分组。
+  命令自动执行单元分组，并用下列属性分组虚拟连接：\texttt{group\_repeater\_driver}、\texttt{group\_repeater\_loads}、\texttt{pin\_pair}、\texttt{group\_id}。
+  \item 用 \cmd{get\_attribute}、\cmd{report\_repeater\_group} 与 \cmd{get\_repeater\_path\_info} 验证路径。
+  \cmd{get\_attribute} 报告 \texttt{group\_repeater\_driver} 或 \texttt{group\_repeater\_loads} 的属性；
+  \cmd{report\_repeater\_groups} 报告指定组或全部组的信息，\opt{-verbose} 打开时还报告全部组的中继器路径；
+  \cmd{get\_repeater\_paths\_info} 返回包含输入单元的中继器路径上的单元。
+  \item 用 \cmd{set\_repeater\_group} \opt{-group\_id} \opt{-cutline} 手动为组指定切割线。
+  \item 对输入中继器组，用切割线在布线上放置互连中继器。
+\end{enumerate}
+
+\subsection{执行手动分组流程}
+\subsubsection*{Performing Manual Grouping Flow}
+
+自动分组基于 \cmd{create\_repeater\_groups}。若自动分组结果不满足要求，使用手动分组。
+
+放置前检查目标单元连接。手动分组步骤：
+\begin{enumerate}
+  \item 用 \opt{-cells} 对单元分组；单元顺序表示单元连接意图。
+  \item 用 \opt{-driver\_group\_id} 或 \opt{-path\_drivers} 定义组虚拟连接。
+  \item 用 \opt{-cutline} 指定切割线。
+  \item 用 \cmd{set\_repeater\_group} 为每组中继器定义寄存器路径连接（虚拟连接）。
+  \begin{itemize}
+    \item 放置前用 \cmd{set\_repeater\_group} \opt{-check\_connection} 检查单元连接。若连接不符合预期，重新设置中继器组以得到期望连接。\opt{-check\_connection} 还可记录 pin 对；\texttt{pin\_pair} 用于按指定库单元 pin 名查找单元实际连接。
+  \end{itemize}
+  \item 用 \cmd{get\_attribute}、\cmd{report\_repeater\_group} 与 \cmd{get\_repeater\_path\_info} 验证路径。
+  \item 用 \cmd{set\_repeater\_group} \opt{-check\_connection} 基于实际连接检查并报告无效路径。
+  \item 对输入中继器组，用切割线在布线上放置互连中继器。
+\end{enumerate}
+
+\subsection{单元输入模式}
+\subsubsection*{Cell Input Mode}
+
+单元输入模式允许基于沿布线放置设置距离。默认情况下，一条中继器路径上的中继器按均匀距离放置。该模式允许用 \opt{-first\_distance} 或 \opt{-last\_distance} 控制驱动端侧或负载侧距离。
+
+\begin{enumerate}
+  \item 用 \cmd{place\_group\_repeaters} \opt{-cells} \opt{-blockage\_aware} 在内部启用自动分组；内部用 \cmd{create\_repeater\_groups} \opt{-cells} 启用自动分组，并根据距离推导切割线，再用 \cmd{set\_repeater\_group} \opt{-group\_id} \opt{-cutline} 定义中继器组。
+  放置后可用 \cmd{report\_repeater\_groups} 查询中继器组，用 \cmd{get\_repeater\_paths\_info} 查询路径信息。
+  \item 要用 \cmd{place\_group\_repeaters} \opt{-cells} 基于实际连接建立单元连接并应用基于距离的放置；此时不创建中继器组。
+\end{enumerate}
+
+% ============================================================
+\section{交换变体单元}
+\subsection*{Swapping Variant Cell}
+
+\cmd{add\_group\_repeater} 与 \cmd{place\_group\_repeater} 命令在成组中继器插入与放置中支持变体单元（variant cell）。
+
+下列主题描述该流程中的步骤：
+\begin{itemize}
+  \item 设置变体单元约束
+  \item 设置应用选项
+  \item 对变体单元分组
+  \item 运行并放置成组中继器
+  \item 故障排除（Troubleshooting）
+\end{itemize}
+
+\subsection{设置变体单元约束}
+\subsubsection*{Setting Constraints of Variant Cell}
+
+设置变体单元约束：
+\begin{enumerate}
+  \item 用 \cmd{set\_repeater\_group\_constraints} \opt{-type} \texttt{variant\_cell\_swapping} 设置用于单元交换的变体。
+  \item 设置后用 \cmd{report\_repeater\_group\_constraints} 查看报告，报告提供：变体单元组的 track 图案、变体 site id、是否尊重不共享时序的单元组、首 track 对齐。
+  \item 用 \cmd{remove\_repeater\_group\_constraints} 根据报告移除约束并复位设置。
+\end{enumerate}
+
+\subsection{设置应用选项}
+\subsubsection*{Setting Application Option}
+
+在使用 \cmd{add\_group\_repeaters} 与 \cmd{place\_group\_repeaters} 之前，用下列命令设置应用选项：
+\begin{lstlisting}
+set_app_option -name eco.placement.variant_cell_swapping -value true
+\end{lstlisting}
+
+可根据需要规划变体单元流程。不同变体单元流程中变体参考交换规则不同。默认情况下，\cmd{eco\_change\_legal\_reference} 中的变体单元支持会自动检测变体模式与设置。
+
+\cmd{eco\_change\_legal\_reference} 检查单元当前参考对放置位置是否合法；若不合法，则尝试从其定义的变体单元组中找到合法参考进行交换。
+
+要对其它单元直接使用变体单元功能，使用 \cmd{eco\_change\_legal\_reference}。
+
+对于复杂场景，可手动切换变体模式并调整设置。变体单元支持的新应用选项包括：
+\begin{itemize}
+  \item 为不同客户与设计流程设置变体模式：\appopt{eco.placement.variant\_cell\_group\_mode}；
+  \item 尊重不共享时序视图的变体单元组：\appopt{eco.placement.honor\_cell\_group\_not\_sharing\_timing}。
+\end{itemize}
+
+\subsection{对变体单元分组}
+\subsubsection*{Grouping Variant Cell}
+
+在同一变体单元组中，库单元变体与主变体（master-variant）仅在掩模颜色（或小几何）上不同，而这些变体的时序数据相同。
+
+变体单元功能支持：
+\begin{itemize}
+  \item \texttt{track\_pattern} 模式
+  \item \texttt{siteId\_based} 模式
+\end{itemize}
+
+\subsubsection{track\_pattern 模式}
+\paragraph*{track\_pattern mode}
+
+要在 \texttt{track\_pattern} 模式中指定用于 track 对齐检查的第一金属层，设置 \appopt{eco.placement.first\_track\_alignment\_layer}。
+
+图~\ref{fig:fc-var-two} 显示具有两个变体的单元组。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}
+\textit{（原书 Figure 221：Cell Group With Two Variants）}
+\vspace{1.0cm}}}
+\caption{具有两个变体的单元组}
+\label{fig:fc-var-two}
+\end{figure}
+
+根据库单元的首 track 偏移与 pitch 值，可定义并推导从 0 开始的变体库单元类型。图~\ref{fig:fc-var-typeid} 显示变体类型 id 定义。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}
+\textit{（原书 Figure 222：Variant Type id Definition）}
+\vspace{1.0cm}}}
+\caption{变体类型 id 定义}
+\label{fig:fc-var-typeid}
+\end{figure}
+
+可检测目标单元当前位置的变体类型 id，并检查当前参考是否合法；若不合法，则从单元组中选择合法参考并交换。图~\ref{fig:fc-var-swap} 显示对目标单元检查并交换合法参考。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}
+\textit{（原书 Figure 223：Check and Swap With Legal Reference for Target Cell）}
+\vspace{1.0cm}}}
+\caption{对目标单元检查并交换合法参考}
+\label{fig:fc-var-swap}
+\end{figure}
+
+\subsubsection{siteId\_based 模式}
+\paragraph*{siteId\_based mode}
+
+变体映射与翻转映射信息在单元组中定义。下列为 \cmd{report\_cell\_groups} 命令的示例。图~\ref{fig:fc-var-mapid} 显示映射 id 与翻转映射 id 的单元组定义。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}
+\textit{（原书 Figure 224：Cell Group Definition for Mapping id and Flipped Mapping id）}
+\vspace{1.0cm}}}
+\caption{映射 id 与翻转映射 id 的单元组定义}
+\label{fig:fc-var-mapid}
+\end{figure}
+
+\texttt{siteId\_based} 模式有两个子流程：2-Variants 与 N-Variant。图~\ref{fig:fc-var-subflow} 显示这两个子流程。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}
+\textit{（原书 Figure 225：2-Variants and N-Variants Sub Flows in siteId\_based Mode）}
+\vspace{1.0cm}}}
+\caption{siteId\_based 模式下的 2-Variants 与 N-Variants 子流程}
+\label{fig:fc-var-subflow}
+\end{figure}
+
+每个变体参考都有合法映射 id 与翻转映射 id。图~\ref{fig:fc-var-mapflip} 显示变体映射与翻转映射 id。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}
+\textit{（原书 Figure 226：Variant Mapping and Flipped Mapping id）}
+\vspace{1.0cm}}}
+\caption{变体映射与翻转映射 id}
+\label{fig:fc-var-mapflip}
+\end{figure}
+
+对于变体 siteId，可先从 site 行获取周期与偏移，再用单元放置位置进行计算。图~\ref{fig:fc-var-siteid} 显示变体 siteId 的计算。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.0cm}
+\textit{（原书 Figure 227：Calculation for Variant siteId）}
+\vspace{1.0cm}}}
+\caption{变体 siteId 的计算}
+\label{fig:fc-var-siteid}
+\end{figure}
+
+\subsection{运行并放置成组中继器}
+\subsubsection*{Running and Placing Group Repeaters}
+
+使用 \cmd{add\_group\_repeaters} 与 \cmd{place\_group\_repeaters} 在命令单元集合中显示变体单元交换的汇总报告。
+
+\subsection{故障排除}
+\subsubsection*{Troubleshooting}
+
+表~\ref{tab:fc-grp-rpt-ts}（原书 Table 73）列出定义成组中继器期间遇到问题的成组中继器放置与插入消息。
+
+\begin{longtable}{@{}p{0.18\textwidth}p{0.12\textwidth}p{0.32\textwidth}p{0.28\textwidth}@{}}
+\caption{成组中继器放置与插入故障排除（原书 Table 73）\label{tab:fc-grp-rpt-ts}}\\
+\toprule
+命令 & 错误码 & 消息 & 排除提示 \\
+\midrule
+\endfirsthead
+\toprule
+命令 & 错误码 & 消息 & 排除提示 \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\texttt{place\_group\_repeaters} & ECOUI-136 & Error: The repeater group (\%d) is invalid. & 用 \cmd{report\_repeater\_groups} 检查输入组 id 是否存在。 \\
+\texttt{place\_group\_repeaters} & ECO-220 & Warning: Failed to connect to route for \%d object: \{\%s\}. & 检查对象的 pin 形状与布线形状。驱动端或负载可以是端口、宏 pin 或已放置单元。 \\
+\texttt{place\_group\_repeaters} & ECO-224 & Error: The option -repeater\_groups cannot be used when eco.placement.eco\_enable\_pipeline\_register\_placer is false. & 检查对象 pin 形状与布线形状。驱动端或负载可以是端口、宏 pin 或已放置单元。 \\
+\texttt{place\_group\_repeaters} & ECO-227 & Warning: Failed to place \%d repeaters for \%d drivers in collection (\%s), and failed cells are in collection (\%s). & 用 \cmd{query\_objects}、\cmd{get\_ports}、\cmd{get\_pins}、\cmd{get\_cells} 检查失败的驱动端。 \\
+\texttt{place\_group\_repeaters} & ECO-228 & Warning: Some repeaters from path driver (\%s) have same repeater group id. The cells belonging to the path are \{\%s\}. & 检查同一路径上单元的组 id；命令会跳过部分中继器。同一路径上单元的组 id 应不同。 \\
+\texttt{place\_group\_repeaters} & ECO-229 & Warning: Failed to find intersection of cutline \%s and route for cell \{\%s\}. & 检查切割线与布线交点。 \\
+\texttt{place\_group\_repeaters} & ECO-231 & Error: The repeater group (\%d) has no cutline or invalid cutline. & 用 \cmd{set\_repeater\_group} 为该组设置正确切割线。 \\
+\texttt{place\_group\_repeaters} & ECO-232 & Error: Cutline \{\{\%s\} \{\%s\}\} is invalid. & 检查切割线格式：\texttt{\{\{x1 y\} \{x2 y\}\}} 或 \texttt{\{\{x y1\} \{x y2\}\}}。 \\
+\texttt{place\_group\_repeaters} / \texttt{unplace\_group\_repeaters} & ECO-233 & Error: The cells in collection (\%s) are invalid since they have no target input pin name (\%s) and output pin name (\%s). & 检查输入/输出 pin 名；可用 \opt{-lib\_cell\_input}/\opt{-lib\_cell\_output}（默认分别为 D 与 Q），或过滤无效单元。 \\
+\texttt{place\_group\_repeaters} & ECO-234 & Warning: There is no repeater to be placed for the path driver (\%s). & 检查该路径驱动端是否有待放置中继器。 \\
+\texttt{place\_group\_repeaters} & ECO-235 & Warning: There is no route on driver net (\%s). & 检查驱动 net 是否有布线。 \\
+\texttt{place\_group\_repeaters} & ECO-236 & Warning: There is no target load for path driver (\%s). & 检查路径驱动端是否有目标负载。 \\
+\texttt{place\_group\_repeaters} & ECO-237 & Warning: Some cell to be placed has no load for path driver (\%s). & 检查待放置单元是否缺少负载。 \\
+\texttt{place\_group\_repeaters} & ECO-239 & Info: \%s. & 检查放置与连接模式（cutline/distance；virtual/real connection）。 \\
+\texttt{place\_group\_repeaters} / \texttt{unplace\_group\_repeaters} & ECO-240 & Error: The option -cells cannot be used when eco.placement.eco\_enable\_virtual\_connection is true. & 若需虚拟连接，改用 \opt{-repeater\_groups}。 \\
+\texttt{place\_group\_repeaters} & ECO-241 & Warning: The distance based placement does not support multi-fanout path driver(\%s). & 对多扇出路径驱动端改用基于切割线的放置。 \\
+\texttt{place\_group\_repeaters} / \texttt{unplace\_group\_repeaters} & ECO-242 & Warning: The cell (\%s) has no driver or load (number of driver: \%d, number of load: \%d). & 检查单元驱动端/负载数量。 \\
+\texttt{place\_group\_repeaters} & ECO-243 & Error: The cells in collection (\%s) are invalid since they have no driver or load. & 确保待放置单元同时有驱动端与负载，否则从输入中移除。 \\
+\texttt{place\_group\_repeaters} & ECO-244 & Warning: The \%s \%s has no shape. & 检查顶层端口或宏 pin 是否有形状。 \\
+\texttt{place\_group\_repeaters} & ECO-246 & Warning: Skip the path driver (\%s) since the driver or load for the path has no shape. & 路径驱动端或负载缺少形状时跳过。 \\
+\texttt{place\_group\_repeaters} & ECO-251 & Info: Place group repeaters successfully. & 检查全部输入单元是否成功放置。 \\
+\texttt{place\_group\_repeaters} & ECO-252 & Warning: Failed to place repeaters for repeater path which driver is \%s. & 检查该路径驱动端的中继器放置失败原因。 \\
+\texttt{place\_group\_repeaters} & ECO-253 & Warning: The cutline information \%s for cell \%s is not on valid route. & 检查切割线信息是否落在有效布线上。 \\
+\texttt{place\_group\_repeaters} & ECO-254 & Warning: Failed to cut route for cell \%s. & 检查是否未能为该单元切割布线。 \\
+\texttt{place\_group\_repeaters} & ECO-255 & Warning: Gap \%s between driver and nearest route is larger than placing distance \%s. & 检查到最近 pin 的布线距离是否大于放置距离。 \\
+\texttt{place\_group\_repeaters} & ECO-256 & Warning: The first/last distance shorter than gap between pin and route. & 检查 \opt{-first\_distance}/\opt{-last\_distance} 是否短于 pin 与布线间隙。 \\
+\texttt{place\_group\_repeaters} & ECO-257 & Warning: Cannot find cutline information for cell \%s. & 检查该单元是否有切割线信息。 \\
+\texttt{place\_group\_repeaters} & ECO-258 & Info: The app option about virtual connection is turned on... & 确认 \appopt{eco.placement.eco\_enable\_virtual\_connection} 为 true，并指定了 \opt{-repeater\_groups}；组内单元保持顺序。 \\
+\texttt{place\_group\_repeaters} / \texttt{unplace\_group\_repeaters} & ECO-259 & Warning: Number of cells from repeater group inconsistent with drivers from driver group. & 检查中继器组单元数与驱动组驱动端数是否一致。 \\
+\texttt{place\_group\_repeaters} / \texttt{unplace\_group\_repeaters} & ECO-260 & Warning: Number of cells from repeater group inconsistent with loads from load group. & 检查中继器组单元数与负载组负载数是否一致。 \\
+\texttt{place\_group\_repeaters} / \texttt{unplace\_group\_repeaters} & ECO-261 & Warning: Number of path loads less than number of cells in group, so skip these path loads. & 路径负载数少于组内单元数时跳过这些路径负载。 \\
+\texttt{place\_group\_repeaters} / \texttt{unplace\_group\_repeaters} & ECO-262 & Warning: Number of path loads is not an integral multiple of cells in group, so use path loads in order. & 路径负载数不是组内单元数的整数倍时按序使用路径负载。 \\
+\texttt{place\_group\_repeaters} & ECO-265 & Warning: The pin shape \{\%s\} of \%s (\%s) is projected to route \%s \{\%s\}. & 检查布线是否远离驱动端或负载；工具将最近 pin 形状投影到布线。 \\
+\texttt{unplace\_group\_repeaters} & ECO-266 & Warning: Cells not placed before cannot be unplaced. & 仅由 \cmd{add\_group\_repeaters} 添加并由 \cmd{place\_group\_repeaters} 放置的单元可被取消放置。 \\
+\texttt{unplace\_group\_repeaters} & ECO-267 & Error: Input and output routes are not merged after unplacing repeater. & 取消放置后若布线未对齐或不在同一层则无法合并。 \\
+\texttt{place\_group\_repeaters} & ECO-268 & Error: Cells are invalid since they are placed before. & 先用 \cmd{unplace\_group\_repeaters} 取消放置。 \\
+\texttt{add\_group\_repeaters} / \texttt{place\_group\_repeaters} & ECO-269 & Error: Unable to check the current reference of cell '\%s': \%s. & 检查报告原因及其他消息；用适当命令检查当前参考是否合法。 \\
+\texttt{add\_group\_repeaters} / \texttt{place\_group\_repeaters} & ECO-270 & Error: Unable to find swappable variant reference for cell '\%s': \%s. & 检查当前参考对该问题是否非法。 \\
+\texttt{add\_group\_repeaters} / \texttt{place\_group\_repeaters} & ECO-271 & Error: Candidate reference and reference of cell are not in the same variant cell group. & 检查候选与当前参考的兼容性及是否同属一个变体单元组。 \\
+\texttt{unplace\_group\_repeaters} & ECO-272 & Error: The mixed input cells are not supported. & 不支持混合由 \cmd{add\_group\_repeaters} 添加与由 \cmd{place\_group\_repeaters} 放置的单元。 \\
+\texttt{unplace\_group\_repeaters} & ECO-273 & Error: There are no placed cells to be unplaced. & 检查是否存在符合条件的已放置单元。 \\
+— & ECO-274 & Warning: You are deleting cell \%s with eco\_repeater\_group\_id \%d. & 检查是否在删除属于中继器组的单元。 \\
+\texttt{place\_group\_repeaters} & ECO-275 & Error: Failed to traverse cutlines. The nets may have too many blockages. & 检查插入位置；移除 blockage 或找到切割线并用 \opt{-repeater\_group}。 \\
+\texttt{add\_group\_repeaters} & ECO-276 & Warning: Unable to find free area for repeater on net at location within range. & 检查 checkerboard snapping 是否能为中继器找到空闲空间。 \\
+\texttt{set\_repeater\_group} & ECO-277 & Warning: You are trying to override cells of repeater group. Use -override if you have to. & 覆盖单元时须使用 \opt{-override}。 \\
+\texttt{create\_repeater\_groups} & ECO-278 & Error: Get 0 transparent cells from all supernets. & 检查输入超网是否没有可分组的透明单元。 \\
+\texttt{create\_repeater\_groups} & ECO-279 & Error: \%s has multiple(\%lu) inputs. & 检查单元或负载是否有多个输入。 \\
+\end{longtable}
+
+% ============================================================
+\section{修复多电压违例}
+\subsection*{Fixing Multivoltage Violations}
+
+ECO 流程中的设计更改有时会导致隔离（isolation）或电压违例。\cmd{fix\_mv\_design} 命令可识别并修复缓冲器树与二极管的违例。
+
+必须与 \cmd{fix\_mv\_design} 一起使用 \opt{-buffer} 或 \opt{-diode} 选项。更多信息见：
+\begin{itemize}
+  \item 修复缓冲器（Fixing Buffers）
+  \item 修复二极管（Fixing Diodes）
+\end{itemize}
+
+若 UPF 尚未 commit，\cmd{fix\_mv\_design} 在执行任何操作前会自动 commit UPF。
+
+该命令对网表所做的更改不保证布局或时序合法。运行后必须检查设计。
+
+\subsection{修复缓冲器}
+\subsubsection*{Fixing Buffers}
+
+\cmd{fix\_mv\_design} 的 \opt{-buffer} 选项修复整个设计中缓冲器树内的隔离违例与非法库单元。命令可执行下列更改：
+\begin{itemize}
+  \item 最小化双轨缓冲器或反相器的数量；
+  \item 修复缓冲器树中的隔离违例；
+  \item 修复具有非法设置的缓冲器与反相器，包括：
+  \begin{itemize}
+    \item 工艺、电压与温度（PVT）设置；
+    \item 库单元 purpose 或 subset 设置；
+    \item 目标库 subset 设置；
+    \item 偏置电压（bias voltages）；
+  \end{itemize}
+  \item 修复缓冲器电源域与其物理所在电压区域之间的失配。
+\end{itemize}
+
+命令可如下更改网表：
+\begin{itemize}
+  \item 交换缓冲器库单元以修复非法设置；
+  \item 将单轨缓冲器换为双轨缓冲器，或将双轨换为单轨；
+  \item 更改双轨缓冲器与反相器的备份电源（backup supplies）；
+  \item 更改电平移位器（level shifter）的输入或输出电源；
+  \item 用物理或逻辑 feedthrough 修复缓冲器电源域与电压区域（或 gas station 电压区域）之间的失配。
+\end{itemize}
+
+\cmd{fix\_mv\_design} 保持原始缓冲器或反相器的布局，并遵守与既有缓冲器/反相器关联的中继器策略。此外，命令仅使用电压区域或电压区域分区中可用的电源。
+
+该命令不会插入隔离单元或电平移位器单元来修复既有隔离或电压违例。由命令引起的网表更改不会引入新的隔离或电压违例。
+
+要用 \opt{-from} 与 net 或驱动 pin 名称指定缓冲器树。若指定 net 名，则使用其驱动 pin。两种情况下，驱动 pin 定义完整或部分缓冲器树。支持通配符。
+
+\opt{-lib\_cells} 指定命令可用作替换单元的单轨与双轨缓冲器或反相器库单元列表。默认情况下，若交换并非修复隔离违例所必需，命令不会在双轨与单轨单元之间交换。但若同时指定 \opt{-minimize\_dual\_rail}，工具会尽量减少双轨缓冲器的使用以节省面积。
+
+若因 \cmd{fix\_mv\_design} 而插入新库单元，按下列优先级选择：
+\begin{itemize}
+  \item 与原始库单元同一库中的单元；
+  \item 与原始库名称相似的库中的单元；
+  \item 与原始库单元名称相似的单元。
+\end{itemize}
+
+默认缓冲器树在电平移位器单元处停止。指定 \opt{-level\_shifter} 可允许命令修改电平移位器的输入或输出电源，但不会更改电平移位器库单元。
+
+要用 \opt{-report\_only} 仅报告工具建议的更改而不做任何网表更改。
+
+\subsection{修复二极管}
+\subsubsection*{Fixing Diodes}
+
+\cmd{fix\_mv\_design} 的 \opt{-diode} 选项修复整个设计中二极管的电源域与电压区域失配。该命令检查所有二极管，包括由 \cmd{create\_cell}、\cmd{create\_diodes}、\cmd{add\_port\_protection\_diodes} 以及若干为修复天线违例而插入二极管的布线命令所插入的二极管。
+
+若发现二极管的电源域与电压区域失配，工具用电压区域显式分配对应电源域。若同一电压区域存在多个电源域，工具任选其中一个可用电源域。任一可用电源域均可接受，因为所有二极管单元都是单轨单元，且同一电压区域内所有电源域具有相同的主电源。
+
+要用 \opt{-report\_only} 仅获得建议更改报告而不做网表更改；用 \opt{-verbose} 获得详细信息。这是可与 \opt{-diode} 一起使用的仅有两个选项。

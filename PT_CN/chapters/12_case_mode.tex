@@ -1,0 +1,487 @@
+% 第 12 章 Case and Mode Analysis
+\bichapter{Case 与 Mode 分析}{Case and Mode Analysis}
+\label{chap:case}
+
+要限制时序分析的范围，可使用下列技术将设计置于特定工作 mode：
+\begin{itemize}
+  \item Case 分析（Case Analysis）
+  \item Mode 分析（Mode Analysis）
+  \item 用于场景缩减的 Mode 合并（Mode Merging for Scenario Reduction）
+\end{itemize}
+
+% ============================================================
+\section{Case 分析}
+\subsection*{Case Analysis}
+
+Case 分析使用端口或 pin 上的逻辑常量或逻辑跳变对时序分析进行约束，从而限制信号在设计中的传播。将 case 分析设为逻辑常量时，常量会向前传播，且常量所传播路径上的路径会被禁用。Case 分析不会向后传播。
+
+将 case 分析设为逻辑跳变（上升或下降）时，通过限制分析中考虑的跳变来消除某些路径。例如，下图所示多路选择器：将 select 信号设为逻辑 0 会阻断 B 到 Z 的数据，从而禁用 B 到 Z 的时序弧。
+
+\figplaceholder{Figure 126: Constant propagation disables timing arcs}{常量传播禁用时序弧}{fig:case-mux}
+
+若 case 分析将常量传播到时序元件的异步 preset 或 clear pin，时序单元输出也会传播常量 1 或 0，如下图所示。
+
+\figplaceholder{Figure 127: Constant propagation through an asynchronous input}{经异步输入的常量传播}{fig:case-async}
+
+关于 case 分析，另见：
+\begin{itemize}
+  \item 控制逻辑值的常量传播
+  \item 配置 Case 分析与常量传播
+  \item 设置与移除 Case 分析值
+  \item 使能经时序单元的 Case 分析传播
+  \item 用 Case 分析评估条件弧
+  \item 用 Case 分析禁用扫描链
+  \item 执行 Case 分析
+  \item 报告被禁用弧并追踪常量传播
+\end{itemize}
+
+\subsection{控制逻辑值的常量传播}
+\subsubsection*{Propagation of Constants that Control Logic Values}
+
+若单元输入上存在逻辑常量与 case 分析，且逻辑常量被设为该单元的控制逻辑值，则从输出传播逻辑常量；否则传播 case 分析。
+
+\textbf{示例 1：输入 A 为常量逻辑 0 的 AND 门}
+
+\figplaceholder{Figure (Example 1): AND gate with constant 0 on A}{输入 A 为常量 0 的 AND 门}{fig:case-and0}
+
+无论 B 为何值，逻辑 0 均从输出 pin Z 传播。
+
+\textbf{示例 2：输入 A 为常量逻辑 1 的 AND 门}
+
+\figplaceholder{Figure (Example 2): AND gate with constant 1 on A}{输入 A 为常量 1 的 AND 门}{fig:case-and1a}
+
+pin A 上的逻辑常量 1 不是控制逻辑值，因此逻辑常量不会传播到输出 pin Z。
+
+\textbf{示例 3：输入 A 与 B 均为常量逻辑 1 的 AND 门}
+
+\figplaceholder{Figure (Example 3): AND gate with constant 1 on A and B}{输入 A、B 均为常量 1 的 AND 门}{fig:case-and1b}
+
+逻辑常量 1 从输出 pin Z 传播。
+
+\subsection{配置 Case 分析与常量传播}
+\subsubsection*{Configuring Case Analysis and Constant Propagation}
+
+要配置 case 分析及工具如何传播常量，设置下列变量：
+
+\begin{table}[htbp]
+\centering
+\caption{Case 分析与常量传播相关变量}
+\begin{tabular}{@{}p{5.5cm}p{7.5cm}@{}}
+\toprule
+变量 & 说明 \\
+\midrule
+\cmd{case\_analysis\_sequential\_propagation} & 控制逻辑常量经时序单元的传播 \\
+\cmd{case\_analysis\_propagate\_through\_icg} & 控制逻辑常量经集成时钟门控单元的传播 \\
+\cmd{disable\_case\_analysis} & 禁用用户指定 case 分析逻辑值与网表逻辑常量的传播；此设置覆盖 \cmd{disable\_case\_analysis\_ti\_hi\_lo} \\
+\cmd{disable\_case\_analysis\_ti\_hi\_lo} & 禁用网表逻辑常量的传播 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{设置与移除 Case 分析值}
+\subsubsection*{Setting and Removing Case Analysis Values}
+
+要在指定 pin 或端口上设置 case 分析值，运行 \cmd{set\_case\_analysis} 命令。设置 case 分析时可指定下列之一：
+
+\begin{itemize}
+  \item \textbf{常量逻辑 0、1 或 static}\\
+        将 test 端口设为常量逻辑 0：
+\begin{lstlisting}
+pt_shell> set_case_analysis 0 [get_ports test]
+\end{lstlisting}
+        逻辑值 \texttt{static} 表示常量 0 或 1 且无跳变，使所连 net 不能作为串扰 aggressor，也不会作为 victim 经历延时变化。
+  \item \textbf{上升或下降跳变}\\
+        将 RESET 端口设为上升跳变：
+\begin{lstlisting}
+pt_shell> set_case_analysis rising [get_ports RESET]
+\end{lstlisting}
+\end{itemize}
+
+\figplaceholder{Figure 128: Setting Case Analysis With a Rising Transition}{用上升跳变设置 Case 分析}{fig:case-rising}
+
+\begin{noteBox}
+PrimePower 计算会忽略上升与下降跳变值。
+\end{noteBox}
+
+冲突时适用下列规则：
+\begin{itemize}
+  \item \cmd{set\_case\_analysis} 设置优先于内建常量值（例如 Verilog 网表中）。
+  \item 同一端口或 pin 上较新的 \cmd{set\_case\_analysis} 优先于较旧设置。
+  \item 直接在端口或 pin 上设置的 case 分析值优先于传播到该端口或 pin 的冲突 case 分析值。
+  \item 传播得到的 case 分析值冲突时，逻辑 0 优先级最高，其次为 static，再次为逻辑 1。
+\end{itemize}
+
+可将 case 分析与 mode 分析结合使用。例如，因 RAM 处于读 mode 而将某些内部逻辑设为常量：
+\begin{lstlisting}
+pt_shell> set_case_analysis 1 U1/U2/select_read
+\end{lstlisting}
+
+\textbf{移除 Case 分析值}
+
+运行 \cmd{remove\_case\_analysis}：
+\begin{lstlisting}
+pt_shell> remove_case_analysis test
+\end{lstlisting}
+
+要抑制所有逻辑常量的传播（包括 case 分析设置及 tie-high/tie-low pin），将 \cmd{disable\_case\_analysis} 设为 \texttt{true}。可用于编写 Design Compiler 能正确综合的脚本。
+
+\subsection{使能经时序单元的 Case 分析传播}
+\subsubsection*{Enabling Case Analysis Propagation Through Sequential Cells}
+
+默认情况下，PrimeTime 不将 case 分析值经时序单元传播。可按下列方式覆盖：
+\begin{itemize}
+  \item 要经所有时序单元传播 case 分析值，将 \cmd{case\_analysis\_sequential\_propagation} 设为 \texttt{always}。
+  \item 要经特定时序单元传播：
+  \begin{enumerate}
+    \item 确保 \cmd{case\_analysis\_sequential\_propagation} 为 \texttt{never}（默认）。
+    \item 运行 \cmd{set\_case\_sequential\_propagation}：
+\begin{lstlisting}
+pt_shell> set_case_sequential_propagation cell_or_libcell_list
+\end{lstlisting}
+    \item 用下列方法之一验证已使能传播的时序单元：
+    \begin{itemize}
+      \item 运行 \cmd{report\_case\_analysis} 并带 \opt{-sequential\_propagation}。
+      \item 查询 \texttt{is\_case\_sequential\_propagation} 属性（对已使能 case 分析传播的时序单元与库单元返回 \texttt{true}）。
+    \end{itemize}
+  \end{enumerate}
+\end{itemize}
+
+要禁用特定时序单元的 case 分析传播，运行 \cmd{remove\_case\_sequential\_propagation}。
+
+\subsection{用 Case 分析评估条件弧}
+\subsubsection*{Evaluating Conditional Arcs Using Case Analysis}
+
+可通过 case 分析使能或禁用 Liberty 模型中的条件弧。Liberty 是描述无对应门级网表的大块静态时序特性的建模语言。若弧有关联条件，PrimeTime 会评估该条件；设计不满足弧条件时，PrimeTime 禁用该条件弧。注意：条件测试不能使已被 case 分析禁用的弧重新使能。
+
+下例中，存在从 A 到 X、条件为 \texttt{COND(C\&\&C1)} 的延时弧；当布尔表达式 \texttt{(C\&\&C1)} 为假时禁用。还存在从 CLK 到 B、条件为 \texttt{COND(C||C1)} 的 setup 弧；当 \texttt{(C||C1)} 为假时禁用。从 CLK 到 Y 的弧为非条件弧。
+
+\figplaceholder{Figure 129: Conditional and nonconditional arcs in a Liberty Model}{Liberty 模型中的条件与非条件弧}{fig:case-liberty}
+
+下列命令因 case 分析使条件为假而禁用 A 到 X 的延时弧：
+\begin{lstlisting}
+pt_shell> set_case_analysis 0 C
+pt_shell> set_case_analysis 1 C1
+\end{lstlisting}
+
+要使能 A 到 X 的延时弧及 CLK 到 B 的 setup 弧：
+\begin{lstlisting}
+pt_shell> set_case_analysis 1 {C C1}
+\end{lstlisting}
+
+关于在 Liberty 中指定条件弧，见 \textit{Library Compiler User Guide}。
+
+\subsection{用 Case 分析禁用扫描链}
+\subsubsection*{Disabling Scan Chains With Case Analysis}
+
+通过 case 分析可禁用扫描链，从而将扫描链从时序分析中排除。
+
+\figplaceholder{Figure 130: Scan chain that starts at SCAN\_IN and ends at SCAN\_OUT}{起始于 SCAN\_IN、终止于 SCAN\_OUT 的扫描链}{fig:case-scan}
+
+要禁用上述扫描链，将 SCAN\_MODE 端口设为逻辑 0：
+\begin{lstlisting}
+pt_shell> set_case_analysis 0 [get_ports "SCAN_MODE"]
+\end{lstlisting}
+
+PrimeTime 将常量传播到各扫描触发器的 TE pin。对 FF1、FF2、FF3、FF4 的时序 case 分析会禁用从 CP 到 TI 的 setup 与 hold 弧。
+
+\subsection{执行 Case 分析}
+\subsubsection*{Performing Case Analysis}
+
+可用下列方法执行 case 分析：
+\begin{itemize}
+  \item 基本 Case 分析（Basic Case Analysis）
+  \item 详细 Case 分析（Detailed Case Analysis）
+  \item 独立 PrimeTime 约束一致性检查（Standalone PrimeTime Constraint Consistency Checking）
+\end{itemize}
+
+\subsubsection{基本 Case 分析}
+\paragraph*{Basic Case Analysis}
+
+生成基本 case 分析报告：
+\begin{lstlisting}
+pt_shell> report_case_analysis
+\end{lstlisting}
+
+示例输出：
+\begin{lstlisting}
+****************************************
+Report : case_analysis
+...
+****************************************
+
+Pin name                         Case analysis value
+----------------------------------------------------
+test_port                        0
+U1/U2/core/WR                    1
+\end{lstlisting}
+
+\subsubsection{详细 Case 分析}
+\paragraph*{Detailed Case Analysis}
+
+带 \opt{-from} 或 \opt{-to} 及 pin/端口列表运行 \cmd{report\_case\_analysis}，会调用约束一致性检查（需要 PrimeTime SI 许可证）：
+\begin{lstlisting}
+pt_shell> report_case_analysis -to y/Z
+\end{lstlisting}
+
+也可在 PrimeTime GUI 中选择 \textbf{Constraints > View Case Debugging Results} 查看 case 传播详情。
+
+\subsubsection{独立 PrimeTime 约束一致性检查}
+\paragraph*{Standalone PrimeTime Constraint Consistency Checking}
+
+要访问更完整的 case 分析功能，运行 PrimeTime 约束一致性 shell。详见「启动约束一致性会话」。
+
+\subsection{报告被禁用弧并追踪常量传播}
+\subsubsection*{Reporting Disabled Arcs and Tracing Constant Propagation}
+
+PrimeTime 执行常量传播时，会在常量传播域边界禁用时序弧。要追踪因常量传播导致的弧禁用：
+\begin{enumerate}
+  \item 将 \cmd{case\_analysis\_log\_file} 设为文件名，以生成列出传播常量的 net 与 pin 的日志。
+  \item 运行 \cmd{report\_disable\_timing} 查看常量传播后被禁用的时序弧。
+\end{enumerate}
+
+下例中，因 U5/A 为常量 0 且未向 U5/Z 传播常量，工具禁用 U5/A 到 U5/Z 的弧。
+
+\figplaceholder{Figure 131: Arc From U5/A to U5/Z is Disabled}{U5/A 到 U5/Z 的弧被禁用}{fig:case-disabled}
+
+\begin{lstlisting}
+pt_shell> set_case_analysis 0 {get_ports "A"}
+pt_shell> set_case_analysis 1 {get_ports "B"}
+pt_shell> set_app_var case_analysis_log_file my_design_cnst.log
+pt_shell> report_disable_timing
+\end{lstlisting}
+
+示例 \cmd{report\_disable\_timing} 输出：
+\begin{lstlisting}
+Cell or Port     From     To     Flag Reason
+-------------------------------------------------
+U5               A        Z      c     A = 0
+\end{lstlisting}
+
+常量传播日志 \texttt{my\_design\_cnst.log} 会记录各级前向传播详情（net pin、单元、逻辑常量等）。
+
+% ============================================================
+\section{Mode 分析}
+\subsection*{Mode Analysis}
+
+库单元与时序模型可定义工作 mode，例如 RAM 的读/写 mode。每个 mode 关联一组 PrimeTime 在该 mode 激活时分析的时序弧；非激活 mode 的时序弧不分析。未设置任何 mode 时，所有 mode 均激活，所有时序弧均分析。
+
+两类 mode：
+\begin{itemize}
+  \item \textbf{单元 mode（Cell modes）}：在时序模型或库单元中定义，如 RAM 的读/写 mode。
+  \item \textbf{设计 mode（Design modes）}：用户在设计级定义，如正常与测试 mode；可将设计 mode 映射到单元实例的单元 mode 集合或路径集合。设计 mode 激活时，映射到该设计 mode 的所有单元 mode 激活，映射路径使能；设计 mode 非激活时，对应单元 mode 非激活，映射路径设为 false path。
+\end{itemize}
+
+\textbf{Mode 组（Mode Groups）}
+
+Mode 组织成组。每组有两种可能状态：所有 mode 使能（默认），或仅一个 mode 使能、其余禁用。通常只有一个 mode 组。
+
+带 mode 的库单元可有一个或多个 mode 组；每组含若干单元 mode，每个单元 mode 映射到库单元中的若干时序弧。该库单元的每个实例继承这些 mode 组与 mode。典型 RAM 可有读、写、锁存、透明 mode；可将读/写归为一组，锁存/透明归为另一组。分组的好处是：设置某单元 mode 时，PrimeTime 会使对应互斥 mode 非激活。例如指定 RAM 为读 mode 即隐含写 mode 非激活，与透明/锁存 mode 设置无关；两组（读/写 与 透明/锁存）相互独立。
+
+关于 mode 操作，见：
+\begin{itemize}
+  \item 设置单元 Mode
+  \item 报告 Mode
+\end{itemize}
+
+\subsection{设置单元 Mode}
+\subsubsection*{Setting Cell Modes}
+
+设置单元工作 mode 的方法（按优先级从高到低）：
+\begin{itemize}
+  \item 直接在单元实例上设置 Mode
+  \item 用设计 Mode 间接设置单元 Mode
+  \item 用 Case 分析将单元置入 Mode
+\end{itemize}
+
+\subsubsection{直接在单元实例上设置 Mode}
+\paragraph*{Setting Modes Directly on Cell Instances}
+
+默认每个单元实例中所有单元 mode 均使能。可仅使能一个单元 mode 并禁用同组其余 mode。mode 禁用时，映射到该 mode 的时序弧均禁用（不参与时序分析）。
+
+\begin{lstlisting}
+pt_shell> set_mode -type cell READ U1/U2/core
+\end{lstlisting}
+
+使能读 mode 并禁用 U1/U2/core 该 mode 组中其余 mode。
+
+取消 mode 选择、使 U1/U2/core 所有 mode 重新激活：
+\begin{lstlisting}
+pt_shell> reset_mode U1/U2/core
+\end{lstlisting}
+
+\subsubsection{用设计 Mode 间接设置单元 Mode}
+\paragraph*{Setting Cell Modes Indirectly Using Design Modes}
+
+设计 mode 是设计级用户定义 mode（如芯片的正常/测试 mode）。在 PrimeTime 中创建设计 mode 并映射到单元实例的单元 mode 或设计路径；设置设计 mode 时，关联单元实例设为映射的单元 mode，或关联路径使能、其他设计 mode 的路径设为 false path。
+
+步骤：
+\begin{enumerate}
+  \item 用 \cmd{define\_design\_mode\_group} 为当前设计创建 mode 组；多个组则多次调用。
+  \item 用 \cmd{map\_design\_mode} 将各设计 mode 映射到关联单元 mode 或路径。
+  \item 用 \cmd{set\_mode -type design} 设置当前设计 mode；使该 mode 激活，同组其他设计 mode 非激活。
+\end{enumerate}
+
+\figplaceholder{Figure 132: Defining, mapping, and setting design modes}{定义、映射与设置设计 mode}{fig:mode-design}
+
+\subsubsection{映射设计 Mode}
+\paragraph*{Mapping Design Modes}
+
+用 \cmd{define\_design\_mode\_group} 创建设计 mode 后，需指定各设计 mode 的行为（映射）：
+\begin{itemize}
+  \item 将设计 Mode 映射到单元 Mode 与实例
+  \item 将设计 Mode 映射到路径集合
+\end{itemize}
+
+\textbf{映射到单元 Mode 与实例}
+
+激活该设计 mode 时，对指定实例应用指定单元 mode：
+\begin{lstlisting}
+map_design_mode design_mode_name \
+   cell_mode_list instance_list
+\end{lstlisting}
+
+示例：将 execute 设计 mode 映射为在 U1/U2/core 上调用 read\_ram 单元 mode：
+\begin{lstlisting}
+pt_shell> map_design_mode execute read_ram U1/U2/core
+\end{lstlisting}
+
+\figplaceholder{Figure 133: Mapping a design mode to a cell mode and cell instance}{将设计 mode 映射到单元 mode 与实例}{fig:mode-map-cell}
+
+\textbf{映射到路径集合}
+
+激活该设计 mode 时使能这些路径；同组其他设计 mode 映射的路径设为 false path 并从时序分析中移除：
+\begin{lstlisting}
+map_design_mode design_mode_name \
+  [-from pin_list] [-through pin_list] [-to pin_list]
+\end{lstlisting}
+
+示例：
+\begin{lstlisting}
+pt_shell> map_design_mode read -from Raddr -through U1/A
+pt_shell> map_design_mode write -from Waddr -through U1/B
+\end{lstlisting}
+
+\figplaceholder{Figure 134: Mapping a design mode to a set of paths}{将设计 mode 映射到路径集合}{fig:mode-map-path}
+
+\textbf{取消映射}
+
+运行 \cmd{remove\_design\_mode} 取消或更改设计 mode 映射，并撤销因该映射产生的单元 mode 设置或 false path。
+
+\subsubsection{用 Case 分析将单元置入 Mode}
+\paragraph*{Placing Cells Into Modes by Using Case Analysis}
+
+部分库单元与时序模型定义条件 mode：由单元输入逻辑条件触发 mode 选择。例如 RAM 读 mode 可由读/写输入 pin 上的逻辑 0 触发。
+
+在输入 pin 上用 case 分析（或传播到该 pin 的 case 分析值）设置控制逻辑值时，单元隐式进入相应分析 mode。
+
+\figplaceholder{Figure 135: RAM Liberty cell can operate in read and write modes}{可在读/写 mode 下工作的 RAM Liberty 单元}{fig:mode-ram}
+
+若 Liberty 中定义：
+\begin{lstlisting}
+cell(RAM) {
+  mode_definition(read_write) {
+    mode_value(read) {
+      when : "!read_write";
+      sdf_cond : "read_write == 0";
+    }
+    mode_value(write) {
+      when : "read_write";
+      sdf_cond : "read_write == 1";
+    }
+  }
+...
+}
+\end{lstlisting}
+
+使能读 mode：
+\begin{lstlisting}
+pt_shell> set_case_analysis 0 [get_ports read_write]
+\end{lstlisting}
+
+使能写 mode：
+\begin{lstlisting}
+pt_shell> set_case_analysis 1 [get_ports read_write]
+\end{lstlisting}
+
+向 read\_write pin 设置或传播逻辑值会隐式选择对应 mode 并禁用另一 mode；仅使用激活 mode 关联的时序弧。若 mode 组中无任何 mode 被 case 分析或其他方式选中，则所有 mode 使能；未选中任何 mode 时使能默认 mode。
+
+\subsection{报告 Mode}
+\subsubsection*{Reporting Modes}
+
+报告已定义或已设置的单元与设计 mode：
+\begin{lstlisting}
+pt_shell> report_mode
+\end{lstlisting}
+
+示例输出片段：
+\begin{lstlisting}
+Cell               Mode(Group)   Status     Condition   Reason
+--------------------------------------------------------------------
+Core (LIB_CORE)    read(rw)      disabled   (A==1)      cond
+                   oen-on(rw)    ENABLED    (A==0)      cond
+                   write(rw)     disabled   (B==1)      cond
+...
+\end{lstlisting}
+
+% ============================================================
+\section{用于场景缩减的 Mode 合并}
+\subsection*{Mode Merging for Scenario Reduction}
+
+复杂设计通常需分析大量场景。可用 PrimeTime 约束一致性 mode 合并能力减少场景数（mode 数 $\times$ corner 数）。
+
+Mode 合并期间，工具会：
+\begin{itemize}
+  \item 确定待合并的输入 mode
+  \item 合并多个输入 mode 的时序约束
+  \item 生成超集输出 mode
+\end{itemize}
+
+\figplaceholder{Figure 136: Mode merging automatically determines which input modes to merge and creates output modes}{Mode 合并自动确定待合并输入 mode 并创建输出 mode}{fig:mode-merge}
+
+示例映射：mode\_1/2/3 $\rightarrow$ merged\_1；mode\_4/5/6 $\rightarrow$ merged\_2；mode\_7 不合并。
+
+\subsection{运行 Mode 合并}
+\subsubsection*{Running Mode Merging}
+
+\begin{enumerate}
+  \item 以多场景模式启动 PrimeTime：
+\begin{lstlisting}
+% pt_shell -multi_scenario
+\end{lstlisting}
+  \item （可选）为分布式 mode 合并指定核/进程/主机：
+\begin{lstlisting}
+set_host_options -max_cores numCores \
+  -num_processes numProcesses \
+  -submit_command submitCommand [host_name]
+\end{lstlisting}
+  \item 为指定 mode 与 corner 创建场景：
+\begin{lstlisting}
+create_scenario -mode mode_name -corner corner_name
+\end{lstlisting}
+  \item 运行 mode 合并：
+\begin{lstlisting}
+create_merged_modes
+\end{lstlisting}
+  \item 在 \texttt{merged\_constraints} 目录中检查合并约束与 mode 合并分析报告。
+\end{enumerate}
+
+Mode 合并考虑 corner 条件；合并约束仅当对应输入 mode 对该 corner 有效时才对该 corner 有效。有效 corner 由 DMSA 主机变量 \texttt{snps\_corner\_name} 指定。
+
+\subsection{调试 Mode 合并冲突}
+\subsubsection*{Debugging Mode Merging Conflicts}
+
+要在 GUI 中可视化调试 mode 合并冲突，对 \cmd{create\_merged\_modes} 使用 \opt{-interactive}。执行仅测试的 mode 合并而不实际合并约束；测试成功后打开 MergeModeConflict Browser。
+
+\figplaceholder{Figure 137: MergeModeConflict browser}{MergeModeConflict 浏览器}{fig:mode-conflict}
+
+GUI 显示下列冲突类型的详情、示意图、调试帮助与修复建议：
+\begin{itemize}
+  \item 时钟-时钟（Clock-clock）
+  \item 时钟-数据（Clock-data）
+  \item 例外（Exception）
+  \item 组路径（Group path）
+  \item 再汇聚（Reconvergence）
+  \item 取值（Value）
+\end{itemize}
+
+关于 mode 合并，另见 SolvNetPlus 文章 000024378，\textit{PrimeTime Mode Merging Application Note}。

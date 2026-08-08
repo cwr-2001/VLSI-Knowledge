@@ -1,0 +1,357 @@
+% 第 11 章 Back-Annotation
+\bichapter{反标}{Back-Annotation}
+\label{chap:backann}
+
+反标（back-annotation）是从外部文件读入延时或寄生电阻电容值供时序分析的过程。通过反标，可在物理设计各阶段后在工具中准确分析电路时序。关于反标，见：
+\begin{itemize}
+  \item SDF 反标
+  \item 反标延时、时序检查与转换时间
+  \item 写出 SDF 文件
+  \item 设置集总寄生电阻与电容
+  \item 详细寄生
+  \item 读入寄生文件
+  \item 不完整反标寄生
+  \item 反标优先级
+  \item 报告反标寄生
+  \item 移除反标数据
+  \item GPD 寄生浏览器
+\end{itemize}
+
+\section{SDF 反标}
+\subsection*{SDF Back-Annotation}
+
+初始静态时序分析中，PrimeTime 基于 wire load 模型估算 net 延时。实际延时取决于单元与 net 的物理布局布线；floorplanner 或 router 可提供更详细准确的延时信息供 PrimeTime 分析，此过程称为延时反标，信息常以 SDF 文件提供。
+
+读入 SDF 反标延时信息的方式：
+\begin{itemize}
+  \item 从 SDF 文件读入延时与时序检查
+  \item 不使用 SDF 格式反标延时、时序检查与转换时间
+\end{itemize}
+
+PrimeTime 支持 SDF v1.0 至 2.1 及 v3.0 子集。一般支持除以下外的所有 SDF 结构：\texttt{PATHPULSE}、\texttt{GLOBALPATHPULSE}；\texttt{NETDELAY}、\texttt{CORRELATION}；\texttt{PATHCONSTRAINT}、\texttt{SUM}、\texttt{DIFF}、\texttt{SKEWCONSTRAINT}。另支持 v3.0 子集：	exttt{RETAIN}、	exttt{RECREM}、	exttt{REMOVAL}、	exttt{CONDELSE}。
+
+若无 SDF 文件，可在分析脚本中用电容电阻寄生反标命令指定延时。
+
+\subsection{读入 SDF 文件}
+\subsubsection*{Reading SDF Files}
+
+\cmd{read\_sdf} 从 SDF 1.0/1.1/2.0/2.1/3.0 文件读入实例相关 pin-to-pin 叶单元与 net 时序信息并反标到当前设计。设计中实例名须与时序文件匹配（如 VHDL 命名约定须一致）。读入后 PrimeTime 报告：SDF 读入错误数；反标延时与时序检查数；不支持的 SDF 结构及出现次数；SDF 中的 P/T/V；可用 \cmd{report\_annotated\_delay} 与 \cmd{report\_annotated\_check} 查看反标状态。
+
+\begin{lstlisting}
+pt_shell> read_sdf -load_delay cell adder.sdf
+pt_shell> current_design MY_DESIGN
+pt_shell> read_sdf -load_delay net -path u1 mult16_u1.sdf
+pt_shell> read_sdf -cond_use max boo.sdf
+pt_shell> read_sdf -analysis_type on_chip_variation boo.sdf
+pt_shell> read_sdf -analysis_type on_chip_variation \
+            -min_file boo_bc.sdf -max_file boo_wc.sdf
+\end{lstlisting}
+
+\subsubsection{从子设计时序文件反标}
+\paragraph*{Annotating Timing From a Subdesign Timing File}
+
+使用 \opt{-path} 时，\cmd{read\_sdf} 用子设计时序文件反标当前设计；不能将子设计端口 net 延时用于反标当前设计。
+
+\subsubsection{反标负载延时}
+\paragraph*{Annotating Load Delay}
+
+负载延时（extra source gate delay）是驱动 net 电容负载引起的单元延时部分。部分延时计算器将其计入 net 延时，部分计入单元延时。默认 \cmd{read\_sdf} 假定负载延时在单元延时中；若在 net 延时中，使用 \opt{-load\_delay}。
+
+\subsubsection{从 SDF 反标条件延时}
+\paragraph*{Annotating Conditional Delays From SDF}
+
+SDF 中延时与时序检查可有条件（通常基于单元输入值的表达式）。反标方式取决于 Synopsys 库是否定义条件弧：
+\begin{itemize}
+  \item 库含条件弧：反标所有 SDF 条件延时；库中 \texttt{sdf\_cond} 字符串须与 SDF 完全匹配
+  \item 库无条件弧：反标所有条件延时的最大或最小值；用 \opt{-cond\_use max/min} 选择
+\end{itemize}
+
+\figplaceholder{Figure 112: Example of state-dependent timing arcs}{状态相关时序弧示例}{fig:ba-sdf-cond}
+
+库无条件时，SDF 对所有 A 到 Z 弧使用最坏延时；库有条件时可映射到对应弧。\figplaceholder{Figure 113}{库无条件时的反标延时}{fig:ba-sdf-nocond}\figplaceholder{Figure 114}{库有条件时的反标延时}{fig:ba-sdf-condlib}
+
+\begin{noteBox}
+IOPATH 语句反标两 pin 间所有弧；COND IOPATH 优先于 IOPATH。
+\end{noteBox}
+
+选择 B=0 延时：\cmd{set\_case\_analysis 0 [get\_pins U1/B]}。常量可通过 tie-high/low 或另一 pin 的 \cmd{set\_case\_analysis} 传播到选择条件弧的 pin。
+
+\subsubsection{反标时序检查}
+\paragraph*{Annotating Timing Checks}
+
+\begin{table}[htbp]
+\centering
+\caption{时序检查的 SDF 结构（表 19）}
+\begin{tabular}{@{}ll@{}}
+\toprule
+检查类型 & SDF 结构 \\
+\midrule
+Setup/Hold & SETUP, HOLD, SETUPHOLD \\
+Recovery & RECOVERY \\
+Removal & REMOVAL \\
+最小脉冲宽度 & WIDTH \\
+最小周期 & PERIOD \\
+最大 skew & SKEW \\
+No change & NOCHANGE \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{报告延时反标状态}
+\paragraph*{Reporting Delay Back-Annotation Status}
+
+SDF 文件通常很大（$\geq$100 MB），建议验证所有 net 已反标延时（及时序检查）。\cmd{report\_annotated\_delay} 独立报告单元延时与 net 延时；net 延时分三类：主输入端口 net、主输出端口 net、内部 net（SDF 标准仅反标内部 net）。
+
+\cmd{report\_annotated\_check} 报告反标时序检查数量（setup/hold/recovery/removal/mpw/period/skew/nochange）。
+
+\subsubsection{SDF 流中的更快时序更新}
+\paragraph*{Faster Timing Updates in SDF Flows}
+
+路径每点 PrimeTime 由输入 slew 与电容计算 slew 并向前传播。SDF 反标流中可将 \cmd{timing\_enable\_sdf\_annotation\_updates} 设为 	exttt{false}，使 \cmd{update\_timing} 不重新计算反标延时弧的 slew，显著加快更新（尤其大设计）。此模式不适用于需精确 slew 传播的分析（如 SI、CCS 详细寄生）。
+
+\section{反标延时、时序检查与转换时间}
+\subsection*{Annotating Delays, Timing Checks, and Transition Times}
+
+可用 \cmd{set\_annotated\_delay}、\cmd{set\_annotated\_check}、\cmd{set\_annotated\_transition} 直接反标，无需 SDF。
+
+\cmd{set\_annotated\_delay} 在 pin 或弧上设置 net 或单元延时；\opt{-cell} 指定单元延时，\opt{-net} 指定 net 延时，\opt{-increment} 增量反标。\cmd{set\_annotated\_check} 反标 setup/hold/recovery/removal 等；\cmd{set\_annotated\_transition} 反标 pin 转换时间。
+
+用 \cmd{report\_annotated\_delay}、\cmd{report\_annotated\_check}、\cmd{report\_annotated\_transition} 验证。\cmd{remove\_annotated\_delay}、\cmd{remove\_annotated\_check}、\cmd{remove\_annotated\_transition} 移除反标。
+
+\section{写出 SDF 文件}
+\subsection*{Writing an SDF File}
+
+\cmd{write\_sdf} 将当前设计延时与时序检查写入 SDF。常用选项：\opt{-significant\_digits}、\opt{-load\_delay cell/net}、\opt{-include}、\opt{-exclude}、\opt{-compress gzip}、\opt{-map}（映射文件）、\opt{-mask\_violations setup/hold/both}。
+
+并行驱动网络写出 SDF 时，每个驱动器到每个负载的弧均写出；大规模并行缓冲网络 SDF 可能极大。\figplaceholder{Figure 115: Parallel buffers driving parallel buffers}{并行缓冲驱动并行缓冲}{fig:ba-par-buf}\figplaceholder{Figure 116: Cell delays in a parallel driver network}{并行驱动网络中的单元延时}{fig:ba-par-cell}
+
+可用 \cmd{timing\_reduce\_multi\_drive\_net\_arcs} 缩减并行驱动器弧后再写 SDF。时钟 mesh/spine 网络可用外部仿真计算延时后反标到时钟 pin。
+
+\subsection{SDF 映射文件}
+\subsubsection*{SDF Mapping Files}
+
+默认 \cmd{write\_sdf} 格式固定；可用映射文件自定义输出格式，引用库中 	exttt{timing\_label} 等。映射语法使用 	exttt{\$SDF\_CELL}、	exttt{\$SDF\_CELL\_END}、	exttt{\$1}...	exttt{\$N} 占位符及函数如 \texttt{min\_rise\_delay(label)}、\texttt{pin(name)}、\texttt{bus(name[index])}。
+
+\begin{noteBox}
+映射文件不支持通配符；不能指定实例级映射；未提供映射的单元使用 \cmd{write\_sdf} 默认格式。
+\end{noteBox}
+
+\subsection{写出压缩 SDF}
+\subsubsection*{Writing Compressed SDF Files}
+
+\begin{lstlisting}
+pt_shell> write_sdf -compress gzip 1.sdf.gz
+\end{lstlisting}
+
+\subsection{写出无 Setup/Hold 违例的 SDF}
+\subsubsection*{Writing SDF Files Without Setup or Hold Violations}
+
+\opt{-mask\_violations} 通过调整违例端点最后一条弧的延时掩盖 setup/hold 违例，便于中期门级仿真。可能需要更高 \opt{-significant\_digits} 避免舍入导致轻微违例。
+
+\section{设置集总寄生电阻与电容}
+\subsection*{Setting Lumped Parasitic Resistance and Capacitance}
+
+\figplaceholder{Figure 117: Lumped RC}{集总 RC}{fig:ba-lumped}\cmd{set\_resistance}、\cmd{set\_load} 在 net 上反标 R/C，临时覆盖 wire load 或详细寄生。\cmd{remove\_resistance}、\cmd{remove\_capacitance} 移除后恢复先前寄生形式。可单独设置：读入详细寄生后仅用 \cmd{set\_load} 覆盖电容，电阻仍用详细寄生计算。
+
+\subsection{设置 Net 电容}
+\subsubsection*{Setting Net Capacitance}
+
+\cmd{set\_load} 设置端口与 net 电容；层次设计须先 \cmd{link\_design}。默认 net 总电容为 pin、port 与 wire 电容之和；指定值覆盖内部估算。\opt{-wire\_load} 将值计为 wire 电容。用 \cmd{report\_port}、\cmd{report\_net} 查看。
+
+\subsection{设置 Net 电阻}
+\subsubsection*{Setting Net Resistance}
+
+\cmd{set\_resistance} 覆盖内部估算电阻；\cmd{report\_net} 查看；\cmd{remove\_resistance} 移除指定 net；\cmd{reset\_design} 移除全设计电阻反标。
+
+\section{详细寄生}
+\subsection*{Detailed Parasitics}
+
+可将详细寄生反标到 PrimeTime，以 R/C 标注布线网表各物理段；比集总寄生更准确但耗时。RC 网络用于计算各子节点有效电容、slew 与延时。PrimeTime 可读 SPEF 等格式。\figplaceholder{Figure 118: Detailed RC}{详细 RC}{fig:ba-det-rc}适用于时钟树等关键 net；深亚微米设计中 net 延时占比更大时尤其重要。支持 mesh 网络。\figplaceholder{Figure 119: Meshed RC}{Mesh RC}{fig:ba-mesh}
+
+\section{读入寄生文件}
+\subsection*{Reading Parasitic Files}
+
+\cmd{read\_parasitics} 可读以下格式：\begin{itemize}
+  \item Galaxy Parasitic Database（GPD）
+  \item Standard Parasitic Exchange Format（SPEF）
+  \item Detailed Standard Parasitic Format（DSPF）
+  \item Reduced Standard Parasitic Format（RSPF，IEEE 1481-1999）
+  \item Milkyway（PARA）
+\end{itemize}
+
+SPEF/RSPF 可为 gzip 压缩；格式可自动识别。net 与 pin 名须与设计匹配。默认 SPEF 电容不含 pin 电容，工具用库 pin 电容；SPEF 中 pin 电容被忽略。须确保 SPEF 耦合电容对称；可用 \opt{-syntax\_only -keep\_capacitive\_coupling} 检查不对称耦合。SPEF 中降阶/详细 RC 网络在延时计算中动态计算有效电容；\cmd{report\_timing}、\cmd{report\_net} 报告的 Ctotal 为集总电容（含 pin 电容）。大文件应放本地磁盘并保证足够内存；gzip 可缩短总处理时间。
+
+\subsection{读入多个寄生文件}
+\subsubsection*{Reading Multiple Parasitic Files}
+
+\begin{lstlisting}
+read_parasitics A.spef -path [all_instances -hierarchy BLKA]
+read_parasitics B.spef
+read_parasitics chip_file_name
+report_annotated_parasitics -check
+\end{lstlisting}
+
+后读入文件在冲突 net 上覆盖先读入数据（若有效）。\figplaceholder{Figure 120: Second annotation is valid}{第二次反标有效}{fig:ba-ann-valid}\figplaceholder{Figure 121: Second annotation is invalid}{第二次反标无效}{fig:ba-ann-invalid}
+
+\subsection{对寄生数据应用位置变换}
+\subsubsection*{Applying Location Transformations to Parasitic Data}
+
+\opt{-axis\_flip flip\_x/flip\_y}、\opt{-rotate}、\opt{-transform} 等对寄生坐标变换以匹配设计朝向。\figplaceholder{Figure 122: Transformations specified by axis_flip options}{axis\_flip 指定的变换}{fig:ba-transform}
+
+\subsection{读入多物理 Pin 的寄生}
+\subsubsection*{Reading Parasitics With Multiple Physical Pins}
+
+一个逻辑 pin 可对应多个物理 pin（如宽金属）；SPEF 中 	exttt{*D} 定义驱动/负载 pin 映射。\cmd{read\_parasitics} 自动处理多物理 pin 连接。
+
+\subsection{从多 corner 寄生数据读入单 corner}
+\subsubsection*{Reading a Single Corner From Multicorner Parasitic Data}
+
+GPD 等多 corner 数据可用 \cmd{set\_gpd\_config} 选择 corner，再 \cmd{read\_parasitics -format gpd}。
+
+\subsection{检查反标 Net}
+\subsubsection*{Checking the Annotated Nets}
+
+\cmd{report\_annotated\_parasitics -check} 验证 RC 网络完整性；\cmd{check\_parasitics} 检查 SPEF 语法与一致性。
+
+\subsection{缩放寄生值}
+\subsubsection*{Scaling Parasitic Values}
+
+\cmd{read\_parasitics} 的 \opt{-scale\_capacitance}、\opt{-scale\_resistance} 在读入时缩放 R/C；或用 \cmd{set\_parasitic\_corner} 管理多 corner 缩放。
+
+\subsection{增量时序分析的寄生读入}
+\subsubsection*{Reading Parasitics for Incremental Timing Analysis}
+
+ECO 后可用增量寄生更新；读入新 SPEF 覆盖变更 net。\figplaceholder{Figure 123: Incremental update before and after ECO}{ECO 前后增量更新}{fig:ba-incr}
+
+\subsection{寄生文件限制}
+\subsubsection*{Limitations of Parasitic Files}
+
+RSPF/DSPF：SPICE 段实例不校验；电阻不能接地；电容须接地（忽略 node-to-node 耦合并警告）。SPEF：忽略电感；不支持降阶 net 的极点留数；电阻不能接地；未启用 SI 时交叉耦合电容拆分到地。
+
+\section{不完整反标寄生}
+\subsection*{Incomplete Annotated Parasitics}
+
+PrimeTime 可补全不完整寄生的 net（须来自 SPEF）。不完整寄生 net 不能完成有效电容计算，延时计算回退到 wire load。仅当缺失段均在两 pin（边界或叶 pin）之间时可补全。\figplaceholder{Figure 124}{用 fanout 补全缺失段}{fig:ba-complete-seg}
+
+\subsection{为不完整 Net 选择 Wire Load 模型}
+\subsubsection*{Selecting a Wire Load Model for Incomplete Nets}
+
+按顶层 wire load mode（enclosed/top）、包围层次、主库默认等选择 wire load；\opt{-complete\_with wlm} 无模型时用零 R/C。
+
+\subsection{补全 Net 上缺失段}
+\subsubsection*{Completing Missing Segments on the Net}
+
+\cmd{complete\_net\_parasitics -complete\_with wlm/zero} 或 \cmd{read\_parasitics -complete\_with}。\figplaceholder{Figure 125: Multidrive segments}{多驱动段}{fig:ba-multidrive}补全后不可撤销；多次 \cmd{read\_parasitics} 时仅在最后一次使用 \opt{-complete\_with}。\cmd{remove\_annotated\_parasitics} 可取消所有寄生读入与补全效果。
+
+\section{反标优先级}
+\subsection*{Back-Annotation Order of Precedence}
+
+冲突时优先级（高到低）：
+\begin{enumerate}
+  \item SDF 或 \cmd{set\_annotated\_delay} 反标的延时
+  \item \cmd{set\_resistance}/\cmd{set\_load} 集总 R/C
+  \item \cmd{read\_parasitics} 详细寄生
+  \item 库或 \cmd{set\_wire\_load\_model} 的 wire load 模型
+\end{enumerate}
+
+\section{报告反标寄生}
+\subsection*{Reporting Annotated Parasitics}
+
+\cmd{report\_annotated\_parasitics} 报告反标统计；\opt{-check} 验证 RC 网络完整。报告按 internal net drive、design input port 等分类显示 Total/RC network/Not Annotated。
+
+\section{移除反标数据}
+\subsection*{Removing Annotated Data}
+
+\begin{table}[htbp]
+\centering
+\caption{移除反标的命令（表 22）}
+\begin{tabular}{@{}ll@{}}
+\toprule
+反标类型 & 命令 \\
+\midrule
+延时 & \cmd{remove\_annotated\_delay} \\
+检查 & \cmd{remove\_annotated\_check} \\
+转换时间 & \cmd{remove\_annotated\_transition} \\
+寄生 & \cmd{remove\_annotated\_parasitics} \\
+全部 & \cmd{reset\_design} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\cmd{reset\_design -keep\_parasitics} 移除约束与延时反标但保留寄生。
+
+\section{GPD 寄生浏览器}
+\subsection*{GPD Parasitic Explorer}
+
+Parasitic Explorer 可查询 GPD 格式反标的寄生 R/C，支持：\cmd{get\_resistors}、\cmd{get\_ground\_capacitors}、\cmd{get\_coupling\_capacitors}；查询电阻、电容、子节点名、层名、层号、物理位置等属性；\cmd{report\_gpd\_properties}、\cmd{set\_gpd\_config}、\cmd{report\_gpd\_config}、\cmd{reset\_gpd\_config}、\cmd{get\_gpd\_corners}、\cmd{get\_gpd\_layers}。
+
+\subsection{使能寄生浏览器}
+\subsubsection*{Enabling the Parasitic Explorer Feature}
+
+\begin{lstlisting}
+pt_shell> set_app_var parasitic_explorer_enable_analysis true
+pt_shell> read_parasitics -format gpd my_design_dir.gpd \
+ -keep_capacitive_coupling ...
+\end{lstlisting}
+
+读入前设为 true 可读入所有 corner 数据；读入后启用则仅能查询当前 corner。
+
+\subsection{寄生电阻与电容集合}
+\subsubsection*{Parasitic Resistor and Capacitor Collections}
+
+\begin{lstlisting}
+get_resistors -of_objects [get_nets {net_rx*}] -parasitic_corners vhi85c
+get_ground_capacitors -from_node U235/z -to_node n121:4
+get_coupling_capacitors -of_objects n2 -filter "capacitance_max > 0.5e-3"
+\end{lstlisting}
+
+须用 \opt{-of\_objects} 或 \opt{-from\_node}/\opt{-to\_node} 指定范围；\cmd{get\_attribute -class resistor ... resistance} 查询属性；\cmd{list\_attributes -application -class resistor} 列出可用属性。
+
+\subsection{查询磁盘上的 GPD 数据}
+\subsubsection*{Querying GPD Data Stored on Disk}
+
+\cmd{report\_gpd\_properties -gpd MyDesignA.gpd} 报告设计名、工具版本、net/cell 数量等；\opt{-layers}、\opt{-parasitic\_corners} 报告层与 corner 信息。\cmd{set\_gpd\_config} 可设耦合电容绝对/相对过滤阈值，覆盖 StarRC StarXtract 生成的 GPD 配置。
+
+\subsection{写出 SDF 的常用选项}
+\subsubsection*{Common write_sdf Options}
+
+\cmd{write\_sdf} 支持 \opt{-significant\_digits}、\opt{-load\_delay cell|net}、\opt{-include}/\opt{-exclude} 过滤弧类型、\opt{-compress gzip}、\opt{-map} 映射文件、\opt{-divide\_and\_conquer} 分块写出大设计 SDF。并行驱动网络写出时每个驱动器到每个负载均有弧；可用并行驱动器缩减后再写以减小文件。
+
+\subsection{SDF 映射函数}
+\subsubsection*{SDF Mapping Functions}
+
+\begin{table}[htbp]
+\centering
+\caption{常用 SDF 映射函数（摘要）}
+\small
+\begin{tabular}{@{}ll@{}}
+\toprule
+函数 & 说明 \\
+\midrule
+min\_rise\_delay(label) & 标号弧最小上升延时 \\
+max\_rise\_delay(label) & 标号弧最大上升延时 \\
+pin(name) & 单元 pin 名 \\
+bus(name[i]) & 总线位 \\
+min\_period(pin) & 最小周期检查 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+库 timing() 组中定义 timing\_label 供映射引用；min\_pulse\_width 可用 timing\_label\_mpw\_low/high 属性。
+
+\subsection{寄生读入缩放与增量分析}
+\subsubsection*{Parasitic Scaling and Incremental Read}
+
+\cmd{read\_parasitics} 的 \opt{-scale\_capacitance}、\opt{-scale\_resistance} 在读入时缩放；ECO 后增量读入新 SPEF 覆盖变更 net，配合 \cmd{update\_timing -incremental}。读入前用本地磁盘存放大 SPEF；gzip 压缩可缩短 I/O 时间。
+
+\subsection{反标命令示例}
+\subsubsection*{Annotation Command Examples}
+
+\begin{lstlisting}
+set_annotated_delay -cell 0.35 -from U1/A -to U1/Z
+set_annotated_check -setup 0.2 -from FF/D -to FF/CP
+set_annotated_transition -rise 0.1 -fall 0.12 [get_pins U2/A]
+report_annotated_delay -list_not_annotated
+report_annotated_parasitics -check -list_not_annotated
+\end{lstlisting}
+

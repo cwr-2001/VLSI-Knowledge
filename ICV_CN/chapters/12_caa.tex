@@ -1,0 +1,254 @@
+% 第 12 章 Critical Area Analysis Flow
+\bichapter{关键面积分析流程}{Critical Area Analysis Flow}
+\label{chap:caa}
+
+本章介绍 IC Validator 关键面积分析（critical area analysis）流程。
+
+IC Validator 关键面积分析（CAA）流程用于识别版图中对制造环境中随机污染物所致失效敏感的区域。
+关键面积定义为：给定尺寸缺陷的中心若落在该区域内，可能导致电路短路或开路失效。
+CAA 流程当前支持两类缺陷：OPEN 与 SHORT。
+
+\figplaceholder{Figure 90: Critical Area by Defect Types}{按缺陷类型划分的关键面积}{fig:caa-defect-types}
+
+关键面积分析流程可用下列示意图说明：
+
+\figplaceholder{Figure 91: Critical Area Analysis Flow}{关键面积分析流程}{fig:caa-flow}
+
+\begin{enumerate}
+  \item \textbf{晶圆厂缺陷数据：} CAA 流程的起点是晶圆厂提供的制造缺陷数据及缺陷尺寸计算公式。\\
+  缺陷数据通常包含由三个参数定义的缺陷尺寸范围——最小与最大缺陷尺寸 $D_{\mathrm{min}}$、$D_{\mathrm{max}}$、缺陷尺寸采样数，以及在 $(D_{\mathrm{min}}, D_{\mathrm{max}})$ 范围内计算缺陷尺寸的系数。
+
+  \item \textbf{查找版图关键面积：} 使用 \cmd{critical\_areas()} 函数确定版图关键面积。更多信息见 \textit{IC Validator Reference Manual} 中的 \cmd{critical\_areas()} 函数。
+
+  \item \textbf{分析关键面积/生成报告：} 识别出版图关键面积并以多边形层表示后，可在 runset 中用这些数据计算加权关键面积（WCA）与平均质量（average quality）。\\
+  WCA 计算为
+  \[
+    \mathrm{WCA} = K \sum_{i} \frac{\mathrm{CA}_{i}}{D_{i}^{\mathrm{fall\_power}}}
+  \]
+  其中 K-factor 由用户在 runset 中提供。\\
+  平均质量通常按如下计算：
+  \[
+    \mathrm{Average\ Quality} = 1 - \frac{\mathrm{WCA}}{\mathrm{AREA}}
+  \]
+  其中 WCA 为给定版图层的加权关键面积，AREA 为该层总面积。\\
+  计算结果可用于生成报告与热图。热图应使用 VUE 工具生成。\\
+  最简单的关键面积报告可由 \cmd{dfm\_feature()} 函数生成，并输出到所分析层的 \cmd{LAYOUT\_ERRORS} 文件。
+\begin{lstlisting}[style=shell]
+chip area:                         = 1543.3206
+Critical_Area[0]:                      = 0.0000
+Defect Size[0]:                        = 0.0110
+Critical_Area[1]:                      = 0.0000
+Defect Size[1]:                        = 0.0120
+Critical_Area[2]:                      = 0.0000
+Defect Size[2]:                        = 0.0190
+Critical_Area[3]:                      = 0.0000
+Defect Size[3]:                        = 0.0380
+Critical_Area[4]:                      = 0.0000
+Defect Size[4]:                        = 0.0740
+Critical_Area[5]:                      = 0.0000
+Defect Size[5]:                        = 0.1350
+Critical_Area[6]:                      = 1.4728
+Defect Size[6]:                        = 0.2250
+Critical_Area[7]:                      = 4.9703
+Defect Size[7]:                        = 0.3500
+Critical_Area[8]:                      = 17.1042
+Defect Size[8]:                        = 0.5170
+Critical_Area[9]:                      = 90.4452
+Defect Size[9]:                        = 0.7320
+Critical_Area[10]:                     = 200.9118
+Defect Size[10]:                       = 1.0000
+WCA:                                   = 0.0005
+DIFF_CA_OPEN AVERAGE QUALITY:          = 1.0000
+\end{lstlisting}
+  关键面积热图由 VUE 工具生成，如图~\ref{fig:caa-heatmap} 所示。
+\end{enumerate}
+
+\figplaceholder{Figure 92: Heat Maps in VUE}{VUE 中的热图}{fig:caa-heatmap}
+
+% ============================================================
+\section{IC Validator 关键面积分析器 Runset}
+\subsection*{IC Validator Critical Area Analyzer Runset}
+
+下列 PXL 结构给出在 CAA runset 中组织数据的一种可能方式：
+\begin{lstlisting}[style=pxl]
+ca_defect_range_s : newtype struct of {
+   count : integer;
+   min : double;
+   max : double;
+};
+ca_defect_density_s : newtype struct of {
+   na : integer;            // dummy
+   fall_power : double;
+   conversion_factor : double;
+};
+ca_config_s : newtype struct of {
+   layer : polygon_layer;
+   mode : critical_area_mode_e;
+   modeling : integer     // dummy
+   range : ca_defect_range_s;
+   defect_density : ca_defect_density_s;
+};
+ca_layer_configuration_l : newtype list of ca_config_s;
+\end{lstlisting}
+
+典型 CAA runset 如下：
+\begin{lstlisting}[style=pxl]
+#include <icv.rh>
+library("input_desing.gds", GDSII, "top");
+
+// assign section
+DIFF = assign({ { 3 } });
+POLY = assign({ { 3 } });
+METAL1 = assign({ { 3 } });
+
+connect_layer = assign({ { 4 } });
+
+// types to store defect sizes;
+defect_sizes_list : newtype list of double;
+defect_sizes_h : newtype hash of integer to defect_sizes_list;
+defect_hash : defect_sizes_h = {};
+layer_dr : list of double = {};
+layer_tagname : string = "";
+fall_power : double = 0.0;
+ca_mode : critical_area_mode_e;
+
+g_ca_layers : string_to_geometry_layer_h = {};
+
+// the remote function to calculate the WCA and average quality and
+// output report
+get_area : function (void) returning void
+{
+     dfm_report_double("chip area: ", dfm_window_area());
+
+     wca_tmp: double = 0;
+
+     // calculate K-factor
+     // put actual K-calculation code here
+     K = 6.0e-07;
+
+     // for each input layer the critical_areas() command creates
+     // list of critical area layers - one layer per defect size
+
+    for (idx = 0 to layer_dr.size() - 1) {
+      this_area = dfm_sum_area(""+idx);
+      dfm_report_double("Critical_Area["+idx+"]: ", this_area);
+      // output critical area value
+
+      dfm_report_double("Defect Size["+idx+"]: ", layer_dr[idx]);
+      // output defect size
+
+         // calculate sum of WCAs for all defect sizes for given input layer
+         wca_tmp= wca_tmp + (this_area / (layer_dr[idx]**fall_power));
+     }
+
+     // final WCA calculation
+     wca = K * wca_tmp;
+
+     dfm_report_double("WCA: " , wca);        // report WCA
+
+    average_quality : double = 1 - (wca / dfm_window_area());
+    // calculate average quality
+    dfm_report_double(layer_tagname + "_" + ca_mode + " AVERAGE QUALITY: ",
+                                         average_quality);
+    // report average quality for one input layer
+
+     dfm_save_data();
+}
+
+
+ca_defect_range_s : newtype struct of {
+   count : integer;
+   min : double;
+   max : double;
+};
+ca_defect_density_s : newtype struct of {
+   na : integer;            // dummy
+   fall_power : double;
+   conversion_factor : double;
+};
+ca_config_s : newtype struct of {
+   layer : polygon_layer;
+   mode : critical_area_mode_e;
+   modeling : integer     // dummy
+   range : ca_defect_range_s;
+   defect_density : ca_defect_density_s;
+};
+
+cas : ca_layer_configuration_l = {
+   {DIFF,CA_OPEN,MODELING,{10,0.022,2.000},{NA,2.5,1e-8}},
+   {POLY,CA_OPEN,MODELING,{10,0.022,2.000},{NA,2.5,1e-8}},
+   {METAL1,CA_OPEN,MODELING,{10,0.022,2.000},{NA,2.5,1e-8}},
+};
+
+get_defect_sizes : function         // function for defect size calculation
+(
+   min_size : double,
+   max_size : double,
+   steps     : integer,
+   fall_power : double
+) returning defect_list : defect_sizes_list
+{
+/*
+     // put actual defect sizes calculation coded by user
+*/
+    defect_list = {0.011, 0.013, 0.017, 0.035, 0.073, 0.13, 0.24, 0.33,
+  0.495, 0.74, 1.0};
+}
+
+di : integer = 0;
+foreach (config in cas)
+{
+    // calculate defect size
+    one_list = get_defect_sizes(config.range.min, config.range.max,
+  config.range.count,
+ config.defect_density.fall_power);
+   defect_hash[di] = one_list;
+
+     di = di + 1;
+}
+
+output_layers: list of write_layer_map_s = {};
+
+
+di = 0;
+layer_n : integer = 1;
+foreach (config in cas)
+ {
+   outs : list of polygon_layer;
+
+  if(config.mode == CA_SHORT)
+  {
+       // for SHORT mode connect_db is required
+       cdb = connect({{{config.layer}, connect_layer}});
+       outs = critical_areas( config.layer, defect_hash[di], config.mode,
+ cdb);
+  }
+  else
+       outs = critical_areas( config.layer, defect_hash[di], config.mode);
+
+    for(i = 0 to defect_hash[di].size()-1) {
+      g_ca_layers[""+i] = outs[i];
+
+        output_layers.push_back( {outs[i], {layer_n}} );
+        layer_n = layer_n + 1;
+    }
+
+    g_ca_layers_keys = g_ca_layers.keys();
+
+    layer_dr = defect_hash[di];
+    fall_power = config.defect_density.fall_power;
+    ca_mode = config.mode;
+
+    layer_tagname = config.layer.tagname;
+
+    {@ ""+config.layer; dfm_features(g_ca_layers, get_area);}
+}
+
+// write out CA layers
+gds_file = gds_library("CA_out.gds");
+write_gds
+(
+   output_library = gds_file,
+   layers = output_layers
+);
+\end{lstlisting}

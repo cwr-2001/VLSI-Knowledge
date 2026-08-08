@@ -1,0 +1,153 @@
+% 第 24 章 Using PrimeTime With Design Compiler
+\bichapter{将 PrimeTime 与 Design Compiler 配合使用}{Using PrimeTime With Design Compiler}
+\label{chap:pt-dc}
+
+PrimeTime 与 Design Compiler 综合工具配合良好。但两款工具在命令语法与行为上存在若干差异。要了解如何高效协同使用，请参阅：
+\begin{itemize}
+  \item PrimeTime 特有功能
+  \item 与 Design Compiler 的时序分析差异
+  \item 共享 Design Compiler 与 PrimeTime 脚本
+  \item Design Compiler 与 PrimeTime 中的路径组
+\end{itemize}
+
+% ============================================================
+\section{PrimeTime 特有功能}
+\subsection*{Features Specific to PrimeTime}
+
+PrimeTime 的某些功能不受 Design Compiler 支持，例如内部时钟、提取时序模型的部分特性，以及模式分析（带工作模式的时序模型）。
+
+Design Compiler 不支持在叶单元内部引脚上创建时钟。必须在包含该内部引脚扇入或扇出路径上的输入或输出引脚上指定这些时钟。
+
+Design Compiler 无法分析与优化使用模式分析的时序模型。要在特定工作模式下分析与优化模块，必须手动禁用非活动的时序弧。
+
+% ============================================================
+\section{与 Design Compiler 的时序分析差异}
+\subsection*{Timing Analysis Differences From Design Compiler}
+
+PrimeTime 与 Design Compiler 在时序分析行为上的差异，请参阅：
+\begin{itemize}
+  \item 路径
+  \item 转换时间
+  \item \cmd{current\_design} 命令
+\end{itemize}
+
+\subsection{路径}
+\subsubsection*{Paths}
+
+以下差异适用于路径：
+\begin{itemize}
+  \item \textbf{保持检查的 time borrowing}\\
+        PrimeTime 默认禁用短路径借用（short-path borrowing，即在电平敏感锁存器上进行保持检查的 time borrowing）。Design Compiler 始终允许短路径借用。\\
+        若要在 PrimeTime 中模拟 Design Compiler 行为，将 \cmd{timing\_allow\_short\_path\_borrowing} 变量设为 \texttt{true}。关于路径借用的更多信息，见 \textit{Synopsys Timing Constraints and Optimization User Guide}。
+  \item \textbf{路径分段：负载相关延时}\\
+        在 Design Compiler 中，若时序报告源自分段路径的新起点，Design Compiler 会将源门负载相关延时部分转移到输出网延时。该方法可能改善综合结果，但不适用于静态时序分析。PrimeTime 不会将负载相关延时加到网上。
+\end{itemize}
+
+\subsection{转换时间}
+\subsubsection*{Transition Time}
+
+对双向（\texttt{inout}）引脚，PrimeTime 为引脚的驱动端与负载端分别维护转换时间信息。Design Compiler 保留驱动端与负载端转换时间的最大值。
+
+\subsection{\cmd{current\_design} 命令}
+\subsubsection*{current\_design Command}
+
+Design Compiler 要求切换当前设计以局部指定信息（如线负载模型）：
+\begin{lstlisting}
+dc_shell> current_design BOTTOM
+dc_shell> set_wire_load_model -name small
+dc_shell> current_design MID
+dc_shell> set_wire_load_model -name medium
+dc_shell> current_design TOP
+dc_shell> set_wire_load_model -name large
+\end{lstlisting}
+
+在 PrimeTime 中，应使用 \cmd{current\_instance} 命令或指定层次单元名称来实现相同目的。不要为此目的使用 \cmd{current\_design}。例如：
+\begin{lstlisting}
+pt_shell> current_design TOP
+pt_shell> set_wire_load_model -name large
+pt_shell> set_wire_load_model -name medium [get_cells U1]
+pt_shell> set_wire_load_model -name small [get_cells U1/U2]
+\end{lstlisting}
+
+% ============================================================
+\section{共享 Design Compiler 与 PrimeTime 脚本}
+\subsection*{Sharing Design Compiler and PrimeTime Scripts}
+
+对同一设计同时使用 Design Compiler 与 PrimeTime 时，可共享脚本。最简便的方法是使用 Synopsys Design Constraints（SDC），如「Synopsys Design Constraints Format (SDC) 脚本文件」一节所述。另一种方法是将含共享命令的脚本与含工具专用命令的脚本分开，如下例所示。
+
+\begin{noteBox}
+无法将 \texttt{dc\_shell} Tcl 脚本转换为 \texttt{pt\_shell} 脚本，但可将部分 \texttt{dc\_shell} Tcl 脚本直接 \cmd{source} 到 \texttt{pt\_shell}。另一种方法是用 SDC 格式以 Tcl 编写共享约束文件。更多信息见「Synopsys Design Constraints Format (SDC) 脚本文件」。
+\end{noteBox}
+
+以下 \texttt{dc\_shell} 脚本包含名为 \texttt{timing\_assertions.scr} 的另一脚本：
+\begin{lstlisting}
+current_design MID
+set_wire_load_model -name medium
+current_design TOP
+set_wire_load_mode enclosed
+set_wire_load_model -name large
+set_max_area 3000
+set_dont_touch u13
+source timing_assertions.scr
+compile
+\end{lstlisting}
+
+以下脚本是 \texttt{timing\_assertions.scr} 的一部分，其中命令对 Design Compiler 与 PrimeTime 均有效：
+\begin{lstlisting}
+set_operating_conditions WCCOM
+create_clock -period 10 CLK
+set_input_delay ...
+set_output_delay ...
+\end{lstlisting}
+
+要在 PrimeTime 中使用 Design Compiler 脚本，可使用时序断言脚本及含 PrimeTime 命令的脚本。部分 PrimeTime 命令语法与 Design Compiler 相同。但如前所述，工具专用命令需以不同方式指定。
+
+本例中，\texttt{pt\_shell} 脚本包含与前面 \texttt{dc\_shell} 脚本等效的命令：
+\begin{lstlisting}
+set_wire_load_mode enclosed
+set_wire_load_model -name medium {u2 u4}
+set_wire_load_model -name large
+source timing_assertions.scr
+set_max_area 3000
+set_dont_touch u13
+\end{lstlisting}
+
+% ============================================================
+\section{Synopsys Design Constraints Format (SDC) 脚本文件}
+\subsection*{Synopsys Design Constraints Format (SDC) Script Files}
+
+Synopsys Design Constraints（SDC）格式脚本文件是使用 PrimeTime 与 Design Compiler 所支持命令子集的 Tcl 脚本。对部分受支持命令存在限制，例如某些命令并非所有选项均受支持。尽管 SDC 是 Tcl 的子集，但并非全功能脚本语言，其目的是在各 EDA 工具间统一时序约束描述，而非用于复杂脚本。
+
+在 SDC 中只有一个设计：当前设计。无法用 SDC 更改当前设计。
+
+SDC 文件用 \cmd{read\_sdc} 读入 PrimeTime，用 \cmd{write\_sdc} 从 PrimeTime 写出。
+
+\subsection{检查 SDC 文件语法}
+\subsubsection*{Checking the Syntax of the SDC File}
+
+要检查 SDC 文件并验证其语法与语义正确，运行 \cmd{read\_sdc -syntax\_only}。该命令在不改变设计的前提下验证脚本。关于 SDC 的更多信息，见 SolvNetPlus 上的 \textit{Using the Synopsys Design Constraints Format Application Note}。
+
+\subsection{检查单位一致性}
+\subsubsection*{Checking the Consistency of Units}
+
+要检查 SDC 文件中的单位是否与主库单位一致，运行 \cmd{set\_units}：
+\begin{lstlisting}
+set_units -time 1ns -capacitance 1nF -current 1mA \
+  -voltage 1V -resistance 1kOhm -power 1W
+\end{lstlisting}
+
+若指定单位与主库单位不同，PrimeTime 会发出警告。
+
+\cmd{set\_units} 可用于 Synopsys Design Constraints（SDC）文件、命令行或脚本文件。该命令可选，但建议使用以识别来自不同约束文件的不一致单位。
+
+% ============================================================
+\section{Design Compiler 与 PrimeTime 中的路径组}
+\subsection*{Path Groups in Design Compiler and PrimeTime}
+
+在 Design Compiler 中，路径组用于修改优化的代价函数。可将路径或端点分配到命名组，每组可指定权重，贡献于设计的最大延时代价。
+
+PrimeTime 检查每条时序路径的最大延时违例：将上升与下降信号的实际路径延时与目标路径延时比较。某组的最差违例是该组 slack 最负（最小）的路径。
+
+可在 PrimeTime 中指定路径组。请求路径时序报告时，PrimeTime 为每个路径组列出一份报告。可用 \cmd{write\_script} 或 \cmd{write\_context} 将该信息导出到 Design Compiler，或对设计做预算（budgeting）。
+
+创建显式路径组时，还可为路径组指定 critical range。critical range 定义 Design Compiler 优化期间路径组的延时裕量。非零值允许在最差违例不增大的前提下优化近临界路径。

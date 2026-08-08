@@ -1,0 +1,658 @@
+# -*- coding: utf-8 -*-
+"""Generate 18_constraint_consistency.tex — dense full technical Chinese translation."""
+from pathlib import Path
+
+OUT = Path(__file__).resolve().parent.parent / "chapters" / "18_constraint_consistency.tex"
+C = []  # chunks
+
+def S(*parts):
+    C.append("".join(parts))
+
+S(r"""% 第 18 章 Constraint Consistency
+\bichapter{约束一致性}{Constraint Consistency}
+\label{chap:cc}
+
+约束一致性功能用于全芯片或模块级时序约束的分析与调试。基于规则检查的设计分析可识别缺失、无效、多余、低效或冲突的多种约束问题。约束一致性提供直观全面的图形界面（GUI），便于进一步调试。可使用大量内置规则运行分析，也可定义自定义一致性检查以扩展检查范围。
+
+要了解约束一致性，请参阅：
+\begin{itemize}
+  \item 约束一致性概述
+  \item 设计一致性检查
+  \item 层次一致性检查
+  \item 相关性一致性检查
+  \item 附加分析特性
+  \item 图形用户界面
+  \item 教程
+\end{itemize}
+
+""")
+
+# ---- Overview ----
+S(r"""% ============================================================
+\section{约束一致性概述}
+\subsection*{Constraint Consistency Overview}
+
+要了解约束一致性功能，请参阅：
+\begin{itemize}
+  \item 设计流程中的约束
+  \item 调试特性
+  \item 分析与调试方法学
+  \item 启动约束一致性会话
+  \item 支持的约束
+  \item 报告约束接受情况
+  \item 例外优先级顺序
+  \item 分析违例
+  \item 抑制违例
+  \item \cmd{report\_constraint\_analysis} 命令
+  \item 使用属性
+  \item 自定义规则与报告
+  \item 创建与使用用户定义规则
+  \item 规则相关命令
+  \item 读取不完整或不匹配网表的设计
+\end{itemize}
+
+\subsubsection{设计流程中的约束}
+\subsection*{Constraints in the Design Flow}
+
+正确完整的约束对逻辑综合、布局、布线等时序驱动实现步骤至关重要。约束描述工作环境及有效静态时序分析（独立或嵌入优化工具）所需信息。时序约束通常以 Synopsys Design Constraints（SDC）文件或更一般的 Tcl 脚本指定。错误或不完整约束可导致设计迭代浪费甚至硅片失效。应尽早发现并修复约束问题以降低风险、提高生产率。
+
+约束一致性在门级分析约束，确定时钟、数据信号与常量在设计中的传播位置与方式。约束在各步骤常被修改（例如布局前约束经修改得到布局、CTS、布线、芯片组装约束）。每次创建或修改约束后应分析正确性与一致性。
+
+约束一致性分析设计及其约束的正确性、完整性与一致性。读入并链接 Verilog 格式的顶层或模块设计，用与 Design Compiler 或 PrimeTime 相同的 SDC 命令施加约束。工具应用 SDC 约束，忽略约束脚本中的非 SDC 工具专用命令。读入、链接并约束后，可运行一条或多条约束一致性命令。\textbf{第一步}运行 \cmd{analyze\_design}，检查设计与约束并生成可在违例浏览器中查看的摘要报告。
+
+从摘要列表可点击违例查看详情；从详细报告可点击链接定位 SDC 脚本中的约束命令、查看原理图相关区域或获取修复建议。检测的违例类型包括：
+\begin{itemize}
+  \item 错误电容值、错误指定的时钟/生成时钟
+  \item 错误的时钟 latency 与转换时间
+  \item 错误或未指定的驱动单元
+  \item 错误指定的时序例外、输入/输出延迟
+  \item 网表问题（如冲突驱动器）、冲突 case analysis 值
+\end{itemize}
+
+进一步诊断可用：\cmd{analyze\_paths}、\cmd{analyze\_clock\_networks}、\cmd{analyze\_unclocked\_pins}、\cmd{report\_case\_details}；\cmd{report\_analysis\_coverage}、\cmd{report\_exceptions}、\cmd{compare\_block\_to\_top} 有助于调试多场景约束、多重时序例外与层次设计中的冲突约束。
+
+\subsubsection{调试特性}
+\subsection*{Debugging Features}
+
+重要特性包括：覆盖广泛潜在约束问题的规则集；用户定义规则；单进程多场景分析；数百万实例级设计的高效容量与性能；强大诊断与详细分析命令；丰富的集合命令与对象属性；符合 SDC 2.0 的规则检查器；支持循环/变量/条件的交互式 Tcl shell；含源文件名与行号的 GUI 输出；与 DC/ICC 等实现工具在约束解释、时钟/信号/常量传播及界面方面的高度一致。
+
+\subsubsection{分析与调试方法学}
+\subsection*{Analysis and Debugging Methodology}
+
+\textbf{输入：}Verilog 网表、Synopsys \texttt{.db} 库、SDC 或 PrimeTime Tcl 约束、Tcl 控制脚本。
+
+\textbf{输出：}文本报告；用于交互调试、自定义报告或条件脚本的查询命令与对象属性。
+
+典型流程：
+\begin{enumerate}
+  \item 启动：\texttt{pt\_shell -constraints}（见“启动会话”）
+  \item 读设计：\cmd{set\_app\_var search\_path}、\cmd{link\_path}、\cmd{read\_verilog}
+  \item 链接：\cmd{current\_design}、\cmd{link\_design}
+  \item 各场景施加约束：\cmd{source}（Tcl）或 \cmd{read\_sdc}（SDC）
+  \item 分析：\cmd{analyze\_design}
+  \item 诊断：专用命令（见“附加分析特性”）
+  \item 按需重复分析与诊断
+\end{enumerate}
+
+\figplaceholder{Figure 229: Typical Constraint Consistency Flow}{典型约束一致性流程}{fig:cc-flow}
+
+""")
+
+S(r"""% ---- Starting session ----
+\subsubsection{启动约束一致性会话}
+\subsection*{Starting a Constraint Consistency Session}
+
+约束一致性为 GUI 驱动，在 Linux 下运行。子主题：启动会话、许可证、Setup 文件、命令日志文件。
+
+\paragraph{启动会话} 使用 \cmd{pt\_shell -constraints}。自动检出 PrimeTime SI 许可证，启动 GUI，出现 \texttt{ptc\_shell>} 提示符。若启动失败，检查：安装正确、PrimeTime 在 PATH 中、许可证服务器运行、许可证文件有效且含 PrimeTime SI 许可证。结束会话：\cmd{quit} 或 \cmd{exit}。
+
+\paragraph{许可证} 启动 \texttt{ptc\_shell} 需 PrimeTime SI 许可证；会话退出自动检入。另需同一服务器上有 PrimeTime 许可证（不检出，但必须存在）。
+
+\paragraph{Setup 文件} 每次启动执行 \texttt{.synopsys\_gca.setup}，按序检查：Synopsys 安装 \texttt{admin/setup}、用户主目录、当前工作目录。用 \cmd{-no\_init} 可禁止执行 setup 文件。
+
+\paragraph{命令日志} 会话历史写入 \texttt{ptc\_shell\_command.log}（覆盖同名文件）。可在 setup 中用 \cmd{sh\_command\_log\_file} 指定其他名称（会话中不可改）。
+
+\subsubsection{支持的约束}
+\subsection*{Supported Constraints}
+
+支持 SDC 与 Tcl 格式全部约束。Tcl 约束用 \cmd{source} 加载；SDC 用 \cmd{read\_sdc}。支持多场景：先 \cmd{create\_scenario}，再为各场景加载约束。
+
+示例（Tcl 片段）：
+\begin{lstlisting}
+foreach_in_collection i [all_clocks] {
+  echo [format "Clock : '%s'" [get_attribute $i full_name]]
+  set_clock_uncertainty 1.5 $i
+}
+\end{lstlisting}
+
+多场景加载示例：
+\begin{lstlisting}
+set all_scenarios {system myscenario_1 myscenario_2}
+foreach scenario $all_scenarios {
+  create_scenario ${scenario}
+  source ./scripts/common.tcl
+  source ./scripts/${scenario}_constraints.tcl
+}
+\end{lstlisting}
+
+\subsubsection{报告约束接受情况}
+\subsection*{Reporting Constraint Acceptance}
+
+\cmd{report\_constraint\_analysis -include statistics} 报告分析接受的约束，快速确认约束是否正确加载。输出含各约束类型的 Accepted/Rejected/Total 计数。
+
+\subsubsection{例外优先级顺序}
+\subsection*{Exception Order of Precedence}
+
+冲突时，约束一致性\textbf{按路径}（非按命令）独立应用优先级规则。例如 \cmd{set\_max\_delay -from A} 与 \cmd{set\_false\_path -to B}：对起自 A 且止于 B 的路径，\cmd{set\_false\_path} 优先；仅起自 A 的路径仍受 \cmd{set\_max\_delay} 约束。
+
+\textbf{例外类型优先级}（高到低）：
+\begin{enumerate}
+  \item \cmd{set\_false\_path}
+  \item \cmd{set\_max\_delay} / \cmd{set\_min\_delay}
+  \item \cmd{set\_multicycle\_path}
+\end{enumerate}
+
+不视为冲突可同时有效的组合：两个 \cmd{set\_false\_path}；\cmd{set\_min\_delay} 与 \cmd{set\_max\_delay}；\cmd{set\_multicycle\_path} 的 setup 与 hold。
+
+\textbf{路径说明优先级}（高到低）：
+\begin{enumerate}
+  \item \cmd{-from}/\cmd{-rise\_from}/\cmd{-fall\_from} pin
+  \item \cmd{-to}/\cmd{-rise\_to}/\cmd{-fall\_to} pin
+  \item \cmd{-through}/\cmd{-rise\_through}/\cmd{-fall\_through}
+  \item \cmd{-from}/\cmd{-rise\_from}/\cmd{-fall\_from} clock
+  \item \cmd{-to}/\cmd{-rise\_to}/\cmd{-fall\_to} clock
+\end{enumerate}
+
+组合示例（高到低）：\texttt{-from pin -to pin} $>$ \texttt{-from pin -to clock} $>$ \texttt{-from pin} $>$ \texttt{-from clock -to pin} $>$ \texttt{-to pin} $>$ \texttt{-from clock -to clock} $>$ \texttt{-from clock} $>$ \texttt{-to clock}。
+
+用 \cmd{report\_exceptions -ignored} 列出被忽略的时序例外。
+
+""")
+
+S(r"""% ---- Analyzing violation + Suppressing ----
+\subsubsection{分析违例}
+\subsection*{Analyzing a Violation}
+
+在违例浏览器中选择违例，在信息窗格查看详情。\figplaceholder{Figure 230--234}{违例浏览器、信息窗格链接、原理图与引脚标注}{fig:cc-violation}
+
+可用 Debugging Help、Fix Suggestion 链接或 SDC 源文件链接进一步调试；查阅在线帮助中的规则参考。
+
+\subsubsection{抑制违例}
+\subsection*{Suppressing Violations}
+
+可完全\textbf{禁用规则}，或对特定实例\textbf{豁免（waiver）}违例。GUI 与 \cmd{create\_waiver}、\cmd{report\_waiver}、\cmd{remove\_waiver}、\cmd{write\_waiver} 支持创建、报告、删除与写出豁免。
+
+\figplaceholder{Figure 235--245}{违例抑制流程、豁免配置、已豁免违例图标}{fig:cc-waiver-flow}
+
+\textbf{抑制流程：}可在 \cmd{analyze\_design} 前后抑制。分析后抑制的违例在浏览器中带特殊图标；分析前完全禁用的规则不出现在报告中；实例豁免仍报告但带图标。豁免后浏览器状态立即更新。
+
+\textbf{禁用规则：}违例浏览器右键 “Disable rule”，或 Design $>$ Waiver Configuration 取消勾选，或 \cmd{disable\_rule}。
+
+\textbf{豁免特定违例：}浏览器右键 “Waive violation”，或 Waiver Configuration 中 Create waiver，或 \cmd{create\_waiver}。\cmd{hide\_waived\_violations false} 时 View 菜单可切换隐藏已豁免违例。
+
+\paragraph{\cmd{create\_waiver} 命令} 可指定多个 \cmd{-condition} 与 \cmd{-not\_condition}；仅当全部满足时抑制。参数为两元素列表：规则参数名与网表对象或约束的集合。
+
+示例 1——豁免 CLK* 时钟上的 CLK\_0026：
+\begin{lstlisting}
+ptc_shell> create_waiver -rule CLK_0026 \
+  -condition [list "clock" [get_clocks CLK*]]
+\end{lstlisting}
+
+示例 2——豁免除 CLK3 外所有时钟：
+\begin{lstlisting}
+ptc_shell> create_waiver -rule CLK_0026 \
+  -not_condition [list "clock" [get_clocks CLK3]]
+\end{lstlisting}
+
+示例 3——多参数（时钟 CLK1/CLK2，引脚非 U1/A、U1/B）：
+\begin{lstlisting}
+ptc_shell> create_waiver -rule CLK_0003 \
+  -condition [list "clock" [get_clocks {CLK1 CLK2}]] \
+  -not_condition [list "pin" [get_pins U1/A] [get_pins U1/B]]
+\end{lstlisting}
+
+示例 5——例外参数：
+\begin{lstlisting}
+ptc_shell> create_waiver -rule EXC_0001 \
+  -condition [list "exception" [get_exceptions -from U1/A -to U2/Z]] \
+  -condition [list "rise_or_fall" "rise"]
+\end{lstlisting}
+
+用 \cmd{report\_rule -parameters rule\_name} 查询规则参数。B2T 与 S2S 规则豁免需指定 \cmd{-design1}/\cmd{-scenario1}/\cmd{-design2}/\cmd{-scenario2} 及 top/block 对象上下文。
+
+\textbf{实例级豁免：}层次浏览器右键 Waive Instance，或 Waiver Configuration $>$ Instance Waivers；命令行用 \cmd{-cells}：
+\begin{lstlisting}
+ptc_shell> create_waiver -name my_waiver_1 -cells [get_cell U1/U1]
+\end{lstlisting}
+
+用法：实例级豁免应用于当前场景；\cmd{-all\_scenarios} 应用于设计所有场景。仅当违例相关对象完全包含在指定实例内才豁免；部分通用规则与用户定义规则不支持实例级豁免。
+
+\cmd{write\_waiver -output file [-force]} 将豁免写入 Tcl 供后续 \cmd{source} 恢复。
+
+""")
+
+S(r"""% ---- report_constraint_analysis + Attributes ----
+\subsubsection{\cmd{report\_constraint\_analysis} 命令}
+\subsection*{report\_constraint\_analysis Command}
+
+生成汇总设计中违例、用户消息与规则信息的文本报告；按分析类型、设计、场景排序。
+
+\begin{itemize}
+  \item \cmd{-include}：\texttt{violations}、\texttt{statistics}、\texttt{user\_messages}、\texttt{rule\_info} 等
+  \item \cmd{-style full|summary}
+  \item \cmd{-rules}/\cmd{-rule\_types} 过滤
+  \item \cmd{-format csv} 输出 CSV
+\end{itemize}
+
+多设计层次比较结果在报告中以 Top/Block 场景分组显示 B2T 违例。
+
+\subsubsection{使用属性}
+\subsection*{Using Attributes}
+
+属性是与设计对象关联的字符串或值。\textbf{命令：}\cmd{list\_attributes}、\cmd{get\_attribute}、\cmd{report\_attribute}。\cmd{get\_attribute} 限于单对象单集合。
+
+属性组（表 43）包括：\texttt{cell}、\texttt{clock}、\texttt{clock\_group}、\texttt{design}、\texttt{exception}、\texttt{pin}、\texttt{port}、\texttt{net}、\texttt{rule}、\texttt{rule\_violation}、\texttt{scenario}、\texttt{timing\_arc}、\texttt{lib\_*} 等。默认只读。
+
+\cmd{get\_timing\_arcs} 创建时序弧集合供自定义报告；\cmd{get\_lib\_timing\_arcs} 创建库时序弧集合。示例——查找 U1 上被禁用的 positive\_unate 弧：
+\begin{lstlisting}
+ptc_shell> set arcs [get_timing_arcs -of_objects U1 \
+  -filter "sense == positive_unate"]
+ptc_shell> foreach_in_collection arc $arcs {
+  echo [get_attribute $arc is_disabled]
+}
+\end{lstlisting}
+
+""")
+
+S(r"""% ---- Custom rules (condensed) ----
+\subsubsection{自定义规则与报告}
+\subsection*{Customizing Rules and Reports}
+
+可用 \cmd{define\_rule}、\cmd{define\_ruleset} 扩展检查范围；\cmd{report\_rule}、\cmd{enable\_rule}/\cmd{disable\_rule}、\cmd{set\_rule\_property} 管理规则（含容差 \texttt{tolerance}）。\cmd{analyze\_design -rules} 可限定检查的规则子集。
+
+\subsubsection{创建与使用用户定义规则}
+\subsection*{Creating and Using User-Defined Rules}
+
+用户定义规则用 Tcl 过程检测自定义条件；可访问设计与约束对象属性。定义后通过 \cmd{analyze\_design} 或专用规则集运行。详见在线帮助 “User-Defined Rules”。
+
+\subsubsection{规则相关命令}
+\subsection*{Rule-Related Commands}
+
+\begin{itemize}
+  \item \cmd{report\_rule [pattern]} — 规则状态与描述
+  \item \cmd{enable\_rule}/\cmd{disable\_rule} — 启用/禁用
+  \item \cmd{set\_rule\_property -tolerance} — B2T/S2S 比较容差（默认 1e-5\%）
+  \item \cmd{analyze\_design}、\cmd{compare\_block\_to\_top}、\cmd{compare\_constraints} — 各检查不同规则集
+\end{itemize}
+
+\subsubsection{读取不完整或不匹配网表的设计}
+\subsection*{Reading Designs With Incomplete or Mismatched Netlists}
+
+\cmd{read\_verilog} 与 \cmd{link\_design} 可处理部分不匹配；\cmd{report\_design\_mismatch} 报告主实例与引用不一致（如 DMM-038 引脚不存在、DMM-905 库中找不到单元）。应在分析前尽量解决链接错误。
+
+""")
+
+S(r"""% ============================================================
+\section{设计一致性检查}
+\subsection*{Design Consistency Checking}
+
+主题：规则与违例、内置规则。
+
+\subsubsection{规则与违例}
+\subsection*{Rules and Violations}
+
+对已加载、已链接、已约束的设计检查设计与约束相关条件。\textbf{规则（rule）}为检查项；\textbf{违例（violation）}为未满足条件的一次出现。违例严重级别：Information、Warning、Error。规则代码为三到四字母+下划线+四位数字（如 \texttt{CLK\_0003}：生成时钟主源引脚无时钟）。
+
+\cmd{analyze\_design} 检查标准规则集；\cmd{compare\_block\_to\_top} 与 \cmd{compare\_constraints} 各检查不同规则集。可 \cmd{disable\_rule} 禁用规则；部分规则默认禁用以节省运行时间。\textbf{豁免（waiver）}在特定条件下跳过检查。除内置规则外可定义用户规则。
+
+\subsubsection{内置规则}
+\subsection*{Built-In Rules}
+
+启动时自动加载表 44 所示内置规则：
+
+\begin{table}[htbp]
+\centering
+\caption{内置规则分类（表 44）}
+\small
+\begin{tabular}{@{}ll@{}}
+\toprule
+边界条件 & CAP\_xxxx 电容；DRV\_xxxx 驱动；EXD\_xxxx 外部延迟 \\
+约束/例外分析 & CAS\_xxxx case；EXC\_xxxx 时序例外 \\
+时钟 & CGR\_xxxx 组；CLK\_xxxx 属性；CNL\_xxxx 网络 latency；\\
+& CTR\_xxxx 转换；CSL\_xxxx 源 latency；UNC\_xxxx uncertainty \\
+通用 & CMP\_xxxx 工具兼容；DES\_xxxx 设计约束；HIER\_xxxx 层次；\\
+& LOOP\_xxxx 环；PRF\_xxxx 性能；NTL\_xxxx 网表；UNT\_xxxx 库单位 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+详细规则描述见 Constraint Consistency 在线帮助。示例：\texttt{CLK\_0003} 表示生成时钟因主源引脚无时钟而无法展开。
+
+""")
+
+S(r"""% ============================================================
+\section{层次一致性检查}
+\subsection*{Hierarchical Consistency Checking}
+
+设计团队采用多种策略创建模块级与顶层约束；自底向上流程中模块约束可传播到顶层，迭代中顶层与模块均可能手工插入新约束。\cmd{compare\_block\_to\_top} 比较模块级与顶层约束是否匹配。
+
+各模块带有综合/布局所用约束（时钟、例外、边界条件）。层次一致性对\textbf{同一网表}加载两套约束并比较，生成 B2T 规则违例，可在违例浏览器中调试；单会话可保留多块 B2T 结果。
+
+\figplaceholder{Figure 246--250}{多块违例浏览器、B2T 原理图与双 SDC 查看器}{fig:cc-b2t}
+
+\subsubsection{比较模块级与顶层约束}
+\subsection*{Comparing Block- and Top-Level Constraints}
+
+复用 IP 或块时须保证并入更大设计后块约束仍有效。\cmd{compare\_block\_to\_top} 找层次约束不一致；\cmd{analyze\_design} 检查单套约束内部问题。
+
+\textbf{方法学：}
+\begin{itemize}
+  \item \textbf{保持多个链接设计：}默认 \cmd{link\_design} 会移除先前链接设计；B2T 流程需同时保留块设计（块约束）与顶层设计（顶约束）。用 \cmd{link\_design -add}；\cmd{current\_design} 切换。
+  \item 流程脚本示例（Example 56）：
+\end{itemize}
+
+\begin{lstlisting}
+set_app_var search_path [list . ${TOP_DIR}/libs ${TOP_DIR}/design]
+set_app_var link_path [list * libs.db]
+read_verilog ${TOP_DIR}/design/ChipLevel_no2blocks.v
+read_verilog ${TOP_DIR}/design/Multiply16x16.v
+link_design ChipLevel
+link_design -add Multiply16x16
+current_design ChipLevel
+source ${TOP_DIR}/dc_outdir/ChipLevel_propagate.sdc -echo
+current_design Multiply16x16
+source ${TOP_DIR}/design/Multiply16x16.sdc -echo
+current_design ChipLevel
+compare_block_to_top -block_design [get_designs Multiply16x16]
+\end{lstlisting}
+
+\textbf{GUI 步骤：}加载设计 $\rightarrow$ 顶层与块级分别 \cmd{analyze\_design} 确保干净 $\rightarrow$ \cmd{compare\_block\_to\_top} $\rightarrow$ Analysis $>$ B2T Mismatch Browser $\rightarrow$ 调试（可豁免 B2T 违例）。
+
+支持：多场景比较、同一块的多个实例、创建豁免、文本报告（\cmd{report\_constraint\_analysis}）。
+
+\subsubsection{内置层次一致性规则}
+\subsection*{Built-In Hierarchical Consistency Checking Rules}
+
+B2T 规则前缀 \texttt{B2T\_}，分类包括：B2T\_CLK\_xxxx 时钟；B2T\_EXC\_xxxx 例外；B2T\_CAS\_xxxx case；B2T\_EXD\_xxxx 外部延迟；B2T\_UNC\_xxxx uncertainty；B2T\_DIS\_xxxx 禁用对象/弧；B2T\_OPC\_xxxx 工作条件等。比较规则可设容差属性；默认 1e-5\%，用 \cmd{set\_rule\_property} 修改。
+
+""")
+
+S(r"""% ============================================================
+\section{相关性一致性检查}
+\subsection*{Correlation Consistency Checking}
+
+设计开发中约束文件可能被修改，导致原版与修改版不一致。\textbf{相关性一致性}用同一网表比较两套约束，或比较两个设计及各自约束集。
+
+\subsubsection{比较两套设计约束}
+\subsection*{Comparing Two Sets of Design Constraints}
+
+用 \cmd{compare\_constraints} 比较。将两套约束建模为\textbf{场景}，在当前设计上创建后比较。
+
+\cmd{compare\_constraints} 检查：\cmd{create\_clock}/\cmd{create\_generated\_clock}；\cmd{set\_input\_delay}/\cmd{set\_output\_delay}；\cmd{set\_false\_path}、\cmd{set\_multicycle\_path}、\cmd{set\_min\_delay}/\cmd{set\_max\_delay}、\cmd{set\_clock\_groups}；\cmd{set\_case\_analysis}；\cmd{set\_disable\_timing}；\cmd{set\_clock\_uncertainty}；\cmd{set\_clock\_transition}/\cmd{set\_input\_transition}；\cmd{set\_clock\_latency}；\cmd{set\_clock\_gating\_check}；\cmd{set\_sense}；\cmd{set\_load} 等。
+
+\textbf{方法学：}
+\begin{enumerate}
+  \item \cmd{create\_scenario} 建模原版与修改版约束集
+  \item \cmd{compare\_constraints -constraints1 ... -constraints2 ...}
+  \item 用 S2S（SDC-to-SDC）浏览器识别违例；\cmd{report\_constraint\_analysis} 获取文本报告
+  \item 按序修复：时钟 $\rightarrow$ \cmd{set\_disable\_timing} $\rightarrow$ \cmd{set\_case\_analysis} $\rightarrow$ 例外
+  \item 重复比较
+\end{enumerate}
+
+\figplaceholder{Figure 252--254}{S2S 违例浏览器、双原理图与双场景 SDC}{fig:cc-s2s}
+
+违例规则前缀 \texttt{S2S\_}。可禁用规则类型；禁用时 GUI 与文本报告均不显示。豁免见“抑制违例”。
+
+\subsubsection{比较两个设计及两套约束}
+\subsection*{Comparing Two Designs With Two Sets of Design Constraints}
+
+链接两个功能等价设计并加载两套约束后，须先提供\textbf{名称映射文件（NMF）}再运行 \cmd{compare\_constraints}。可用 \cmd{-use\_clock\_map} 引用自定义时钟映射。需 PrimeTime-ELT 许可证。
+
+\textbf{方法学：}
+\begin{enumerate}
+  \item 链接设计并加载约束（第二设计：\cmd{link\_design -add -latest design2}）
+  \item \cmd{define\_name\_maps} 指定 NMF（仅 NMF 格式被识别）
+  \item \cmd{compare\_constraints -constraints1 ... -constraints2 ... [-design2 design2]}
+  \item \cmd{report\_constraint\_analysis} 与 GUI 调试
+\end{enumerate}
+
+NMF 语法：
+\begin{lstlisting}
+define_name_maps -application golden_sdc -design_name design2 \
+  -columns {class pattern options names} \
+  [list port IN [list] [list IN_2]] \
+  [list cell BLK1 [list] [list BLK2]]
+\end{lstlisting}
+
+支持引脚、端口、网线、单元（含层次单元）映射。时钟映射示例：
+\begin{lstlisting}
+set_clock_map -clocks1 gclk1_hier -clocks2 gclk1_buf \
+  -design2 design2 -scenario2 sdc2_mode1
+\end{lstlisting}
+
+""")
+
+S(r"""% ============================================================
+\section{附加分析特性}
+\subsection*{Additional Analysis Features}
+
+\subsubsection{\cmd{analyze\_paths} 命令}
+\subsection*{analyze\_paths Command}
+
+当 PrimeTime/DC/ICC 的 \cmd{report\_timing} 无法显示某些路径时，用 \cmd{analyze\_paths} 查明路径传播被阻断的原因及阻断点。可识别特定路径上的例外与约束，统计满足 from/through/to 条件的路径数量，并按受影响路径数对引脚排序。
+
+\cmd{-path\_type full} 且 GUI 打开时生成文本报告与原理图（\figplaceholder{Figure 255}{analyze\_paths 识别的路径}{fig:cc-analyze-paths}）。\cmd{-max\_endpoints} 限制原理图显示端点数。\cmd{-text\_only} 或 GUI 关闭时仅文本。
+
+报告类型：
+\begin{itemize}
+  \item \textbf{默认：}到/经/自某对象集合的路径数与时钟交互（Example 64）
+  \item \textbf{\cmd{-path\_type full}：}含起点/终点细分、逻辑级、途经点；若存在例外则显示例外名、脚本名与行号（Example 65--66）
+  \item \textbf{\cmd{-path\_type summary}：}摘要（Example 67）
+  \item \textbf{\cmd{-traverse\_disabled}：}追踪被禁用路径，显示数据传播阻断原因（Example 68）
+\end{itemize}
+
+示例：
+\begin{lstlisting}
+ptc_shell> analyze_paths -to Tranx/pay_count__reg[1]/D
+ptc_shell> analyze_paths -to Tranx/pay_count__reg[1]/D -path_type full
+ptc_shell> analyze_paths -to Tranx/CRC_tranx/pay_out_reg/D \
+  -path_type full -traverse_disabled
+\end{lstlisting}
+
+\subsubsection{\cmd{analyze\_unclocked\_pins} 命令}
+\subsection*{analyze\_unclocked\_pins Command}
+
+分析引脚集合中缺失时钟定义或时钟传播被阻断的情况；默认分析设计中所有引脚。默认报告：分析摘要、可能缺失时钟定义的位置、时钟传播被阻断的位置。\cmd{-verbose} 列出无时钟的时钟引脚、case 禁用与寄存器禁用引脚。原理图 Pin annotation 菜单可开关时钟与 case 标注。
+
+\subsubsection{\cmd{analyze\_clock\_networks} 命令}
+\subsection*{analyze\_clock\_networks Command}
+
+分析时钟网络传播、生成分钟树报告，识别未到达寄存器时钟引脚的时钟、被阻断的传播点。对调试时钟定义与 \cmd{set\_disable\_timing}/case analysis 导致的时钟丢失非常有用。
+
+\subsubsection{\cmd{report\_case\_details} 命令}
+\subsection*{report\_case\_details Command}
+
+报告设计中 case analysis 传播结果：用户设置值、传播常量、冲突与未解析网络。用于调试 \cmd{set\_case\_analysis} 与 CAS\_xxxx 违例。
+
+\subsubsection{\cmd{report\_clock\_crossing} 命令}
+\subsection*{report\_clock\_crossing Command}
+
+报告时钟域交叉路径统计：发射/捕获时钟对、路径数量、是否被 false path/clock groups 约束。用于验证跨时钟域约束完整性。
+
+\subsubsection{\cmd{report\_analysis\_coverage} 命令}
+\subsection*{report\_analysis\_coverage Command}
+
+（PrimeTime 侧）报告分析覆盖率；约束一致性环境中用于检查约束导致的未测试路径。与 \cmd{check\_timing} 配合确保断言有效。
+
+\subsubsection{\cmd{report\_exceptions} 命令（冗余约束）}
+\subsection*{report\_exceptions Command (Redundant Constraints)}
+
+识别冗余、被覆盖与主导的时序例外：
+\begin{itemize}
+  \item \cmd{report\_exceptions -ignored} — 被其他例外完全覆盖的例外
+  \item \cmd{report\_exceptions -redundant} — 冗余例外
+  \item \cmd{report\_exceptions -dominant} — 对至少一条路径起主导作用、移除会改变约束集的例外
+  \item \cmd{report\_exceptions -ignored -verbose} — 显示主导忽略例外的详细信息
+\end{itemize}
+
+约束一致性不修改约束；编辑 SDC 后重新运行验证。应从 SDC 中删除被忽略的例外以节省后续会话运行时间与内存。
+
+""")
+
+S(r"""% ============================================================
+\section{图形用户界面}
+\subsection*{Graphical User Interface}
+
+约束一致性 GUI 为查看与调试 PrimeTime、Design Compiler、IC Compiler 等工具约束问题的主要环境。
+
+子节：使用 GUI、约束一致性窗口、用户消息浏览器、违例浏览器、B2T 违例浏览器、相关性一致性违例浏览器、豁免配置对话框、信息窗格、控制台、在线帮助、SDC 视图、层次浏览器与原理图视图、按名选择工具栏、属性对话框、原理图显示选项。
+
+\subsubsection{使用 GUI}
+\subsection*{Using GUI}
+
+典型任务：启动 GUI $\rightarrow$ 读入/链接/约束/分析 $\rightarrow$ 深入分析违例路径。默认 \texttt{pt\_shell} 含 GUI；可用 \cmd{gui\_start}/\cmd{gui\_stop}。仅 shell：\texttt{pt\_shell -no\_gui}。View $>$ Palette/Toolbars 显示/隐藏界面元素。控制台含 \texttt{ptc\_shell} 提示符及 Log/History 标签。File $>$ Close GUI 关闭 GUI 保留终端会话；File $>$ Exit 退出。
+
+\subsubsection{约束一致性窗口}
+\subsection*{The Constraint Consistency Window}
+
+窗口可平铺（Window $>$ Tile）、层叠（Cascade）、移动与调整大小。表 46 窗口类型：
+
+\begin{table}[htbp]
+\centering
+\caption{约束一致性窗口类型（表 46）}
+\small
+\begin{tabular}{@{}p{3.2cm}p{8.8cm}@{}}
+\toprule
+窗口 & 描述 \\
+\midrule
+Violation Browser & 按场景与严重级别列出违例 \\
+B2T Mismatch Browser & 顶层与块级约束差异 \\
+S2S Mismatch Browser & 同一设计两套约束差异 \\
+User Message Browser & 用户消息 \\
+Information Pane & 当前选择的详细信息 \\
+Console & 运行 \texttt{ptc\_shell}、查看日志与历史 \\
+SDC View & 显示 SDC 并标记相关行 \\
+Hierarchy/Schematic & 浏览层次、选择单元/网线/端口/引脚 \\
+Path Schematic & 层次单元或路径的原理图 \\
+Properties & 对象属性列表 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+启动时默认停靠：违例浏览器、信息窗格、控制台（\figplaceholder{Figure 259}{启动时的约束一致性窗口}{fig:cc-gui-start}）。可按需打开层次浏览器（Window $>$ New Hierarchy Browser）。
+
+工具栏提供常用菜单快捷方式；上下文变化时按钮启用/变灰。菜单栏：File、View、Selection、Highlight、Design、Analysis、Schematic、Window、Help（表 47）。
+
+\subsubsection{违例浏览器}
+\subsection*{Violation Browser}
+
+主要调试工具；分层显示设计与约束违例及修复建议。支持网表相关与场景相关违例。显示顺序：Error、Warning、Information。默认每规则最多 1000 个违例标识节点；\cmd{display\_violations\_per\_rule\_limit} 可改。
+
+多分析运行结果存于多个违例浏览器；Analysis Run Chooser（\figplaceholder{Figure 263}{分析运行选择器}{fig:cc-run-chooser}）选择查看哪次运行。首次打开时严重级别节点展开、违例标识节点折叠。
+
+导航指南：单击查看信息窗格；双击展开规则下全部违例；使用过滤与搜索缩小列表；右键可禁用规则、豁免违例、查看 SDC/原理图。
+
+\subsubsection{其他 GUI 组件（摘要）}
+\subsection*{Other GUI Components}
+
+\textbf{用户消息浏览器}（Analysis $>$ UserMessage Browser）：按严重级别排序；选择消息后在信息窗格显示 SDC 行号链接。
+
+\textbf{B2T / S2S 浏览器：}与违例浏览器类似，含双原理图、双 SDC 侧-by-side 查看与修复建议链接。
+
+\textbf{豁免配置：}Design $>$ Waiver Configuration — 禁用规则、创建/编辑/删除豁免、实例豁免。
+
+\textbf{信息窗格：}显示违例详情、超链接（SDC、原理图、Debugging Help、Fix Suggestion）、属性与例外摘要。
+
+\textbf{SDC 视图：}点击链接打开 SDC 并高亮违例行。
+
+\textbf{原理图：}Pin annotation 可显示 \texttt{case\_value}、\texttt{clock\_names}、\texttt{exceptions\_summary} 等；Attribute Group Manager 自定义显示属性组。
+
+\textbf{在线帮助：}Help $>$ Online Help；\cmd{report\_rule CAS\_*} 等可快速查看规则摘要。
+
+""")
+
+S(r"""% ============================================================
+\section{教程}
+\subsection*{Tutorial}
+
+本教程演示如何在教程设计上设置并运行约束一致性，并调查规则违例。假设读者已熟悉约束一致性关键组件。
+
+子节：约束一致性概述、教程设计、启动、分析 ChipLevel 设计、调试约束问题、结束与重启会话。
+
+\subsubsection{约束一致性概述（教程）}
+\subsection*{Overview of Constraint Consistency}
+
+违例浏览器（\figplaceholder{Figure 275}{约束一致性 GUI}{fig:cc-tut-gui}）为关键特性：\cmd{analyze\_design} 后按场景汇总 Error/Warning/Info；双击或 “+” 展开查看具体规则违例。信息窗格显示选中项详情与调查链接。控制台可交互输入命令并显示日志；History 标签列出已用命令。点击原理图链接可替换违例浏览器视图，用标签页切回。
+
+\cmd{analyze\_design} 对照预定义规则检查已加载设计（时钟、case、例外、边界条件等）。表 50 规则类型与表 44 类似，另含 B2T\_xxx\_xxxx 块到顶规则。\cmd{report\_rule CAS\_*} 列出 case 规则摘要；详细描述见在线帮助。
+
+\subsubsection{关于教程设计}
+\subsection*{About the Tutorial Design}
+
+教程设计 \textbf{ChipLevel} 实现多种二进制算术功能（加法、乘法等）。主要块：Adder16、CascadeMod、Comparator、Multiply8x8、Multiply16x16、MuxMod、PathSegment。设计处于前期开发阶段，时钟网络与约束仍在构建，适合用约束一致性尽早发现约束问题。
+
+教程文件位于 PrimeTime 安装 \texttt{doc/gca/tutorial}：
+\begin{lstlisting}
+% cp -r $SYNOPSYS/doc/gca/tutorial .
+\end{lstlisting}
+
+目录结构：
+\begin{verbatim}
+tutorial/
+  run_tutorial.tcl
+  design/chiplevel.v, chiplevel.sdc
+  libs/lsi_10k.db
+\end{verbatim}
+
+从 \texttt{tutorial} 目录运行 \texttt{run\_tutorial.tcl}。
+
+\subsubsection{启动约束一致性}
+\subsection*{Starting Constraint Consistency}
+
+\begin{enumerate}
+  \item 打开 Linux shell，进入 \texttt{user\_directory/tutorial}
+  \item \texttt{pt\_shell -constraints}
+\end{enumerate}
+
+失败时检查安装、PATH、许可证服务器、PrimeTime 与 PrimeTime SI 许可证。
+
+\subsubsection{分析 ChipLevel 设计}
+\subsection*{Analyzing the ChipLevel Design}
+
+步骤摘要：
+\begin{enumerate}
+  \item \cmd{set\_app\_var search\_path [list . ./libs ./design]}
+  \item \cmd{set\_app\_var link\_path [list * lsi\_10k.db]}
+  \item \cmd{read\_verilog chiplevel.v}
+  \item \cmd{current\_design ChipLevel}
+  \item \cmd{link\_design}
+  \item \cmd{source ./design/chiplevel.sdc}（或 \cmd{read\_sdc}）
+  \item \cmd{analyze\_design}
+\end{enumerate}
+
+\cmd{analyze\_design} 后违例浏览器显示结果。上述命令亦包含在 \texttt{run\_tutorial.tcl}（Example 84）中。
+
+\subsubsection{调试约束问题}
+\subsection*{Debugging Constraint Problems}
+
+在违例浏览器中按严重级别展开 Error，选择具体违例（如 CLK\_xxxx、CAS\_xxxx）。使用信息窗格中的 SDC 链接、原理图链接、Debugging Help 与 Fix Suggestion。常见修复：补全时钟定义、修正 \cmd{set\_input\_delay}/\cmd{set\_output\_delay}、解决 case 冲突、删除无效 \cmd{set\_multicycle\_path} 对象（如 Q 引脚非有效端点）。
+
+修改 \texttt{chiplevel.sdc} 后重新 \cmd{source} 并 \cmd{analyze\_design} 验证。可用 \cmd{report\_constraint\_analysis -include violations} 生成文本摘要。
+
+\subsubsection{结束与重启教程会话}
+\subsection*{Ending and Restarting the Tutorial Session}
+
+\cmd{exit} 结束会话。保留 \texttt{ptc\_shell\_command.log} 可 \cmd{source} 重复会话。重新启动：\texttt{pt\_shell -constraints} 后 \cmd{source run\_tutorial.tcl}。
+
+\begin{noteBox}
+约束一致性（\texttt{pt\_shell -constraints}）与标准 PrimeTime STA 使用相同 SDC 语义，但专注于约束质量而非 signoff 时序。修复约束后应在 PrimeTime 中运行完整 STA 验证。
+\end{noteBox}
+
+\begin{seeAlsoBox}
+SDC 格式见 Synopsys Design Constraints 应用说明；Tcl 见 \textit{Using Tcl With Synopsys Tools}；PrimeTime 报告与调试见第~\ref{chap:report}~章。
+\end{seeAlsoBox}
+
+""")
+
+OUT.write_text("".join(C), encoding="utf-8")
+print(f"Wrote {OUT} ({OUT.stat().st_size:,} bytes, UTF-8)")

@@ -1,0 +1,405 @@
+% 第 11 章 Using Hierarchical Models
+\bichapter{使用层次化模型}{Using Hierarchical Models}
+\label{chap:hier}
+
+在大型设计上执行顶层优化时，可使用层次化模型（hierarchical models）以减少设计对象数量与内存需求。
+术语「层次化模型」指 block abstraction（块抽象）与物理层次（physical hierarchy）。
+
+本章包括以下主题：
+\begin{itemize}
+  \item 层次化模型概览
+  \item 关于 Block Abstraction
+\end{itemize}
+
+% ============================================================
+\section{层次化模型概览}
+\subsection*{Overview of Hierarchical Models}
+
+在 DC Explorer 中，层次化模型用于在大型设计的顶层优化期间减少设计对象数量与内存需求。
+
+对于接口逻辑模型（interface logic model，ILM），块的门级网表被建模为仅包含该块所需接口逻辑、以及您可能手动关联到接口逻辑的部分门级网表；其余逻辑均被移除。
+但 DC Explorer \textbf{不支持 ILM}，而是使用 block abstraction。
+
+Block abstraction 是对 ILM 的扩展。与 ILM 将内部逻辑移除并保存到单独的 \texttt{.ddc} 文件不同：使用 block abstraction 时，完整设计与 block abstraction 信息保存在同一 \texttt{.ddc} 文件中。
+接口逻辑被标记；读取 block abstraction 时工具仅加载接口逻辑。
+DC Explorer 可创建 block abstraction，并支持在 IC Compiler 中创建的 block abstraction；但 IC Compiler 仅支持在 IC Compiler 中创建的 block abstraction。
+
+图~\ref{fig:dce-hier-block} 给出一个块及其层次化模型：下列路径之间的逻辑被保留：
+\begin{itemize}
+  \item 各时序路径的输入端口到第一个寄存器
+  \item 各时序路径的最后一个寄存器到输出端口
+\end{itemize}
+纯组合的输入端口到输出端口时序路径（A 到 X）相关逻辑也会保留。到被保留寄存器的时钟连接同样保留；寄存器到寄存器逻辑则丢弃。
+
+\figplaceholder{Figure 65: A Block and Its Hierarchical Model}{块及其层次化模型}{fig:dce-hier-block}
+
+DC Explorer 支持下列使用层次化模型的流程：
+\begin{itemize}
+  \item \textbf{多角多模式（Multicorner-multimode）}\\
+        工具自动检测多个 corner 与多个 mode，并保留各 scenario 接口时序路径所涉及的接口逻辑。
+  \item \textbf{具有多层物理层次的设计}\\
+        工具仅通过 block abstraction 支持多层物理层次。
+\end{itemize}
+
+要进一步了解层次化模型，见：
+\begin{itemize}
+  \item 层次化模型中使用的信息
+  \item 多角多模式流程中的层次化模型
+  \item 在 GUI 中查看层次化模型
+\end{itemize}
+
+\begin{seeAlsoBox}
+自底向上 compile，见第~\ref{chap:opt}~章「优化」。
+\end{seeAlsoBox}
+
+\subsection{层次化模型中使用的信息}
+\subsubsection*{Information Used in Hierarchical Models}
+
+默认情况下，层次化模型包含下列网表对象：
+\begin{itemize}
+  \item 通向下列四类关键时序路径的叶单元与宏单元：输入端口到输出端口（组合输入到输出路径）、输入端口到边沿触发寄存器、边沿触发寄存器到输出端口
+  \item 抽象时钟树，包括到接口寄存器的时钟路径、也可能连接到非接口寄存器的最小/最大时钟路径，以及属于这些时钟路径的时钟树综合例外（CTS exceptions）
+\end{itemize}
+
+DC Explorer 将生成时钟（generated clock）视为时钟端口，并保留由生成时钟驱动的接口寄存器；但由生成时钟驱动的内部寄存器不会保留。
+当设计包含生成时钟时，主时钟与生成时钟之间时序路径上的逻辑也会保留。
+
+此外还包括：
+\begin{itemize}
+  \item 时钟门控电路——若由外部端口驱动
+  \item 主时钟与由其派生的任何生成时钟之间时序路径上的逻辑
+  \item 所有网络的旁路负载单元（side-load cells）\\
+        Side-load cell 是可影响接口路径时序、但不直接属于接口逻辑的单元。
+\end{itemize}
+
+\begin{noteBox}
+默认情况下，锁存器（latch）按组合逻辑处理。
+\end{noteBox}
+
+除网表对象外，层次化模型还存储下列信息：
+\begin{itemize}
+  \item 单元或引脚位置信息
+  \item 寄生参数信息
+  \item 时序约束
+  \item 内部网络的引脚到引脚延时
+  \item UPF 约束
+\end{itemize}
+
+图~\ref{fig:dce-hier-model} 给出层次化模型中包含的元素，并突出时钟树：深色阴影元素位于时钟路径上；浅色阴影为 side-load cell；未阴影元素不包含在模型中。
+
+\figplaceholder{Figure 66: Hierarchical Model}{层次化模型}{fig:dce-hier-model}
+
+\subsection{多角多模式流程中的层次化模型}
+\subsubsection*{Hierarchical Models in a Multicorner-Multimode Flow}
+
+可将多角多模式约束施加到层次化模型，并在顶层设计中使用这些约束。
+
+对使用层次化模型建模的块、并配合多角多模式 scenario，适用下列要求：
+\begin{itemize}
+  \item 对每个顶层多角多模式 scenario，设计中所用各块都必须存在同名 scenario。\\
+        若存在不匹配，使用 \cmd{select\_block\_scenario} 命令将块中的 scenario 映射到顶层设计。块可以有顶层未使用的额外 scenario。
+  \item 可将具有多角多模式 scenario 的顶层设计与不具有多角多模式 scenario 的块一起使用；这不需要使用 \cmd{select\_block\_scenario}。工具会自动对顶层定义的每个活动 scenario 使用相同的块级数据（如时序与功耗）。
+  \item 默认情况下，在不具有多角多模式 scenario 的顶层设计中，只能使用同样不具有多角多模式 scenario 的块。\\
+        要在非多角多模式顶层设计中使用多角多模式块，请用 \cmd{select\_block\_scenario} 指定 scenario 映射。
+  \item 对每个 TLUPlus 文件，块在指定温度（作为工作条件）下存储提取数据。为在顶层寄生提取时获得准确结果，顶层的 TLUPlus 文件与温度 corner 应与块级实现时使用的 TLUPlus 与温度 corner 匹配。不过，可在顶层使用额外的 TLUPlus 与温度，但精度会下降。
+\end{itemize}
+
+\begin{noteBox}
+DC Explorer 支持创建多个 scenario，并仅在当前 scenario 中进行优化；但工具不执行 scenario reduction。
+\end{noteBox}
+
+\subsection{在 GUI 中查看层次化模型}
+\subsubsection*{Viewing Hierarchical Models in the GUI}
+
+在 DC Explorer GUI 中，层次化模型实例显示为一级物理层次：带填充图案的矩形或折线形（rectilinear）形状。View Settings 面板提供对 block abstraction 显示的额外控制。
+\begin{itemize}
+  \item 要显示层次化模型，选择 \textbf{Cell > ILM/Block Abstraction} 可见性选项。
+  \item 要显示层次化模型引脚，选择 \textbf{Pin} 可见性选项。
+  \item 要展开层次化模型以显示其中的叶单元、引脚、网络与宏，在 ``Level'' 框中输入或选择正整数。
+  \item 要将显示重置为默认未展开视图，在 ``Level'' 框中输入或选择 0。
+\end{itemize}
+
+更多信息另见 \textit{Design Vision User Guide} 中的 ``Examining Physical Hierarchy Blocks'' 主题。
+
+% ============================================================
+\section{关于 Block Abstraction}
+\subsection*{About Block Abstractions}
+
+使用 block abstraction 的顶层流程允许优化顶层逻辑。
+
+Block abstraction 是对接口逻辑模型（ILM）的扩展。与 ILM 将内部逻辑移除并保存到单独 \texttt{.ddc} 不同：使用 block abstraction 时，完整设计与 block abstraction 信息保存在同一 \texttt{.ddc} 中。在顶层将设计作为 block abstraction 读入时，工具仅从该 \texttt{.ddc} 加载接口逻辑。
+
+\begin{noteBox}
+DC Explorer 不支持 ILM，应改用 block abstraction。
+\end{noteBox}
+
+图~\ref{fig:dce-ilm-ba} 说明 ILM 与 block abstraction 的差异，并展示 Design Compiler topographical 如何支持使用 block abstraction 的顶层优化。在 DC Explorer 中不能对 block abstraction 进行优化。
+
+\figplaceholder{Figure 67: ILM and Block Abstraction Comparison}{ILM 与 Block Abstraction 对比}{fig:dce-ilm-ba}
+
+要了解层次化流程以及 block abstraction 的限制，见：
+\begin{itemize}
+  \item Block Abstraction 层次化流程
+  \item 限制
+\end{itemize}
+
+\subsection{Block Abstraction 层次化流程}
+\subsubsection*{Block Abstraction Hierarchical Flow}
+
+DC Explorer 可创建 block abstraction，并支持在 DC Explorer、Design Compiler 或 IC Compiler 中创建的 block abstraction。但 IC Compiler 仅支持在 IC Compiler 中创建的 block abstraction。
+
+要运行 block abstraction 层次化流程，请按下列主题顺序完成任务：
+\begin{enumerate}
+  \item 创建并保存 Block Abstraction
+  \item 设置顶层设计选项
+  \item 控制为 Block Abstraction 加载的逻辑范围
+  \item 加载 Block Abstraction
+  \item 检查 Block Abstraction 就绪性
+  \item 执行顶层综合
+\end{enumerate}
+
+要在顶层综合期间忽略完全位于 block abstraction 内的时序路径，见「忽略 Block Abstraction 内的时序路径」。
+
+更多信息另见 \textit{IC Compiler Implementation User Guide}。
+
+\begin{seeAlsoBox}
+限制，见下文「限制」。
+\end{seeAlsoBox}
+
+\subsection{创建并保存 Block Abstraction}
+\subsubsection*{Creating and Saving Block Abstractions}
+
+创建并保存 block abstraction 时，它们存储在单个包含完整设计网表的 \texttt{.ddc} 文件中。您无需维护两个 \texttt{.ddc}（一个用于接口逻辑、一个用于完整网表）。
+
+要为当前设计生成 block abstraction，请在综合结束时使用 \cmd{create\_block\_abstraction} 命令。该命令将 block abstraction 信息添加到内存中的设计。
+
+要保存 block abstraction，必须在创建后立即使用 \cmd{write\_file} 命令：
+\begin{lstlisting}
+de_shell> create_block_abstraction
+de_shell> write_file -hierarchy -format ddc \
+   -output ${DESIGN_NAME}.mapped.ddc
+\end{lstlisting}
+
+该 \texttt{.ddc} 文件同时包含完整设计与 DC Explorer block abstraction。
+
+要用 \cmd{set\_top\_implementation\_options} 指定将链接到 block abstraction 并与顶层设计集成的块引用列表，见「设置顶层设计选项」。
+
+\begin{seeAlsoBox}
+Block Abstraction 层次化流程（上文）。
+\end{seeAlsoBox}
+
+\subsection{设置顶层设计选项}
+\subsubsection*{Setting Top-Level Design Options}
+
+要在顶层使用 block abstraction，对 \cmd{set\_top\_implementation\_options} 使用 \opt{-block\_references} 选项，指定要链接到 block abstraction 的块引用列表。对 DC Explorer 与 IC Compiler 的 block abstraction 均需如此设置。
+
+请在将含 block abstraction 的 \texttt{.ddc} 读入内存\textbf{之前}使用 \cmd{set\_top\_implementation\_options}；否则会加载完整块网表。链接时，工具仅将接口逻辑加载到顶层。
+
+使用 IC Compiler block abstraction 时，请在 DC Explorer 中运行任何 \cmd{link} 命令之前使用 \cmd{set\_top\_implementation\_options}。链接顶层设计时，工具会从 Milkyway 参考库列表自动读取 IC Compiler block abstraction。
+
+下例为 \texttt{blk1} 与 \texttt{blk2} 块设置顶层实现选项：
+\begin{lstlisting}
+de_shell> set_top_implementation_options -block_references {blk1 blk2}
+\end{lstlisting}
+
+可使用多条 \cmd{set\_top\_implementation\_options} 命令为顶层全部 block abstraction 指定选项。
+例~\ref{ex:dce-ba-one} 与例~\ref{ex:dce-ba-multi} 中的命令设置等价。
+
+\begin{lstlisting}[caption={在一条命令中为 Block Abstraction 指定选项},label={ex:dce-ba-one}]
+de_shell> set_top_implementation_options -block_references {blk1 blk2}
+\end{lstlisting}
+
+\begin{lstlisting}[caption={用多条命令为 Block Abstraction 指定选项},label={ex:dce-ba-multi}]
+de_shell> set_top_implementation_options -block_references {blk1}
+de_shell> set_top_implementation_options -block_references {blk2}
+\end{lstlisting}
+
+要验证 \cmd{set\_top\_implementation\_options} 设置的选项并确认 block abstraction 正确加载，使用 \cmd{report\_top\_implementation\_options} 命令。
+
+要重置顶层实现选项，对 \cmd{set\_top\_implementation\_options} 使用 \opt{-reset} 选项。这将为该块加载完整设计网表，而非加载 block abstraction。
+
+下例重置 \texttt{blk2} 的顶层实现选项。此例中加载 \texttt{blk1} 的 block abstraction，并加载 \texttt{blk2} 的完整网表：
+\begin{lstlisting}
+de_shell> set_top_implementation_options -block_references {blk1 blk2}
+de_shell> set_top_implementation_options -block_references {blk2} -reset
+\end{lstlisting}
+
+\begin{seeAlsoBox}
+Block Abstraction 层次化流程（上文）。
+\end{seeAlsoBox}
+
+\subsection{控制为 Block Abstraction 加载的逻辑范围}
+\subsubsection*{Controlling the Extent of Logic Loaded for Block Abstractions}
+
+在顶层将块作为 block abstraction 加载时，可通过 \cmd{set\_top\_implementation\_options} 的 \opt{-load\_logic} 选项控制加载完整接口（full interface）或紧凑接口（compact interface）。
+
+选择紧凑接口时，仅保留 min/max 与 rise/fall 接口逻辑。对于扇出到大量边界寄存器的端口所在块，使用紧凑接口可改善运行时间与内存占用。用 \cmd{create\_block\_abstraction} 创建 block abstraction 时，工具同时识别完整接口逻辑与紧凑接口逻辑。
+
+用下列选项控制加载范围：
+\begin{itemize}
+  \item \opt{-load\_logic full\_interface}：加载完整接口（默认）。下列逻辑标记为接口逻辑：
+  \begin{itemize}
+    \item 从输入端口到寄存器或输出端口的全部逻辑
+    \item 从寄存器或输入端口到输出端口的全部逻辑
+  \end{itemize}
+  \item \opt{-load\_logic compact\_interface}：加载紧凑接口，仅包含每个输入/输出端口时序关键路径上的逻辑。下列逻辑标记为接口逻辑：
+  \begin{itemize}
+    \item 属于从输入端口到寄存器或输出端口的 min/max rise/fall 逻辑
+    \item 属于从寄存器或输入端口到输出端口的 min/max rise/fall 逻辑
+  \end{itemize}
+\end{itemize}
+
+无论加载完整接口还是紧凑接口，下列时钟电路均标记为接口逻辑：
+\begin{itemize}
+  \item 从主时钟到生成时钟路径上的任何逻辑
+  \item 驱动接口寄存器的时钟树（含时钟树中的任何逻辑）
+  \item 从时钟端口出发的最长与最短时钟路径
+  \item 所有非 ideal、且未因 DRC 禁用的网络的 side-load cell
+\end{itemize}
+
+无论加载完整接口还是紧凑接口，工具在 block abstraction 中保留下列 IEEE 1801 Unified Power Format（UPF）对象：
+\begin{itemize}
+  \item 所有 retention 寄存器（无论是否属于接口逻辑）
+  \item 属于接口逻辑的电平移位单元与隔离单元
+  \item 所保留 retention 寄存器、隔离单元与电平移位单元的控制逻辑
+\end{itemize}
+
+当工具移除某 UPF 网表对象时，会移除或更新关联的 UPF 约束，并确保 block abstraction 中存储的 UPF strategy 与 UPF 网表对象一致。
+
+要将 block abstraction 中的 UPF 对象传播到顶层，运行 \cmd{propagate\_constraints -power\_supply\_data} 命令。
+
+\begin{seeAlsoBox}
+Block Abstraction 层次化流程（上文）。
+\end{seeAlsoBox}
+
+\subsection{加载 Block Abstraction}
+\subsubsection*{Loading Block Abstractions}
+
+在使用 \cmd{set\_top\_implementation\_options} 之后，使用 \cmd{read\_ddc} 命令加载将链接到顶层设计的 DC Explorer block abstraction：
+\begin{lstlisting}
+de_shell> read_ddc {DesignA.mapped.ddc DesignB.mapped.ddc}
+\end{lstlisting}
+
+读入块 \texttt{.ddc} 时，下列消息表示正在加载 DC Explorer block abstraction：
+\begin{lstlisting}
+Information: Reading block abstraction for design 'blk1' and its
+hierarchy.(DDC-27)
+\end{lstlisting}
+
+确保您的 Milkyway 参考库包含 IC Compiler block abstraction 设计。链接顶层设计时，IC Compiler block abstraction 会从 Milkyway 参考库列表自动加载。
+
+链接顶层设计时，下列消息表示正在加载 IC Compiler block abstraction：
+\begin{lstlisting}
+Information: Auto loading blk2.CEL (version 1) from Milkyway library
+blk2.mw ...(ILM-102)
+\end{lstlisting}
+
+\begin{seeAlsoBox}
+Block Abstraction 层次化流程（上文）。
+\end{seeAlsoBox}
+
+\subsection{检查 Block Abstraction 就绪性}
+\subsubsection*{Checking Block Abstraction Readiness}
+
+要确定已加载的 block abstraction 是否已为顶层综合就绪，可执行下列任务：
+
+\subsubsection{报告 Block Abstraction}
+\subsubsection*{Reporting Block Abstractions}
+
+要报告链接到当前设计的 block abstraction，使用 \cmd{report\_block\_abstraction} 命令。
+对 IC Compiler 创建的 block abstraction，该命令还会报告 UPF 信息。
+
+\subsubsection{查询 Block Abstraction}
+\subsubsection*{Querying Block Abstractions}
+
+要用 \cmd{get\_cells} 创建 block abstraction 集合：
+\begin{lstlisting}
+de_shell> get_cells -hierarchical -filter is_block_abstraction==true
+{blk1 blk2}
+\end{lstlisting}
+
+\subsubsection{检查 Block Abstraction}
+\subsubsection*{Checking Block Abstractions}
+
+要在优化前检查 block abstraction 就绪性，使用 \cmd{check\_block\_abstraction} 命令。该命令检查链接到顶层设计的块，确保其已为顶层综合就绪。
+
+命令检查下列内容：
+\begin{itemize}
+  \item 多角多模式块中的 scenario 一致性
+  \item 块与单元上是否存在 \texttt{dont\_touch} 设置\\
+        所有对象都必须具有 \texttt{dont\_touch} 属性，以免被修改。
+\end{itemize}
+
+也可使用 \cmd{compile\_exploration -check\_only} 验证设计与库是否具备 \cmd{compile\_exploration} 成功运行所需的全部数据。
+
+\begin{seeAlsoBox}
+Block Abstraction 层次化流程（上文）。
+\end{seeAlsoBox}
+
+\subsection{执行顶层综合}
+\subsubsection*{Performing Top-Level Synthesis}
+
+在 block abstraction 流程中执行顶层综合之前，应完成下列任务：
+\begin{itemize}
+  \item 创建 block abstraction
+  \item 指定将其链接到顶层设计的设置
+  \item 运行报告以检查顶层实现设置
+  \item 运行报告以获取 block abstraction 详情
+  \item 检查 block abstraction 就绪性
+  \item （可选）忽略完全位于 block abstraction 内的时序路径
+\end{itemize}
+
+下列脚本给出顶层综合流程的一部分。顶层设计包含 \texttt{DesignA} 与 \texttt{DesignB} 块及其对应的 block abstraction（\texttt{DesignA.mapped.ddc} 与 \texttt{DesignB.mapped.ddc}）：
+\begin{lstlisting}
+set BLOCK_ABSTRACTION_DESIGNS "DesignA DesignB"
+set_top_implementation_options -block_references \
+   ${BLOCK_ABSTRACTION_DESIGNS}
+... # Read in the top-level RTL
+read_ddc {DesignA.mapped.ddc DesignB.mapped.ddc}
+current_design top
+link
+report_block_abstraction
+get_cells -hierarchical -filter is_block_abstraction==true
+report_top_implementation_options
+... # Read in constraints
+check_block_abstraction
+compile_exploration -check_only
+compile_exploration
+\end{lstlisting}
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item Block Abstraction 层次化流程（上文）
+  \item 忽略 Block Abstraction 内的时序路径（下文）
+  \item 第~\ref{chap:opt}~章「优化」中的自底向上 compile
+\end{itemize}
+\end{seeAlsoBox}
+
+\subsection{忽略 Block Abstraction 内的时序路径}
+\subsubsection*{Ignoring Timing Paths Within Block Abstractions}
+
+Block abstraction 可包含完全位于块内的寄存器到寄存器路径。这些路径源于 block abstraction 中由输入到寄存器与寄存器到输出路径共享的组合逻辑。
+
+这些路径在块级优化期间已优化。要忽略这些路径，将 \varname{timing\_ignore\_paths\_within\_block\_abstraction} 变量设为 \texttt{true}（默认值为 \texttt{false}）。例如：
+\begin{lstlisting}
+de_shell> set_app_var timing_ignore_paths_within_block_abstraction true
+\end{lstlisting}
+
+该变量设置不影响始于 block abstraction 内、穿出后再返回该 block abstraction 的路径。
+
+\begin{seeAlsoBox}
+Block Abstraction 层次化流程（上文）。
+\end{seeAlsoBox}
+
+\subsection{限制}
+\subsubsection*{Limitations}
+
+Block abstraction 具有下列限制：
+\begin{itemize}
+  \item IC Compiler 不支持在 DC Explorer 中创建的 block abstraction。
+  \item 在 DC Explorer 中不能修改或优化 block abstraction。
+\end{itemize}
+
+\begin{seeAlsoBox}
+Block Abstraction 层次化流程（上文）。
+\end{seeAlsoBox}

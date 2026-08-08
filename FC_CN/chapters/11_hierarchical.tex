@@ -1,0 +1,1572 @@
+% 第 11 章 Hierarchical Implementation
+\bichapter{层次化实现}{Hierarchical Implementation}
+\label{chap:hier}
+
+本章说明如何在层次化设计（hierarchical design）上执行综合（synthesis）、布局（placement）、优化（optimization）、时钟树综合（clock tree synthesis）、布线（routing）以及后布线优化（postroute optimization）。内容涵盖：
+\begin{itemize}
+  \item 使用 Abstract 进行层次化综合
+  \item 使用 ETM 进行层次化综合
+  \item 层次化综合流程的预检查
+  \item 提供块级测试模型（test model）
+  \item 指定块级功耗意图（power intent）
+  \item Abstract 视图概述
+  \item 创建 Abstract 视图
+  \item 报告 Abstract 纳入原因
+  \item 创建 Abstract 之后修改 block
+  \item 创建 Frame 视图
+  \item 在顶层链接 Abstract 视图
+  \item 将 block 从 Abstract 切换为 Design 视图
+  \item 链接带多个 label 的子块
+  \item 从顶层指定 block 的可编辑性
+  \item 使用 Abstract 做顶层收敛前的准备
+  \item 检查含 Abstract 设计的顶层收敛问题
+  \item 使用 Abstract 视图执行顶层收敛
+  \item 创建 ETM 与 ETM cell library
+  \item 在顶层链接 ETM
+  \item 使用 ETM 执行顶层收敛
+  \item 透明层次优化（Transparent Hierarchy Optimization，THO）
+\end{itemize}
+
+% ============================================================
+\section{使用 Abstract 进行层次化综合}
+\subsection*{Performing Hierarchical Synthesis Using Abstracts}
+
+基于 Abstract 的层次化综合流程主要包括以下步骤：
+\begin{enumerate}
+  \item 在顶层对设计进行划分（partition），并为下层 block 生成设计库（design library），详见「全芯片设计的划分与规划」。
+  \item 对每个下层 block 进行综合，并生成顶层综合所需的块级信息，详见「综合子块」。
+  \item 对顶层进行综合，详见「综合顶层」。
+\end{enumerate}
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item Overview of Abstract Views（Abstract 视图概述）
+  \item Creating Abstract Views（创建 Abstract 视图）
+  \item Creating a Frame View（创建 Frame 视图）
+\end{itemize}
+\end{seeAlsoBox}
+
+\subsection{全芯片设计的划分与规划}
+\subsubsection*{Partitioning and Planning the Full Chip Design}
+
+基于 Abstract 的层次化综合流程包含以下两种情形：
+\begin{itemize}
+  \item 子块与顶层设计的 floorplan 尚不可用；
+  \item 子块与顶层设计的 floorplan 已可用。
+\end{itemize}
+
+\subsubsection{Floorplan 不可用时的层次化综合流程}
+\subsubsection*{Hierarchical Synthesis Flow When Floorplans are not Available}
+
+当子块与顶层设计的 floorplan 尚不可用时，可按以下步骤对顶层做划分与规划，并创建后续自底向上（bottom-up）综合所需的下层 block：
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 187：Hierarchical Synthesis Flow When Floorplans are not Available）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{Floorplan 不可用时的层次化综合流程}
+\label{fig:hier-synth-no-fp}
+\end{figure}
+
+\begin{enumerate}
+  \item 读入全芯片设计并施加约束，例如：
+\begin{lstlisting}
+fc_shell> set REF_LIBS "stdcell.ndm macro.ndm"
+fc_shell> create_lib TOP -technology techfile \
+    -ref_libs $REF_LIBS
+fc_shell> analyze -format verilog $rtl_files
+fc_shell> elaborate TOP
+fc_shell> set_top_module TOP
+
+fc_shell> load_upf fullchip.upf
+fc_shell> read_sdc fullchip.sdc
+\end{lstlisting}
+
+  \item 识别设计划分并拆分约束，例如：
+\begin{lstlisting}
+fc_shell> set_budget_options -add_blocks {BLOCK1 BLOCK2}
+fc_shell> split_constraints
+\end{lstlisting}
+
+  \item 创建带设计信息的子块设计库，并启用按块配置参考库（reference library）的设置，例如：
+\begin{lstlisting}
+fc_shell> copy_lib -to_lib BLOCK1.nlib -no_design
+fc_shell> copy_lib -to_lib BLOCK2.nlib -no_design
+fc_shell> set_attribute -objects BLOCK1.nlib \
+   -name use_hier_ref_libs -value true
+fc_shell> set_attribute -objects BLOCK2.nlib \
+   -name use_hier_ref_libs -value true
+fc_shell> save_lib -all
+\end{lstlisting}
+
+  \item 创建子块设计划分，例如：
+\begin{lstlisting}
+fc_shell> commit_block -library BLOCK1.nlib BLOCK1
+fc_shell> commit_block -library BLOCK2.nlib BLOCK2
+fc_shell> save_lib -all
+\end{lstlisting}
+
+  \item 加载此前由 \cmd{split\_constraints} 为未映射子块与顶层生成的 UPF 与 SDC 约束，例如：
+\begin{lstlisting}
+fc_shell> set_constraint_mapping_file ./split/mapfile
+fc_shell> load_block_constraints -all_blocks -type SDC  \
+   -type UPF -type CLKNET
+fc_shell> save_lib -all
+\end{lstlisting}
+
+  \item 运行 \cmd{compile\_fusion}，直到子块的逻辑优化（logic optimization）与自动 floorplanning 完成，例如：
+\begin{lstlisting}
+fc_shell> compile_fusion -to logic_opto
+\end{lstlisting}
+
+  \item 运行 \cmd{compile\_fusion}，直到顶层设计的工艺映射（technology mapping）完成，例如：
+\begin{lstlisting}
+fc_shell> compile_fusion -to initial_map
+\end{lstlisting}
+
+  \item 执行设计规划（design planning）操作：从 floorplan 初始化、子块与电压域（voltage area）塑形、硬宏与标准单元布局、电源网络创建，直到 pin assignment。
+
+  \item 运行 \cmd{compile\_fusion}，直到顶层设计的逻辑优化完成，例如：
+\begin{lstlisting}
+fc_shell> compile_fusion -from logic_opto -to logic_opto
+\end{lstlisting}
+
+  \item 仅对顶层做增量标准单元布局，例如：
+\begin{lstlisting}
+fc_shell> create_placement -floorplan -use_seed_locs
+\end{lstlisting}
+
+  \item 执行时序估计（timing estimation）与预算（budgeting），生成块级实现所需的 block budget。
+
+  \item 完成设计规划后，打开 elaborated RTL NDM，加载 floorplan、feedthrough 与 budget，重建子块与顶层设计。
+\end{enumerate}
+
+\subsubsection{Floorplan 可用时的层次化综合流程}
+\subsubsection*{Hierarchical Synthesis Flow When Floorplans are Available}
+
+当子块与顶层设计的 floorplan 已可用时，可按以下步骤对顶层做划分与规划，并创建后续自底向上综合所需的下层 block：
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 188：Hierarchical Synthesis Flow When Floorplans are Available）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{Floorplan 可用时的层次化综合流程}
+\label{fig:hier-synth-with-fp}
+\end{figure}
+
+\begin{enumerate}
+  \item 读入全芯片设计并施加约束，例如：
+\begin{lstlisting}
+fc_shell> set REF_LIBS "stdcell.ndm macro.ndm"
+fc_shell> create_lib TOP -technology techfile \
+    -ref_libs $REF_LIBS
+fc_shell> analyze -format verilog $rtl_files
+fc_shell> elaborate TOP
+fc_shell> set_top_module TOP
+
+fc_shell> load_upf fullchip.upf
+fc_shell> read_sdc fullchip.sdc
+\end{lstlisting}
+
+  \item 对设计划分拆分约束，例如：
+\begin{lstlisting}
+fc_shell> set_budget_options -add_blocks {BLOCK1 BLOCK2}
+fc_shell> split_constraints
+\end{lstlisting}
+
+  \item 创建带设计信息的子块设计库，并启用按块配置参考库的设置，例如：
+\begin{lstlisting}
+fc_shell> copy_lib -to_lib BLOCK1.nlib -no_design
+fc_shell> copy_lib -to_lib BLOCK2.nlib -no_design
+fc_shell> set_attribute -objects BLOCK1.nlib \
+   -name use_hier_ref_libs -value true
+fc_shell> set_attribute -objects BLOCK2.nlib \
+   -name use_hier_ref_libs -value true
+fc_shell> save_lib -all
+\end{lstlisting}
+
+  \item 创建子块设计划分，例如：
+\begin{lstlisting}
+fc_shell> commit_block -library BLOCK1.nlib BLOCK1
+fc_shell> commit_block -library BLOCK2.nlib BLOCK2
+fc_shell> save_lib -all
+\end{lstlisting}
+
+  \item 加载此前由 \cmd{split\_constraints} 为未映射子块与顶层生成的 UPF 与 SDC 约束，例如：
+\begin{lstlisting}
+fc_shell> set_constraint_mapping_file ./split/mapfile
+fc_shell> load_block_constraints -all_blocks -type SDC  \
+   -type UPF -type CLKNET
+fc_shell> save_lib -all
+\end{lstlisting}
+
+  \item 加载子块与顶层设计的 floorplan。
+
+  \item 运行 \cmd{compile\_fusion}，直到子块与顶层设计的逻辑优化完成，例如：
+\begin{lstlisting}
+fc_shell> compile_fusion -to logic_opto
+\end{lstlisting}
+
+  \item 执行标准单元布局，随后进行 pin assignment、时序估计与预算。
+
+  \item 完成设计规划后，打开 elaborated RTL NDM，加载 floorplan、feedthrough 与 budget，重建子块与顶层设计。
+\end{enumerate}
+
+\begin{noteBox}
+各项设计规划操作的细节，请参阅 \textit{Design Planning User Guide}。
+\end{noteBox}
+
+\subsection{综合子块}
+\subsubsection*{Synthesizing a Subblock}
+
+要综合某个子块并生成顶层综合所需的块级信息，执行以下步骤：
+\begin{enumerate}
+  \item 读入「全芯片设计的划分与规划」中 rebuild 步骤后生成的子块设计库。
+  \item 施加综合该 block 所需的任何块级专用约束与设置。
+  \item 使用 \cmd{set\_dft\_signal}、\cmd{set\_scan\_configuration} 等命令施加 DFT 设置，并用 \cmd{create\_test\_protocol} 创建测试协议（test protocol）。
+  \item 插入 DFT 逻辑并综合该 block：
+\begin{lstlisting}
+fc_shell> compile_fusion -to logic_opto
+fc_shell> insert_dft
+fc_shell> compile_fusion -from initial_place
+\end{lstlisting}
+  \item 创建只读 Abstract 视图、Frame 视图与测试协议，并保存 block：
+\begin{lstlisting}
+fc_shell> create_abstract -read_only
+fc_shell> create_frame
+fc_shell> write_test_model BLOCK1.ctl
+fc_shell> save_block -as BLOCK1/PostSynthesis
+\end{lstlisting}
+\end{enumerate}
+
+\subsection{综合顶层}
+\subsubsection*{Synthesizing the Top-Level}
+
+要综合顶层，执行以下步骤：
+\begin{enumerate}
+  \item 读入「全芯片设计的划分与规划」中 rebuild 步骤后生成的顶层设计。
+  \item 设置合适选项并链接顶层设计，例如：
+\begin{lstlisting}
+fc_shell> set_label_switch_list \
+    -reference {BLOCK1 BLOCK2} PostCompile
+fc_shell> set_attribute -objects {BLOCK1.nlib BLOCK2.nlib} \
+    -name use_hier_ref_libs -value true
+fc_shell> set_top_module TOP
+\end{lstlisting}
+若子块已用 label 保存在设计库中，用 \cmd{set\_label\_switch\_list} 指定要链接的 label；\cmd{set\_top\_module} 用于链接指定的顶层模块。
+  \item 施加综合顶层所需的任何专用约束与设置，并读入子块的测试模型，例如：
+\begin{lstlisting}
+fc_shell> read_test_model BLOCK1.ctl
+fc_shell> read_test_model BLOCK2.ctl
+fc_shell> create_test_protocol
+\end{lstlisting}
+  \item 插入 DFT 逻辑并综合顶层设计：
+\begin{lstlisting}
+fc_shell> compile_fusion -to initial_opto
+fc_shell> insert_dft
+fc_shell> compile_fusion -from initial_place
+\end{lstlisting}
+\end{enumerate}
+
+% ============================================================
+\section{使用 ETM 进行层次化综合}
+\subsection*{Performing Hierarchical Synthesis Using ETMs}
+
+在层次化流程中，block 设计以带 Frame 视图的宏（macro）形式表示；已实现的 block 则以提取时序模型（extracted timing model，ETM）的形式，用于设计的顶层实现。
+
+ETM 是设计的 Liberty 模型表示，由 PrimeTime 工具中的 \cmd{extract\_model} 命令生成。该命令用相关 Liberty 属性捕获设计的时序与功耗信息，示例如下：
+\begin{lstlisting}
+library("block1") {
+...
+comment : "PrimeTime Extracted Model." ;
+  voltage_map("nom_voltage", 1.08);
+  voltage_map("VDD", 1.08);
+...
+cell( block1 ) {
+timing_model_type : "extracted";
+...
+pg_pin("VDD") {
+        voltage_name : "VDD";
+        pg_type : primary_power;
+}
+...
+\end{lstlisting}
+
+本节主题包括：
+\begin{itemize}
+  \item 使用 ETM 运行层次化综合可行性分析流程
+  \item 使用 ETM 运行层次化综合流程
+  \item 使用 ETM 的层次化综合示例脚本
+\end{itemize}
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item SolvNet 文章 2284429，\textit{Top-level Closure Flow With Extracted Timing Models (ETMs)}
+  \item Creating ETMs and ETM Cell Libraries（创建 ETM 与 ETM cell library）
+  \item Linking to ETMs at the Top Level（在顶层链接 ETM）
+\end{itemize}
+\end{seeAlsoBox}
+
+\subsection{使用 ETM 运行层次化综合可行性分析流程}
+\subsubsection*{Running the Hierarchical Synthesis Feasibility Analysis Flow Using ETMs}
+
+为减少迭代次数并获得更优结果，可在运行层次化综合之前先做可行性分析（feasibility analysis），如图~\ref{fig:hier-etm-feas} 所示。
+
+层次化综合可行性流程使用 \cmd{compile\_fusion} 之后生成的下列块级信息：
+\begin{itemize}
+  \item Floorplanning 信息，用于步骤 2 中生成 ETM；
+  \item 功耗意图与测试模型（CTL）信息，用于步骤 4 的顶层综合。
+\end{itemize}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 189：Hierarchical Synthesis Feasibility Analysis）}\\[0.3em]
+\small 流程示意：1)~前端工具综合 block（\texttt{compile\_fusion}）；2)~前端工具创建 ETM（\texttt{extract\_model}）；3)~前端工具综合顶层（\texttt{compile\_fusion}）。请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{层次化综合可行性分析}
+\label{fig:hier-etm-feas}
+\end{figure}
+
+\subsection{使用 ETM 运行层次化综合流程}
+\subsubsection*{Running the Hierarchical Synthesis Flow Using ETMs}
+
+按图~\ref{fig:hier-etm-flow} 所述步骤运行层次化综合流程。与可行性流程不同，该流程使用 place and route 之后生成的下列块级信息：
+\begin{itemize}
+  \item Floorplanning 信息，用于步骤 3 中生成 ETM；
+  \item 功耗意图与测试模型（CTL）信息，用于步骤 5 的顶层综合。
+\end{itemize}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 190：Hierarchical Synthesis Flow）}\\[0.3em]
+\small 流程示意：1)~前端综合 block；2)~后端实现 block；3)~后端创建 ETM；4)~前端综合顶层。请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{层次化综合流程}
+\label{fig:hier-etm-flow}
+\end{figure}
+
+\subsection{使用 ETM 的层次化综合示例脚本}
+\subsubsection*{Example Script of Hierarchical Synthesis Using ETMs}
+
+以下脚本给出层次化综合流程示例：
+\begin{lstlisting}
+# Specify reference libraries
+set REF_LIBS ${std_cell}.ndm
+lappend REF_LIBS ${block_design}_etm.ndm
+create_lib -tech ${TECH_FILE} -ref_libs $REF_LIBS ${DESIGN_NAME}
+
+# Read the RTL design
+analyze -format verilog [list $rtl_list]
+elaborate ${DESIGN_NAME}
+
+#ETM.ndm in ref_lib is used to link cell instances
+set_top_module ${DESIGN_NAME}
+
+# Load UPF for ETM cell instance
+load_upf ${block_design}.upf -scope cell_instance
+
+# Read test model for ETM cell instance
+read_test_model ${block_design}.mapped.ctl
+...
+compile_fusion -to initial_opto
+
+# Query commands
+# List all macro cell instances
+get_cells -hierarchical -filter "is_hard_macro == true"
+# ref view name is "timing" for cell instances bound to ETM
+get_attribute ${CELL} is_etm_moded_cell
+\end{lstlisting}
+
+% ============================================================
+\section{层次化综合流程的预检查}
+\subsection*{Performing Prechecks for Hierarchical Synthesis Flows}
+
+要检查层次化综合流程的就绪程度，可使用下列命令：
+\begin{itemize}
+  \item \cmd{check\_design -checks block\_ready\_for\_top}\\
+在 block 综合之后运行，检查已综合的 block 是否已准备好用于顶层综合。
+  \item \cmd{check\_design -checks hier\_pre\_compile}\\
+在顶层综合之前运行，检查子块与顶层设计是否已准备好进入层次化流程。
+\end{itemize}
+
+% ============================================================
+\section{提供块级测试模型}
+\subsection*{Providing Block-Level Test Models}
+
+在运行层次化综合时，可为顶层设计实现提供子块的测试模型。做法是：在块级综合期间为已映射的 block 生成测试模型，再在顶层综合时将该测试模型注解到子块。例如：
+
+\begin{itemize}
+  \item 在块级综合期间生成测试模型：
+\begin{lstlisting}
+# Read block RTL and constraints
+# Specify DFT configuration
+set_dft_signal ...
+set_scan_configuration ...
+create_test_protocol
+...
+compile_fusion -to initial_opto
+insert_dft
+write_test_model -output block_des.mapped.ctl
+\end{lstlisting}
+
+  \item 在顶层综合中使用块级测试模型：
+\begin{lstlisting}
+# Read RTL and constraints
+# Specify DFT configuration
+
+read_test_model block_des.mapped.ctl
+set_dft_signal ...
+set_scan_configuration ...
+create_test_protocol
+...
+compile_fusion -to initial_opto
+insert_dft
+\end{lstlisting}
+\end{itemize}
+
+% ============================================================
+\section{指定块级功耗意图}
+\subsection*{Specifying Block-Level Power Intent}
+
+在运行层次化综合时，必须为顶层设计实现提供子块的功耗意图。可提供完整的块级 UPF，由工具自动提取功耗意图接口。下图示意名为 \texttt{U1} 的子块；顶层功耗意图脚本用 \cmd{load\_upf} 加载块级功耗意图。
+
+\begin{noteBox}
+块级功耗意图规范仅在使用 ETM 的层次化综合中必需。在 Abstract 流程中，UPF 约束由工具自动处理。
+\end{noteBox}
+
+\begin{itemize}
+  \item 在 \texttt{PD\_Top} 设计中将 \texttt{U1} 作为 ETM
+  \item 顶层功耗意图：
+\begin{lstlisting}
+create_power_domain PD_TOP -include_scope
+create_supply_net VDD_AO
+...
+load_upf block.upf -scope U1
+...
+connect_supply_net VDD_AO -port U1/VDD_AO
+\end{lstlisting}
+  \item 块级功耗意图：\texttt{block.upf}
+\begin{lstlisting}
+create_power_domain PD_BLK -include_scope
+create_power_switch sw1 -domain PD_BLK \
+   -input_supply_port {in VDD_AO} \
+   -output_supply_port {out VDD_SW} ...
+...
+add_port_state sw1/out -state {ON 1.08} -state {OFF off}
+...
+create_pst pst -supplies {VDD_SW ...}
+\end{lstlisting}
+\end{itemize}
+
+% ============================================================
+\section{Abstract 视图概述}
+\subsection*{Overview of Abstract Views}
+
+在 Abstract 视图中，block 的门级网表由仅包含所需接口逻辑（interface logic）的部分门级网表建模；其余逻辑全部移除。
+
+图~\ref{fig:hier-abstract-view} 显示一个 block 及其 Abstract 视图，其中保留了：
+\begin{itemize}
+  \item 各时序路径上输入端口到第一级寄存器之间的逻辑；
+  \item 各时序路径上最后一级寄存器到输出端口之间的逻辑。
+\end{itemize}
+
+与纯组合逻辑输入端口到输出端口时序路径（A 到 X）相关的逻辑也会保留。被保留寄存器的时钟连接同样保留。寄存器到寄存器（register-to-register）逻辑则丢弃。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 191：A Block and Its Abstract View）}\\[0.3em]
+\small 左侧为完整 Block，右侧为 Abstract View；请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{Block 及其 Abstract 视图}
+\label{fig:hier-abstract-view}
+\end{figure}
+
+Abstract 视图的接口逻辑包括：
+\begin{itemize}
+  \item 从输入端口到寄存器或输出端口的时序路径上的所有 cell、pin 与 net；
+  \item 从寄存器或输入端口到输出端口的时序路径上的所有 cell、pin 与 net；
+  \item 从主时钟（master clock）到生成时钟（generated clock）连接中的任何逻辑；
+  \item 驱动接口寄存器的时钟树，包括时钟树中的任何逻辑；
+  \item 从时钟端口出发的最长与最短时钟路径；
+  \item 属于接口逻辑、且带有时序约束的所有 pin。
+\end{itemize}
+
+除接口逻辑外，Abstract 视图还包含与接口逻辑相关的下列信息：
+\begin{itemize}
+  \item 布局信息（placement information）
+  \item 时序约束（timing constraints）
+  \item 时钟树例外（clock tree exceptions）
+  \item 寄生参数信息（parasitic information）
+  \item 悬空 pin（dangling pin）的 transition 与 case value
+  \item 功耗管理单元（power management cell）与 UPF 约束
+  \item Abstract 视图中保留的 net 上的非默认布线规则（nondefault routing rule）关联，以及最小/最大层约束（若有）
+\end{itemize}
+
+% ============================================================
+\section{创建 Abstract 视图}
+\subsection*{Creating Abstract Views}
+
+在 Fusion Compiler 中，可在设计流程的多个阶段为 block 创建 Abstract 视图，例如综合、布局、优化、时钟树综合、布线之后等。创建 Abstract 视图之前，请确保顶层所需的 scenario 已创建且处于活动（active）状态。
+
+要为顶层收敛创建 Abstract 视图，使用 \cmd{create\_abstract} 命令。
+\begin{itemize}
+  \item 用 \opt{-timing\_level} 控制 Abstract 视图中时序信息的多少，可选设置如下：
+  \begin{itemize}
+    \item \texttt{boundary}：创建仅包含连接到各边界端口的边界单元（一层逻辑）的 Abstract。此类 Abstract 还包含 feedthrough 数据路径、feedthrough 组合时钟路径，以及驱动输出端口的内部时钟逻辑。可用于在顶层修复 DRC 违规。
+    \item \texttt{compact}：创建紧凑 Abstract，仅包含接口逻辑中关键 setup/hold 时序路径的时序信息。这是默认设置，也是顶层设计收敛的首选。
+    \item \texttt{full\_interface}：为全部接口逻辑创建带时序信息的 Abstract。当多重例化块（multiply-instantiated block，MIB）在顶层的约束对各实例不同时，可能需要 \texttt{full\_interface} Abstract。
+  \end{itemize}
+
+  \item 要为当前 block 的下层 block 创建 Abstract，可用下列方法之一：
+  \begin{itemize}
+    \item 用 \opt{-blocks} 并指定 block 名，为特定下层 block 创建 Abstract；
+    \item 用 \opt{-all\_blocks} 为所有下层 block 创建 Abstract。
+  \end{itemize}
+使用 \opt{-blocks} 或 \opt{-all\_blocks} 时，若指定 block 已有 Abstract 视图，默认不会重新创建；要强制重建，使用 \opt{-force\_recreate}。
+
+  \item 要用 \opt{-include\_objects} 把特定 net、port、层次 pin 或 leaf pin 纳入布局或时序 Abstract。
+
+  \item 用 \opt{-read\_only} 创建只读 Abstract。\\
+默认情况下，工具创建可编辑（editable）Abstract，可在父 block 上下文中修改；但会把该 block 的 design 视图设为只读，防止对 block 做改动。\\
+若创建只读 Abstract，则该 block 的 design 视图仍可编辑，可继续对其修改。
+
+  \item 用 \opt{-preserve\_block\_instances false} 展平物理层次，仅保留下层 block 中相关逻辑。
+
+  \item 用 \opt{-target\_use planning} 或 \opt{-target\_use implementation} 指定 Abstract 用于设计规划还是顶层实现。工具会按预期用途对 Abstract 施加相应内部设置。
+
+  \item 用 \opt{-host\_options} 指定分布式处理的主机选项。当用 \opt{-blocks} 或 \opt{-all\_blocks} 创建多个 Abstract 视图时，可借此缩短运行时间。
+\end{itemize}
+
+\subsection{创建含功耗信息的 Abstract}
+\subsubsection*{Creating Abstracts With Power Information}
+
+要在块级创建含对应 block 功耗信息的 Abstract，按以下步骤操作：
+\begin{enumerate}
+  \item 用 \cmd{set\_scenario\_status} 的 \opt{-active true} 激活要进行功耗分析的 scenario，并用下列选项启用功耗分析：
+  \begin{itemize}
+    \item \opt{-dynamic\_power true}：动态功耗分析
+    \item \opt{-leakage\_power true}：漏电功耗分析
+  \end{itemize}
+功耗信息仅对已启用动态或漏电功耗的活动 scenario 存储。
+  \item （可选）通过 \cmd{read\_saif} 读入 SAIF，或用 \cmd{set\_switching\_activity} 在 net 上注解开关活动（switching activity）。更多说明见 Annotating the Switching Activity。
+  \item 将应用选项 \appopt{abstract.annotate\_power} 设为 \texttt{true}，以便在 Abstract 中存储功耗信息。
+  \item 用 \cmd{create\_abstract} 为该 block 创建 Abstract。
+\end{enumerate}
+
+创建带功耗信息的 Abstract 时，工具只为被移除的逻辑存储功耗信息。
+
+在顶层例化此类 Abstract 并做功耗分析时，工具会：
+\begin{itemize}
+  \item 根据顶层看到的开关活动与负载，在上下文中重新计算 Abstract 内接口逻辑的功耗；
+  \item 对被 Abstract 创建时移除的逻辑，使用 Abstract 中已存储的功耗。
+\end{itemize}
+
+要用 \cmd{report\_power -blocks} 报告顶层例化 Abstract 中的功耗信息。若存在多层物理层次，可用 \opt{-levels} 指定要报告的层数。
+
+\subsection{为信号电迁移分析创建 Abstract}
+\subsubsection*{Creating Abstracts for Signal Electromigration Analysis}
+
+要创建可用于顶层信号电迁移（signal electromigration）分析的 Abstract，在运行 \cmd{create\_abstract} 之前，将应用选项 \appopt{abstract.enable\_signal\_em\_analysis} 设为 \texttt{true}。
+
+\subsection{处理多层物理层次}
+\subsubsection*{Handling Multiple Levels of Physical Hierarchy}
+
+对于多层物理层次设计，若要为内部已例化 Abstract 的 block 再创建 Abstract，须先：
+\begin{itemize}
+  \item 将希望用 Abstract 表示的下层 block 绑定到特定 Abstract。
+\end{itemize}
+
+例如，假设设计具有如下多层物理层次：
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 192：A Design With Multiple Levels of Physical Hierarchy）}\\[0.3em]
+\small BOT / MID / TOP 层次关系示意，请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{多层物理层次设计}
+\label{fig:hier-multi-level}
+\end{figure}
+
+要为名为 \texttt{BOT} 的 block 创建 Abstract：
+\begin{lstlisting}
+fc_shell> open_block BOT
+fc_shell> create_abstract
+\end{lstlisting}
+
+要为名为 \texttt{MID} 的 block 创建 Abstract：
+\begin{lstlisting}
+fc_shell> open_block MID
+fc_shell> change_abstract -view abstract -references BOT
+fc_shell> create_abstract
+\end{lstlisting}
+
+默认情况下，\cmd{create\_abstract} 保留所有物理层次。要用 \opt{-preserve\_block\_instances false} 展平物理层次并仅保留下层 block 的相关逻辑，例如：
+\begin{lstlisting}
+fc_shell> open_block MID
+fc_shell> create_abstract -preserve_block_instances false
+\end{lstlisting}
+
+在下层 block 按只读处理的顶层实现流程中使用展平 Abstract。展平 Abstract 可减小顶层网表规模，并简化数据管理——无需把下层 block 放进顶层的参考库列表。
+
+\subsection{为最小脉宽分析创建 Abstract}
+\subsubsection*{Creating Abstracts for Minimum Pulse Width Analysis}
+
+在顶层时序 Abstract 中，Fusion Compiler 支持检查最小脉宽（minimum pulse width，MPW）违规。创建 Abstract 时，工具会保留存在 MPW 违规的时钟 sink，及其扇入 cell 与 net。
+
+可用下列应用选项：
+\begin{itemize}
+  \item 将 \appopt{abstract.keep\_min\_pulse\_width\_violation\_pins} 设为 \texttt{true}，检查并保留带 MPW 违规的寄存器及其完整时钟路径。这些寄存器的数据路径不会保留。该选项默认值为 \texttt{false}。
+  \item 将 \appopt{abstract.min\_pulse\_width\_violation\_slack\_limit} 设为所需 slack，以限制纳入的 MPW 违规范围。这有助于保留尚未违规、但 slack 略为正的 MPW pin。
+\end{itemize}
+
+% ============================================================
+\section{报告 Abstract 纳入原因}
+\subsection*{Reporting Abstract Inclusion Reasons}
+
+在 Fusion Compiler 中，\cmd{create\_abstract} 会在顶层与块级 Abstract 视图中纳入 cell、net、pin 等网表对象，并报告纳入原因。
+
+要用 \cmd{report\_abstract\_inclusion\_reason} 报告特定网表对象被纳入 Abstract 视图的原因；该命令可覆盖 Abstract 中各层次的对象。
+
+每条原因会显示一个原因码（reason code），对应有效的纳入理由。同一网表对象可有多个原因。
+
+\begin{noteBox}
+\cmd{report\_abstract\_inclusion\_reason} 不会报告层次 cell，或层次 cell 上 pin 的纳入原因。
+\end{noteBox}
+
+可在例化了 Abstract 的顶层设计上做原因报告，无需把 Abstract 设为当前 block。
+
+下例报告 Abstract 视图中 pin 的纳入原因：
+\begin{lstlisting}
+fc_shell> report_abstract_inclusion_reason [get_pins -of_object \
+ [get_cells -filter "is_hierarchical==false" -hierarchical *]]
+
+Legend
+mv - MV Logic
+comp - Compact interface logic
+cell - Cell inclusion
+--------------------------------------------------------------------
+Pin name                            Reason(s) for inclusion
+--------------------------------------------------------------------
+AINV_P_260/I                        comp, cell
+AINV_P_260/VDD                      cell
+AINV_P_260/VSS                      cell
+AINV_P_260/ZN                       comp, cell
+AINV_P_262/I                        comp, cell
+AINV_P_262/VDD                      cell
+AINV_P_262/VSS                      cell
+AINV_P_262/ZN                       comp, cell
+AINV_P_263/I                        mv, comp, cell
+\end{lstlisting}
+
+报告开头会显示图例（legend），说明各原因码的详细含义。
+
+% ============================================================
+\section{创建 Abstract 之后修改 Block}
+\subsection*{Making Changes to a Block After Creating an Abstract}
+
+用 \cmd{create\_abstract} 为 block 创建 Abstract 视图时，默认会同时保存该 block 的 Abstract 与 design 视图，并把 design 视图改为只读。
+
+可以打开只读 block 并在内存中修改，但不能用 \cmd{save\_block} 或 \cmd{save\_lib} 保存这些修改。要保存对只读 block 的修改，可用下列方法之一：
+\begin{itemize}
+  \item 用 \cmd{save\_block -as} 另存为不同的 block；
+  \item 用 \cmd{create\_abstract} 为该 block 重新创建 Abstract，工具会自动保存 design 视图；
+  \item 若不再需要 Abstract，用 \cmd{remove\_abstract} 删除它。这会把 design 视图从只读改回可编辑，随后可用 \cmd{save\_block} 或 \cmd{save\_lib} 保存。
+\end{itemize}
+
+若用 \cmd{create\_abstract -read\_only} 创建只读 Abstract，工具不会把该 block 的 design 视图设为只读，后续修改可用 \cmd{save\_block} 或 \cmd{save\_lib} 保存，例如：
+\begin{lstlisting}
+fc_shell> create_abstract -read_only
+fc_shell> change_link [get_cells U25] AND2
+fc_shell> save_block
+\end{lstlisting}
+
+% ============================================================
+\section{创建 Frame 视图}
+\subsection*{Creating a Frame View}
+
+要执行顶层布线（含 virtual routing），每个 Abstract 视图都必须有对应的 Frame 视图。用 \cmd{create\_frame} 创建 Frame 视图；该命令从 design 视图提取 blockage、pin 与 via 信息。
+
+创建 Frame 视图后，用 \cmd{save\_lib} 保存设计库。
+
+% ============================================================
+\section{在顶层链接 Abstract 视图}
+\subsection*{Linking to Abstract Views at the Top-Level}
+
+要使顶层设计链接到下层 block 的 Abstract 视图，包含该 Abstract 视图的设计库必须是顶层的参考库之一。
+
+例如，假设顶层设计名为 \texttt{TOP}，并例化了两个下层 block \texttt{BLK1} 与 \texttt{BLK2}，如图~\ref{fig:hier-top-blocks} 所示。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 193：Top-Level Design With Instantiated Blocks）}\\[0.3em]
+\small TOP 例化 BLK1、BLK2 示意，请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{例化了 Block 的顶层设计}
+\label{fig:hier-top-blocks}
+\end{figure}
+
+要链接到 \texttt{BLK1} 与 \texttt{BLK2} 的 Abstract，包含这些 Abstract 视图的设计库必须是 \texttt{TOP} 的参考库。若尚未加入，可用 \cmd{set\_ref\_libs -add} 添加，例如：
+\begin{lstlisting}
+current_block TOP
+set_ref_libs -add ../BLK1/BLK1.nib
+set_ref_libs -add ../BLK2/BLK2.nib
+\end{lstlisting}
+
+要用 \cmd{report\_ref\_libs} 报告当前设计的参考库。
+
+链接顶层设计时，若下层 block 已有 Abstract 视图，工具默认链接到该 Abstract。链接下层 block 时各视图的默认优先级为：
+\begin{enumerate}
+  \item Abstract 视图
+  \item Design 视图
+  \item Frame 视图
+  \item Outline 视图
+\end{enumerate}
+
+% ============================================================
+\section{将 Block 从 Abstract 切换为 Design 视图}
+\subsection*{Changing the Block From Abstract to Design View}
+
+要用 \cmd{change\_abstract}，并通过 \opt{-view} 指定目标视图，把 block 从 Abstract 切换为 design 视图。从 Abstract 切到 design 视图时，应移除现有约束并施加全芯片时序约束。
+
+下例将 \texttt{BLK1} 从 Abstract 切到 design 视图，并施加全芯片时序约束。
+\begin{enumerate}
+  \item 移除现有时序约束：
+\begin{lstlisting}
+fc_shell> remove_scenarios -all
+fc_shell> remove_modes -all
+fc_shell> remove_corners -all
+\end{lstlisting}
+  \item 用 \cmd{change\_abstract} 从 Abstract 切到 design 视图：
+\begin{lstlisting}
+fc_shell> change_abstract -view design -references BLK1
+\end{lstlisting}
+  \item 执行全芯片 scenario 创建脚本：
+\begin{lstlisting}
+fc_shell> source full_chip_scenario_creation.tcl
+\end{lstlisting}
+\end{enumerate}
+
+若 block 在其设计库中的 Abstract 视图已更新，可用 \cmd{change\_abstract -reload} 重新加载新的 Abstract。
+
+要用 \cmd{report\_abstracts} 报告设计当前链接到的 Abstract 视图。
+
+关于指定参考库以及在顶层链接 Abstract 视图的更多信息，见 SolvNet 文章 2436119，\textit{Setting Up Designs for Hierarchical Place and Route}。
+
+% ============================================================
+\section{链接带多个 Label 的子块}
+\subsection*{Linking to Subblocks With Multiple Labels}
+
+在实现流程的不同阶段保存 block 时，可用 \cmd{save\_block} 的 \opt{-as blockName/labelName} 或 \opt{-label labelName}，为每次保存指定唯一 label。
+
+默认情况下，链接时顶层会链接到具有相同 label 的下层 block。若子块已用多个 label 保存，可用 \cmd{set\_label\_switch\_list} 指定顶层应链接到哪个 label。该命令给出链接时按优先级排序的 label 列表。默认作用于所有子块；要用 \opt{-reference} 指定不同的 block。
+
+下例指定顶层应链接到 \texttt{BLOCK1} 与 \texttt{BLOCK2} 的 \texttt{PostCompile} label：
+\begin{lstlisting}
+fc_shell> set_label_switch_list \
+    -reference {BLOCK1 BLOCK2} PostCompile
+\end{lstlisting}
+
+下例指定：在顶层链接任意子块时，\texttt{PostCompile} 优先于 \texttt{PreCompile}：
+\begin{lstlisting}
+fc_shell> set_label_switch_list {PostCompile PreCompile}
+\end{lstlisting}
+
+可再次使用 \cmd{set\_label\_switch\_list} 更新 block 的 label 切换列表，再用 \cmd{link\_block -rebind} 重新链接。重新链接时注意：
+\begin{itemize}
+  \item 若切换列表中的 label 在某子块均不可用，或指定了空切换列表，工具会把该子块链接到其先前已链接的 label；
+  \item 若已移除某子块的全部 label，工具会把该子块链接到其父 block 的 label。
+\end{itemize}
+
+% ============================================================
+\section{从顶层指定 Block 的可编辑性}
+\subsection*{Specifying the Editability of Blocks From the Top-Level}
+
+对于带物理层次的设计，可在顶层用 \cmd{set\_editability} 指定下层 block 是否可修改。
+
+可更改：
+\begin{itemize}
+  \item 用 \opt{-blocks} 指定的特定 block；
+  \item 用 \opt{-from\_level} 指定从某一物理层次起的全部 block；
+  \item 用 \opt{-to\_level} 指定到某一物理层次为止的全部 block。
+\end{itemize}
+
+对于使用只读 Abstract 的顶层实现流程，链接设计后应显式把下层 block 设为只读：
+\begin{lstlisting}
+fc_shell> set_editability -blocks [get_blocks -hierarchical] \
+   -value false
+\end{lstlisting}
+
+默认情况下，若用下列命令之一更改库名或 block 名，工具不会把可编辑性设置从旧参考传播到新参考：
+\begin{itemize}
+  \item \cmd{change\_abstract -lib}
+  \item \cmd{link\_block -rebind -force}
+  \item \cmd{set\_reference}
+\end{itemize}
+
+要保留可编辑性设置，在更改库名或 block 名之前，将应用选项 \appopt{design.preserve\_reference\_editability} 设为 \texttt{true}。
+
+用 \cmd{save\_block} 保存层次化设计时，可编辑性设置会被保存。
+
+% ============================================================
+\section{使用 Abstract 做顶层收敛前的准备}
+\subsection*{Preparing for Top-Level Closure With Abstracts}
+
+在顶层执行综合、布局、优化、时钟树综合与布线之前，必须完成下列任务：
+\begin{itemize}
+  \item 施加顶层时序约束与设置。\\
+可用 \cmd{split\_constraints} 把芯片级约束拆成独立的顶层与块级约束。
+
+  \item 用 \cmd{set\_block\_to\_top\_map} 审查并指定顶层与块级 mode、corner、clock 之间的对应关系。
+
+  \item 若用于顶层布局与优化的是已经过 CCD 优化的预时钟树实现 block，则 CCD、clock-gate estimation 等引擎在 block 内寄存器或集成时钟门控（integrated clock gating，ICG）单元时钟 pin 上动态调整的理想时钟延迟（ideal clock latency），在顶层可能看不到，从而导致顶层时序不准确。要用下列命令把这些时钟延迟约束从块级提升到顶层：
+\begin{lstlisting}
+promote_clock_data -latency_offset -auto_clock connected
+\end{lstlisting}
+
+  \item 施加顶层时钟树综合设置与例外：
+  \begin{itemize}
+    \item 若顶层例外未包含下层 block 内 pin 上的 balance point，用下列命令从下层提升 balance point：
+\begin{lstlisting}
+promote_clock_data -auto_clock connected -balance_points
+\end{lstlisting}
+    \item 若在块级执行了并发时钟与数据（concurrent clock and data，CCD）优化，工具会为块级时钟端口推导中位时钟延迟（median clock latency），以反映 CCD 期间为块级寄存器推导的延迟调整。要用下列命令把这些块级时钟延迟作为块级时钟 pin 的 clock balance point delay 提升：
+\begin{lstlisting}
+promote_clock_data -auto_clock connected -port_latency
+\end{lstlisting}
+    \item 若下层 block 含 clock mesh，用 \cmd{promote\_clock\_data -mesh\_annotations} 提升 mesh 注解（已注解的 transition 与 delay）。
+  \end{itemize}
+
+  \item 若只需为特定顶层时钟提升时钟数据，使用：
+\begin{lstlisting}
+promote_clock_data -clocks {top_clock} -port_latency
+\end{lstlisting}
+该命令也会提升与时钟无关的例外。若给定顶层时钟在任一 mode 中都未映射到任何块级时钟，工具会发出警告。
+
+  \item 若顶层存在无法映射到块级对应 mode/corner/clock 的活动 mode、corner 或 clock，仍可用下列命令为其他已映射的 mode/corner/clock 提升时钟数据：
+\begin{lstlisting}
+promote_clock_data -balance_points -force
+\end{lstlisting}
+该命令会对未映射的 mode、corner 或 clock 发出错误。
+
+  \item 施加顶层 UPF 约束；可用 \cmd{split\_constraints} 从全芯片 UPF 约束生成。\\
+工具会把下层 block 中所需的 UPF 约束提升到顶层。
+\end{itemize}
+
+% ============================================================
+\section{检查含 Abstract 设计的顶层收敛问题}
+\subsection*{Checking Designs With Abstracts for Top-Level-Closure Issues}
+
+可用 \cmd{check\_hier\_design} 检查含 Abstract 的层次化设计，查找应用选项一致性问题，以及与顶层收敛相关的设计问题。在执行顶层收敛前识别并修复这些问题，有助于缩短周转时间（turnaround time）。
+
+使用 \cmd{check\_hier\_design} 时可指定：
+\begin{itemize}
+  \item 用 \opt{-reference} 指定要检查的参考。若不指定，命令检查物理层次中的所有参考。
+  \item 用 \opt{-stage} 指定检查类型：
+  \begin{itemize}
+    \item \opt{-stage timing}：执行时序相关检查。若不指定 \opt{-stage}，默认执行时序相关检查。
+    \item \opt{-stage pre\_placement}：同时执行时序与预布局相关检查。
+  \end{itemize}
+\end{itemize}
+
+\cmd{check\_hier\_design} 可检查顶层约束与每个链接到 Abstract 的下层实例约束之间的一致性。启用该功能时，在运行 \cmd{check\_hier\_design} 之前将应用选项 \appopt{abstract.check\_constraints\_consistency} 设为 \texttt{true}。
+
+工具在 \cmd{create\_abstract} 期间会保存预定列表中的 timer 应用选项设置。在顶层，\cmd{check\_hier\_design} 会将这些设置与块级设计中的对应设置进行比较。
+
+下列应用选项会在 \cmd{create\_abstract} 期间自动保存，并由 \cmd{check\_hier\_design} 校验：
+\begin{itemize}
+  \item \appopt{time.case\_analysis\_propagate\_through\_icg}
+  \item \appopt{time.case\_analysis\_sequential\_propagation}
+  \item \appopt{time.clock\_gating\_propagate\_enable}
+  \item \appopt{time.clock\_gating\_user\_setting\_only}
+  \item \appopt{time.clock\_marking}
+  \item \appopt{time.clock\_reconvergence\_pessimism}
+  \item \appopt{time.create\_clock\_no\_input\_delay}
+  \item \appopt{time.crpr\_remove\_clock\_to\_data\_crp}
+  \item \appopt{time.delay\_calc\_waveform\_analysis\_mode}
+  \item \appopt{time.delay\_calculation\_style}
+  \item \appopt{time.disable\_case\_analysis\_ti\_hi\_lo}
+  \item \appopt{time.disable\_clock\_gating\_checks}
+  \item \appopt{time.disable\_cond\_default\_arcs}
+  \item \appopt{time.disable\_internal\_inout\_net\_arcs}
+  \item \appopt{time.disable\_recovery\_removal\_checks}
+  \item \appopt{time.edge\_specific\_source\_latency}
+  \item \appopt{time.enable\_auto\_mux\_clock\_exclusivity}
+  \item \appopt{time.enable\_ccs\_rcv\_cap}
+  \item \appopt{time.enable\_clock\_propagation\_through\_preset\_clear}
+  \item \appopt{time.enable\_clock\_propagation\_through\_three\_state\_enable\_pins}
+  \item \appopt{time.enable\_clock\_to\_data\_analysis}
+  \item \appopt{time.enable\_non\_sequential\_checks}
+  \item \appopt{time.enable\_preset\_clear\_arcs}
+  \item \appopt{time.enable\_si\_timing\_windows}
+  \item \appopt{time.gclock\_source\_network\_num\_master\_registers}
+  \item \appopt{time.special\_path\_group\_precedence}
+  \item \appopt{time.use\_lib\_cell\_generated\_clock\_name}
+  \item \appopt{time.use\_special\_default\_path\_groups}
+\end{itemize}
+
+关于 \cmd{check\_hier\_design} 识别的问题及修复方法，请参阅对应消息 ID 的 man page。
+
+除生成报告外，\cmd{check\_hier\_design} 还会生成增强消息系统（enhanced messaging system，EMS）数据库，可在 Fusion Compiler GUI 的消息浏览器中查看。应在运行 \cmd{check\_hier\_design} 之前创建 EMS 数据库，例如：
+\begin{lstlisting}
+fc_shell> create_ems_database check_hier.ems
+fc_shell> check_hier_design -stage timing
+fc_shell> save_ems_database
+\end{lstlisting}
+
+在 Fusion Compiler GUI 消息浏览器中，可对消息排序、过滤，并链接到对应 man page，如图~\ref{fig:hier-ems-browser} 所示。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 194：Viewing the EMS Database in the Message Browser）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{在消息浏览器中查看 EMS 数据库}
+\label{fig:hier-ems-browser}
+\end{figure}
+
+也可用 \cmd{report\_ems\_database} 以 ASCII 格式输出 EMS 数据库中的信息。
+
+\cmd{check\_hier\_design} 执行的检查同样可在 \cmd{check\_design} 中使用。可以：
+\begin{itemize}
+  \item 用 \cmd{check\_design -checks hier\_timing} 执行专用于顶层收敛的时序检查；
+  \item 用 \cmd{check\_design -checks timing} 执行全部时序检查（含顶层收敛专用检查）；
+  \item 用 \cmd{check\_design -checks hier\_preplacement} 执行专用于顶层收敛的预布局检查；
+  \item 用 \cmd{check\_design -checks preplacement} 执行全部预布局检查（含顶层收敛专用检查）。
+\end{itemize}
+
+也可为 \cmd{check\_design} 生成 EMS 数据库并在 GUI 中查看，方式与 \cmd{check\_hier\_design} 类似。
+
+\subsection{用 Early Data Check Manager 处理设计数据}
+\subsubsection*{Handling Design Data Using the Early Data Check Manager}
+
+在识别并修复顶层收敛相关问题的同时，工具允许在存在设计数据违规的情况下探索顶层流程。层次化检查可检测设计中各类不匹配、不完整与不一致的数据。可为层次化检查配置下列策略（policy）以管理设计数据违规：
+\begin{itemize}
+  \item \textbf{Error}：不缓解违规，而是发出错误消息。
+  \item \textbf{Tolerate}：做出可预期、可解释的假设以继续流程；不对设计或设置做更改。
+  \item \textbf{Repair}：用一种或多种修复策略缓解违规并记录。修复可包括对设计与设置的更改。
+  \item \textbf{Strict}：按检查所支持的策略，依次尝试 error、tolerate、repair。
+  \item \textbf{Lenient}：按检查所支持的策略，依次尝试 repair、tolerate、error。
+\end{itemize}
+
+\begin{noteBox}
+对错误的容忍（toleration）与修复（repair）可能影响顶层流程的 QoR。错误容忍与修复主要用于早期设计探索阶段管理数据违规。在实现流程中，应对所有检查使用 strict 策略。
+\end{noteBox}
+
+\subsubsection{处理早期设计数据的前提}
+\subsubsection*{Prerequisites for Handling Early Design Data}
+
+工具在 \cmd{check\_hier\_design} 命令内部执行修复，并把记录保存到子块中。对于需要重建 Frame 的修复，还需运行 \cmd{save\_lib} 把 Frame 保存到磁盘。
+
+要将修复及其记录成功保存到子块，需要下列设置：
+\begin{enumerate}
+  \item 以可编辑方式打开包含子块的参考库：
+\begin{lstlisting}
+open_lib top.nlib -ref_libs_for_edit
+\end{lstlisting}
+  \item 对需要执行修复的子块启用可编辑性：
+\begin{lstlisting}
+set_editability -blocks <> -value true
+\end{lstlisting}
+\end{enumerate}
+
+若需执行修复，\cmd{check\_hier\_design} 会检查所需可编辑性设置；若未正确设置，会发出 \texttt{TL-170} 错误消息。
+
+\begin{noteBox}
+工具支持对链接到 \texttt{read\_only} Abstract（而非可编辑 Abstract）的子块执行修复，因为管理不匹配设计数据的机制目标只是让顶层探索流程能继续，子块 Abstract 上的修复工作不应合并回实际 design 视图。若顶层使用可编辑 design 视图，修复工作仍会继续。
+\end{noteBox}
+
+\subsubsection{早期数据检查、策略与修复策略}
+\subsubsection*{Early Data Checks, Policies, and Strategies}
+
+工具可在设计早期阶段识别数据问题与违规。可为预定义检查设置策略与策略配置，以允许、容忍或修复数据。表~\ref{tab:hier-tlc-checks} 描述了顶层收敛的预定义检查。
+
+\begin{table}[htbp]
+\centering
+\caption{顶层收敛检查、策略与修复策略（原书 Table 64）}
+\label{tab:hier-tlc-checks}
+\small
+\begin{tabularx}{\textwidth}{@{}>{\ttfamily\raggedright\arraybackslash}p{0.28\textwidth} >{\raggedright\arraybackslash}X >{\raggedright\arraybackslash}p{0.22\textwidth} >{\raggedright\arraybackslash}p{0.12\textwidth} >{\raggedright\arraybackslash}p{0.1\textwidth}@{}}
+\toprule
+Check & 说明 & Strategy & 支持 Policies & 支持 References \\
+\midrule
+hier.block.missing\_frame\_view
+  & 检查层次 block 是否缺少 Frame 视图
+  & 从已绑定视图重建 Frame
+  & error, tolerate, repair & MID, BOT \\
+hier.block.reference\_missing\_port\_location
+  & 检查物理层次边界 pin 位置是否缺失
+  & 按连接关系在 block 边界上为 block pin 分配位置
+  & error, tolerate, repair & MID, BOT \\
+hier.block.reference\_port\_outside\_boundary
+  & 检查物理层次边界 pin 位置是否在边界外
+  & 按连接关系在 block 边界上重新分配位置
+  & error, tolerate, repair & MID, BOT \\
+hier.block.reference\_missing\_port
+  & 检查物理层次参考中是否缺少 port
+  & 在参考 block 中创建缺失 port 并更新位置
+  & error, tolerate, repair & MID, BOT \\
+hier.block.instance\_bound\_to\_frame
+  & 检查物理层次实例是否绑定到 Frame 视图
+  & --- & error, tolerate & TOP \\
+hier.block.instance\_with\_design\_type\_macro
+  & 检查物理层次实例是否绑定到 macro
+  & --- & error, tolerate & TOP \\
+hier.top.estimated\_corner
+  & 检查顶层是否存在 estimated corner
+  & --- & error, tolerate & TOP \\
+hier.block.missing\_leaf\_cell\_location
+  & 检查物理层次 leaf cell 位置是否缺失
+  & 在 block 边界内为 leaf cell 分配近似位置（不考虑合法性）
+  & error, tolerate, repair & MID, BOT \\
+hier.block.leaf\_cell\_outside\_boundary
+  & 检查物理层次 leaf cell 位置是否在边界外
+  & 将 leaf cell 重新放到边界内最近位置（不考虑合法性）
+  & error, tolerate, repair & MID, BOT \\
+hier.block.missing\_child\_block\_instance\_location
+  & 检查指定物理层次中子物理层次实例位置是否缺失
+  & 按连接关系在 block 边界内为下层子块分配近似位置（不考虑重叠消除）
+  & error, tolerate, repair & MID \\
+hier.block.child\_block\_instance\_outside\_boundary
+  & 检查子物理层次实例位置是否在指定物理层次边界外
+  & 将子块移到边界内最近位置（不考虑重叠消除）
+  & error, tolerate, repair & MID \\
+hier.block.port\_mismatch\_between\_views
+  & 检查物理层次各视图之间是否存在 port 不匹配
+  & 以绑定视图为 golden，重建 Frame 以与之匹配
+  & error, tolerate, repair & MID, BOT \\
+hier.block.missing\_design\_view\_for\_abs
+  & 检查 Abstract 是否缺少 design 视图
+  & --- & error, tolerate & MID, BOT \\
+hier.block.instance\_unlinked
+  & 检查物理层次参考是否因视图从 Frame/ETM 变为 Abstract/design 而未正确链接到顶层
+  & --- & error & TOP \\
+hier.block.abstract\_type\_non\_timing
+  & 检查 Abstract 类型是否非 timing
+  & --- & error & MID, BOT \\
+hier.block.abstract\_target\_use\_non\_implementation
+  & 检查 Abstract 的 target use 是否非 implementation
+  & --- & error & MID, BOT \\
+hier.block.missing\_core\_area
+  & 检查物理层次是否缺少 core area
+  & --- & error & MID, BOT \\
+hier.block.unmapped\_logic
+  & 检查物理层次中是否存在未映射逻辑
+  & --- & error & MID, BOT \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+其中：
+\begin{itemize}
+  \item BOT 表示底层设计；
+  \item MID 表示例化 BOT 的中间层设计；
+  \item TOP 表示例化 MID 的顶层设计。
+\end{itemize}
+
+\subsubsection{为早期数据检查设置策略}
+\subsubsection*{Setting the Policy for Early Data Checks}
+
+要用 \cmd{set\_early\_data\_check\_policy} 设置或修改全部检查的策略，或修改数据检查的策略设置。可用下列选项配置策略：
+\begin{itemize}
+  \item \opt{-checks}：指定预定义数据检查列表。检查名支持星号通配符（\texttt{*}）。
+  \item \opt{-policy}：按检查所支持的类型指定策略，可为：
+  \begin{itemize}
+    \item \texttt{error}：若检查不支持 \texttt{error} 策略，工具发出错误消息。
+    \item \texttt{tolerate}：若检查不支持 \texttt{tolerate} 策略，工具发出错误消息。
+    \item \texttt{repair}：若检查不支持 \texttt{repair} 策略，工具发出错误消息。
+    \item \texttt{strict}：按下列顺序设置第一个匹配的策略：1.~error；2.~tolerate；3.~repair。例如，若检查支持 \texttt{error} 与 \texttt{tolerate}，选择 \texttt{strict} 时会设为 \texttt{error}。
+    \item \texttt{lenient}：按下列顺序设置第一个匹配的策略：1.~repair；2.~tolerate；3.~error。例如，若检查支持 \texttt{error} 与 \texttt{tolerate}，选择 \texttt{lenient} 时会设为 \texttt{tolerate}。
+  \end{itemize}
+\begin{noteBox}
+若同时指定 checks 与 policies，配置支持本节所述、且该应用特定检查所支持的全部策略。但若只指定 policies 而不指定 checks，则配置仅支持 \texttt{strict} 与 \texttt{lenient} 策略。
+\end{noteBox}
+  \item 也可在 \opt{-policy} 中使用 \texttt{if\_not\_exists} 关键字，仅当当前设计尚未设置策略时才设置。
+  \item \opt{-strategy}：为检查指定要应用的 strategy。
+\begin{noteBox}
+\opt{-strategy} 不适用于层次化检查。
+\end{noteBox}
+  \item \opt{-references}：为参考子设计指定策略与 strategy。
+\end{itemize}
+
+\subsubsection{报告早期数据检查记录}
+\subsubsection*{Reporting Early Data Check Records}
+
+可用 \cmd{report\_early\_data\_checks} 报告全部检查或特定检查集的策略设置。可用下列选项配置报告：
+\begin{itemize}
+  \item \opt{-policy}：报告全部检查的配置详情，显示各检查所选策略与 strategy。与 \opt{-hierarchical} 合用可报告子块配置。
+  \item \opt{-checks}：报告各检查的当前策略、支持的策略、strategy 与帮助文本。检查名支持星号通配符（\texttt{*}）。与 \opt{-hierarchical} 合用可报告子块检查。
+  \item \opt{-verbose}：报告所有失败检查的摘要、策略、已应用 strategy，以及带注释的已检查对象。与 \opt{-hierarchical} 合用可报告子块中失败检查的记录、策略、strategy 与已检查对象。
+  \item \opt{-hierarchical}：遍历层次，报告层次中每个设计的检查、策略、strategy 与失败计数。
+\end{itemize}
+
+下例中，\cmd{report\_early\_data\_checks -hierarchical -policy} 报告顶层与块级设计上层次化检查的策略设置：
+\begin{lstlisting}
+fc_shell> report_early_data_checks -policy
+****************************************
+Report : report_early_data_checks
+Design : top
+Version: R-2020.09
+Date   : Thu Aug 20 23:53:54 2020
+****************************************
+Design                   Check                                             Policy
+ Strategy
+---------------------------------------------------------------------------------
+-------
+unit_des.nlib:top.design hier.block.instance_bound_to_frame                error
+
+unit_des.nlib:top.design hier.block.instance_unlinked                      error
+
+unit_des.nlib:top.design hier.block.instance_with_design_type_macro        error
+
+unit_des.nlib:top.design hier.top.estimated_corner                         error
+---------------------------------------------------------------------------------
+------
+blk                      hier.block.abstract_missing_design_view           error
+
+blk                      hier.block.abstract_target_use_non_implementation error
+
+blk                      hier.block.abstract_type_non_timing               error
+
+blk                      hier.block.leaf_cell_outside_boundary             error
+---------------------------------------------------------------------------------
+-----
+\end{lstlisting}
+
+下例中，\cmd{report\_early\_data\_checks -hierarchical -verbose} 报告对已检查对象执行的修复，并给出子块上的策略、strategy 与已检查对象详情：
+\begin{lstlisting}
+fc_shell> report_early_data_checks -hierarchical -verbose
+******************************************************
+Design Check                               Policy Strategy Checked  Comment
+                                                           Object
+------------------------------------------------------------------------------------
+blk  hier.block.missing_leaf_cell_location repair          eco_cell Instance location
+                                                                    updated to
+                                                                    X:150145 Y:69620
+-------------------------------------------------------------------------------------
+\end{lstlisting}
+
+在运行顶层早期流程时，可能因子块或顶层设计中的设计数据违规而遇到顶层错误或警告。要利用数据检查与策略能力探索早期流程，需要知道设计上所见顶层错误对应的检查名。\cmd{report\_hier\_check\_description} 提供各顶层错误关联检查的信息。下例显示该命令生成的报告：
+\begin{lstlisting}
+fc_shell> report_hier_check_description
+*********************************************
+Report : Hier check description
+Design : top
+Version: R-2020.09
+Date   : Fri Aug 21 00:08:32 2020
+*********************************************
+
+Legend
+    E - error
+    R - repair
+    T - tolerate
+    TOP - Top-Design
+    BLK - Respective Block-Ref
+
+--------------------------------------------------------------------------------------
+---------------------------
+Check                                      Error  Tolerate Repair Allowed  Allowed
+ Description
+                                            ID      ID      ID    Policies References
+--------------------------------------------------------------------------------------
+---------------------------
+hier.block.missing_frame_view              TL-101  TL-401  TL-501  E|R|T     BLK
+ Missing frame view
+hier.block.abstract_missing_design_view    TL-101  TL-401  N/A     E|T       BLK
+ Missing design view for abstract
+hier.block.reference_missing_port_location TL-126  TL-426  TL-526  E|R|T     BLK
+ Missing location of physical
+                                                      hierarchy boundary pin
+hier.block.reference_port_outside_boundary TL-127  TL-427  TL-527  E|R|T     BLK
+ Location of physical hierarchy boundary
+                                                      pin outside physical hierarchy boundary
+\end{lstlisting}
+
+\subsubsection{生成早期数据检查记录报告}
+\subsubsection*{Generating a Report of Early Data Check Records}
+
+可用 \cmd{get\_early\_data\_check\_records} 从设计生成检查记录报告。与 \opt{-hierarchical} 合用可获取所有子块的检查记录。
+
+报告格式为：
+\begin{lstlisting}
+check_name@object
+\end{lstlisting}
+
+例如：
+\begin{lstlisting}
+fc_shell> get_early_data_check_records -hierarchical
+{hier.block.missing_leaf_cell_location@eco_cell}
+\end{lstlisting}
+
+可用 \opt{-filter} 按对象类、检查名等参数过滤结果，例如：
+\begin{lstlisting}
+fc_shell> get_early_data_check_records \
+-filter "checked_object_class==port"
+{place.port_type_mismatch@clk route.missing_layer_direction@feed_in
+ route.layer_name_mismatch@out}
+\end{lstlisting}
+
+% ============================================================
+\section{使用 Abstract 视图执行顶层收敛}
+\subsection*{Performing Top-Level Closure With Abstract Views}
+
+可先实现各 block，再实现顶层，如图~\ref{fig:hier-tlc-after-blocks} 所示：
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 195：Top-Level Implemented After Blocks are Completed）}\\[0.3em]
+\small 块级流程完成后生成 Abstract/Frame，再进入顶层综合/布局/优化/CTS/布线/后布线优化。请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{Block 完成后再实现顶层}
+\label{fig:hier-tlc-after-blocks}
+\end{figure}
+
+也可并行实现 block 与顶层，如图~\ref{fig:hier-tlc-parallel} 所示：
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 196：Top and Block Levels Implemented in Parallel）}\\[0.3em]
+\small 块级与顶层流程并行，中途交换 Abstract/Frame。请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{顶层与块级并行实现}
+\label{fig:hier-tlc-parallel}
+\end{figure}
+
+在顶层使用 Abstract 时，可用块级支持的命令执行顶层综合、布局、优化、时钟树综合、布线与后布线优化。当前工具在顶层收敛期间不会修改 Abstract 内部，因此可创建并使用只读 Abstract。
+
+% ============================================================
+\section{创建 ETM 与 ETM Cell Library}
+\subsection*{Creating ETMs and ETM Cell Libraries}
+
+要在 Fusion Compiler 中创建 ETM 与 ETM cell library，见「在 Fusion Compiler 工具中创建 ETM 与 ETM Cell Library」。
+
+要分别在 PrimeTime 与 Library Manager 中创建 ETM 与 ETM cell library，见：
+\begin{itemize}
+  \item 在 PrimeTime 工具中创建 ETM
+  \item 在 Library Manager 工具中创建 ETM Cell Library
+\end{itemize}
+
+\subsection{在 Fusion Compiler 工具中创建 ETM 与 ETM Cell Library}
+\subsubsection*{Creating ETMs and ETM Cell Libraries in the Fusion Compiler Tool}
+
+不必先在 PrimeTime 中用 \cmd{extract\_model} 为每个 mode/corner 组合创建 ETM，再在 Library Manager 中把 ETM 与对应物理信息合并成 cell library；可直接在 Fusion Compiler 中用 \cmd{extract\_model} 一步完成这两步。
+
+下列 Fusion Compiler 脚本为设计的每个 mode 与 corner 创建 ETM，再与对应物理信息合并并创建相应 cell library：
+\begin{lstlisting}
+# Open the design, create a frame view, and set the PrimeTime options
+open block.nlib:block.design
+create_frame <options>        ;# extract_model needs Frame for library
+ preparation
+set_pt_options -pt_exec_path <> -work_dir ETM_work_dir \
+               -post_link_script <tcl script with extract_model*
+ variables> \
+
+# To use StarRC for Parasitic extraction
+set_app_options -name extract.starrc_mode -value true
+set_starrc_options -config <starrc_config_file>
+
+# Create the ETM and generate the ETM cell library
+extract_model
+\end{lstlisting}
+
+默认情况下，Fusion Compiler 将生成的 ETM library 写出到：
+\begin{itemize}
+  \item 带 label 的 block：\texttt{[pwd]/ETM\_Lib\_work\_dir/block\_name/label\_name/}
+  \item 不带 label 的 block：\texttt{[pwd]/ETM\_Lib\_work\_dir/block\_name/}
+\end{itemize}
+
+\subsection{在 PrimeTime 工具中创建 ETM}
+\subsubsection*{Creating ETMs in the PrimeTime Tool}
+
+可在 PrimeTime 中用 \cmd{extract\_model} 为设计创建 ETM。对于多 corner-多 mode 设计，必须为每个 scenario 施加相应 corner 与 mode 约束并分别创建 ETM。
+
+下列 PrimeTime 脚本为 AMS\_BLK 设计的 S3 scenario（由 m1 mode 与 c3 corner 组成）创建 ETM：
+\begin{lstlisting}
+#Read in the design
+read_verilog ./AMS_BLK.v
+link
+
+# Apply parasitics
+read_parasitics ./AMS_BLK.spef
+
+#For multivoltage designs, apply UPF data and settings
+load_upf ./AMD_BLK.upf
+set extract_model_include_upf_data true
+
+# Apply the mode (m1) and corner (c3) constraints for the scenario (S3)
+source m1_constraints.tcl
+source c3_constraints.tcl
+
+# Enable clock latencies for designs with synthesized clock trees
+set extract_model_with_clock_latency_arcs true
+set extract_model_clock_latency_arcs_include_all_registers false
+
+# Create the ETM
+extract_model -library_cell -format db -output AMS_BLK_m1_c3
+\end{lstlisting}
+
+关于在 PrimeTime 中创建 ETM 的更多信息，见 \textit{PrimeTime User Guide} 的 Extracted Timing Models 一章。
+
+\subsection{在 Library Manager 工具中创建 ETM Cell Library}
+\subsubsection*{Creating ETM Cell Libraries in the Library Manager Tool}
+
+为每个 mode/corner 组合创建 ETM 后，用 Library Manager 把 ETM 与对应物理信息合并并创建 cell library。更多信息见 \textit{Library Manager User Guide}。
+
+下列 Library Manager 脚本把 AMS\_BLK 设计各 mode/corner 的 ETM 与对应物理信息合并，并创建相应 cell library：
+\begin{lstlisting}
+# Create a library work space
+create_workspace -flow etm_moded AMS_BLK
+
+# Read the physical data (frame view)
+read_ndm -views frame AMS_BLK.ndm
+
+# Read the ETMs for every scenario
+read_db -mode_label m1 AMS_BLK_m1_c1.db
+read_db -mode_label m1 AMS_BLK_m1_c2.db
+read_db -mode_label m1 AMS_BLK_m1_c3.db
+read_db -mode_label m2 AMS_BLK_m2_c1.db
+read_db -mode_label m2 AMS_BLK_m2_c2.db
+read_db -mode_label m2 AMS_BLK_m2_c3.db
+
+
+# Check the compatibility of the libraries you read in
+check_workspace
+
+# Generate cell library
+commit_workspace -output AMS_BLK_ETM.ndm
+\end{lstlisting}
+
+创建 ETM 的 cell library 时，可用下列方法之一获取物理数据：
+\begin{itemize}
+  \item 用 \cmd{read\_ndm -views frame} 读入对应 block 的 Frame 视图；
+  \item 用 \cmd{read\_lef} 读入 block 的 LEF 文件；
+  \item 用 \cmd{read\_gds} 读入 block 的 GDSII 文件；
+  \item 用 \cmd{read\_oasis} 读入 block 的 OASIS 文件。
+\end{itemize}
+
+% ============================================================
+\section{在顶层链接 ETM}
+\subsection*{Linking to ETMs at the Top Level}
+
+要在顶层链接 ETM，在创建顶层设计库之前把 ETM library 加入参考库列表，例如：
+\begin{lstlisting}
+fc_shell> lappend nt_ref_lib "AMS_BLK_ETM.ndm"
+fc_shell> create_lib -technology tech.tf -ref_libs $nt_ref_lib TOP
+\end{lstlisting}
+
+包含多个 mode 的 ETM 称为 moded ETM。对于链接到 moded ETM 的 cell 实例，必须用 \cmd{set\_cell\_mode} 指定所需 mode，例如：
+\begin{lstlisting}
+fc_shell> current_mode m1
+fc_shell> set_cell_mode m1 U1
+\end{lstlisting}
+
+对于链接到 moded ETM 的 cell 实例，若不指定 mode，工具不会激活时序弧、时序检查、生成时钟与 case value。
+
+要用 \cmd{report\_cell\_modes} 报告特定 cell 实例的 cell mode。
+
+要用 \cmd{set\_reference} 把 cell 实例在其 Abstract 视图与 ETM 之间切换。下例把 \texttt{U1} 从 Abstract 切到 ETM：
+\begin{lstlisting}
+fc_shell> set_reference -block AMS_BLK_ETM.ndm:AMS_BLK.timing U1
+\end{lstlisting}
+
+下例把 \texttt{U1} 从 ETM 切回 Abstract：
+\begin{lstlisting}
+fc_shell> set_reference -block AMS_BLK.ndm:AMS_BLK.abstract U1
+\end{lstlisting}
+
+在 ETM 与 Abstract 视图之间切换后，需重新施加顶层时序约束。
+
+% ============================================================
+\section{使用 ETM 执行顶层收敛}
+\subsection*{Performing Top-Level Closure With ETMs}
+
+在顶层使用 ETM 之前，必须完成下列任务：
+\begin{itemize}
+  \item 施加仅顶层的时序约束与设置。\\
+若由 ETM 表示的 cell 实例含内部时钟，必须从顶层重新施加这些时钟定义。避免引用 block 内部对象的跨边界时序例外。
+
+  \item 要施加 UPF 约束与设置，必须：
+  \begin{enumerate}
+    \item 用 \cmd{save\_upf} 从各块级设计生成块级 UPF；
+    \item 在顶层，为每个由 ETM 表示的 block 实例加载块级 UPF，并加载仅顶层 UPF：
+\begin{lstlisting}
+load_upf -scope <instance_name> block.upf
+load_upf top.upf
+\end{lstlisting}
+  \end{enumerate}
+
+  \item 施加顶层布局约束与设置，例如 hard keepout margin。
+\end{itemize}
+
+在顶层使用 ETM 时，可用块级支持的命令执行综合、顶层布局、优化、时钟树综合、布线与后布线优化。
+
+% ============================================================
+\section{透明层次优化}
+\subsection*{Transparent Hierarchy Optimization}
+
+透明层次优化（Transparent Hierarchy Optimization，THO）使工具能透明地优化层次化设计。
+
+THO 允许在遵守物理 block 边界的同时，并发优化顶层与子块，并使用 CCD、AWP、PrimeTime 延迟计算等全部高级优化技术。
+
+在 THO 期间，工具在顶层时序上下文中优化顶层与特定子块（design 视图）。THO 不改变子块形状与物理层次。默认情况下，工具遵守 pin 位置，但提供选项以重新分配 pin 位置以改善 QoR。
+
+由于无需展平设计，可继续用层次化 block 做 signoff：signoff extraction 与 PrimeTime STA 均可层次化运行。此外，后期 ECO 也往往更容易实现。
+
+THO 可用于 \cmd{compile\_fusion} 的 \texttt{final\_place} 与 \texttt{final\_opto} 阶段，以及 \cmd{route\_opt} 与 \cmd{hyper\_route\_opt}。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 197：Transparent Hierarchy Optimization Flow）}\\[0.3em]
+\small THO 流程：\texttt{open\_block -ref\_libs\_for\_edit} → 启用 THO 设置 → \texttt{compile\_fusion -from final\_place} / \texttt{route\_opt} 或 \texttt{hyper\_route\_opt}。请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{透明层次优化流程}
+\label{fig:hier-tho-flow}
+\end{figure}
+
+下列示例流程展示 THO 在整体实现流程中的用法。本例中，THO 作为典型层次化优化流程之上的额外增量优化步骤运行。
+
+THO 流程包括以下步骤：
+\begin{itemize}
+  \item 访问库（Accessing Libraries）
+  \item 设置透明层次优化（Setting up Transparent Hierarchy Optimization）
+  \item 在 \cmd{compile\_fusion} 的 \texttt{final\_place} 阶段执行 THO
+  \item 在 \cmd{compile\_fusion} 的 \texttt{final\_opto} 阶段执行 THO
+  \item \cmd{compile\_fusion} 之后重新预算（Rebudgeting）
+  \item 在 \cmd{route\_opt} 或 \cmd{hyper\_route\_opt} 期间执行 THO
+\end{itemize}
+
+\subsection{访问库}
+\subsubsection*{Accessing Libraries}
+
+启用 THO 设置之前，必须确保：
+\begin{itemize}
+  \item 所有子块库以编辑模式打开。必须用 \cmd{open\_lib} 的 \opt{-ref\_libs\_for\_edit} 打开父库。
+  \item block 的 design 视图可编辑。
+\end{itemize}
+
+\subsection{设置透明层次优化}
+\subsubsection*{Setting up Transparent Hierarchy Optimization}
+
+执行 THO 需要 design 视图。顶层可能正链接到 Abstract 视图；请按「将 Block 从 Abstract 切换为 Design 视图」一节的说明，把要优化的 block 切换为 design 视图。按下列步骤设置 THO：
+\begin{enumerate}
+  \item 若在块级 \cmd{compile\_fusion} 之后执行 THO，必须用下列命令把 CCD useful skew balancing offset 以及集成时钟门控单元的 latency offset 传播到顶层时序上下文：
+\begin{lstlisting}
+fc_shell> promote_clock_data -auto_clock all -latency_offset
+fc_shell> promote_clock_data -auto_clock all -balance_points
+\end{lstlisting}
+  \item 要启用并对 block 执行 THO，确保要优化的 block 已允许编辑：
+\begin{lstlisting}
+fc_shell> set_editability -blocks {list of blocks} -value true
+\end{lstlisting}
+  \item 用下列命令验证 block 可编辑性：
+\begin{lstlisting}
+fc_shell> report_editability -blocks [get_blocks -hierarchical]
+\end{lstlisting}
+  \item 在 THO 期间，子块内的拥塞更新、route-driven estimation（RDE）计算以及 ECO 布线等操作可用分布式处理运行。用下列命令进行设置。必须按示例指定自己的队列参数（如 \texttt{qsub} 参数）：
+\begin{noteBox}
+若未指定 host options，工具会在主进程中串行运行各子块操作。
+\end{noteBox}
+\begin{lstlisting}
+fc_shell> set_host_options -name for_tho -num_processes 4 -max_cores 16
+ -submit_command [list qsub -P queue -pe mt 16 -l mem_free=100G -cwd]
+fc_shell> set_hierarchy_options -host_option for_tho -blocks {list of
+ blocks}
+\end{lstlisting}
+  \item 用 \cmd{init\_hier\_optimization} 启用 THO。按阶段使用不同选项，见后续各节。
+\end{enumerate}
+
+\subsection{在 compile\_fusion final\_place 阶段执行 THO}
+\subsubsection*{Performing THO During compile\_fusion final\_place Stage}
+
+在 \cmd{compile\_fusion} 的 \texttt{final\_place} 阶段，可跨顶层与各 block 透明地执行布局。布局发生在各自 block 边界内，同时又是全局的——忽略 pin 位置以获得直通路径。布局可由线长、时序与拥塞驱动。
+
+THO 提供基于全局布局细化 pin 位置的选项。可在 THO 的粗布局步骤中，为指定 block 集细化 pin 位置。
+\begin{enumerate}
+  \item 要细化 pin 位置并允许 pin 移动：
+\begin{lstlisting}
+fc_shell> set_hierarchy_options -enable_pin_movement true -blocks \
+ {list of blocks}
+\end{lstlisting}
+  \item 要用 \cmd{report\_hierarchy\_options} 报告 \cmd{set\_hierarchy\_options} 所施加的设置。
+  \item 要用下列命令以 THO 运行 \texttt{final\_place} 阶段：
+\begin{lstlisting}
+fc_shell> init_hier_optimization -flow pre_route
+fc_shell> compile_fusion -from final_place -to final_place
+fc_shell> commit_hier_optimization
+\end{lstlisting}
+\end{enumerate}
+
+\cmd{init\_hier\_optimization} 会发出类似下列消息，确认哪些 block 可用于优化：
+\begin{lstlisting}
+Information: Sub-block u1/a/i1 (Reference: ablock.design) is treated
+ as modifiable. (HOPT-001)
+\end{lstlisting}
+
+全局布局之后，THO 调用 \cmd{place\_pins} 创建新的 pin 布局。
+
+\subsection{在 compile\_fusion final\_opto 阶段执行 THO}
+\subsubsection*{Performing THO During compile\_fusion final\_opto Stage}
+
+Fusion Compiler 在 \texttt{final\_opto} 阶段执行透明层次优化，确保所有块间路径与块-顶层路径都像扁平设计一样被优化。这样，CCD 优化可完整处理这些路径上的违规。
+\begin{lstlisting}
+fc_shell> init_hier_optimization -flow pre_route
+fc_shell> compile_fusion -from final_opto -to final_opto
+fc_shell> commit_hier_optimization
+\end{lstlisting}
+
+\subsection{compile\_fusion 之后重新预算}
+\subsubsection*{Rebudgeting After compile\_fusion}
+
+在带 THO 的 \cmd{compile\_fusion} 之后，块接口时序相对各 block 单独实现时会发生变化。由于 block 现已基于顶层时序图景优化，在继续对 block 运行 \cmd{clock\_opt} 之前，必须为 block 创建更新后的时序约束。THO 期间可能已修改 CCD useful skew balance point offset；这些 offset 也需要变成块上下文专用，以便时钟树综合步骤能将其纳入考虑。
+
+下例展示如何执行预算：
+\begin{lstlisting}
+fc_shell> set budget_instances "u1/a/i1 u1/b/i2 ..."
+fc_shell> set_budget_options -reset -all
+fc_shell> set_budget_options -add_blocks $budget_instances
+fc_shell> set_app_options -list { plan.budget.use_ccd_latency true }
+fc_shell> set_app_options -list { plan.budget.write_hold_budgets false }
+fc_shell> set_app_options -list { plan.budget.estimate_timing_mode
+ false }
+fc_shell> compute_budget_constraints -setup_delay -latency_targets actual
+ -balance false -boundary
+fc_shell> write_budgets -output budgets-post-compile -force -nosplit
+ -include_balance_points -include_pin_latency
+\end{lstlisting}
+
+\subsection{在 route\_opt 或 hyper\_route\_opt 期间执行 THO}
+\subsubsection*{Performing THO During route\_opt or hyper\_route\_opt}
+
+在实现流程末尾执行 THO，可获得最佳优化潜力，因为优化的是完整设计。\cmd{route\_opt} 与 \cmd{hyper\_route\_opt} 对顶层与各 block 一起执行后布线优化。优化后的 ECO 布线会在所有已打开编辑的子块上执行。
+
+THO 优化已完全集成到 \cmd{route\_opt} 与 \cmd{hyper\_route\_opt}。在单主机上使用 \cmd{hyper\_route\_opt} 或 \cmd{route\_opt} 的示例如下：
+\begin{lstlisting}
+fc_shell> init_hier_optimization -flow post_route
+fc_shell> route_opt  or hyper_route_opt
+fc_shell> commit_hier_optimization
+\end{lstlisting}
+
+使用 \cmd{route\_opt} 时，可在每次 \cmd{route\_opt} 之后并行执行必须进行的 ECO 布线操作，以缩短整体运行时间。须按「设置透明层次优化」一节设置 host options。\cmd{hier\_route\_eco} 在各 block 中执行 ECO 布线，示例如下：
+\begin{lstlisting}
+fc_shell> init_hier_optimization -flow post_route \
+ -detached_hier_route_eco
+fc_shell> route_opt
+fc_shell> hier_route_eco
+fc_shell> commit_hier_optimization
+\end{lstlisting}
+
+\begin{noteBox}
+以这种方式使用 \cmd{hyper\_route\_opt} 时，工具会忽略该设置，不会分发 ECO 布线。
+\end{noteBox}

@@ -1,0 +1,1776 @@
+
+===== PAGE 212 =====
+Feedback
+3
+Physical Synthesis
+The Fusion Compiler tool synthesizes the RTL descriptions into optimized gate-level 
+designs, optimizes them to achieve the best quality of results (QoR) in speed, area, and 
+power, and allows early design exploration and prototyping.
+Topics in this section include
+•
+Performing Unified Physical Synthesis
+•
+Controlling Mapping and Optimization
+•
+Performing Multibit Optimization
+•
+Running Concurrent Clock and Data Optimization
+•
+Performing Test Insertion and Scan Synthesis
+•
+Specifying Settings for Performance, Power, and Area Improvement
+•
+Performing Design Analysis
+Performing Unified Physical Synthesis
+The Fusion Compiler tool performs unified physical synthesis. The benefits of unified 
+physical synthesis include
+•
+Reduced runtime
+Unified physical synthesis streamlines the iterations of placement and optimization, and 
+utilizes the initial placement and buffer trees built during synthesis to achieve the best 
+runtime.
+•
+Improved quality of results (QoR)
+The unified preroute optimization framework uses consistent costs in optimization 
+algorithms to improve QoR. The best technologies, such as logic restructuring, 
+concurrent clock and data optimization, multibit mapping, and advanced legalizer, are 
+shared throughout the preroute flow.
+The Fusion Compiler compilation includes both top-down and bottom-up (hierarchical) 
+compile strategies. In a top-down compile, all environment and constraint settings are 
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+212
+
+===== PAGE 213 =====
+Chapter 3: Physical Synthesis
+Performing Unified Physical Synthesis
+Feedback
+defined with respect to the top-level design. Top-down compile provides a push-button 
+approach and handles interblock dependencies automatically, but it requires that all 
+designs must reside in memory at the same time. In a hierarchical compile flow, you 
+start optimization of design subblocks using a top-down approach and then continue 
+incorporating the subblocks into higher-level blocks until the top-level design is complete.
+The following topics describe how perform unified physical synthesis:
+•
+Using the compile_fusion Command
+•
+Performing Prechecks
+•
+Generating Verification Checkpoints During Compilation
+Using the compile_fusion Command
+To perform unified physical synthesis, use the compile_fusion  command.
+The compile_fusion  command consists of the following stages:
+1. initial_map
+During this stage, the tool maps the design and performs area optimization.
+2. logic_opt
+During this stage, the tool performs logic-based delay optimization.
+3. initial_place
+During this stage, the tool merges the clock-gating logic and performs coarse 
+placement.
+4. initial_drc
+During this stage, the tool removes existing buffer trees and performs high-fanout-net 
+synthesis and electrical DRC violation fixing.
+5. initial_opto
+During this stage, the tool performs physical optimization and incremental placement.
+6. final_place
+During this stage, the tool performs final placement to improve timing and congestion.
+7. final_opto
+During this stage, the tool performs final optimization and legalization to improve 
+timing, power, and logical DRCs.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+213
+
+===== PAGE 214 =====
+Chapter 3: Physical Synthesis
+Performing Unified Physical Synthesis
+Feedback
+When you run the compile_fusion  command, by default, the tool runs all stages. To run 
+only some of these stages, use the -from  option to specify the stage from which you want 
+to begin and the -to  option to specify the stage after which you want to end. If you do not 
+specify the -from  option, the tool begins from the initial_place  stage. Similarly, if you 
+do not specify the -to  option, the tool continues until the final_opto  stage is completed.
+Breaking the compile_fusion  command in to stages allows you to perform different 
+tasks between the stages, such as changing constraints or settings, generating reports 
+for analysis, performing other implementation tasks such as design planning or DFT 
+insertion, and so on. If you make manual changes to the design between stages, ensure 
+the changes honor the expected state of the design. For example, the design is expected 
+to be mapped after the initial_map  stage. Therefore, do not introduce unmapped logic 
+to the design after this stage.
+You can repeat a stage; however, ensure that you run all stages in the correct sequence. 
+The following example runs the compile_fusion  command until it completes the 
+initial_opto  stage, performs analysis, changes an application option setting, and 
+restarts by running the initial_opto  stage again.
+fc_shell> compile_fusion -to initial_opto
+fc_shell> report_qor
+fc_shell> set_app_option \
+   -name opt.common.advanced_logic_restructuring_mode -value timing
+fc_shell> compile_fusion -from initial_opto
+In the following situations, the design can contain unmapped cells after the 
+compile_fusion  command:
+•
+Missing the required cells in the library
+•
+User-specified restrictions on the required library cells
+When a design contains unmapped cells, the compile_fusion  command continues the 
+compilation and provides an estimated area for the unmapped cells.
+Unmapped cells are marked with the is_unmapped  attribute. To query unmapped cells in a 
+netlist, use the following command:
+fc_shell> get_cells -hierarchical -filter "is_unmapped==true"
+Note the following limitations:
+•
+DesignWare operators are not mitigated.
+•
+Only placement information is stored in the database after mitigation; routing 
+information is not saved.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+214
+
+===== PAGE 215 =====
+Chapter 3: Physical Synthesis
+Performing Unified Physical Synthesis
+Feedback
+Performing Prechecks
+Fusion Compiler can perform compile prechecks to prevent compile failures and allow 
+the compile_fusion  command to quickly exit with error messages when incomplete (or 
+inconsistent) setup or constraint issues are encountered. This capability is on by default, 
+but these checks can also be enabled by the compile_fusion -check_only  command.
+The compile_fusion  command and the compile_fusion  -check_only  command 
+perform the prechecks listed in the following table and issue error messages accordingly. 
+A check mark (X) indicates the precheck is performed.
+Table 19
+Prechecks Performed During the Compile Flow
+Code
+Message
+Default compile 
+prechecks
+compile_fusion 
+-check_only
+OPT-3000
+Design is not linked or has link issues.
+X
+X
+OPT-3001
+Cell is not resolved after linking.
+X
+X
+OPT-3002
+Cell is physical hierarchy and not allowed in 
+compile.
+X
+X
+OPT-3003
+Cell is logical hierarchy and not allowed in compile.
+X
+X
+OPT-3005
+Design is not present.
+X
+X
+OPT-3006
+Current instance hierarchy is not the top.
+X
+X
+OPT-2001
+Could not initialize scenario settings.
+X
+OPT-2002
+Missing parasitic information for corners or missing 
+TLUPlus information.
+X
+OPT-4000
+Design does not have a floorplan or a valid 
+floorplan.
+X
+X
+OPT-4001
+Design does not have a valid die area.
+X
+X
+OPT-4002
+Macro does not have placement. information.
+X
+X
+OPT-4004
+Design port does not have placement information.
+X
+X
+OPT-4010
+Pad connected to port does not have placement 
+information.
+X
+X
+OPT-4008
+Design has no site rows defined.
+X
+X
+OPT-4009
+Design has no tracks defined.
+X
+X
+OPT-1008
+Layer does not have a preferred direction.
+X
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+215
+
+===== PAGE 216 =====
+Chapter 3: Physical Synthesis
+Performing Unified Physical Synthesis
+Feedback
+Table 19
+Prechecks Performed During the Compile Flow (Continued)
+Code
+Message
+Default compile 
+prechecks
+compile_fusion 
+-check_only
+OPT-1006
+Library analysis failure - cannot find buffers and 
+inverters.
+X
+X
+OPT-1007
+Library analysis failure - No technology data.
+X
+X
+OPT-4012
+Design has 1 duplicate. Run check_duplicates  for 
+more details.
+X
+Compile Precheck Examples
+The following two examples show the compile logs with and without compile prechecks. 
+When the -check_only  option is set, the compile_fusion  command issues error 
+messages for any failed precheck condition.
+Example 14
+Compile Log With Compile Prechecks
+------------------------- Begin compile flow ----------------------- 
+ (FLW-3001)
+->Compile in progress:    1.0%                 (FLW-3778)
+Error: Layer M1 does not have a preferred direction (OPT-1008)
+...
+Error: Layer MRDL does not have a preferred direction (OPT-1008)
+...
+Warning: Technology layer 'M1' setting 'routing-direction' is not valid 
+ (NEX-001)
+...
+Warning: Technology layer 'MRDL' setting 'routing-direction' is not valid 
+ (NEX-001)
+Example 15
+Compile Log Without Compile Prechecks
+---------------------- End logic optimization -------------------- 
+ (FLW-3001)
+->Compile in progress:   27.0%                 (FLW-3778)
+->Compile in progress:   28.0%                 (FLW-3778)
+->Compile in progress:   28.5%                 (FLW-3778)
+Information: Corner max_corner: no PVT mismatches. (PVT-032)
+Warning: Technology layer 'M1' setting 'routing-direction' is not valid 
+ (NEX-001)...
+Warning: Technology layer 'MRDL' setting 'routing-direction' is not valid 
+ (NEX-001)
+Information: Design Average RC for design top  (NEX-011)
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+216
+
+===== PAGE 217 =====
+Chapter 3: Physical Synthesis
+Controlling Mapping and Optimization
+Feedback
+Generating Verification Checkpoints During Compilation
+You can generate intermediate verification checkpoints during the compile_fusion 
+command, which you can use in the Formality tool to provide a netlist snapshot of the 
+synthesis design state and verify the intermediate netlists. Verification checkpointing 
+allows the Fusion Compiler and Formality tools to synchronize on an intermediate netlist 
+and in turn results in higher completion rates and better QoR.
+To enable verification checkpointing, use the set_verification_checkpoints  command 
+as shown in the following example:
+fc_shell> set_verification_checkpoints
+Enabling checkpoint "ckpt_logic_opt"
+Enabling checkpoint "ckpt_pre_map"
+When you enable this feature, by default, the compile_fusion  command generates 
+verification checkpoints before mapping and during logic optimization, and the 
+corresponding verification-checkpoint stages are named ckpt_pre_map  and 
+ckpt_logic_opt. You can enable verification checkpointing at only one stage as shown in 
+the following example:
+fc_shell> set_verification_checkpoints {ckpt_logic_opt}
+Disabling checkpoint "ckpt_pre_map"
+Enabling checkpoint "ckpt_logic_opt"
+At each verification checkpoint, the tool automatically generates a checkpoint netlist and 
+the guide_checkpoint  command in the .svf file that is used by the Formality tool during 
+verification.
+Controlling Mapping and Optimization
+The following topics describe how you can customize and control the mapping and 
+optimization that is performed during the initial_map, logic_opto, and initial_drc 
+stages of the compile_fusion  command:
+•
+Ungrouping or Preserving Hierarchies During Optimization
+•
+Controlling Boundary Optimization
+•
+Controlling Datapath Optimization
+•
+Controlling MUX Optimization
+•
+Controlling Sequential Mapping
+•
+Controlling Register Replication
+•
+Controlling Register Merging
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+217
+
+===== PAGE 218 =====
+Chapter 3: Physical Synthesis
+Controlling Mapping and Optimization
+Feedback
+•
+Selectively Removing or Preserving Constant and Unloaded Registers
+•
+Reporting Cross-Probing Information for Optimized Registers
+•
+Controlling High-Fanout-Net Synthesis
+Ungrouping or Preserving Hierarchies During Optimization
+Ungrouping merges subdesigns of a given level of the hierarchy into the parent cell 
+or design. It removes hierarchical boundaries and allows Fusion Compiler to improve 
+timing by reducing the levels of logic and to improve area by sharing logic. By default, the 
+compile_fusion  command automatically ungroups logical hierarchies that do not have a 
+dont_touch  attribute setting.
+During optimization, the compile_fusion  command performs the following types of 
+automatic grouping:
+•
+Area-based automatic ungrouping
+Before initial mapping, the command estimates the area for unmapped hierarchies and 
+removes small subdesigns. Because the command performs automatic ungrouping 
+at an early stage, it has a better optimization context. Additionally, datapath extraction 
+is enabled across ungrouped hierarchies. These factors improve the area and timing 
+quality of results.
+•
+Delay-based automatic ungrouping
+The command ungroups hierarchies along the critical path and is used essentially for 
+timing optimization.
+For ungrouping of DesignWare and datapath cells, see Datapath Implementation.
+You can disable automatic ungrouping by setting the compile.flow.autoungroup 
+application option to false. The default is true. However, doing do can affect the QoR. 
+Therefore, it is better to limit ungrouping, rather than disabling it, using the following 
+methods:
+Controlling the Automatic Ungrouping of Specific Types of Hierarchies
+To control the automatic ungrouping of specific types of hierarchies, use the 
+set_autoungroup_options  command.
+The following example specifies that parent hierarchies of blocks with UPF and SDC 
+constraints should preserved and that automatic ungrouping of other hierarchies should 
+begin from the third level:
+fc_shell> set_autoungroup_options -keep_parent_hierarchies UPF
+fc_shell> set_autoungroup_options -keep_parent_hierarchies SDC
+fc_shell> set_autoungroup_options -start_level 3
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+218
+
+===== PAGE 219 =====
+Chapter 3: Physical Synthesis
+Controlling Mapping and Optimization
+Feedback
+The set_autoungroup_options  command is cumulative and the settings are saved in the 
+design library.
+To report information about the hierarchies that are automatically ungrouped or preserved, 
+use the report_ungroup  command.
+Controlling the Automatic Ungrouping of Specific Objects
+To force or prevent specific cell instances or modules being ungrouped during 
+optimization, use the set_ungroup  command with the true  or false  setting. The 
+set_ungroup  command sets the ungroup  attribute to the appropriate value for the 
+specified objects. If you set the attribute on a module, all cells that reference the module 
+are affected.
+Note:
+The set_ungroup  command has a higher priority than the 
+set_autoungroup_options  command.
+The following example script sets specific modules to be ungrouped and specific cell 
+instances to be preserved during optimization:
+# Set modules A and B to be ungrouped
+set_ungroup [get_modules {A B}] true
+# Set cells u_C and u_D to be preserved
+set_ungroup [get_cells {u_C u_D}] false
+# Query the ungroup attribute
+get_attribute -name ungroup -objects [get_modules {A B}]
+get_attribute -name ungroup -objects [get_cells {u_C u_D}]
+compile_fusion
+Controlling Boundary Optimization
+You can control boundary optimization across user-specified logical boundaries and 
+match the interface boundary of a physical block with the RTL module interface. Boundary 
+optimization allows you to use RTL floorplanning DEF files during block implementation.
+The following figure shows how constants, equal-opposite logic, logic phase, and 
+unloaded ports are propagated through the logical boundaries without and with boundary 
+optimization.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+219
+
+===== PAGE 220 =====
+Chapter 3: Physical Synthesis
+Controlling Mapping and Optimization
+Feedback
+0
+Constant propagation
+0
+Phase inversion
+Unloaded propagation
+Equal-opposite logic propagation
+Disabled
+Enabled  
+Disabled
+Disabled
+Disabled
+Enabled  
+Enabled  
+Enabled  
+Disabled: without boundary optimization
+Enabled:  with boundary optimization
+Global Control
+By default, all types of boundary optimization are enabled during compile. To control 
+boundary optimization globally, use the compile.flow.boundary_optimization 
+application option.
+When you set the compile.flow.boundary_optimization  application option to false,
+•
+The tool disables propagation of equal-opposite logic and phase inversion.
+•
+Constants and unloaded ports continue to propagate across hierarchies.
+To disable constant propagation and unloaded propagation globally, set the 
+compile.flow.constant_and_unloaded_propagation_with_no_boundary_opt 
+application option to false. The default is true. The setting does not affect object-level 
+specifications.
+Controlling Specific Types of Boundary Optimization
+To control the level of boundary optimization for hierarchical cell pins, hierarchical cells, 
+or blocks, use the set_boundary_optimization  command. The tool uses the following 
+order of precedence to determine the setting to use during optimization:
+1. Setting applied on pins of hierarchical cell instances
+2. Setting applied on hierarchical cell instances, which applies to its pins as well
+3. Setting applied on modules, which applies to all its cells and pins as well
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+220
+
+===== PAGE 221 =====
+Chapter 3: Physical Synthesis
+Controlling Mapping and Optimization
+Feedback
+The following table shows the level of boundary optimization you can specify with the 
+set_boundary_optimization  command and the types of boundary optimization that are 
+enabled for each level.
+Table 20
+Levels of Boundary Optimization and the Corresponding Types of 
+Boundary Optimization Performed
+Level of boundary 
+optimization
+Constant 
+propagation
+Unloaded 
+propagation
+Equal-opposite 
+logic propagation
+Phase 
+inversion
+all
+Enabled
+Enabled
+Enabled
+Enabled
+auto
+Enabled
+Enabled
+Disabled
+Disabled
+none
+Disabled
+Disabled
+Disabled
+Disabled
+You can control the specific types of boundary optimization allowed for an 
+object by using the -constant_propagation, -unloaded_propagation, 
+-equal_opposite_propagation, and -phase_inversion  options. These options are 
+mutually exclusive with the boundary optimization level specified by using all, auto, or 
+none  and cannot be used on the same object in a single command invocation. If you use 
+the set_boundary_optimization  command multiple times on the same object, the effect 
+is additive.
+Based on the types of boundary optimization you enable or disable, the tool sets the 
+constant_propagation, unloaded_propagation, equal_opposite_propagation, and 
+phase_inversion  read-only attributes of the specified object to true  or false. If you
+•
+Enable all four types, the tool sets the boundary_optimization  read-only attribute to 
+true
+•
+Disable at least one type, the tool sets the boundary_optimization  read-only attribute 
+to false
+To report boundary optimization settings, use the report_boundary_optimization 
+command. To remove them, use the remove_boundary_optimization  command.
+The following example
+•
+Disables all boundary optimization for the U1 cell instance
+•
+Disables equal-opposite logic propagation and phase inversion for the U2 cell instance
+•
+Disables constant propagation and phase inversion for the U3/in1 cell pin
+fc_shell> set_boundary_optimization [get_cells U1] none
+fc_shell> set_boundary_optimization [get_cells U2] auto
+fc_shell> set_boundary_optimization [get_pins U3/in1] \
+-constant_propagation false
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+221
+
+===== PAGE 222 =====
+Chapter 3: Physical Synthesis
+Controlling Mapping and Optimization
+Feedback
+fc_shell> set_boundary_optimization [get_pins U3/in1] \
+-phase_inversion false
+Controlling Phase Inversion
+To prevent boundary optimization from moving inverters across hierarchical boundaries, 
+set the compile.optimization.enable_hierarchical_inverter  application option 
+to false. By default, the application option is set to true  to allow phase inversion. This 
+application option is only effective when boundary optimization is enabled.
+Controlling Datapath Optimization
+Datapath design is commonly used in applications that contain extensive data 
+manipulation, such as 3-D, multimedia, and digital signal processing (DSP). By default, 
+when you run the compile_fusion  command, datapath optimization is enabled and both 
+standard and DesignWare Foundation libraries are automatically linked.
+During datapath optimization, the tool performs the following tasks:
+•
+Shares (or reverses the sharing) of datapath operators
+•
+Uses the carry-save arithmetic technique
+•
+Extracts the data path
+•
+Performs high-level arithmetic optimization on the extracted data path
+•
+Explores better solutions that might involve a different resource-sharing configuration
+•
+Makes tradeoffs between resource sharing and datapath optimization
+Topics in this section
+•
+Datapath Extraction
+Transforms arithmetic operators, such as addition, subtraction, and multiplication, into 
+datapath blocks.
+•
+Datapath Implementation
+Uses a datapath generator to generate the best implementations for the extracted 
+components.
+•
+Optimizing Datapaths
+Datapath Extraction
+Datapath extraction transforms arithmetic operators, such as addition, subtraction, and 
+multiplication, into datapath blocks to be implemented by a datapath generator. This 
+transformation improves the quality of results (QoR) by using carry-save arithmetic.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+222
+
+===== PAGE 223 =====
+Chapter 3: Physical Synthesis
+Controlling Mapping and Optimization
+Feedback
+Carry-save arithmetic does not fully propagate carries but stores results in an intermediate 
+form. The carry-save adders are faster than the conventional carry-propagate adders 
+because the carry-save adder delay is independent of bit-width. These adders use 
+significantly less area than carry-propagate adders because they do not use full adders for 
+the carry.
+The following example shows the code for the a * b + c + d = z expression. As shown in 
+Figure 30, the conventional implementation of the expression use three carry-propagate 
+adders, whereas the carry-save arithmetic requires only one carry-propagate adder and 
+two carry-save adders. The figure also shows the timing and area numbers for both 
+implementations.
+module dp (a, b, c, d, e);   input  [15:0] a, b;
+   input  [31:0] c, d;
+   output [31:0] Z;
+assign Z = (a * b) + c + d;
+endmodule
+Figure 30
+Conventional Carry-Propagate Adder Versus Carry-Save Adder
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+223
+
+===== PAGE 224 =====
+Chapter 3: Physical Synthesis
+Controlling Mapping and Optimization
+Feedback
+The tool supports extraction of the following components:
+•
+Arithmetic operators that can be merged into one carry-save arithmetic tree
+•
+Operators extracted as part of a datapath: *, +, -, >, <, <=, >=, ==, !=, and MUXes
+•
+Variable shift operators (<<, >>, <<<, >>> for Verilog and sll, srl, sla, sra, rol, ror for 
+VHDL)
+•
+Operations with bit truncation
+The datapath flow can extract these components only if they are directly connected to 
+each other, that is, no nonarithmetic logic between components. Keep the following points 
+in mind:
+•
+Extraction of mixed signed and unsigned operators is allowed only for adder trees
+•
+Instantiated DesignWare components cannot be extracted
+Datapath Implementation
+All the extracted datapath elements and the synthetic operators are implemented by the 
+DesignWare datapath generator in Fusion Compiler. The DesignWare datapath generator 
+uses the smart generation technology to perform the following tasks:
+•
+Implement datapath blocks using context-driven optimizations
+•
+Revisit high-level optimization decisions for a given timing context
+•
+Consider logic library characteristics
+Use these commands and application option for datapath implementation:
+•
+set_datapath_architecture_options
+This command controls the strategies used to generate the datapath cells for 
+arithmetic and shift operators. The following example specifies to use Booth-encoded 
+architectures to generate multiplexers:
+fc_shell> set_datapath_architecture_options -booth_encoding true
+•
+set_implementation
+This command specifies the implementation to use for dividers and synthetic library 
+cell instances with a specified name. The following example specifies to use the cla3 
+implementation for the instantiated DesignWare cell U1.
+fc_shell> set_implementation cla3 U1
+•
+set_synlib_dont_use
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+224
+
+===== PAGE 225 =====
+Chapter 3: Physical Synthesis
+Controlling Mapping and Optimization
+Feedback
+This command prevents using specific implementation. The following example 
+specifies not to use the rpl implementation.
+fc_shell> set_synlib_dont_use \
+   {dw_foundation/DW_div/cla standard/DW_div/rpl}
+•
+compile.datapath.ungroup
+By default, all DesignWare cells and datapath blocks are ungrouped during timing 
+optimization. To disable the ungrouping, set the compile.datapath.ungroup 
+application option to false, changing from its default of true. For example,
+fc_shell> set_app_options \
+   -name compile.datapath.ungroup -value false
+Optimizing Datapaths
+Th following script disables the ungrouping of the DP_OP cell with datapath gating 
+element add_3:
+# Disable ungrouping of DP_OP with datapath gating
+set_datapath_gating_options -ungroup false [get_cells add_3]
+Analyzing Datapath Extraction
+To get the best QoR results from datapath optimization, ensure that the biggest 
+possible datapath blocks are extracted from the RTL code during compile. To examine 
+how the datapath blocks will be extracted from your RTL before compile, use the 
+analyze_datapath_extraction  command. The command analyzes the arithmetic 
+contents of the design and provides feedback, so you can improve the RTL code as 
+needed.
+The following example shows a datapath report:
+Cell : DP_OP_123_2304_10297_J1
+--------------------------------
+   Current Implementation :  str(area,speed)
+   Contained Operations  :  add_30(test.v:30) add_30_2(test.v:30)
+       mult_36(test.v:36)
+   Multiplier Arch       :  benc_radix4
+ 
+               Data
+ Var     Type  Class     Width  Expression
+-------------------------------------------------------------------------
+ PI_0    PI    Unsigned      6
+ PI_1    PI    Unsigned      1
+ PI_2    PI    Unsigned     24
+ T16     IFO   Unsigned      7  PI_0 + PI_1  (test.v:30)
+ PO_0    PO    Unsigned     30  PI_2 * T16 (test.v:36)
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+225
+
+===== PAGE 226 =====
+Chapter 3: Physical Synthesis
+Controlling Mapping and Optimization
+Feedback
+To report the resources and datapath blocks used in the design, use the 
+report_resources  command. To report the implementation overview, specify the 
+-summary  with the report_resources  command. For example,
+fc_shell> report_resources -hierarchy
+Controlling Datapath Gating
+The following figure shows signal transitions of the inputs of a DP_OP cell that is 
+generated during datapath gating optimization. To control datapath gating, use the 
+set_datapath_gating_options  command.
+The following script disables datapath gating on the datapath element add_3:
+# Disable datapath gating on particular operator
+set_datapath_gating_options -enable false [get_cells add_3]
+Controlling MUX Optimization
+The Fusion Compiler tool can map combinational logic representing multiplexers in the 
+HDL code directly to a single multiplexer (MUX) or a tree of multiplexer cells from the 
+target logic library.
+Multiplexers are commonly modeled with if and case statements. To implement the 
+mutliplexer logic, the HDL Compiler uses SELECT_OP cells, which the Fusion Compiler 
+tool map to combinational logic or multiplexers in the logic library.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+226
+
+===== PAGE 227 =====
+Chapter 3: Physical Synthesis
+Controlling Mapping and Optimization
+Feedback
+User-specified
+Tool evaluated
+Implemented using 
+MUX gates
+Implemented using MUX or 
+non MUX gates based on area 
+costing
+analyze  
+elaborate 
+Infers Select_OP cells
+compile_fusion
+Selecting and Multiplexing Logic
+The Fusion Compiler tool infers SELECT_OP cells for logic that selects data signals based 
+on control signals. SELECT_OP cells are mapped to combinational logic.
+The following topics describe SELECT_OP inferences:
+•
+Inferring SELECT_OPs
+Inferring SELECT_OPs
+HDL Compiler uses SELECT_OP components to implement conditional operations implied 
+by if and case statements. An example of a SELECT_OP cell implementation for an 8-bit 
+data signal is shown in Figure 31.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+227
+
+===== PAGE 228 =====
+Chapter 3: Physical Synthesis
+Controlling Mapping and Optimization
+Feedback
+Figure 31
+SELECT_OP Implementation for an 8-bit Data Signal
+Figure 32
+Verilog Output—SELECT_OP and Selection Logic
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+228
+
+===== PAGE 229 =====
+Chapter 3: Physical Synthesis
+Controlling Mapping and Optimization
+Feedback
+Depending on the design constraints, Fusion Compiler implements the SELECT_OP with 
+either combinational logic or multiplexer cells from the logic library. For more information 
+on SELECT_OP inference, see the HDL Compiler documentation.
+Library Requirements
+You need to have multiplexer cells in the logic library and also require to use multiplexing 
+logic from the cell library.
+The following section describes library requirements to implement multiplexer cells for 
+multiplexer optimization or to implement multiplexing logic from the cell library to control 
+MUX mapping:
+•
+Understanding Library Cell Requirements for Multiplexer Optimization
+•
+Implementing Multiplexing Logic From Cell Library
+Understanding Library Cell Requirements for Multiplexer Optimization
+The multiplexer optimization requires the presence of at least a 2:1 multiplexer cell in the 
+logic library. The inputs or outputs of this cell can be inverted. If a 2:1 multiplexer primitive 
+cell does not exist in the library, you see the following warning message:
+Warning: Target library does not contain any 2-1 multiplexer.
+(OPT-853)
+An implementation of the MUX_OP cell from the target library is created, but it might not 
+be the best implementation possible. All multiplexer cells in the target library can be used 
+to construct the implementation of the MUX_OP cell except
+•
+Enabled multiplexer cells
+•
+Bused output multiplexer
+•
+Multiplexers larger than 32 : 1
+For Fusion Compiler to make the best use of the multiplexer cells available in your logic 
+library, recompile the library or obtain a library compiled with version V3.4a or later from 
+your ASIC vendor.
+Implementing Multiplexing Logic From Cell Library
+During logic synthesis, the tool implements multiplexing logic from the cell library using 
+one of the following methods:
+•
+AND, OR, and INV gates
+•
+MUX gates
+The tool evaluates the area effect of both methods and selects the solution with the 
+smallest area.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+229
+
+===== PAGE 230 =====
+Chapter 3: Physical Synthesis
+Controlling Mapping and Optimization
+Feedback
+You can specify that the tool uses MUX gates to implement specific multiplexing logic by 
+applying the map_to_mux  attribute on the corresponding SELECT_OP WVGTECH cells in 
+the block, as shown in Example 16.
+Example 16
+Using map_to_mux attribute to implement specific multiplexing logic
+# Apply the map_to_mux attribute on the SELECT_OP cell named C10
+set_attribute -objects [get_cells C10] -name map_to_mux -value true
+ 
+# Query if the attribute is set as required on C10
+get_attribute -objects [get_cells C10] -name map_to_mux
+ 
+#Run the compile step
+compile_fusion
+ 
+#Identify the cell created using the map_to_mux attribute
+get_cells -hier -filter "map_to_mux==true && !infer_mux_override"
+Controlling Sequential Mapping
+The sequential mapping phase consists of two steps: register inferencing and technology 
+mapping. The term register refers to both edge-triggered registers and level-sensitive 
+latches.
+Register inferencing is the process by which the RTL description of a register is translated 
+into a technology-independent representation called a SEQGEN. SEQGENs are created 
+during elaboration and are usually mapped to flip-flops during compile. Technology 
+mapping is the process by which a SEQGEN is mapped to gates of a specified target 
+logic library. Both of these steps are performed by the compile_fusion  command. 
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+230
+
+===== PAGE 231 =====
+Chapter 3: Physical Synthesis
+Controlling Mapping and Optimization
+Feedback
+Both registers and latches are represented by a SEQGEN cell, which is a technology-
+independent model of a sequential element as shown in the following figure:
+clear
+preset
+next_state
+clocked_on
+data_in
+enable
+synch_clear
+synch_preset
+synch_toggle
+synch_enable
+Q
+QN
+SEQGEN
+This table lists the pins of a SEQGEN cell. Only a subset of these pins is used depending 
+on the type of cell that is inferred. Unused pins are tied to zero.
+Direction
+Name
+Description
+Cell type
+Input
+clear
+Asynchronous reset
+Flip-flop or latch
+preset
+Asynchronous preset
+Flip-flop or latch
+next_state
+Synchronous data
+Flip-flop
+clocked_on
+Clock
+Flip-flop
+data_in
+Asynchronous data
+Latch
+enable
+Clock or asynchronous enable
+Latch
+synch_clear
+Synchronous reset
+Flip-flop
+synch_preset
+Synchronous preset
+Flip-flop
+synch_toggle
+Synchronous toggle
+Flip-flop
+synch_enable
+Synchronous enable
+Flip-flop
+Output
+Q
+Non-inverting output
+Flip-flop or latch
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+231
+
+===== PAGE 232 =====
+Chapter 3: Physical Synthesis
+Controlling Mapping and Optimization
+Feedback
+Direction
+Name
+Description
+Cell type
+QN
+Inverting output
+Flip-flop or latch
+During technology mapping, the tool uses the SEQGEN as the starting point for mapping. 
+The sequential mapper checks the connections to the pins and the information present in 
+the library cell descriptions when it maps to a logic library register.
+Topics in this section
+•
+Mapping Sequential Elements Exactly as Described in RTL
+•
+Mapping of Scan Cells
+•
+Mapping of Synchronous Reset or Preset Registers
+•
+Specifying Synchronous Input Types for Library Cell Pins
+•
+Controlling Sequential Output Inversion
+•
+Preventing Connections to Register QN Pins
+•
+Mapping of Synchronous Enable Logic to a MUX
+•
+Identification of Shift Registers
+Mapping Sequential Elements Exactly as Described in RTL
+To specify that the tool maps sequential elements exactly as described in the RTL, set the 
+compile.seqmap.exact_map  application option to true. When this feature is enabled, the 
+tool disables mapping to sequential library cells with inverted outputs or unused ports.
+Mapping of Scan Cells
+During test-ready compile, the tool replaces regular flip-flops with flip-flops that contain 
+logic for testability. The following figure shows an example of how a D flip-flop is replaced 
+with a scan register during test-ready compile. This type of architecture, a multiplexed flip-
+flop, incorporates a 2-input MUX at the input of the D flip-flop. The select line of the MUX 
+enables two modes—functional mode (normal data input) and test mode (scanned data 
+input). In this example, the scan-in pin is si, the scan-enable pin is se, and the scan-out 
+pin, so, is shared with the functional output pin, Q.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+232
+
+===== PAGE 233 =====
+Chapter 3: Physical Synthesis
+Controlling Mapping and Optimization
+Feedback
+D
+si
+D
+Clk
+se
+1
+0
+Q/so
+When you run the compile_fusioncommand,
+•
+The tool maps all sequential cells directly to scan registers in your library
+•
+The scan pins, such as scan enable and scan out, are unconnected
+•
+The scan output pin of a scan register is used for scan connections
+Use the seqmap.bind_scan_pins  application option to hold the scan enable pin inactive
+If the library contains no scan registers, the tool uses nonscan cells for mapping and 
+issues a warning. Set the dont_use  attribute on all scan registers in the library to map to 
+nonscan cells
+Mapping of Synchronous Reset or Preset Registers
+Fusion Compiler does not infer synchronous reset or preset flip-flops by default. 
+To infer registers with synchronous reset or preset pins, use the sync_set_reset 
+Synopsys compiler directive in the RTL. HDL Compiler then connects these signals to the 
+synch_clear and synch_preset pins on the SEQGEN WVGTECH cell to communicate to 
+the mapper that these are the synchronous control signals and they should be kept as 
+close to the register as possible.
+To enable the tool to infer synchronous reset or preset flip-flops or preserve the 
+synchronous reset or preset logic close to the flip-flop, use either of the following two 
+methods:
+•
+The sync_set_reset  directive
+Specify the //synopsys sync_set_reset  directive in the RTL.
+•
+The hdlin.elaborate.ff_infer_sync_set_reset  application option
+When the RTL does not contain the directive, set the 
+hdlin.elaborate.ff_infer_sync_set_reset  application option to true. The default 
+is false.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+233
+
+===== PAGE 234 =====
+Chapter 3: Physical Synthesis
+Controlling Mapping and Optimization
+Feedback
+During compile, the tool performs the following mapping based on the registers in your 
+library:
+•
+The library containing registers with synchronous reset (or preset) pins
+The tool connects the reset (or preset) net to the reset (or preset) pin of a register with 
+a dedicated reset pin.
+•
+The library containing no registers with synchronous reset (or preset) pins
+The tool adds extra logic to the data input to generate the reset (or preset) condition 
+on a register without a reset (or preset) pin. The tool also attempts to map the logic as 
+close as possible to the data pin.
+This figure shows examples of mapping to registers with and without a synchronous reset 
+pin.
+D
+Q
+___
+RST
+D
+Using a reset pin
+D
+Q
+___
+RST
+D
+Using a gate on the data pin
+If your library has registers with synchronous reset (or preset) pins, you must still use 
+the sync_set_reset  directive in the RTL so that the tool can distinguish the reset 
+(or preset) signals from other data signals and connect the reset signal as close to 
+the register as possible. To connect the reset signal close to the register, set the 
+compile.seqmap.honor_sync_set_reset  application option to true.
+Note:
+Synchronous reset and preset signals are not inferred for level-sensitive 
+latches. A synchronous reset or preset coding style on a latch always results 
+in combinational logic on the data signal even if the library has latches with 
+synchronous reset or preset pins.
+Mapping of Asynchronous Reset or Preset Registers
+To enable the tool to map to registers with asynchronous reset or preset signals, you must
+•
+Describe the registers correctly in the RTL
+•
+Ensure the library contain the corresponding cells
+•
+Ensure the hdlin.elaborate.ff_infer_async_set_reset  application option is set 
+to true  (the default)
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+234
+
+===== PAGE 235 =====
+Chapter 3: Physical Synthesis
+Controlling Mapping and Optimization
+Feedback
+If the library does not contain this type of registers, the tool leaves the cells unmapped.
+Specifying Synchronous Input Types for Library Cell Pins
+When mapping sequential cells, the tool uses the nextstate_type  attribute of a library 
+cell pin to identify its synchronous pin type. The valid values for this attribute are data, 
+preset, clear, load, scan_in, and scan_enable.
+If this attribute is not specified or is incorrectly specified in the logic library, you can 
+manually specify it by using the set_attribute  command, as shown in the following 
+example:
+fc_shell> set_attribute [get_lib_pins my_lib/dffsrst/RN] \
+nextstate_type clear
+Controlling Sequential Output Inversion
+By default, the compile_fusion  command can map a register to a sequential library cell 
+with an output that is opposite to that of the register, if it improves QoR. This is known as 
+sequential output inversion.
+Sequential output inversion is also useful when mapping to a target library with sequential 
+cells that have only one type of asynchronous inputs (either set or reset). In this case, the 
+only way to map a register that uses the missing asynchronous inputs is to use a library 
+cell with the opposite type of asynchronous input and invert the output of that cell, as 
+shown in the following figure.
+This figure shows an example of sequential output inversion during mapping.
+Q
+___
+SET
+D
+Q
+D
+___
+RST
+QN
+D
+___
+RST
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+235
+
+===== PAGE 236 =====
+Chapter 3: Physical Synthesis
+Controlling Mapping and Optimization
+Feedback
+Note:
+Information about inverted registers is written to the verification guidance (.svf) 
+file. You must include the .svf file in the Formality tool when verifying blocks with 
+sequential output inversion.
+To control sequential output inversion for
+•
+The entire block, use the compile.seqmap.enable_output_inversion  application 
+option.
+The default is true.
+•
+Specific hierarchical or leaf cells, use the set_register_output_inversion 
+command.
+An instance-specific sequential output inversion setting specified with the 
+set_register_output_inversion  command overrides a block-specific setting specified 
+with the compile.seqmap.enable_output_inversion  application option.
+The compile_fusion  command allows the mapping of sequential elements in the design 
+to sequential library cells whose output phase is inverted. In certain cases, the tool might 
+infer a register that has one type of asynchronous control, but your library has the opposite 
+type of pin. In such cases, the tool maps to the opposite type of register and inverts all the 
+data inputs and outputs.
+Preventing Connections to Register QN Pins
+During sequential mapping, the tool can map registers to library cells that have both Q and 
+QN pins, if doing so improves the QoR. However, you can prevent the tool from using the 
+QN pin of such registers by setting the compile.seqmap.disable_qn_usage  application 
+option to true.
+Mapping of Synchronous Enable Logic to a MUX
+When the RTL contains synchronous enable logic, the compile_fusion  command maps 
+the enable logic to library cells with a synchronous enable pin. When the library cells with 
+a synchronous enable pin are not available, the compile_fusion  command maps the 
+pushed-out synchronous logic to a MUX, as shown in this figure.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+236
+
+===== PAGE 237 =====
+Chapter 3: Physical Synthesis
+Controlling Mapping and Optimization
+Feedback
+To enable the mapping to MUXs, set the map_sync_enable_to_mux  attribute on the 
+SEQGEN cells before compile. For example,
+fc_shell> set_attribute "A1/B/reg[30] mid/sub1/Q_reg[0]" \
+   -name map_sync_enable_to_mux -value true
+fc_shell> set_attribute "mid3/apbif_reg/Q_reg[4]" \
+   -name map_sync_enable_to_mux -value true
+fc_shell> compile_fusion
+Identification of Shift Registers
+During compile, the tool can automatically identify shift registers in the design. The 
+compile_fusion -to initial_opto  command maps the first register to a scan cell and 
+the other cells to nonscan cells, as shown in this figure.
+Q
+D
+___
+RST
+D
+SI
+SE
+CLK
+Q
+Q
+D
+Q
+D
+Q
+SO
+This capability improves the sequential design area and reduces congestion 
+because of fewer scan-signals for routing. To disable this capability, set the 
+compile.seqmap.identify_shift_registers  application option to false. The default is 
+true.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+237
+
+===== PAGE 238 =====
+Chapter 3: Physical Synthesis
+Controlling Mapping and Optimization
+Feedback
+Controlling Register Replication
+You can perform logic optimization by running the compile_fusion -to logic_opto 
+command. To identify registers that you want the tool to replicate during logic 
+optimization, use the set_register_replication  command. This command sets the 
+register_replication  attribute on the specified registers and improves the timing by 
+balancing fanout. During logic optimization, the specified registers are replicated and the 
+loads of the original registers are evenly distributed among the new replicated registers 
+when the -num_copies  option is used. When you use the -max_fanout  option, the tool 
+computes the number of copies and attempts to distribute loads evenly without violating 
+the maximum fanout constraints.
+You can control the number of copies that are created by using one of the following 
+methods:
+•
+Specify the total number of registers after replication, including the original, by using 
+the -num_copies  option.
+•
+Specify the maximum fanout of the replicated registers by using the -max_fanout 
+option.
+If you specify both options, the -max_fanout  option is ignored.
+The following example specifies that the tool should replicate the regA and regB registers 
+by creating one additional copy of each register:
+fc_shell> set_register_replication -num_copies 2 regA
+fc_shell> set_register_replication -num_copies 2 regB
+Figure 33 shows the regA and regB registers before and after optimization.
+Figure 33
+Before and After Register Replication
+r1
+r2
+r3
+Out1
+ 
+Out2
+r1
+r2
+r3
+RegB
+regA
+RegA
+regB
+regA
+regB
+Out2
+Out1
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+238
+
+===== PAGE 239 =====
+Chapter 3: Physical Synthesis
+Controlling Mapping and Optimization
+Feedback
+You can include logic in the fanin or fanout of the specified register by using the 
+-include_fanin_logic  or -include_fanout_logic  option. You can specify any 
+startpoint in the fanin or endpoint in the fanout of the register.
+The following example specifies that the tool should replicate the A_reg register and the 
+logic in the path from this register to the U1 cell:
+fc_shell> set_register_replication -num_copies 2 A_reg \
+   -include_fanout_logic U1
+To specify endpoint registers or primary output ports that must be driven 
+by the original register after replication, as shown in Figure 34, use the 
+-driven_by_original_register  option.
+The following example specifies that after replication, the r0 register must drive the r1, r2, 
+and r3 registers:
+fc_shell> set_register_replication -num_copies 3  r0 \
+    -driven_by_original_register {r1 r2 r3}
+Figure 34
+Using the -driven_by_original_register Option
+r0
+r1
+r2
+r3
+Out1
+ 
+Out2
+ 
+Out3
+r0
+r1
+r2
+r3
+Out1
+ 
+Out2
+ 
+Out2
+r0_rep1
+r0_rep2
+Controlling Register Merging
+By default, the tool performs register merging during optimization. To disable register 
+merging, set the compile.seqmap.enable_register_merging  application option to 
+false. The default is true. Information about which registers are being merged is stored 
+in the .svf file, and the output log file shows information messages about register merging.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+239
+
+===== PAGE 240 =====
+Chapter 3: Physical Synthesis
+Controlling Mapping and Optimization
+Feedback
+You can also control register merging based on the attribute setting by using the 
+set_register_merging  command. To enable register merging during optimization, 
+specify a true  value to set the register merging attribute on the specified object list. To 
+disable register merging, specifies a false  value for the specified object list. The objects 
+can include leaf cells, hierarchical cells, and modules.
+This example specifies not to merge registers that have the u1/count_reg string in the 
+instance names:
+fc_shell> set_register_merging "u1/count_reg*" false
+This example specifies not to merge all flip-flops of u1 instance name:
+fc_shell> set_register_merging "u1" false
+Selectively Removing or Preserving Constant and Unloaded 
+Registers
+To optimize the design by reducing area, the tool can automatically detect and remove 
+constant registers and unloaded registers. You can control this behavior as described in 
+the following topics:
+Removing Constant Registers
+Certain registers in a design might never change state because they have constant values 
+on one or more input pins. These constant values can either be directly at the input or 
+result from the optimization of fanin logic that eventually leads to a constant input of the 
+register. Eliminating such registers can improve area significantly.
+By default, the compile_fusion  command removes constant registers and prints an 
+information message in the compile log file. This table lists cases in which a sequential 
+element can be eliminated.
+Type of register
+Data
+Preset
+Reset
+Simple, constant data
+1 or 0
+Preset and constant data 1
+1
+X
+Constant preset
+X
+1
+Reset and constant data 0
+0
+X
+Constant reset
+X
+1
+Preset, reset, and constant data 1; reset 
+always inactive
+1
+X
+0
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+240
+
+===== PAGE 241 =====
+Chapter 3: Physical Synthesis
+Controlling Mapping and Optimization
+Feedback
+Type of register
+Data
+Preset
+Reset
+Preset, reset, and constant data 0; preset 
+always inactive
+0
+0
+X
+2-input XOR gate where one input is 0
+X
+Retention register where D and Q pins 
+are directly connected
+1 or 0
+To disable constant register removal for the entire block you are synthesizing, set the 
+compile.seqmap.remove_constant_registers  application option to false, changing it 
+from its default of true. To control constant register removal for a specific cell or module , 
+use the set_constant_register_removal  command.
+For example, the following settings prevent the tool from removing the constant register 
+named reg11:
+fc_shell> set_constant_register_removal reg11 false
+The following settings globally disables constant register removal for the entire block 
+except for the module named sub5 :
+fc_shell> set_app_option -name compile.seqmap.remove_constant_registers 
+ -value false
+ 
+fc_shell> set_constant_register_removal [get_module sub5] true
+Information about removed constant registers is written to the verification guidance .svf file 
+and the compile log file. To report the constant registers removed during compile, use the 
+report_constant_registers  command.
+Removing Unloaded Registers
+During optimization, the tool deletes registers with outputs that do not drive any load. The 
+combinational logic cone associated with the input of the register can also be deleted 
+if the cell is not used in the design. Register outputs can become unloaded because of 
+redundancy in the circuit or as a result of constant propagation. In some designs where 
+the registers have been instantiated, the outputs might already be unloaded.
+By default, the compile_fusion  command removes unloaded registers in the design and 
+prints an information message in the compile log file. To disable this capability for the block 
+you are synthesizing, set the compile.seqmap.remove_unloaded_registers  application 
+option to false, changing it from its default of true. To control unloaded register removal 
+for a specific cell or module , use the set_unloaded_register_removal  command.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+241
+
+===== PAGE 242 =====
+Chapter 3: Physical Synthesis
+Controlling Mapping and Optimization
+Feedback
+For example, the following settings prevent the tool from removing the unloaded register 
+named reg22:
+fc_shell> set_unloaded_register_removal reg22 false
+The following settings globally disables unloaded register removal for the entire block 
+except for the module named sub5 :
+fc_shell> set_app_option -name compile.seqmap.remove_unloaded_registers 
+ -value false
+ 
+fc_shell> set_unloaded_register_removal [get_module sub5] true
+To report the unloaded registers that were removed during compile, use the 
+report_unloaded_registers  command.
+Reporting Cross-Probing Information for Optimized Registers
+The compile_fusion  command mergers registers and removes constant and 
+unloaded registers during register optimization. To print the RTL file name and 
+line number of these optimized register in the compile_fusion  command log 
+file and in the report_transformed_registers  command output, set the 
+compile.seqmap.print_cross_probing_info_for_removed_registers  application 
+option to true.
+The following table shows the messages printed out during the different types of register 
+optimization.
+Table 21
+Cross-Probing Information Messages Printed During Register Optimization
+Register Optimization
+Information Message
+Constant register removal
+Information: The register 'a/b_reg 
+{ {/user/test/design.v:49} }' is removed as 
+constant 0 (SQM-4100)
+Unloaded register removal
+Information: The register 
+'a/c_reg{ {/user/test/design.v:193} }' is removed 
+because it is unloaded. (SQM-4101)
+Register merging
+Information: The register 'a_reg[1] 
+{ {/user/testcases/top.v:113} }' is removed because 
+it is merged to 'a_reg[0]'. (SQM-4102)
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+242
+
+===== PAGE 243 =====
+Chapter 3: Physical Synthesis
+Performing Multibit Optimization
+Feedback
+The following example output shows the cross probing information that is reported by the 
+report_transformed_registers  command:
+Legend:
+        c0r - Constant 0 Register Removed
+        c1r - Constant 1 Register Removed
+        ul  - Unloaded Removed
+        inv - Inverted
+        rep - Replicated
+        mrg - Merged register
+        mb  - Mutibit
+        mbd - Mutibit debanked
+Register                         Transformation                 Filename: 
+ Line number
+-------------------------------------------------------------------------
+-------
+mega_shift_reg                   c0r                           
+ {{a/b/test1.v:112}}
+Carry_Flag_reg                   ul                            
+ {{a/b/test2.v:117}}
+mega_shift_reg[10]               mrg (mega_shift_reg[31])      
+ {{a/b/test3.v:121 }}
+Controlling High-Fanout-Net Synthesis
+The tool performs high-fanout-net synthesis during the initial_drc  stage 
+of the compile-fusion command. To use globally routed nets to determine 
+the topology for the buffers inserted during high-fanout synthesis, set the 
+compile.initial_drc.global_route_based  application option to true. After high-
+fanout synthesis, which is performed during the DRC fixing stage of the compile_fusion 
+command, the global routes are deleted.
+Global-route-based buffering benefits designs with high congestion in routing channels 
+such as the channels between banks of macros. This feature increases the runtime of the 
+compile_fusion  command. Therefore, you should enable it only for designs with highly 
+congested routing channels.
+Performing Multibit Optimization
+The Fusion Compiler tool can combine (bank) single-bit registers or smaller multibit 
+registers and replace them with equivalent larger multibit registers. For example, the tool 
+can combine eight 1-bit registers or four 2-bit register banks and replace them with one 
+8-bit register bank or two 4-bit register banks. The tool merges single-bit registers only if 
+they have the same timing constraints, and it copies the timing constraints to the resulting 
+multibit register.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+243
+
+===== PAGE 244 =====
+Chapter 3: Physical Synthesis
+Performing Multibit Optimization
+Feedback
+Figure 35
+Replacing Multiple Single-Bit Register Cells With a Multibit Register Cell
+Two 1-bit register cells
+One 2-bit register cell
+Replace with
+D
+Q
+D
+Q
+2
+2
+D
+Q
+SI
+SE
+SI
+SE
+SI
+SE
+Replacing single-bit registers with multibit registers reduces
+•
+Area due to shared transistors and optimized transistor-level layout
+•
+The total clock tree net length
+•
+The number of clock tree buffers and clock tree power
+The tool can also split (debank) large multibit registers into smaller multibit registers or 
+single-bit registers, if it improves the total negative slack.
+Some logic libraries have mixed-drive-strength multibit registers where some bits have a 
+higher drive strength than others. For designs that use such cells, if a violating path goes 
+through a lower-drive-strength bit, the tool can rewire the mixed-drive-strength multibit cell 
+such that the violating path goes through a higher-drive-strength bit.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+244
+
+===== PAGE 245 =====
+Chapter 3: Physical Synthesis
+Performing Multibit Optimization
+Feedback
+Performing Integrated Multibit-Register Optimization
+To perform integrated multibit register optimization during the compile_fusion  command,
+1. Enable multibit register optimization by setting the compile.flow.enable_multibit 
+application option to true.
+When you do so, by default, the tool performs the following multibit optimizations during 
+different stages of the compile_fusion  command:
+◦
+Combines single registers or smaller register banks at the RTL level to create larger 
+register banks during the initial_map  stage
+To disable this feature, set the compile.flow.enable_rtl_multibit_banking 
+application option to false.
+◦
+Splits multibit register banks created at the RTL level if the register bank includes 
+registers on critical timing paths during the logic_opto  stage
+To disable this feature, set the compile.flow.enable_rtl_multibit_debanking 
+application option to false.
+◦
+Creates multibit register banks considering placement during the initial_opto 
+stage
+To disable this feature, set the 
+compile.flow.enable_physical_multibit_banking  application option to false.
+You can enable placement-based multibit banking during the final_place  stage 
+of the compile_fusion  command, instead of the initial_opto  stage, by setting 
+the compile.flow.enable_second_pass_multibit_banking  application option 
+to true  and the compile.flow.enable_physical_multibit_banking  application 
+option to false.
+You should enable placement-based multibit banking either during the 
+initial_opto  stage or the final_place  stage; not both.
+◦
+Splits multibit register banks, if it improves total negative slack (TNS), during the 
+initial_opto  and final_opto  stages
+To disable this feature, set the compile.flow.enable_multibit_debanking 
+application option to false.
+2. (Optional) .
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+245
+
+===== PAGE 246 =====
+Chapter 3: Physical Synthesis
+Performing Multibit Optimization
+Feedback
+3. Specify settings for multibit register banking by using the set_multibit_options 
+command.
+For example, the following command excludes the reg[1] cell from multibit optimization 
+during the RTL-banking stage:
+fc_shell> set_multibit_options -exclude [get_cells "reg[1]"] \
+   -stage rtl
+The following command specifies that during the physical-banking stage, the tool banks 
+only registers that are connected to the same bus:
+fc_shell> set_multibit_options  -bus_registers_only \
+   -stage physical
+4. (Optional) Control multibit register optimization using application options as shown in 
+the following table.
+Table 22
+General Application Options for Controlling Multibit Register Optimization
+To do this
+Set this application option
+Ignore scan flip-flops that are not included in 
+the SCANDEF information during banking
+multibit.banking.enable_strict_scan_check  to 
+true
+Consider multibit register library cells with 
+multiple scan-in pins and internal scan-in pins 
+during banking
+multibit.banking.lcs_consider_multi_si_cells  to 
+true
+Enable banking of registers driven by 
+equivalent integrated-clock-gating (ICG) cells
+When you enable this feature,the tool might 
+loose nondefault routing rules applied to 
+the nets connected to the clock-gating cells. 
+Therefore, check and reapply these nondefault 
+routing rules after optimization.
+multibit.banking.across_equivalent_icg  to true
+Enable timing-driven banking of power 
+management cells
+The tool skips fixed cells and cells marked 
+with dont_touch, legalize_only, and 
+user-specified size_only  attributes
+mv.cells.enable_multibit_pm_cells  to true
+Include cells with user-specified size_only 
+settings during physical banking and 
+debanking
+multibit.common.exclude_size_only_cells  to 
+false
+Enable multibit register rewiring for 
+thecompile_fusion  command
+compile.flow.enable_multibit_rewiring  to true
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+246
+
+===== PAGE 247 =====
+Chapter 3: Physical Synthesis
+Performing Multibit Optimization
+Feedback
+To do this
+Set this application option
+Consider the toggle rate when performing 
+RTL-based multibit reordering at the 
+logic_opto  stage
+compile.flow.enable_toggle_aware_rtl_multibit_
+reordering  to true
+Enable site aware debanking, clock useful 
+skew (CUS), driver sizing, and early debanking 
+of bottleneck multibit registers
+Multibit debanking features 
+impact the debanking in the 
+initial_opto (compile_fusion), 
+the final_place, and the final_opto 
+(compile_fusion/place_opt)stages.
+Multibit debanking doesn’t impact RTL 
+debanking, which is enabled in the 
+logic_opto  stage of the compile_fusion 
+command.
+opt.common.enable_multibit_feature  to true
+5. (Optional) Create a multibit register bank from specific single-bit registers as described 
+in Creating a Multibit Register Bank From Specific Single-Bit Registers.
+6. (Optional) Control the naming style used for multibit banking as described in Specifying 
+Naming Styles for Multibit Registers.
+7. Perform optimization by using the compile_fusion  command.
+8. (Optional) Report multibit information.
+To report the multibit register banks inferred by the tool, use the 
+report_transformed_registers -multibit  command, as described in Reporting 
+Multibit Registers.
+To report multibit statistics such as the total number of single-bit and multibit registers, 
+the multibit banking ratio, and so on, use the report_multibit  command.
+For more information about how to determine why multibit register banking is not 
+performed for specific cells, see Identifying Why Multibit Banking Is Not Performed.
+9. (Optional) Analyze the multibit banking components in the GUI as described in Viewing 
+Multibit Components in the GUI.
+Creating a Multibit Register Bank From Specific Single-Bit 
+Registers
+Before you run the compile_fusion  command on an RTL design, you can create 
+a multibit bus consisting of specific unmapped single-bit registers by using the 
+create_multibit  command. Then, when you run the compile_fusion  command, 
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+247
+
+===== PAGE 248 =====
+Chapter 3: Physical Synthesis
+Performing Multibit Optimization
+Feedback
+during the initial_map  stage, the tool maps the single-bit cells of the bus created by the 
+create_multibit  command into a multibit register bank.
+The single-bit registers you specify with the create_multibit -sort  command must
+•
+Be unmapped
+•
+Be of the same type
+•
+Be in the same logical hierarchy
+•
+Not be part of an existing bus
+In the following example, the single-bit cells are combined in alphanumeric descending 
+order, which is reg4, reg3, reg2, and reg1:
+fc_shell> set_app_option -name compile.flow.enable_multibit -value true
+fc_shell> create_multibit {reg2 reg4 reg1 reg3} -sort descending
+fc_shell> compile_fusion
+In the following example the single-bit cells are combined in alphanumeric ascending 
+order, which is reg1, reg2, reg3, and reg4:
+fc_shell> set_app_option -name compile.flow.enable_multibit -value true
+fc_shell> create_multibit {reg2 reg4 reg1 reg3} -sort ascending
+fc_shell> compile_fusion
+In the following example, the single-bit cells are combined in the specified order, which is 
+reg2, reg4, reg1, and reg3:
+fc_shell> set_app_option -name compile.flow.enable_multibit -value true
+fc_shell> create_multibit {reg2 reg4 reg1 reg3} -sort none
+fc_shell> compile_fusion
+Note:
+You must set the compile.flow.enable_multibit  application option to 
+true  before you run the create_multibit  command on unmapped single bit 
+registers. If not, the tool issues the following error message:
+Error: create_multibit command failed: multibit flow is 
+ disabled. (MBIT-068)
+Specifying Naming Styles for Multibit Registers
+Fusion Compiler allows you to customize the naming styles for multibit registers. You can 
+use the application options described in this topic to modify the default naming styles to 
+match the requirements of your design flow or a third-party tool.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+248
+
+===== PAGE 249 =====
+Chapter 3: Physical Synthesis
+Performing Multibit Optimization
+Feedback
+Specifying a Name Separator
+When creating the name for a multibit register, the tool concatenates the names of the 
+single-bit registers and uses the _ character as the name separator. For example, when 
+the tool combines the single-bit registers named reg1 and reg2, the multibit register is 
+named reg1_reg2.
+To change the default name separator, use the 
+multibit.naming.multiple_name_separator_style  application option.
+Specifying a Name Prefix
+To specify a prefix for the multibit register name, use the multibit.naming.name_prefix 
+application option.
+Compacting Hierarchical Names
+When combining single-bit registers with hierarchical names, the tool uses the full 
+hierarchical names of the single-bit registers for the concatenated multibit register name. 
+For example, when the tool combines the single-bit registers named A/B/P/reg1 and A/B/
+Q/reg2, the multibit register is named A/B/P/reg1_A/B/Q/reg2.
+To make the multibit register name more compact, specify that 
+common hierarchical names should not be repeated by setting the 
+multibit.naming.compact_hierarchical_name  application option to true. If you do 
+so, when the tool combines the single-bit registers named A/B/P/reg1 and A/B/Q/reg2, the 
+multibit register is named A/B/P/reg1_Q/reg2.
+Specifying a Range Separator for Contiguous Bits of a Bused Register
+When combining contiguous bits of a bused register, the tool uses the : character as the 
+range separator. For example, when the tool combines single-bit bused registers named 
+regA[0], regA[1], and regA[2], the multibit register is named regA[2:0].
+To change the range separator, use the multibit.naming.range_separator_style 
+application option.
+Specifying an Element Separator for Noncontiguous Bits of a Bused Register
+When combining noncontiguous bits of a bused register, the tool uses the , character as 
+the element separator. For example, when the tool combines the single-bit bused registers 
+named regA[1] and regA[3], the multibit register is named regA[3,1].
+To change the element separator, use the multibit.naming.element_separator_style 
+application option.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+249
+
+===== PAGE 250 =====
+Chapter 3: Physical Synthesis
+Performing Multibit Optimization
+Feedback
+Specifying the Expanded Naming Styles When Combining Elements of a 
+Multidimensional Register Array
+To specify the expanded naming styles for the multibit registers created 
+by combining elements of a multidimensional register array, use the 
+multibit.naming.expanded_name_style  application option. For more information on 
+this application option, see the man page.
+Reporting Multibit Registers
+After you run the compile_fusion  command, you can report the registers 
+that are transformed due to multibit banking and debanking by using the 
+report_transformed_registers -multibit  command.
+The following example shows a portion of a report generated by the 
+report_transformed_registers -multibit  command.
+fc_shell> report_transformed_registers -multibit
+...
+****************************************
+Attributes:
+mb  - multibit
+mbd - multibit debanked
+...
+Register      Optimization
+-----------------------------------
+MB_2_MB_1     mb (source:MB_2, MB_1)
+MB_0_MB_3     mb (source:MB_0, MB_3)
+MB_5, MB_6    mbd (source: MB_5_MB_6)
+Identifying Why Multibit Banking Is Not Performed
+To report a summary of the multibit banking ratio, a list of reasons for not banking or 
+debanking cells, and the number of cells for each reason, use the report_multibit 
+command, as shown in the following example:
+fc_shell> report_multibit
+****************************************
+Report : report_multibit
+...
+...
+ 
+****************************************
+ 
+Total number of sequential cells:                       4020
+Number of single-bit flip-flops:                        3149
+Number of single-bit latches:                           29
+Number of multi-bit flip-flops:                         842
+Number of multi-bit latches:                            0
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+250

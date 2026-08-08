@@ -1,0 +1,523 @@
+% 第 8 章 Timing Paths and Exceptions
+\bichapter{时序路径与例外}{Timing Paths and Exceptions}
+\label{chap:paths}
+
+时序路径是设计中从寄存器时钟引脚或输入 port 出发，经组合逻辑，终止于寄存器 data 输入引脚或输出 port 的点到点序列。
+
+有关路径 startpoint 与 endpoint、delay 计算、setup 与 hold 约束、time borrowing 与时序例外的基础信息，见「静态时序分析概述」。要进一步了解时序路径，请参阅：
+\begin{itemize}
+  \item 时序路径组
+  \item 路径时序报告
+  \item 路径时序计算
+  \item 指定时序路径
+  \item 时序例外
+  \item 保存与恢复时序路径集合
+\end{itemize}
+
+% ============================================================
+\section{时序路径组}
+\subsection*{Timing Path Groups}
+
+PrimeTime 将路径组织为组。路径分组影响时序分析报告生成。例如 \cmd{report\_timing} 与 \opt{-group} 选项报告所列 path group 中每条组的最差路径。
+
+在 Design Compiler 中，路径分组也影响设计优化。每个 path group 可分配 weight（也称 cost function），weight 越高，Design Compiler 优化该组路径的努力越大。PrimeTime 中也可为 path group 分配 weight，但 PrimeTime 不使用该 weight 信息。
+
+每次用 \cmd{create\_clock} 创建新时钟时，PrimeTime 隐式创建 path group，名称与时钟相同。若路径 endpoint 为由该时钟计时的 flip-flop，路径归入该 path group。
+
+PrimeTime 还隐式创建以下 path group：
+\begin{itemize}
+  \item \texttt{**clock\_gating\_default**}——终止于时钟门控用组合元件的路径组
+  \item \texttt{**async\_default**}——终止于 flip-flop 异步 preset/clear 输入的路径组
+  \item \texttt{**default**}——有约束但不属于其他隐式类别的路径组（例如终止于 output port 的路径）
+\end{itemize}
+
+除隐式 path group 外，可用 \cmd{group\_path} 创建用户定义的 path group，并将特定路径分配到指定 path group。当前 path group 信息：\cmd{report\_path\_group}。注意 \cmd{group\_path} 与层次 model extraction 不兼容。
+
+移除 path group：\cmd{remove\_path\_group}，该组路径隐式分配到 default path group。
+
+\begin{lstlisting}
+pt_shell> group_path -name out1bus -to [get_ports OUT_1*]
+\end{lstlisting}
+
+未约束路径不属于任何 path group。报告未约束路径，将 \texttt{timing\_report\_unconstrained\_paths} 设为 \texttt{true}。\cmd{report\_timing} 将未约束路径报告为属于 ``(none)'' path group。
+
+% ============================================================
+\section{路径时序报告}
+\subsection*{Path Timing Reports}
+
+路径时序报告用于聚焦特定时序违例并确定违例原因。默认 \cmd{report\_timing} 报告所有 path group 中 setup slack 最差的路径。
+
+路径时序报告提供特定路径的详细时序信息，可指定输出细节，例如：
+\begin{itemize}
+  \item 逻辑路径中的门级
+  \item 各级 incremental delay
+  \item 总路径 delay 之和
+  \item 路径 slack 量
+  \item 源与目的时钟名、latency 与 uncertainty
+  \item 移除 clock reconvergence pessimism 后的 OCV
+\end{itemize}
+
+用 \cmd{report\_timing} 选项控制报告的信息类型：路径数量、路径类型、详细程度、startpoint、endpoint 及路径中间点。
+
+不带选项的 \cmd{report\_timing} 等价于：
+\begin{lstlisting}
+pt_shell> report_timing -path_type full -delay_type max -max_paths 1
+\end{lstlisting}
+
+PrimeTime 生成最大 delay（setup 约束）的完整路径报告，仅显示单条最差路径。报告四条最差 setup 路径：
+\begin{lstlisting}
+pt_shell> report_timing -max_paths 4
+\end{lstlisting}
+
+\opt{-max\_paths} 大于 1 时，仅报告负 slack 路径。要在多路径报告中包含正 slack 路径，用 \opt{-slack\_lesser\_than}：
+\begin{lstlisting}
+pt_shell> report_timing -slack_lesser_than 100 -max_paths 40
+\end{lstlisting}
+
+报告每个 path group 中最差 setup 路径：
+\begin{lstlisting}
+pt_shell> report_timing -group [get_path_groups *]
+\end{lstlisting}
+
+显示 transition time 与 capacitance：
+\begin{lstlisting}
+pt_shell> report_timing -transition_time -capacitance
+\end{lstlisting}
+
+% ============================================================
+\section{路径时序计算}
+\subsection*{Path Timing Calculation}
+
+\cmd{report\_delay\_calculation} 报告从 cell 输入到输出或从 driver 到 net 上 load 的 delay 详细计算。所见信息类型取决于所用 delay model。
+
+许多 ASIC 供应商将 cell delay 计算详细信息视为专有。为保护该信息，\cmd{report\_delay\_calculation} 仅在库供应商通过 Library Compiler 的 \texttt{library\_features} 属性启用该功能时才显示 cell delay 详情。
+
+% ============================================================
+\section{指定时序路径}
+\subsection*{Specifying Timing Paths}
+
+\cmd{report\_timing}、时序例外命令（如 \cmd{set\_false\_path}）及若干其他命令允许多种方法指定单条或多条路径用于时序报告或应用时序例外。一种方法是在 \cmd{report\_timing} 中显式指定 \opt{-from} 与 \opt{-to}：
+\begin{lstlisting}
+pt_shell> report_timing -from PORTA -to PORTZ
+pt_shell> set_false_path -from FFB1/CP -to FFB2/D
+pt_shell> set_max_delay -from REGA -to REGB 12
+pt_shell> set_multicycle_path -setup 2 -from FF4 -to FF5
+\end{lstlisting}
+
+每个指定 startpoint 可为 clock、primary input port、时序 cell、时序 cell 时钟输入 pin、电平敏感 latch data pin 或指定了 input delay 的 pin。若指定 clock，所有与该 clock 相关的寄存器与 primary input 用作路径 startpoint。若指定 cell，命令应用于该 cell 上一个路径 startpoint。
+
+每个指定 endpoint 可为 clock、primary output port、时序 cell、时序 cell data 输入 pin 或指定了 output delay 的 pin。若指定 clock，所有与该 clock 相关的寄存器与 primary output 用作路径 endpoint。
+
+PrimeTime 还支持 startpoint 或 endpoint 变为 \opt{-through} pin、clock 对象变为 \opt{-from} 或 \opt{-to} 对象的特殊形式。可与所有有效 startpoint/endpoint 类型联用。
+
+\begin{noteBox}
+该方法计算量更大，尤其在大型设计中。尽可能使用 \opt{-from} 与 \opt{-to} 指定路径。
+\end{noteBox}
+
+可用 \opt{-rise\_from}、\opt{-fall\_from}、\opt{-rise\_to}、\opt{-fall\_through} 等将 \cmd{report\_timing} 限制为仅上升或下降边沿。
+
+\subsection{多个 Through 参数}
+单条命令中可用多个 \opt{-through}、\opt{-rise\_through}、\opt{-fall\_through} 指定路径组：
+\begin{lstlisting}
+pt_shell> report_timing -from A1 -through B1 -through C1 -to D1
+pt_shell> report_timing -from A1 -through {B1 B2} -through {C1 C2} -to D1
+\end{lstlisting}
+
+后者表示从 A1 出发、依次经过 B1 或 B2、再经过 C1 或 C2、终止于 D1 的任意路径。
+
+\subsection{Rise/Fall From/To Clock}
+可用 \opt{-rise\_from}、\opt{-fall\_to} 等限制命令仅针对上升或下降边沿。当 ``from'' 或 ``to'' 对象为 clock 时，命令基于源时钟特定边沿在 startpoint 发射数据或在 endpoint 捕获数据指定路径。路径选择考虑时钟路径上任何逻辑反相。
+
+\figplaceholder{Figure 71: Circuit for path specification examples 1-3}{路径指定示例 1--3 的电路}{fig:path-spec-ex1-3}
+
+\textbf{示例 1}：\cmd{set\_false\_path -to [get\_clocks CLK]}——Figure 71 中所有由 CLK 在 endpoint 计时的路径（四条路径）均为 false。
+
+\textbf{示例 2}：\cmd{set\_false\_path -rise\_from [get\_clocks CLK]}——由 CLK 在 startpoint 计时且由源时钟上升沿发射数据的路径为 false（Path A 与 Path D）。
+
+\textbf{示例 3}：\cmd{set\_false\_path -fall\_to [get\_clocks CLK]}——由 CLK 在 endpoint 计时且由源时钟下降沿捕获数据的路径为 false（Path B 与 Path C）。
+
+\textbf{示例 4}：Figure 72 中两 flip-flop 在时钟正沿捕获数据，电平敏感 latch 在上升沿打开、下降沿关闭。
+
+\figplaceholder{Figure 72: Circuit for path specification example 4}{路径指定示例 4 的电路}{fig:path-spec-ex4}
+
+\cmd{report\_timing -rise\_from [get\_clocks clk]} 报告由时钟上升沿发射数据的路径。\cmd{report\_timing -fall\_to [get\_clocks clk]} 报告由时钟下降沿捕获数据的路径（FF0 到 LAT1）。
+
+\textbf{示例 5}：Figure 73 与示例 4 相同，但 latch 在下降沿打开、上升沿关闭。
+
+\figplaceholder{Figure 73: Circuit for path specification example 5}{路径指定示例 5 的电路}{fig:path-spec-ex5}
+
+\textbf{示例 6--7}：时钟反相时，\opt{-fall\_from} 与 \opt{-rise\_to} 的行为相应反转。
+
+\textbf{示例 8}：Figure 76 中多个时钟到达 flip-flop。
+
+\figplaceholder{Figure 76: Circuit for path specification example 8}{路径指定示例 8 的电路}{fig:path-spec-ex8}
+
+仅对 clk1（非 clk2）在 FF1 D pin 结束设置 false path：
+\begin{lstlisting}
+pt_shell> set_false_path -through FF1/D -to [get_clocks clk1]
+pt_shell> set_false_path -through FF1/D -rise_to [get_clocks clk1]
+\end{lstlisting}
+
+\subsection{无效 Startpoint 或 Endpoint 的报告}
+\texttt{timing\_report\_always\_use\_valid\_start\_end\_points} 变量指定 PrimeTime 如何报告无效 startpoint 与 endpoint，影响 \cmd{report\_timing}、\cmd{report\_bottleneck} 与 \cmd{get\_timing\_paths} 对 \opt{-from}、\opt{-rise\_from}、\opt{-fall\_from}、\opt{-to}、\opt{-rise\_to}、\opt{-fall\_to} 的处理。
+
+默认 \texttt{false} 时，\texttt{from\_list} 解释为所列对象范围内所有 pin。例如 \opt{-from [get\_pins FF/*]} 包含 input、output 与异步 pin，PrimeTime 默认将这些无效 startpoint/endpoint 视为 through 点并继续搜索。
+
+设为 \texttt{true} 时，各报告命令忽略无效 startpoint 与 endpoint。无论该变量设置如何，建议在 \texttt{from\_list} 中始终指定有效 startpoint（input port 与寄存器时钟 pin），在 \texttt{to\_list} 中指定有效 endpoint（output port 与寄存器 data pin）。
+
+
+% ============================================================
+\section{时序例外}
+\subsection*{Timing Exceptions}
+
+默认 PrimeTime 假设在路径 startpoint 发射的数据在路径 endpoint 由下一个时钟边沿捕获。对非如此工作的路径，须指定时序例外，否则时序分析不匹配实际电路行为。
+
+进一步了解时序例外，请参阅：
+\begin{itemize}
+  \item 时序例外概述
+  \item 单周期（默认）路径延迟约束
+  \item 设置 False Path
+  \item 设置最大与最小路径延迟
+  \item 设置多周期路径
+  \item 指定时序裕量
+  \item 高效指定例外
+  \item 例外优先级顺序
+  \item 报告例外
+  \item 报告时序例外
+  \item 报告例外源文件与行号信息
+  \item 检查被忽略的例外
+  \item 移除例外
+\end{itemize}
+
+\subsection{时序例外概述}
+\subsubsection*{Overview of Timing Exceptions}
+
+可设置以下时序例外：
+
+\begin{table}[htbp]
+\centering
+\caption{时序例外类型}
+\begin{tabularx}{\textwidth}{@{}l l X@{}}
+\toprule
+时序例外 & 命令 & 说明 \\
+\midrule
+False path & \cmd{set\_false\_path} & 阻止分析指定路径；移除路径时序约束 \\
+最小/最大路径 delay & \cmd{set\_max\_delay}、\cmd{set\_min\_delay} & 用特定最大/最小时间值覆盖默认 setup/hold 约束 \\
+多周期路径 & \cmd{set\_multicycle\_path} & 指定数据从路径起点到终点所需时钟周期数 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+每个时序例外命令可应用于单条路径或相关路径组（如从一个 clock domain 到另一个的所有路径，或经过指定点的所有路径）。见「指定时序路径」。
+
+指定路径的 startpoint 与 endpoint 时，确保指定 PrimeTime 中有效的时序路径。路径 startpoint 须为寄存器时钟 pin 或 input port；路径 endpoint 须为寄存器 data 输入 pin 或 output port。
+
+查看已应用于设计的时序例外列表：\cmd{report\_exceptions}。也可保留源文件与行号信息用于约束跟踪与报告。
+
+用 \cmd{reset\_path} 恢复路径上的默认时序约束。
+
+\subsection{单周期（默认）路径延迟约束}
+\subsubsection*{Single-Cycle (Default) Path Delay Constraints}
+
+确定是否需要设置时序例外，须理解 PrimeTime 如何计算路径最大与最小 delay，以及该计算与被分析设计实际操作的相似或差异。静态时序分析原理入门见「静态时序分析概述」。
+
+\subsubsection{单时钟 Flip-Flop 路径延迟}
+Figure 77 展示 PrimeTime 如何确定 rising-edge-triggered flip-flop 路径的 setup 与 hold 约束。两 flip-flop 由同一时钟触发，时钟周期 10\,ns。
+
+\figplaceholder{Figure 77: Single-Cycle Setup and Hold for Flip-Flops}{Flip-Flop 单周期 Setup 与 Hold}{fig:single-cycle-ff}
+
+PrimeTime 执行 setup 检查，验证 FF1 在 time=0 发射的数据在 time=10 捕获边沿前到达 FF2 D 输入。数据到达过晚则报告 setup 违例。类似地执行 hold 检查，验证 FF1 在 time=0 发射的数据不会过早被 FF2 在 time=0 捕获边沿捕获。
+
+Setup 与 hold 要求考虑组合逻辑 delay、库中 flip-flop 的 setup/hold 要求及 flip-flop 间 net delay。
+
+\subsubsection{不同时钟 Flip-Flop 路径延迟}
+Launch 与 capture flip-flop 属于不同 clock domain 时，路径 delay 计算算法更复杂。
+
+\figplaceholder{Figure 78: Setup Constraints for Flip-Flops With Different Clocks}{不同时钟 Flip-Flop 的 Setup 约束}{fig:diff-clock-setup}
+
+\begin{lstlisting}
+pt_shell> create_clock -period 10 -waveform {0 5} CLK1
+pt_shell> create_clock -period 25 -waveform {5 12.5} CLK2
+\end{lstlisting}
+
+默认 PrimeTime 假设两时钟彼此同步且具有固定相位关系。若实际电路并非如此（例如两时钟从不同时活跃或异步操作），须用多种方法之一声明，否则 PrimeTime 会花费时间检查实际电路中不存在的约束并报告违例。
+
+\textbf{Setup 分析}：PrimeTime 考察完整重复周期（两时钟周期最小公倍数）内活跃时钟边沿间关系。对每个 destination flip-flop 捕获（latch）边沿，假设对应 launch 边沿为捕获边沿之前最近的源时钟边沿。Figure 78 中 Setup 1（time=0 到 time=5）更严格，确定路径最大允许 delay 为 5\,ns。
+
+\textbf{Hold 分析}：Hold 关系基于用于确定 setup 关系的时钟边沿的相邻边沿。对每个 setup 关系，PrimeTime 执行两种 hold 检查：setup launch 边沿发射的数据不能被前一捕获边沿捕获；下一 launch 边沿发射的数据不能被 setup capture 边沿捕获。
+
+\figplaceholder{Figure 79: Hold Constraints for Flip-Flops With Different Clocks}{不同时钟 Flip-Flop 的 Hold 约束}{fig:diff-clock-hold}
+
+最严格 hold 检查为捕获边沿相对 launch 边沿最晚者（Figure 79 中 Hold 2b），确定最小允许 delay 为 0\,ns。
+
+\subsubsection{单周期路径分析示例}
+Figure 80：CLK1 周期 20\,ns，CLK2 周期 10\,ns。最严格 setup：time=0 到 time=10；最严格 hold：time=0 到 time=0。
+
+\figplaceholder{Figure 80: Delay Requirements With 20ns/10ns Clocks}{20\,ns/10\,ns 时钟的延迟要求}{fig:delay-20-10}
+
+Figure 81：CLK1 周期 4\,ns，CLK2 周期 3\,ns。最严格 setup：time=3 到 time=4；最严格 hold：time=7 到 time=7。
+
+\figplaceholder{Figure 81: Delay Requirements With 4ns/3ns Clocks}{4\,ns/3\,ns 时钟的延迟要求}{fig:delay-4-3}
+
+\subsection{设置 False Path}
+\subsubsection*{Setting False Paths}
+
+False path 是存在但不应进行时序分析的逻辑路径。例如两个复用逻辑块间的路径若从不同时选中，则该路径对时序分析无效。
+
+\begin{lstlisting}
+pt_shell> set_false_path -from [get_pins FFB1/CP] -to [get_pins FFB2/D]
+\end{lstlisting}
+
+声明路径为 false 移除路径上所有时序约束。PrimeTime 仍计算路径 delay，但无论 delay 多长或多短均不报告为错误。
+
+设置 false path 是点到点时序例外，不同于 \cmd{set\_disable\_timing}（禁用指定 pin、cell 或 port 的时序分析）。若通过某 pin 的所有路径均为 false，\cmd{set\_disable\_timing [get\_pins pin\_name]} 比 \cmd{set\_false\_path -through [get\_pins pin\_name]} 更高效。
+
+另一 false path 示例：属于彼此异步的两个 clock domain 的 flip-flop 间路径。声明两 clock domain 间所有路径为 false：
+\begin{lstlisting}
+pt_shell> set_false_path -from [get_clocks ck1] -to [get_clocks ck2]
+pt_shell> set_false_path -from [get_clocks ck2] -to [get_clocks ck1]
+\end{lstlisting}
+
+效率提示：用 clock 名（\cmd{get\_clocks}）而非 pin 名（\cmd{get\_pins}）指定各 clock。
+
+也可用 \cmd{set\_clock\_groups} 排除由一时钟发射、由另一时钟捕获的路径。效果与声明 false path 相同，但不视为时序例外，\cmd{report\_exceptions} 不报告。
+
+\subsection{设置最大与最小路径延迟}
+\subsubsection*{Setting Maximum and Minimum Path Delays}
+
+默认 PrimeTime 根据时钟边沿时间计算最大与最小路径 delay。用 \cmd{set\_max\_delay} 或 \cmd{set\_min\_delay} 以自定义时间值覆盖默认最大或最小时间。
+
+\begin{lstlisting}
+pt_shell> set_max_delay 12.0 -from [get_cells REGA] -to [get_cells REGB]
+pt_shell> set_min_delay 2.0 -from [get_cells REGA] -to [get_cells REGB]
+\end{lstlisting}
+
+有时序例外时，PrimeTime 忽略时钟关系。超过 12 时间单位减 endpoint 寄存器 setup 要求的路径 delay 报告为违例；小于 2 时间单位加 hold 要求的路径 delay 报告为违例。可选指定 delay 值仅应用于 endpoint 上升或下降边沿。
+
+确保用 \opt{-from} 选择有效路径 startpoint、用 \opt{-to} 选择有效 endpoint，除非要覆盖 PrimeTime 检查的路径。指定无效 startpoint 或 endpoint 时，PrimeTime 完全按指定执行检查并忽略路径剩余有效部分。在 clock path 上应用此类例外会阻止时钟从应用点向前传播。指定无效 startpoint/endpoint 时 PrimeTime 发出 UITE-217 警告。
+
+用 \opt{-probe} 为最大 delay 约束设置时序 endpoint 而不强制其他时序路径的 endpoint：
+\begin{lstlisting}
+pt_shell> set_max_delay 4.5 -to I_TOP/MEM/U133/Z -probe
+\end{lstlisting}
+
+\opt{-from} 参数指定时序 cell 时，命令自动扩展应用于 cell 每个时钟输入 pin；\opt{-to} 指定时序 cell 时扩展应用于每个 data 输入 pin。可用 \cmd{report\_exceptions} 或 \cmd{write\_sdc} 查看展开的 pin-by-pin 例外。在 IC Compiler II 等工具中例外保持在 cell 级，可能导致不同工具以不同方式解决重叠例外。
+
+
+% ============================================================
+\subsection{设置多周期路径}
+\subsubsection*{Setting Multicycle Paths}
+
+用 \cmd{set\_multicycle\_path} 指定数据从路径起点传播到终点所需的时钟周期数。PrimeTime 根据指定周期数计算 setup 或 hold 约束。
+
+\figplaceholder{Figure 82: Multicycle Path Example}{多周期路径示例}{fig:multicycle-example}
+
+Figure 82 中 FF4 到 FF5 的路径设计为两个时钟周期而非一个。默认 PrimeTime 假设所有路径为单周期时序，须为该路径指定时序例外。
+
+虽可用 \cmd{set\_max\_delay} 指定显式最大 delay 值，但更好使用 \cmd{set\_multicycle\_path}，在更改时钟周期时自动调整最大 delay 值。
+
+\begin{lstlisting}
+pt_shell> set_multicycle_path -setup 2 -from [get_cells FF4] -to [get_cells FF5]
+\end{lstlisting}
+
+该命令指定路径需两个时钟周期而非一个，建立 Figure 83 所示新 setup 关系——launch 边沿后第二个（而非第一个）捕获边沿成为路径终点适用边沿。
+
+\figplaceholder{Figure 83: Multicycle path setup relationship}{多周期路径 setup 关系}{fig:multicycle-setup}
+
+改变 setup 关系也隐式改变 hold 关系，因为所有 hold 关系基于有效 setup 关系。PrimeTime 验证 setup launch 边沿发射的数据不被前一捕获边沿捕获。新 hold 关系见 Figure 84。
+
+\figplaceholder{Figure 84: Multicycle path hold relationship}{多周期路径 hold 关系}{fig:multicycle-hold}
+
+新 hold 关系可能不是设计的正确关系。若 FF4 无需在第一个时钟边沿后保持数据，须指定另一时序例外。虽可用 \cmd{set\_min\_delay} 指定显式 hold 时间，更好用另一 \cmd{set\_multicycle\_path} 将 hold 关系的捕获边沿后移一个时钟周期：
+
+\begin{lstlisting}
+pt_shell> set_multicycle_path -setup 2 -from [get_cells FF4] -to [get_cells FF5]
+pt_shell> set_multicycle_path -hold 1 -from [get_cells FF4] -to [get_cells FF5]
+\end{lstlisting}
+
+Figure 85 展示用两个 \cmd{set\_multicycle\_path} 命令正确设置的 setup 与 hold 关系。第二个命令将 hold 关系捕获边沿后移一个时钟周期。
+
+\figplaceholder{Figure 85: Multicycle path hold set correctly}{正确设置的多周期 hold}{fig:multicycle-hold-correct}
+
+PrimeTime 对 \cmd{set\_multicycle\_path} 的 \opt{-setup} 与 \opt{-hold} 选项解释不同：
+\begin{itemize}
+  \item \opt{-setup} 整数值指定多周期路径的时钟周期数，无时序例外时默认为 1
+  \item \opt{-hold} 整数值指定相对于默认位置（相对于有效 setup 关系）将捕获边沿后移的时钟周期数，默认为 0
+\end{itemize}
+
+\figplaceholder{Figure 86: Multicycle path taking five clock cycles}{五时钟周期的多周期路径}{fig:multicycle-five-cycles}
+
+\begin{lstlisting}
+pt_shell> set_multicycle_path -setup 5 -from [get_cells FF1] -to [get_cells FF2]
+pt_shell> set_multicycle_path -hold 4 -from [get_cells FF1] -to [get_cells FF2]
+\end{lstlisting}
+
+\opt{-setup 5} 使 setup 关系跨越五个时钟周期（time=0 到 time=50），隐式将 hold 关系改为 time=40 的前一捕获边沿。要将 hold 捕获边沿移回 time=0，须用 \opt{-hold 4} 将捕获边沿后移四个时钟周期。
+
+总结：hold 周期数 = (setup 选项值) $-$ 1 $-$ (hold 选项值)。默认 hold 周期 = 1 $-$ 1 $-$ 0 = 0。Figure 85：hold 周期 = 2 $-$ 1 $-$ 1 = 0。Figure 86：hold 周期 = 5 $-$ 1 $-$ 4 = 0。
+
+可选指定多周期路径例外仅应用于路径 endpoint 上升或下降边沿。若 startpoint 与 endpoint 由不同时钟计时，可指定调整路径时钟周期数时考虑哪个时钟。
+
+\subsection{指定时序裕量}
+\subsubsection*{Specifying Timing Margins}
+
+用 \cmd{set\_path\_margin} 将任何时序检查收紧或放宽指定时间量：
+\begin{lstlisting}
+pt_shell> set_path_margin -setup 1.2 -to I_BL/reg30a/D
+\end{lstlisting}
+
+使到达指定寄存器 pin 的所有 setup 检查更严格 1.2 时间单位。报告 setup slack 比无 path margin 时少 1.2 时间单位（更负）。\cmd{report\_timing} 报告中 margin 显示为 ``data required time'' 计算中的 ``path margin'' 调整。
+
+对所有时序路径，正 margin 使检查更严格；负 margin 使检查更宽松。Path margin 设置是时序例外，类似于 \cmd{set\_max\_delay} 或 \cmd{set\_multicycle\_path} 设置的例外，应用于同一路径上任何 minimum-delay、maximum-delay 与 multicycle path 例外之外的时序检查。
+
+\subsection{高效指定例外}
+\subsubsection*{Specifying Exceptions Efficiently}
+
+许多情况下可用多种方式指定例外路径。选择高效方法可减少分析运行时间。
+
+\figplaceholder{Figure 87: Multiplexed register paths}{复用寄存器路径}{fig:multiplexed-reg-paths}
+
+Figure 87 中三个 16 位寄存器由三个不同时钟计时。REG2 仅用于测试，正常运行时 REG2 到 REG3 的所有路径为 false path。防止 REG2 到 REG3 时序分析的方法（效率从高到低）：
+\begin{itemize}
+  \item Case analysis：\cmd{set\_case\_analysis 0} 于 TEST\_ENABLE
+  \item 声明 CLK1 与 CLK2 clock domain 互斥
+  \item 声明 CLK2 到 CLK3 clock domain 间 false path（高效——PrimeTime 仅跟踪 clock domain）
+  \item 逐条声明 16 条 REG2 到 REG3 路径（较低效）
+  \item 用 wildcard 声明所有 REG2 到 REG3 路径（更低效——256 条路径）
+  \item 声明所有从 REG2 出发的路径为 false（类似低效）
+\end{itemize}
+
+总结：分析使例外必要的根本原因，找到控制受影响路径时序分析的最简方法。使用 false path 前，考虑 case analysis、\cmd{set\_clock\_groups} 或 \cmd{set\_disable\_timing}。若必须设置 false path，避免用 \opt{-through}、wildcard 或逐条列出大量路径。
+
+\subsection{例外优先级顺序}
+\subsubsection*{Exception Order of Precedence}
+
+若不同时序例外命令对特定路径冲突，PrimeTime 使用的例外取决于例外类型或冲突命令中使用的路径指定方法。规则集建立不同例外设置情况的优先级顺序。
+
+PrimeTime 在每条路径（非每条命令）上独立应用例外优先级规则。例如：
+\begin{lstlisting}
+pt_shell> set_max_delay -from A 5.1
+pt_shell> set_false_path -to B
+\end{lstlisting}
+\cmd{set\_false\_path} 优先于 \cmd{set\_max\_delay}，从 A 开始且终止于 B 的路径为 false path，但 \cmd{set\_max\_delay} 仍应用于从 A 开始但不终止于 B 的路径。
+
+\subsubsection{例外类型优先级}
+以下时序例外类型对不视为冲突，两设置对路径均可有效：
+\begin{itemize}
+  \item 两个 \cmd{set\_false\_path} 设置
+  \item \cmd{set\_min\_delay} 与 \cmd{set\_max\_delay} 设置
+  \item \cmd{set\_multicycle\_path -setup} 与 \opt{-hold} 设置
+\end{itemize}
+
+冲突时，时序例外类型优先级（从高到低）：
+\begin{enumerate}
+  \item \cmd{set\_false\_path}
+  \item \cmd{set\_max\_delay} 与 \cmd{set\_min\_delay}
+  \item \cmd{set\_multicycle\_path}
+\end{enumerate}
+
+用 \cmd{report\_exceptions -ignored} 列出被忽略的时序例外。
+
+\subsubsection{路径指定优先级}
+相同类型时序例外用不同路径指定应用时，更具体的命令优先于更一般的命令。更具体对象（pin 或 port）上的例外优先于更一般对象（clock）上的例外。
+
+\opt{-from}/\opt{-to} 路径指定方法优先级（从高到低）：
+\begin{enumerate}
+  \item \opt{-from pin}、\opt{-rise\_from pin}、\opt{-fall\_from pin}
+  \item \opt{-to pin}、\opt{-rise\_to pin}、\opt{-fall\_to pin}
+  \item \opt{-through}、\opt{-rise\_through}、\opt{-fall\_through}
+  \item \opt{-from clock}、\opt{-rise\_from clock}、\opt{-fall\_from clock}
+  \item \opt{-to clock}、\opt{-rise\_to clock}、\opt{-fall\_to clock}
+\end{enumerate}
+
+可能的组合按优先级排序（最高到最低）：\opt{-from pin -to pin}、\opt{-from pin -to clock}、\opt{-from pin}、\opt{-from clock -to pin}、\opt{-to pin}、\opt{-from clock -to clock}、\opt{-from clock}、\opt{-to clock}。
+
+\subsection{报告例外}
+\subsubsection*{Reporting Exceptions}
+
+报告已设置的时序例外：\cmd{report\_exceptions}。可用 \opt{-from}、\opt{-to}、\opt{-through}、\opt{-rise\_from}、\opt{-fall\_to} 等路径指定参数缩小报告范围，匹配创建原始例外时使用的路径指定符。
+
+\cmd{report\_exceptions} 导致完整时序更新，须在设置所有时序断言并准备接收报告后使用。
+
+例外设置命令有时因多种原因被部分或完全忽略。部分忽略的命令，例外报告显示被忽略部分的原因。默认完全忽略的命令不被 \cmd{report\_exceptions} 报告。用 \opt{-ignored} 报告完全忽略的命令。
+
+\figplaceholder{Figure 88: Design to demonstrate ignored exceptions}{演示被忽略例外的设计}{fig:ignored-exceptions}
+
+\subsection{报告时序例外}
+\subsubsection*{Reporting Timing Exceptions}
+
+\cmd{report\_timing} 的 \opt{-exceptions} 选项允许报告应用于单条路径的时序例外，可报告：适用的例外、被更高优先级例外覆盖的例外、未约束路径调试（含未约束 startpoint/endpoint）、显示未约束原因的时序路径属性。
+
+用 \cmd{report\_timing -exceptions all} 或 \cmd{get\_timing\_paths} 报告未约束原因前，须先将 \texttt{timing\_report\_unconstrained\_paths} 设为 \texttt{true}。
+
+\begin{lstlisting}
+pt_shell> report_timing -exceptions dominant
+pt_shell> report_timing -exceptions overridden
+pt_shell> report_timing -exceptions all
+\end{lstlisting}
+
+冲突例外示例中，maximum-delay 例外优先级更高。\cmd{report\_timing -exceptions dominant} 显示 dominant 例外；\opt{-exceptions overridden} 显示被覆盖例外；\opt{-exceptions all} 显示两者。
+
+\cmd{get\_timing\_paths} 可创建时序路径集合并传递给 \cmd{report\_timing}。时序路径属性（\texttt{dominant\_exception}、\texttt{startpoint\_unconstrained\_reason}、\texttt{endpoint\_unconstrained\_reason}）显示路径未约束原因，如 \texttt{false\_path}、\texttt{min\_delay}/\texttt{max\_delay}、\texttt{multicycle\_path}、\texttt{no\_capture\_clock}、\texttt{no\_launch\_clock}、\texttt{dangling\_end\_point}、\texttt{fanin\_of\_disabled}、\texttt{fanout\_of\_disabled} 等。
+
+\subsection{报告例外源文件与行号信息}
+\subsubsection*{Reporting Exceptions Source File and Line Number Information}
+
+对部分约束，PrimeTime 可跟踪并报告约束的源文件与行号。源文件通过 \cmd{source}、\cmd{read\_sdc} 或 \opt{-f} 命令行选项读入 PrimeTime shell。
+
+启用当前设计约束的源文件名与行号信息，将 \texttt{sdc\_save\_source\_file\_information} 设为 \texttt{true}（默认 \texttt{false}）。
+
+\begin{noteBox}
+仅可在尚未输入例外时修改该变量值。若尝试设置时至少一条例外命令已成功输入，将收到错误且值保持不变。
+\end{noteBox}
+
+适用范围：\cmd{set\_false\_path}、\cmd{set\_multicycle\_path}、\cmd{set\_max\_delay}、\cmd{set\_min\_delay}。交互输入的命令无源位置信息。控制结构（if、foreach）内输入的命令报告闭合括号行号；过程调用内输入的命令报告调用过程行号。
+
+\subsection{检查被忽略的例外}
+\subsubsection*{Checking Ignored Exceptions}
+
+已指定但 PrimeTime 未接受的时序例外称为被忽略例外。忽略原因：
+\begin{itemize}
+  \item 指定 startpoint 或 endpoint 无效
+  \item 指定路径未约束
+  \item 路径因 \cmd{set\_disable\_timing}、constant propagation、环断开或 case analysis 无效
+  \item 例外优先级低于应用于同一路径的另一例外
+\end{itemize}
+
+\cmd{report\_exceptions} 报告完全与部分有效例外；\cmd{report\_exceptions -ignored} 报告所有完全忽略例外。宜检查这些报告确认例外指定正确。大量被忽略例外可增加内存使用与分析运行时间。
+
+检查两点间是否存在逻辑路径：\cmd{all\_fanout -from point\_a -to point\_b}。时序更新后检查路径时序：\cmd{report\_timing -from point\_a -to point\_b}。
+
+\subsection{移除例外}
+\subsubsection*{Removing Exceptions}
+
+移除先前用 \cmd{set\_false\_path}、\cmd{set\_max\_delay}、\cmd{set\_min\_delay} 或 \cmd{set\_multicycle\_path} 设置的时序例外：\cmd{reset\_path}。
+
+用 \opt{-from}、\opt{-to}、\opt{-through}、\opt{-rise\_from}、\opt{-fall\_to} 等控制移除范围。路径指定与对象（pin、port 或 clock）须匹配设置例外时使用的原始指定，否则 \cmd{reset\_path} 无效。
+
+在应用新例外前重置路径上所有例外，在例外设置命令中使用 \opt{-reset\_path}：
+\begin{lstlisting}
+pt_shell> set_false_path -through [get_pins d/Z] -reset_path
+\end{lstlisting}
+
+移除设计中所有例外：\cmd{reset\_design}（移除所有用户指定时钟、path group、例外与属性，\cmd{set\_user\_attribute} 定义的除外）。
+
+% ============================================================
+\section{保存与恢复时序路径集合}
+\subsection*{Saving and Restoring Timing Path Collections}
+
+可将时序路径集合保存到磁盘目录并在新工具会话中恢复。保存与恢复路径集合比用新 \cmd{get\_timing\_paths} 重新生成快得多。
+
+\begin{lstlisting}
+pt_shell> set my_paths [get_timing_paths -nworst 20 -max_paths 500]
+pt_shell> save_timing_paths $my_paths -output paths1
+pt_shell> set my_paths [restore_timing_paths paths1]
+pt_shell> report_timing $my_paths
+\end{lstlisting}
+
+\cmd{save\_timing\_paths} 须指定时序路径集合及存储目录名。\cmd{restore\_timing\_paths} 须指定存储目录名。设计、约束与 PrimeTime 工具版本须与存储时相同。
+
+\begin{seeAlsoBox}
+有关在 GUI 中分析路径集合中的路径，见「分析时序路径集合」。
+\end{seeAlsoBox}
+

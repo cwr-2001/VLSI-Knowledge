@@ -1,0 +1,587 @@
+# -*- coding: utf-8 -*-
+"""Generate 23_spice.tex with proper UTF-8 encoding."""
+from pathlib import Path
+import re
+
+OUT = Path(__file__).resolve().parent.parent / "chapters" / "23_spice.tex"
+
+content = r"""% 第 23 章 Using PrimeTime With SPICE
+\bichapter{将 PrimeTime 与 SPICE 配合使用}{Using PrimeTime With SPICE}
+\label{chap:spice}
+
+您可通过以下功能将 PrimeTime 结果与 SPICE 分析进行比较：
+\begin{itemize}
+  \item Simulation Link：关联 PrimeTime 与 SPICE 结果
+  \item 使用 \cmd{write\_spice\_deck} 命令生成 SPICE 网表
+\end{itemize}
+
+% ============================================================
+\section{Simulation Link：关联 PrimeTime 与 SPICE 结果}
+\subsection*{Simulation Link to Correlate PrimeTime and SPICE Results}
+
+PrimeTime 静态时序分析基于门级网表表示，并结合库中门级单元的时序表征。在门级进行分析时，工具可在合理时间内对超大规模设计做穷举时序分析。
+
+某些情况下，您可能希望用电路仿真进行晶体管级时序分析。这种高精度对以下目的可能有用：
+\begin{itemize}
+  \item 验证 PrimeTime 在新工艺节点上的库表征方法
+  \item 进一步分析信号质量，例如时钟网络中的高扇出网
+  \item 进一步分析信号完整性效应，例如用于设计修复的双切换（double switching）
+\end{itemize}
+
+由于无法对含数百万门的网表做 SPICE 仿真，PrimeTime 提供 simulation link 以执行以下 SPICE 分析：
+\begin{itemize}
+  \item Simulation Link 命令摘要
+  \item 关联基于路径的非耦合 PrimeTime 与 SPICE 分析
+  \item 关联基于弧的耦合 PrimeTime SI 与 SPICE 分析
+  \item 关联 PrimeTime SI 与 SPICE 噪声分析
+  \item 在多台机器上分布仿真
+\end{itemize}
+
+\subsection{Simulation Link 命令摘要}
+\subsubsection*{Summary of Simulation Link Commands}
+
+以下 simulation link 命令便于在 PrimeTime 中进行 SPICE 分析。
+
+\begin{longtable}{@{}p{0.32\textwidth} p{0.58\textwidth}@{}}
+\caption{Simulation Link 命令摘要}\label{tab:sim-link-cmds}\\
+\toprule
+命令 & 任务 \\
+\midrule
+\endfirsthead
+\multicolumn{2}{c}{\tablename\ \thetable{}（续）}\\
+\toprule
+命令 & 任务 \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\cmd{sim\_setup\_library} &
+通过指定库名、子电路目录名与头文件名，设置用于仿真的 SPICE 模型。 \\
+\cmd{sim\_setup\_simulator} &
+指定 HSPICE 仿真器可执行文件路径，以及用于 PrimeTime 与仿真器比较的仿真器选项。 \\
+\cmd{sim\_validate\_setup} &
+通过在组合逻辑门上仿真来验证仿真设置。指定单元名、测试负载及仿真所用输入转换时间。 \\
+\cmd{sim\_validate\_path} &
+对指定路径段执行基于路径的非耦合 SPICE 分析，并将仿真结果与静态时序结果比较。 \\
+\cmd{sim\_enable\_si\_correlation} &
+使能网用于耦合的一又二分之一级（one-and-a-half-stage）关联。 \\
+\cmd{sim\_validate\_stage} &
+对指定级或一又二分之一级执行基于弧的耦合 SPICE 分析，并将仿真结果与静态时序结果比较。 \\
+\cmd{sim\_validate\_noise} &
+比较 PrimeTime SI 噪声分析结果与 SPICE 结果。 \\
+\end{longtable}
+
+\subsection{关联基于路径的非耦合 PrimeTime 与 SPICE 分析}
+\subsubsection*{Correlating Path-Based Uncoupled PrimeTime and SPICE Analysis}
+
+借助 PrimeTime simulation link，可按以下步骤执行基于路径的非耦合 SPICE 分析：
+
+\begin{enumerate}
+  \item 使用以下命令配置 PrimeTime 静态时序分析：
+\begin{lstlisting}
+# Disable use of nonconditional timing arcs between pins that have
+# at least one conditional timing arc
+set_app_var timing_disable_cond_default_arcs true
+
+# Report all paths through parallel cell arcs
+set_app_var timing_report_use_worst_parallel_cell_arc false
+
+# Enable waveform propagation
+set_app_var delay_calc_waveform_analysis_mode full_design
+
+# Store waveform data when CCS waveform propagation is enabled
+set_app_var timing_keep_waveform_on_points true
+
+# Disable advanced on-chip variation (AOCV)
+set_app_var timing_aocvm_enable_analysis false
+
+# Disable AOCV for SPICE correlation at specific corners
+remove_ocvm
+
+# Reset user-specified derate factors
+reset_timing_derate
+\end{lstlisting}
+
+  \item 使用 \cmd{sim\_setup\_library} 设置 SPICE 仿真库，该命令指定库子电路与仿真头文件位置。例如：
+\begin{lstlisting}
+pt_shell> sim_setup_library -library mylib \
+          -sub_circuit my_subckt_dir -header my_header_file
+\end{lstlisting}
+
+  \item 指定 SPICE 仿真器路径。例如：
+\begin{lstlisting}
+pt_shell> sim_setup_simulator \
+          -simulator /abc/tools/bin/hspice \
+          -simulator_type hspice
+\end{lstlisting}
+
+  \item 使用 \cmd{sim\_validate\_setup} 验证仿真设置，该命令对库中组合逻辑门执行仿真，确保 simulation link 的 SPICE 设置与库表征所用设置一致。例如：
+\begin{lstlisting}
+pt_shell> sim_validate_setup -lib_cell k04_lib/inv7Q \
+          -from A -to Y \
+          -capacitance 0.35 -transition_time 0.12
+\end{lstlisting}
+
+        PrimeTime 对指定单元调用 simulation link 并与静态时序分析结果比较。要检查 SPICE 环境与库表征环境是否一致，请指定与库索引点匹配的转换时间与负载电容值。
+
+  \item 使用带 \opt{-pba\_mode path} 的 \cmd{get\_timing\_paths} 创建用于仿真的基于路径分析路径集合。例如：
+\begin{lstlisting}
+pt_shell> set my_paths \
+          [get_timing_paths -pba_mode path -delay_type max]
+\end{lstlisting}
+
+  \item 使用 \cmd{sim\_validate\_path} 提交路径进行 SPICE 分析，该命令仿真指定路径段并比较延时与转换时间。例如：
+\begin{lstlisting}
+pt_shell> sim_validate_path -transition_time $my_paths
+\end{lstlisting}
+
+        也可使用 \opt{-from} 与 \opt{-to} 比较路径段。例如：
+\begin{lstlisting}
+pt_shell> sim_validate_path -from u2/A -to u5/Z \
+          -transition_time $my_paths
+\end{lstlisting}
+
+        验证报告显示 SPICE 仿真值（Ref）、PrimeTime 值（Val）、绝对差（Diff）与百分比差（\%），分别针对延时与转换时间。例如：
+\begin{lstlisting}
+Comparing path number     0 :
+Pin      Sense        Transition time                        Delay
+                 Ref     Val      Diff  %         Ref      Val       Diff   %
+-------------------------------------------------------------------------------
+U3/A       f 0.0197 0.01870 -0.00100 -5.12 0.017613 # 0.01749 -0.000117 -0.67
+U4/A       r 0.0175 0.01730 -0.00025 -1.45 0.014172 # 0.01404 -0.000129 -0.91
+U5/A       f    0.13 0.1371     0.0031 2.33 0.083447 # 0.08412 0.000681 0.82
+U5/Z       f   0.239 0.2431 0.00365 1.53        0.131 # 0.1345     0.00267 2.03
+-------------------------------------------------------------------------------
+Path segment 0.0830 0.08385 0.000842 1.01     0.24713    0.2502    0.00310 1.26
+\end{lstlisting}
+\end{enumerate}
+
+\begin{noteBox}
+\begin{itemize}
+  \item 若路径起始于输入端口，请用 \cmd{set\_driving\_cell} 在输入端口上设置简单组合逻辑单元（如缓冲器或反相器）作为驱动单元。例如：\\
+        \texttt{pt\_shell> set\_driving\_cell -lib\_cell IBUF2 [get\_ports in1]}
+  \item 同一批路径上，SPICE 仿真运行时间通常长于 \cmd{report\_timing}。
+  \item 由于 SPICE 每一级都需时序窗口对齐，不支持基于路径的串扰 SPICE 仿真。也不支持电压与温度缩放。
+\end{itemize}
+\end{noteBox}
+
+\subsection{关联基于弧的耦合 PrimeTime SI 与 SPICE 分析}
+\subsubsection*{Correlating Arc-Based Coupled PrimeTime SI and SPICE Analysis}
+
+借助 PrimeTime SI simulation link，可在 SPICE 中分析耦合延时的信号完整性行为，基于受害网弧写出 SPICE 网表，用 HSPICE 仿真，并自动比较 HSPICE 与 PrimeTime SI 结果。
+
+使用 PrimeTime SI 时，可选择一个或多个网弧进行仿真。为关联目的，建议使用一又二分之一级延时。该功能仅当网具有标注的耦合 RC 网络时适用。计算中不考虑被滤除的 aggressor，其耦合电容在 SPICE 网表中被接地。
+
+基于弧的耦合 SPICE 分析要求启用 PrimeTime SI。不支持电压与温度缩放。
+
+按以下步骤执行基于弧的耦合 SPICE 分析：
+
+\begin{enumerate}
+  \item 使用以下命令配置 PrimeTime SI 分析：
+\begin{lstlisting}
+# Enable PrimeTime SI analysis
+set_app_var si_enable_analysis true
+
+# Disable use of nonconditional timing arcs between pins that have
+# at least one conditional timing arc
+set_app_var timing_disable_cond_default_arcs true
+
+# Report all paths through parallel cell arcs
+set_app_var timing_report_use_worst_parallel_cell_arc false
+
+# Enable waveform propagation
+set_app_var delay_calc_waveform_analysis_mode full_design
+
+# Store waveform data when CCS waveform propagation is enabled
+set_app_var timing_keep_waveform_on_points true
+
+# Disable advanced on-chip variation (AOCV)
+set_app_var timing_aocvm_enable_analysis false
+
+# Disable AOCV for SPICE correlation at specific corners
+remove_ocvm
+
+# Reset user-specified derate factors
+reset_timing_derate
+\end{lstlisting}
+
+  \item 使用 \cmd{sim\_setup\_library} 设置 SPICE 仿真库（同路径分析）。
+
+  \item 使用 \cmd{sim\_setup\_simulator} 指定 SPICE 仿真器路径（同路径分析）。
+
+  \item 使用 \cmd{sim\_validate\_setup} 验证仿真设置（同路径分析）。
+
+  \item 使用 \cmd{get\_timing\_arcs} 创建用于仿真的耦合网弧集合。例如：
+\begin{lstlisting}
+pt_shell> set my_arcs [get_timing_arcs -from U1/Z -to U2/A]
+\end{lstlisting}
+
+\begin{noteBox}
+不建议对由端口驱动的级执行基于弧的关联。
+\end{noteBox}
+
+  \item 对 \$net 使能耦合一又二分之一级关联，并执行时序更新。例如：
+\begin{lstlisting}
+pt_shell> sim_enable_si_correlation \
+          [get_nets -of [get_attribute $my_arcs from_pin]]
+pt_shell> update_timing -full
+\end{lstlisting}
+
+  \item 使用 \cmd{sim\_validate\_stage} 执行 SPICE 分析，该命令仿真指定一又二分之一级并比较级延时。验证报告显示 SPICE 仿真值（Ref）、PrimeTime 值（Val）、绝对差（Diff）与百分比差（\%）。例如：
+\begin{lstlisting}
+pt_shell> sim_validate_stage $my_arcs
+
+Pin            Sense                Delay
+                         Ref           Val          Diff        %
+----------------------------------------------------------------
+U2/Z        f      0.59594 #    0.594371   -0.00156873    -0.26
+----------------------------------------------------------------
+Tolerance   MET                                      0     3.00
+\end{lstlisting}
+
+        若弧包含接收级，则执行一又二分之一级分析；若不包含接收级，则报告单级关联。例如：
+\begin{lstlisting}
+pt_shell> set my_arcs [get_timing_arcs -from U1/Z -to FF1/D]
+pt_shell> sim_validate_stage $my_arcs
+
+Pin             Sense                             Delay
+                                 Ref           Val          Diff        %
+-------------------------------------------------------------------
+FF1/D         f      0.59594 #    0.594371   -0.00156873    -0.26
+-------------------------------------------------------------------
+Tolerance   MET                                         0    3.00
+\end{lstlisting}
+\end{enumerate}
+
+\subsection{关联 PrimeTime SI 与 SPICE 噪声分析}
+\subsubsection*{Correlating PrimeTime SI and SPICE Noise Analysis}
+
+要比较 PrimeTime SI 噪声分析结果与 SPICE 结果，运行 \cmd{sim\_validate\_noise} 命令。该命令比较两工具报告的噪声凸起高度与面积。
+
+噪声关联流程如下：
+\begin{lstlisting}
+# Specify the nets on which to compare noise analysis
+sim_enable_si_correlation [get_nets -of_objects net_driver_pin]
+
+# Run timing and noise analysis
+update_timing -full
+update_noise -full
+
+# Specify the timing arcs and run noise correlation
+set net_arc [get_timing_arcs -from net_driver_pin -to net_receiver_pin]
+sim_validate_noise $net_arc -area [-verbose] \
+  -analysis_type above_low | below_high
+\end{lstlisting}
+
+\subsection{在多台机器上分布仿真}
+\subsubsection*{Distributing Simulations Across Multiple Machines}
+
+若需对大量集合对象运行仿真，可使用 \cmd{sim\_setup\_distributed} 将仿真分布到多台机器。例如：
+\begin{lstlisting}
+pt_shell> sim_setup_distributed \
+            -mode grd \
+            -submit_command {qsub -V -cwd -P bnormal} \
+            -sim_per_job 2
+
+pt_shell> sim_validate_path $twelve_paths
+\end{lstlisting}
+
+\opt{-sim\_per\_job} 指定每个提交作业中的集合对象仿真数量。提交作业总数取决于传给仿真命令的集合对象数量。（变分仿真的样本空间不会跨作业拆分。）
+
+分布式仿真作业完成后，工具打印作业摘要：
+\begin{lstlisting}
+Summary:
+----------------------------------------
+Total number of simulations       : 12
+Simulation per farm job           : 2
+Total number of farm jobs         : 6
+Completed number of farm jobs     : 4
+Failed number of farm jobs        : 0
+Timed out farm jobs               : 2
+----------------------------------------
+\end{lstlisting}
+
+以下命令支持分布式仿真：
+\begin{itemize}
+  \item \cmd{sim\_validate\_noise}
+  \item \cmd{sim\_validate\_path}
+  \item \cmd{sim\_validate\_setup}
+  \item \cmd{sim\_validate\_stage}
+  \item \cmd{sim\_analyze\_path}
+\end{itemize}
+
+\cmd{sim\_setup\_distributed} 还提供限制排队作业与重试失败作业的选项。详见 man page。
+
+\begin{noteBox}
+\cmd{sim\_setup\_distributed} 的限制：不支持 \cmd{sim\_validate\_path} 的 \opt{-from} 与 \opt{-to} 选项。
+\end{noteBox}
+
+% ============================================================
+\section{使用 \cmd{write\_spice\_deck} 命令生成 SPICE 网表}
+\subsection*{Generating a SPICE Deck With the write\_spice\_deck Command}
+
+要生成 SPICE 网表，运行 \cmd{write\_spice\_deck} 命令。该命令需要 PrimeTime SI 许可证。命令生成包含指定路径或弧上单元，以及时序路径或弧相关网上的电阻、对地电容与对 aggressor 网耦合电容的 SPICE 网表。命令还提供选项以生成激励受害路径与 aggressor 的激励。
+
+关于生成与使用 SPICE 网表，请参阅：
+\begin{itemize}
+  \item 为时序路径编写 SPICE 网表
+  \item 为时序弧编写 SPICE 网表
+  \item \cmd{write\_spice\_deck} 中的库激励（sensitization）
+  \item 库驱动波形
+  \item SPICE 仿真所需的其他信息
+  \item \cmd{write\_spice\_deck} 输出示例
+  \item 使用 \cmd{write\_spice\_deck} 进行 SPICE 关联的限制
+\end{itemize}
+
+\subsection{为时序路径编写 SPICE 网表}
+\subsubsection*{Writing a SPICE Deck for a Timing Path}
+
+要分析时序路径的串扰延时效应（非静态噪声效应），生成表示该时序路径的 SPICE 网表。使用 \cmd{get\_timing\_paths} 收集路径供 \cmd{write\_spice\_deck} 使用。例如：
+\begin{lstlisting}
+pt_shell> write_spice_deck -header header.spi \
+          -output testcase.spi \
+          -logic_one_voltage 1.5 \
+          -logic_zero_voltage 0.0 \
+          -sub_circuit_file ./SPICE/subckt.spi \
+          [get_timing_paths -from A2 -to buf5/A]
+\end{lstlisting}
+
+要收集特定路径或转换，请结合 \opt{-from}、\opt{-to} 或 \opt{-delay\_type} 使用 \cmd{get\_timing\_paths}。若不使用这些选项，\cmd{get\_timing\_paths} 收集时序裕量最差的路径。
+
+要为特定受害与 aggressor 转换生成电路激励波形，请使用 \cmd{get\_timing\_paths} 的 \opt{-delay\_type} 选项。设为 \texttt{max\_rise}、\texttt{max\_fall}、\texttt{min\_rise} 或 \texttt{min\_fall} 时，指定延时类型（最大或最小）及路径端点的转换类型（上升或下降）。对路径端点处的串扰，该设置指定如下图所示的串扰条件。对路径上每条受害网，\cmd{write\_spice\_deck} 会适当激励 aggressor 网以测试指定的最大或最小延时转换。
+
+\figplaceholder{Figure 454: Specifying crosstalk delay transitions for paths}{为路径指定串扰延时转换}{fig:spice-path-crosstalk}
+
+生成的 SPICE 网表包含整条路径上所有交叉耦合的 aggressor 网与电容。路径很长或很复杂且耦合电容很多时，可能产生过大数据文件，难以实际仿真。此时可尝试用 \cmd{get\_timing\_arcs} 仅选择含受害网及其邻近电路的路径片段。
+
+\subsection{为时序弧编写 SPICE 网表}
+\subsubsection*{Writing a SPICE Deck for a Timing Arc}
+
+要分析时序弧的串扰延时效应或静态噪声效应，生成表示该时序弧的 SPICE 网表。结合 \opt{-from}、\opt{-to} 与 \opt{-of\_objects} 使用 \cmd{get\_timing\_arcs} 为 \cmd{write\_spice\_deck} 指定弧：
+\begin{lstlisting}
+pt_shell> write_spice_deck -header header.spi \
+          -analysis_type above_high \
+          -output ../SIMUL_BEYOND_HIGH/new_general.spi \
+          -logic_one_voltage 1.5 -logic_zero_voltage 0.0 \
+          -sub_circuit_file ./SPICE/subckt.spi \
+          [get_timing_arcs -to buf5/A]
+\end{lstlisting}
+
+使用 \opt{-analysis\_type} 指定分析类型，取值如下：
+\begin{itemize}
+  \item 串扰延时分析：\texttt{max\_rise}、\texttt{max\_fall}、\texttt{min\_rise} 或 \texttt{min\_fall}。
+\end{itemize}
+
+\figplaceholder{Figure 455: Crosstalk delay transitions for arcs}{时序弧的串扰延时转换}{fig:spice-arc-crosstalk-delay}
+
+\begin{itemize}
+  \item 静态噪声分析：\texttt{above\_high}、\texttt{below\_high}、\texttt{above\_low} 或 \texttt{below\_low}。
+\end{itemize}
+
+\figplaceholder{Figure 456: Crosstalk noise transitions for arcs}{时序弧的串扰噪声转换}{fig:spice-arc-crosstalk-noise}
+
+默认情况下，\cmd{write\_spice\_deck} 将 aggressor 转换放在到达时序窗口中间，而不一定是最坏串扰时刻。要与 PrimeTime SI 与 SPICE 一致，通常需通过一系列 SPICE 仿真“扫描”转换时间以找到最坏转换时间。
+
+为减少仿真工作量，可使用 \cmd{write\_spice\_deck} 的 \opt{-align\_aggressors} 选项，将 aggressor 转换放在产生 \opt{-analysis\_type} 所指定条件下最坏串扰效应的位置。条件可为串扰延时分析的 \texttt{max\_rise}、\texttt{max\_fall}、\texttt{min\_rise}、\texttt{min\_fall}，或串扰噪声分析的 \texttt{above\_high}、\texttt{below\_high}、\texttt{above\_low}、\texttt{below\_low}。aggressor 对齐功能适用于 \cmd{get\_timing\_arcs} 获得的时序级，不适用于 \cmd{get\_timing\_paths} 获得的时序路径。
+
+aggressor 对齐仅针对网时序弧（从单元输出引脚经网到另一单元输入引脚的弧），不针对单元时序弧（单元输入引脚到输出引脚的弧），尽管被驱动网的耦合 RC 网络仍会写出。
+
+当 \cmd{write\_spice\_deck} 对网弧使用 aggressor 对齐时，选择与 PrimeTime 中 \cmd{update\_timing} 期间相同的驱动单元弧。对直接用 \cmd{set\_driving\_cell} 驱动的 aggressor，aggressor 对齐不起作用。
+
+\subsection{\cmd{write\_spice\_deck} 中的库激励}
+\subsubsection*{Library Sensitization in write\_spice\_deck}
+
+\cmd{write\_spice\_deck} 可使用库中的激励信息来激励时序路径或级的逻辑单元，从而用与弧表征时相同的激励来激励时序弧。因此，耦合与非耦合分析的 PrimeTime 与 SPICE 关联更准确。
+
+PrimeTime 使用库中包含的激励信息。若无库指定激励，则根据时序弧的 \texttt{when} 条件及组合逻辑函数或时序逻辑二进制状态表应用默认激励。
+
+有关 Liberty 格式中单元激励语法的更多信息，见 \textit{Library Compiler User Guide}。
+
+以下示例说明 \cmd{write\_spice\_deck} 如何使用库定义的激励信息：
+\begin{lstlisting}
+sensitization (2in_1out){
+pin_names (IN1, IN2, OUT);
+vector (0, "0 0 0") ;
+vector (1, "0 0 1") ;
+vector (2, "0 1 0") ;
+vector (3, "0 1 1") ;
+vector (4, "1 0 0") ;
+vector (5, "1 0 1") ;
+vector (6, "1 1 0") ;
+vector (7, "1 1 1") ;
+
+ cell(my_cell){
+      sensitization_master : 2in_1out;
+      pin_name_map (A, B, Z);
+        ...
+     pin(Z) {
+          ...
+        timing() {
+              related_pin : A;
+              wave_rise (0, 4, 2, 6, 3);
+              wave_fall (1, 5, 3, 6);
+              wave_rise_sampling_index : 4;
+              wave_fall_sampling_index : 3;
+        }
+      }
+ }
+\end{lstlisting}
+
+激励模板 \texttt{2in\_1out} 定义八个向量，每个向量按 \texttt{pin\_names} 列表顺序定义单元引脚逻辑值。
+
+\texttt{cell(my\_cell)} 实例化模板 \texttt{2in\_1out}，并将其引脚 A、B、Z 分别映射到 IN1、IN2、OUT。
+
+对 A 到 Z 的时序弧，\texttt{wave\_rise} 属性定义引脚 A 与 B 上产生 Z 上升沿的波形，使用 \texttt{2in\_1out} 模板中先前定义的向量序列。\texttt{wave\_rise\_sampling\_index} 定义在 \texttt{wave\_rise} 的哪个转换上测量延时与转换时间；本例为第四次转换。输出下降转换的激励由 \texttt{wave\_fall} 与 \texttt{wave\_fall\_sampling\_index} 类似定义。
+
+下图展示 PrimeTime SI 中对 \texttt{wave\_rise} 属性的解释。向量序列 \texttt{(0, 4, 2, 6, 3)} 表示施加到引脚 A 与 B 以在 Z 产生上升沿的波形。A 到 Z 时序弧的延时与转换时间测量发生在第四次序列转换（本例为向量 ID 6 与 3 之间的转换）。
+
+\figplaceholder{Figure 457: Usage of wave\_rise in library sensitization definition}{库激励定义中 wave\_rise 的用法}{fig:spice-wave-rise}
+
+PrimeTime SI 在转换之间分配固定时间间隔，使相关逻辑单元有足够时间稳定并初始化到正确状态。可用 \texttt{wave\_rise\_timing\_interval} 属性指定不同时间间隔。以下示例将时间间隔设为 0.5 个库时间单位：
+\begin{lstlisting}
+wave_rise_timing_interval : 0.5;
+\end{lstlisting}
+
+由于 SPICE 仿真器使用自适应时间步进，提供超过逻辑稳定所需时间的仿真时间不会显著增加仿真运行时间。
+
+\subsection{库驱动波形}
+\subsubsection*{Library Driver Waveform}
+
+当 \cmd{write\_spice\_deck} 激励单元输入时，使用与时序数据表征相同的波形。PrimeTime SI 在可用时从库获取预驱动（predriver）建模信息。
+
+若库不含预驱动信息，默认使用标准 Synopsys 预驱动。要在 PrimeTime SI 中显式指定预驱动类型，使用 \cmd{set\_library\_driver\_waveform} 命令。
+
+\cmd{set\_library\_driver\_waveform} 的 \opt{-type} 设置指定预驱动类型，可为简单斜坡或标准 Synopsys 预驱动。若在命令中指定一个或多个库对象（库或库单元集合），则仅应用于这些对象；否则应用于整个设计。
+
+库驱动设置不仅影响 \cmd{write\_spice\_deck}，也影响使用 CCS 模型进行高级延时计算时的预驱动。更多信息见 PrimeTime SI Crosstalk Delay Calculation Using CCS Models。
+
+\subsection{SPICE 仿真所需的其他信息}
+\subsubsection*{Additional Required Information for SPICE Simulation}
+
+使用 \cmd{write\_spice\_deck} 生成的网表前，必须添加以下信息：
+\begin{itemize}
+  \item SPICE 网表中所有门使用的子电路定义；可使用 \texttt{.include} 语句。
+  \item 门中所有晶体管及其他器件的 SPICE 模型。
+  \item SPICE 网表中所有电源与地网的定义；网表头中的注释行说明如何将 VDD 定义为电源、VSS 定义为地。所有生成的对地电容连接到网 0，所有生成的分段线性（PWL）延时模型相对于网 0。
+\end{itemize}
+
+检查 SPICE 网表输出中的所有注释行以获取注释、警告与错误消息。典型错误包括缺少子电路文件、子电路文件中缺少定义、引脚顺序不兼容，或无法确定到达窗口的无约束路径。
+
+PrimeTime SI 尝试为 SPICE 网表生成所有所需激励，但在某些情况下可能无法做到，例如缺少适当数据定义的 RAM。
+
+\subsection{\cmd{write\_spice\_deck} 输出示例}
+\subsubsection*{Example of write\_spice\_deck Output}
+
+以下是 \cmd{write\_spice\_deck} 命令示例：
+\begin{lstlisting}
+pt_shell> write_spice_deck -output my_output \
+          -sub_circuit_file spice_subckt \
+          -logic_one_voltage 1.8 \
+          [get_timing_paths]
+\end{lstlisting}
+
+该示例基于名为 \texttt{spice\_subckt} 的 SPICE 子电路文件中的定义，生成名为 \texttt{my\_output} 的 SPICE 网表文件。\opt{-logic\_one\_voltage} 将门输入引脚的上摆幅电压设为 1.8 V，影响 PWL 模型生成。
+
+以下示例展示该命令生成的输出文件及相应的输入 SPICE 子电路定义。
+
+\textbf{示例 90：SPICE 网表输出}
+\begin{lstlisting}
+MAX. critical path section: (falling) SecIn -> (falling)
+SecondReg/D.
+*.global vdd vss
+*vvdd vdd 0 1.8
+*vvss vss 0 0
+.include "./spice/spi_deck.subckt"
+
+***   critical path 0 has 7 pins.
+********** Arrival Window Info. for pin 'SecIn' **********
+* {myclock} pos_edge {min_r_f 0.1 0.1} {max_r_f 0.1 0.1}
+* --clock-- {0 2}
+******************************************
+* !!! INFO: PrimeTime created the following critical path falling
+input port 'SecIn' waveform.
+* For rising pwl
+* vSecIn SecIn 0 pwl(0.0ns 0 10.0995ns 0 10.1005ns 1.8)
+* For falling pwl
+vSecIn SecIn 0 pwl(0.0ns 1.8 10.0995ns 1.8 10.1005ns 0)
+******************************************
+* resistor(s) for net 'SecIn'.
+r0      SecIn:4      SecIn:8       4.000000
+r1      SecIn:3      SecIn:4       4.000000
+r2      PreInv/A     SecIn:3       4.000000
+r3      SecIn:5      SecIn:6       1.368000
+r4      SecIn:6      SecIn:8       0.049228
+r5      SecIn:5      SecIn         0.053363
+* ground capacitors(s) for net 'SecIn'.
+c0      PreInv/A     0       0.052000ff
+* c1    SecIn:4      0       0.000000ff
+c2      SecIn        0       0.081000ff
+c3      SecIn:5      0       0.404000ff
+c4      SecIn:6      0       0.009000ff
+* c5    SecIn:8      0       0.000000ff
+c6      SecIn:3      0       0.026000ff
+* cross capacitance of net 'SecIn'.
+cc0      SecIn:4       PreInv/Y      0.008000ff
+cc1      SecIn:4       PreNet:14     0.026000ff
+cc2      SecIn:4       PreNet:8      0.023000ff
+cc3      SecIn:4       PreNet:4      0.023000ff
+cc4      SecIn:8       PreInv/Y      0.009000ff
+cc5      SecIn:8       PreNet:14     0.029000ff
+cc6      SecIn:8       PreNet:8      0.026000ff
+cc7      SecIn:8       PreNet:4      0.026000ff
+cc8      SecIn:3       PreInv/Y      0.008000ff
+cc9      SecIn:3       PreNet:14     0.026000ff
+cc10     SecIn:3       PreNet:8      0.023000ff
+cc11     SecIn:3       PreNet:4      0.023000ff
+\end{lstlisting}
+
+\textbf{示例 91：SPICE 子电路输入文件}
+\begin{lstlisting}
+.SUBCKT buf1a3 A Y
+MU11 N1N4 A VSS VSS n L=0.24 W=1.66
+MU12 N1N4 A VDD VDD p L=0.24 W=2.50
+MU21 Y N1N4 VSS VSS n L=0.24 W=1.66
+MU22 Y N1N4 VDD VDD p L=0.24 W=2.50
+.ENDS
+.SUBCKT fdf1a6 CLK D Q
+M1 N1N56 TP2 N1N119 VSS n L=0.24 W=1.00
+M2 N1N119 D VSS VSS n L=0.24 W=1.00
+M3 N1N56 TP3 N1N35 VSS n L=0.24 W=0.58
+M4 N1N35 TP7 VSS VSS n L=0.24 W=0.58
+M5 TP7 N1N56 VSS VSS n L=0.24 W=1.00
+M6 TP7 TP3 N1N46 VSS n L=0.24 W=0.58
+M7 N1N46 TP2 N1N37 VSS n L=0.24 W=0.58
+M8 N1N37 N1N108 VSS VSS n L=0.24 W=0.58
+M9 TP3 TP2 VDD VDD p L=0.24 W=0.78
+.ENDS
+.SUBCKT inv1a6 A Y
+M1 Y A VSS VSS n L=0.24 W=3.32
+M2 Y A VDD VDD p L=0.24 W=5.00
+.ENDS
+.SUBCKT or2c3 A B Y
+M1I551 N1I551N10 B VSS VSS n L=0.24 W=1.66
+M1I552 Y A N1I551N10 VSS n L=0.24 W=1.66
+M1I553 Y A VDD VDD p L=0.24 W=2.50
+M1I554 Y B VDD VDD p L=0.24 W=2.50
+.ENDS
+\end{lstlisting}
+
+\subsection{使用 \cmd{write\_spice\_deck} 进行 SPICE 关联的限制}
+\subsubsection*{Limitations of Using write\_spice\_deck for SPICE Correlation}
+
+\cmd{write\_spice\_deck} 有助于创建受害路径及其 aggressor 网的结构表示，但由于以下原因，不能期望运行单次 SPICE 网表仿真即可与 PrimeTime SI 结果做直接一对一比较：
+\begin{itemize}
+  \item 所选路径可能很长且含大量交叉耦合电容，即使单次 SPICE 仿真也可能耗时过长而不切实际。
+  \item PrimeTime SI 使用多次迭代进行计算，考虑受害路径的整体环境及多个开关周期；SPICE 网表生成器只能生成一条受害路径（及其 aggressor 网），且仅考虑路径的一个开关周期。
+  \item 其他因素（如转换时间传播方案与库精度）也会影响 PrimeTime SI 与 SPICE 结果的比较。
+\end{itemize}
+"""
+
+OUT.write_text(content, encoding="utf-8")
+
+cjk = len(re.findall(r"[\u4e00-\u9fff]", content))
+lines = content.count("\n") + 1
+print(f"Wrote {OUT}")
+print(f"  bytes: {OUT.stat().st_size}")
+print(f"  lines: {lines}")
+print(f"  CJK chars: {cjk}")

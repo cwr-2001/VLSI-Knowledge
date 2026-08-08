@@ -1,0 +1,281 @@
+% 附录 E PYDB Perl API
+\biappendix{PYDB Perl API}{PYDB Perl API}
+\label{app:e}
+
+本附录介绍如何使用 IC Validator 工具提供的 Perl 应用程序编程接口（API）访问 IC Validator 错误数据库（PYDB）。
+
+PYDB Perl API 使你能直接访问 IC Validator 工具产生的错误数据。例如，你可以：
+\begin{itemize}
+  \item 为特定违例生成错误信息；
+  \item 统计违例数量以供跟踪。
+\end{itemize}
+
+数据库与 Perl API 包括以下各节：
+\begin{itemize}
+  \item PYDB Perl API 概述（PYDB Perl API Overview）
+  \item 访问 PYDB（Accessing the PYDB）
+  \item 常见任务示例（Examples of Common Tasks）
+  \item PYDB 模式（PYDB Schema）
+\end{itemize}
+
+% ============================================================
+\section{PYDB Perl API 概述}
+\subsection*{PYDB Perl API Overview}
+
+使用 PYDB Perl API，你可以访问 IC Validator 工具发现的违例信息，并按需处理数据。IC Validator 仅将含错误数据的违例与单元存入 PYDB。\cmd{LAYOUT\_ERRORS} 文件通常显示 PYDB 中可用的大部分信息。
+
+IC Validator 产生的错误数据以表的形式存储在 SQLite 数据库中；该数据库即为 PYDB。表的结构及其相互关系称为数据库模式（schema）。模式信息见「PYDB 模式」。
+
+要正确查询复杂数据库，必须了解数据库模式。可用 SQLite 命令访问数据库并返回信息；这些命令可能较复杂，取决于所需返回的信息。
+
+为便于在无需学习数据库模式的情况下访问错误数据，所提供的 PYDB Perl API 可连接并检索 PYDB。与使用 SQLite 命令相比，它使与错误数据库的交互容易得多。其内置功能包括：
+\begin{itemize}
+  \item 连接到 PYDB 服务器；
+  \item 提交查询并确保多个数据库服务器不会相互竞争；
+  \item 提供高级函数以检索 PYDB 特定信息，而无需编写复杂的 SQLite 查询；
+  \item 处理结果。
+\end{itemize}
+
+PYDB Perl API 位于 \cmd{ICV\_INSTALL\_DIRECTORY/contrib/pydb/}。子目录见表~\ref{tab:app-e-pydb-dirs}。
+
+\begin{table}[htbp]
+\centering
+\caption{pydb 目录的子目录}
+\label{tab:app-e-pydb-dirs}
+\begin{tabular}{@{}>{\ttfamily\raggedright\arraybackslash}p{0.22\textwidth} p{0.72\textwidth}@{}}
+\toprule
+\textbf{\rmfamily 子目录} & \textbf{说明} \\
+\midrule
+bin/ &
+含示例脚本。这些脚本展示如何使用 PYDB 模块。 \\
+\midrule
+lib/ &
+含公共库模块。每个文件有简短说明，后接该模块提供的全部类方法的详细说明。 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ============================================================
+\section{访问 PYDB}
+\subsection*{Accessing the PYDB}
+
+PYDB Perl API 提供高级接口，使你能处理错误数据，并在需要时对错误数据库运行直接 SQLite 查询。
+
+\begin{noteBox}
+PYDB 模式与服务器通信协议可能随版本变化。因此，访问 PYDB 时必须使用生成该 PYDB 的同一 IC Validator 版本所附带的 API。
+\end{noteBox}
+
+使用 IC Validator 提供的 PYDB Perl API 访问 PYDB，请按下列步骤：
+
+\begin{enumerate}
+  \item \textbf{加载 PYDB 库。}\\
+在任何数据库命令之前，在 Perl 脚本中包含下列代码。该代码从 IC Validator 安装导入所需模块：
+\begin{lstlisting}
+push @INC, $ENV{"ICV_INSTALL_DIRECTORY"}."/contrib/pydb/lib";
+require "PYDB.pm";
+\end{lstlisting}
+
+  \item \textbf{连接数据库。}\\
+在 Perl 脚本中包含下列代码以连接数据库：
+\begin{lstlisting}
+$dbh = PYDB::Connect($db_path,$db_name);
+if (! $dbh) {
+   print "ERROR: Error connecting to database: $PYDB::errstr\n";
+   exit;
+}
+\end{lstlisting}
+若连接成功，返回数据库句柄。
+
+  \item \textbf{执行数据库查询。}\\
+使用 PYDB Perl API 可访问错误信息并按需处理数据。仅含错误数据的违例与单元存入数据库。\cmd{LAYOUT\_ERRORS} 文件通常显示 PYDB 中可用的大部分信息。示例见「常见任务示例」。
+
+  \item \textbf{断开数据库连接。}\\
+在 Perl 脚本中包含下列代码以断开连接：
+\begin{lstlisting}
+$dbh->Disconnect();
+\end{lstlisting}
+\end{enumerate}
+
+% ============================================================
+\section{常见任务示例}
+\subsection*{Examples of Common Tasks}
+
+下列示例展示一些常见任务。
+
+\subsection{列出数据库中的违例}
+\subsubsection*{List violations in the database}
+
+\begin{lstlisting}
+# All violations stored in the PYDB
+foreach $vio ($dbh->Violations()) {
+   print "Violation: \"".$vio->Comment()."\"\n";
+}
+
+# Find a specific violation
+$vio = $dbh->GetViolationByComment("M1.S1.1: Metal 1 space");
+if ($vio) {
+   print "Found M1 violation, with ".$vio->ErrorCount().
+      " error(s).\n";
+}
+
+# Find violations that match a regular expression
+foreach $vio ($dbh->GetViolationsByCommentRegex(qr/M1\..*/)) {
+   print "M1 rule: \"".$vio->Comment()."\"\n";
+}
+\end{lstlisting}
+
+\subsection{列出数据库中的单元}
+\subsubsection*{List cells in the database}
+
+\begin{lstlisting}
+# All cells stored in the PYDB
+foreach $cell ($dbh->Cells()) {
+   print "Cell: \"".$cell->CellName()."\"\n";
+}
+
+# Find a specific cell
+$cell = $dbh->GetCellByName("TOP");
+if ($cell) {
+   print "Found top cell.\n";
+}
+
+# Find cells that match a regular expression
+foreach $cell ($dbh->GetCellsByNameRegex(qr/STDCELL.*/)) {
+   print "Found cell: \"".$cell->CellName()."\"\n";
+}
+\end{lstlisting}
+
+\subsection{访问特定违例中的错误}
+\subsubsection*{Access errors in a specific violation}
+
+\begin{lstlisting}
+$vio = $dbh->GetViolationByComment("M1.S1.1: Metal 1 space");
+if ($vio) {
+
+    foreach $command ($vio->Commands()) {
+       print "Command ".$command->Comment().
+          " produced ".$command->NumErrorsUnlimited().
+          " errors, details are available for ".
+          $command->NumErrors()."\n";
+
+        foreach $cell ($command->Cells()) {
+           # Errors are stored by command/cell, the error
+           # iterator can be used to access them
+           $iter = $dbh->ListErrors($command, $cell);
+           if (! $iter) {
+              print "ERROR: $PYDB::errstr\n";
+              $dbh->Disconnect();
+              exit;
+           }
+
+            while ($error = $iter->NextError()) {
+               # Bounding box of error
+               @bbox = $error->GetBBox();
+               # Error polygons
+               foreach $polygon ($error->Polygons()) {
+                  # List of points making up the polygon
+                  @points = $polygon->Points();
+               }
+               # Access to specific data fields by column name
+               $distance = $error->Get("Distance");
+               # Certain types of errors might have child errors
+               foreach $child_error ($error->Children()) {
+                  # ...
+               }
+            }
+        }
+    }
+}
+\end{lstlisting}
+
+\subsection{执行直接 SQLite 查询}
+\subsubsection*{Perform a direct SQLite query}
+
+Perl API 提供与多数 Perl 安装自带的 DBI 模块类似的接口。
+
+\begin{lstlisting}
+# Prepare the query
+$sth = $dbh->prepare("SELECT CellID, CellName FROM pyCellNames");
+if (! $sth) {
+   print "ERROR: $PYDB::errstr\n";
+   $dbh->Disconnect();
+   exit;
+}
+
+# Execute the query
+if (! $sth->execute()) {
+   print "ERROR: $PYDB::errstr\n";
+   $dbh->Disconnect();
+   exit;
+}
+
+# Retrieve the data
+while ($ref = $sth->fetchrow_hashref()) {
+   print "Cell name=".$ref->{'CellName'}.
+      ", id=".$ref->{'CellID'}."\n";
+}
+\end{lstlisting}
+
+% ============================================================
+\section{PYDB 模式}
+\subsection*{PYDB Schema}
+
+在 PYDB 模式中，错误存储在错误表中。
+\begin{itemize}
+  \item 每个表由可引用若干相关列的数据行组成，类似电子表格。
+  \item 每个表至少需要一个唯一键以标识各条记录。某些表引用多个键。
+\end{itemize}
+
+每种命令类型至少有一个表；含有子错误的命令还有额外表。错误分类信息也存储在 PYDB 的若干表中。
+
+表~\ref{tab:app-e-pydb-org} 展示 PYDB 中一些常用表。
+
+\begin{longtable}{@{}>{\ttfamily\raggedright\arraybackslash}p{0.32\textwidth} p{0.62\textwidth}@{}}
+\caption{PYDB 组织结构}\\
+\label{tab:app-e-pydb-org}\\
+\toprule
+\textbf{\rmfamily 表} & \textbf{存储的信息} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{\rmfamily 表} & \textbf{存储的信息} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+
+pyCellNames &
+含单元信息。每个命令可从不同单元写入错误。 \\
+\midrule
+
+pyCommandCells &
+列出某命令含错误的单元。 \\
+\midrule
+
+pyCommands &
+对产生错误的每个 runset 命令含一条记录。多个命令（例如 \cmd{internal1()} 与 \cmd{external2()}）可写入同一违例注释。 \\
+\midrule
+
+pyErrors\_\textit{<command type>} &
+含各条错误数据。特定命令类型的错误表动态创建，并含该命令类型特有的数据列。 \\
+\midrule
+
+pyErrorTableFormat &
+定义错误表的数据列。 \\
+\midrule
+
+pyErrorTables &
+定义与某命令类型关联的错误表层次。 \\
+\midrule
+
+pyPolygons\_\textit{<command type>} &
+含各条错误形状。 \\
+\midrule
+
+pyRunInfo &
+含一般信息。 \\
+\midrule
+
+pyViolations &
+定义 PYDB 中存储错误的违例规则注释。 \\
+\end{longtable}

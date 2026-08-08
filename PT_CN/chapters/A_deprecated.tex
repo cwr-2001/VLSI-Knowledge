@@ -1,0 +1,460 @@
+% 附录 A Deprecated Features
+\bichapter{已弃用功能}{Deprecated Features}
+\label{chap:deprecated}
+
+以下功能当前已弃用，并将在未来版本中废止：
+\begin{itemize}
+  \item HyperScale 分布式分析（HyperScale Distributed Analysis）
+  \item 旧版基于路径的 SMVA（Legacy Path-Based SMVA）
+\end{itemize}
+
+% ============================================================
+\section{HyperScale 分布式分析}
+\subsection*{HyperScale Distributed Analysis}
+
+本功能的文档章节包括：
+\begin{itemize}
+  \item 从全芯片 Flat 分析到 HyperScale 分布式分析
+  \item 使用恢复会话的类 Flat 顶层报告
+  \item 从分布式分析到块级分析
+  \item 分布式 HyperScale 分析中的 MIM 合并
+  \item HyperScale 属性
+\end{itemize}
+
+\subsection{从全芯片 Flat 分析到 HyperScale 分布式分析}
+\subsubsection*{From Full-Chip Flat to HyperScale Distributed Analysis}
+
+若已有执行全芯片 flat 分析的脚本，可轻松复用同一脚本执行 HyperScale 层次化分析。只需添加几行以启用层次化分析并指定主机。
+
+PrimeTime 自动为每个较低层次块运行独立分析，生成各块的 HyperScale 模型，并使用生成的模型运行顶层分析。该方法称为 HyperScale 分布式分析。
+
+以下为例。加粗行为添加到全芯片 flat 分析脚本中的行。
+\begin{lstlisting}
+\section{Enable hierarchical analysis}
+set_app_var hier_enable_distributed_analysis true
+
+\section{Set working directory for analysis data}
+set_app_var hier_distributed_working_directory $nfs_dir
+
+\section{Optional: override default distributed hierarchical partitioning}
+set_hier_config ...
+
+\section{Specify hosts for distributed analysis}
+set_host_options -num_processes $nProc1 -max_cores $mCore1 \
+ -submit_command "..."
+set_host_options -num_processes $nProc2 -max_cores $mCore2 \
+ -submit_command "..."
+...
+start_hosts
+
+\section{Run full-chip flat analysis script}
+    read_verilog blk_A.v
+    read_verilog blk_B.v
+    read_verilog top.v
+    link_design TOP
+    ...
+    update_timing
+    ...
+
+\section{Flat-like reporting from top level}
+report_timing -path_type full_clock_expanded \
+ -from IN1 -to U2/reg78 ...
+\end{lstlisting}
+
+启用层次化分析时（\cmd{hier\_enable\_distributed\_analysis} 或 \cmd{hier\_enable\_analysis} 变量设为 \texttt{true}），每请求 32 个核心进行分析需要一枚 PrimeTime-ADV 许可证。需在链接设计之前设置主机与层次化配置。工具自动将较低层次块分配到可用主机上执行。
+
+表示为 HyperScale 块模型的块（或其内部子块）不需要块级 Verilog 网表与寄生参数数据。但若现有脚本通过读入所有顶层与块级完整 Verilog 网表及寄生参数执行顶层全 flat 时序分析，仍可保留原脚本，无需删除读入块级 Verilog 与寄生参数的命令。
+
+启用分布式分析流程（\texttt{set hier\_enable\_distributed\_analysis true}）并正确设置 HyperScale 配置（使用 \cmd{set\_hier\_config}）后，工具自动链接 HyperScale 模型数据，即使已读入也不链接完整块级 Verilog；同时自动从 HyperScale 数据加载简化寄生参数，即使脚本指示读入完整块级寄生参数也会跳过。
+
+为进一步改善运行时间与内存占用，可从脚本中删除读入块级 Verilog 的命令。
+
+\subsubsection{分布式分析的默认划分}
+\paragraph*{Default Partitioning for Distributed Analysis}
+
+默认情况下，分布式分析方法将顶层每个块放入各自分区，如下图所示。
+
+\figplaceholder{Figure 458: Default Partitioning in Distributed Analysis}{分布式分析中的默认划分}{fig:hs-default-partition}
+
+\subsubsection{覆盖分布式分析的默认划分}
+\paragraph*{Overriding the Default Partitioning in Distributed Analysis}
+
+要覆盖默认划分，使用 \cmd{set\_hier\_config} 命令。例如：
+\begin{lstlisting}
+set_hier_config \
+  -enable_mim \               # Merge context for MIM blocks
+  -exclude {U1} \             # Keep U1 (blkA) with top level
+  -split {U6}                 # Split U6 (blkD) one level down
+\end{lstlisting}
+
+下图展示对设计划分产生的变化。
+
+\figplaceholder{Figure 459: User-Directed Distributed Analysis Partitioning Example 1}{用户指定的分布式分析划分示例 1}{fig:hs-partition-ex1}
+
+若仅将某些大块指定为独立分析，其余块保留在顶层，请使用带 \opt{-partitions} 的 \cmd{set\_hier\_config}。例如：
+\begin{lstlisting}
+set_hier_config \
+  -partitions {U5 U6}            # Analyze only U5 and U6 as separate blocks
+\end{lstlisting}
+
+下图展示对设计划分产生的变化。
+
+\figplaceholder{Figure 460: User-Directed Partitioning Example 2}{用户指定的划分示例 2}{fig:hs-partition-ex2}
+
+不能将 \opt{-partitions} 与 \opt{-exclude} 或 \opt{-split} 一起使用。但可将 \opt{-partitions} 与 \opt{-enable\_mim} 一起使用，以有选择地划分多实例模块（MIM）子集，如下图所示。
+
+\figplaceholder{Figure 461: User-Directed Partitioning Example 3}{用户指定的划分示例 3}{fig:hs-partition-ex3}
+
+\subsubsection{主机资源亲和性}
+\paragraph*{Host Resource Affinity}
+
+可使用 \cmd{set\_host\_options} 与 \cmd{set\_hier\_config} 将较大块显式分配到具有更多 CPU 与内存资源的主机。例如，以下命令定义主机资源，并将块实例 P1、P2、P3 作为 HyperScale 块使用指定资源进行分析：
+\begin{lstlisting}
+set_host_options -name RA -num_processes 1 -max_cores 2 ... host1
+set_host_options -name RB -num_processes 1 -max_cores 1 ... host2
+set_host_options -name RC -num_processes 1 -max_cores 1 ... host3
+start_hosts
+report_host_usage -verbose
+ ...
+set_hier_config -partitions {P1 P2} -affinity {RA RB} ...
+set_hier_config -partitions {P3} -affinity {RC} ...
+ ...
+\end{lstlisting}
+
+工具将分区 P1 与 P2 分配到资源 RA 与 RB 上分析，将分区 P3 分配到资源 RC 上分析。P1 与 P2 中较大的分区（按单元数）在 RA 与 RB 中较大资源（按分配内存）上分析。
+
+\subsubsection{较低层次块中的属性访问}
+\paragraph*{Attribute Access in Lower-Level Blocks}
+
+在分布式分析中查询较低层次块对象的时序属性时，响应可能较慢，因为顶层无法立即获得这些属性。为加快响应，可将属性数据收集到缓存中。
+
+例如，以下脚本高效收集并使用层次引脚的 slack 属性数据：
+\begin{lstlisting}
+cache_distributed_attribute_data -class pin \
+  -attributes {min_rise_slack max_rise_slack}
+
+set mypins [get_pins -hierarchical *]
+foreach_in_collection pin $mypins {
+  set slack1 [get_attribute $mypins min_rise_slack]
+  set slack2 [get_attribute $mypins max_rise_slack]
+  ...
+}
+\end{lstlisting}
+
+要删除缓存的属性数据：
+\begin{lstlisting}
+purge_distributed_attribute_data -class pin \
+  -attributes {min_rise_slack max_rise_slack}
+\end{lstlisting}
+
+\subsubsection{分布式分析仅顶层流程}
+\paragraph*{Distributed Analysis Top-Only Analysis Flow}
+
+仅顶层分布式分析流程在您只关心顶层时序结果时可减少计算资源占用。要选择此流程：
+\begin{lstlisting}
+pt_shell> set_hier_config -enable_top_only_flow ...
+\end{lstlisting}
+
+在此流程中，HyperScale 分布式分析仅作用于设计的顶层部分。时序报告仅适用于“活动对象”（active objects），即顶层设计的端口、单元、网与引脚。要判断对象是否活动，从分布式分析管理器查询其 \texttt{is\_active} 属性：
+\begin{lstlisting}
+pt_shell> get_attribute [get_pins U123/ZN] is_active
+true
+\end{lstlisting}
+
+在仅顶层分布式分析流程中，时序更新后工具会释放块分区的计算资源，从而阻止进一步的时序更新。要在仅顶层模式下时序更新后保留计算资源，设置以下变量：
+\begin{lstlisting}
+pt_shell> set hier_enable_release_resources_in_top_only_flow false
+\end{lstlisting}
+
+\subsection{使用恢复会话的类 Flat 顶层报告}
+\subsubsection*{Flat-Like Top-Level Reporting Using Restored Sessions}
+
+若已在 HyperScale 分析会话中完成块级与顶层时序分析，可将这些会话恢复到新的顶层会话，并从该层级报告时序路径（包括跨越层次边界的路径），而无需再次承担顶层分析的开销。
+
+例如，假设先前分别为 blkA、blkB 与顶层运行了独立的 HyperScale 分析：
+\begin{lstlisting}
+---------------------------------
+\section{Analysis session for block blkA}
+...
+read_context $topDir
+...
+save_session $blkAsession
+
+---------------------------------
+\section{Analysis session for block blkB}
+...
+read_context $topDir
+...
+save_session $blkBsession
+
+---------------------------------
+\section{Analysis session for top level}
+...
+save_session $topSession
+\end{lstlisting}
+
+要恢复这些会话并从顶层生成时序报告，执行以下操作：
+\begin{lstlisting}
+...
+set_app_var hier_enable_analysis true
+
+\section{Read existing HyperScale session data}
+set_hier_config -session -block blkA -path $blkAsession
+set_hier_config -session -block blkB -path $blkBsession
+set_hier_config -session -top -path $topSession
+
+\section{Generate full-chip timing report and noise report}
+report_timing -path_type full_clock_expanded -from IN1 -to BLKA/reg2 ...
+report_noise ...
+report_constraint ...
+report_analysis_coverage ...
+report_qor ...
+\end{lstlisting}
+
+恢复块级与顶层会话后，时序报告的工作方式与 HyperScale 分布式分析会话中相同。
+
+\subsection{从分布式分析到块级分析}
+\subsubsection*{From Distributed Analysis to Block-Level Analysis}
+
+HyperScale 分布式分析方法在后台自动为每个块运行块级分析。运行 HyperScale 分布式分析后，可使用自动保存的块级会话数据轻松重新运行块级分析。
+
+例如，假设已运行分布式分析：
+\begin{lstlisting}
+set_app_var hier_enable_distributed_analysis true
+set_app_var hier_distributed_working_directory $nfs_dir
+set_host_options -num_processes $nProc1 -max_cores $mCore1 \
+ -submit_command "..."
+set_host_options -num_processes $nProc2 -max_cores $mCore2 \
+ -submit_command "..."
+...
+start_hosts
+
+\section{Run full-chip flat analysis script}
+    read_verilog ...
+    ...
+    update_timing
+    ...
+save_session $DH_Session
+\end{lstlisting}
+
+保存分布式分析会话时，工具将顶层与块级数据保存到不同子目录。在新的 PrimeTime 会话中，可仅恢复一个块的会话数据或仅恢复顶层，并单独重新分析该部分设计。
+
+例如：
+\begin{lstlisting}
+-----------------------------------------
+\section{Restore separate session for block blkA}
+set_app_var hier_enable_analysis true
+restore_session $DH_Session/blkA
+report_timing ...
+
+-----------------------------------------
+\section{Restore separate session for block blkB}
+set_app_var hier_enable_analysis true
+restore_session $DH_Session/blkB
+report_timing ...
+
+-----------------------------------------
+\section{Restore separate session for top level}
+set_app_var hier_enable_analysis true
+restore_session $DH_Session/top
+report_timing ...
+\end{lstlisting}
+
+默认情况下，\cmd{restore\_session} 恢复原始会话的所有分区。为节省时间与内存，可使用 \cmd{restore\_session} 的 \opt{-partitions} 选项有选择地仅恢复感兴趣的 HyperScale 分区。
+
+默认情况下，恢复的分布式分析会话使用原始会话中 \cmd{set\_host\_options} 命令定义的相同主机选项设置。但可在 \cmd{restore\_session} 之前用新设置运行 \cmd{set\_host\_options} 覆盖原始主机设置。例如：
+\begin{lstlisting}
+set_host_options -num_processes 2 -max_cores 4 myCore3 ...
+restore_session -partitions {P2} my_session_dir
+\end{lstlisting}
+
+当前会话中任何 \cmd{set\_host\_options} 的使用都会使原始会话的所有主机选项设置失效。
+
+\subsection{分布式 HyperScale 分析中的 MIM 合并}
+\subsubsection*{MIM Merging in Distributed HyperScale Analysis}
+
+在全芯片分布式分析流程中，可使用带 \opt{-enable\_mim} 的 \cmd{set\_hier\_config} 执行 MIM 合并，如下图所示。
+
+\figplaceholder{Figure 462: MIM Merging for All Instances of a Block}{块的全部实例的 MIM 合并}{fig:hs-mim-all}
+
+若 MIM 集合中某块的层次化上下文与其余实例差异很大，可能希望将该块与顶层一起分析。此时应使用带 \opt{-partitions} 的 \cmd{set\_hier\_config} 显式指定划分，如下图所示。
+
+\figplaceholder{Figure 463: MIM Merging for Some Instances of a Block}{块的若干实例的 MIM 合并}{fig:hs-mim-some}
+
+本例中，向实例 U2 读入寄生参数并非必需，但为防止完整 MIM 合并配置中可能出现的错误，应向 MIM 块的所有实例读入寄生参数。
+
+\subsection{HyperScale 属性}
+\subsubsection*{HyperScale Attributes}
+
+\begin{longtable}{@{}p{0.35\textwidth} p{0.55\textwidth}@{}}
+\caption{单元（Cell）对象的 HyperScale 属性}\label{tab:hs-cell-attr}\\
+\toprule
+单元属性 & 说明 \\
+\midrule
+\endfirsthead
+\multicolumn{2}{c}{\tablename\ \thetable{}（续）}\\
+\toprule
+单元属性 & 说明 \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\texttt{is\_active}（布尔） &
+在 HyperScale 仅顶层分布式分析（\cmd{set\_hier\_config -enable\_top\_only\_flow}）中，若该单元被视为活动对象则返回 \texttt{true}。 \\
+\end{longtable}
+
+\begin{longtable}{@{}p{0.35\textwidth} p{0.55\textwidth}@{}}
+\caption{引脚（Pin）对象的 HyperScale 属性}\label{tab:hs-pin-attr}\\
+\toprule
+引脚属性 & 说明 \\
+\midrule
+\endfirsthead
+\multicolumn{2}{c}{\tablename\ \thetable{}（续）}\\
+\toprule
+引脚属性 & 说明 \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\texttt{is\_active}（布尔） &
+在 HyperScale 仅顶层分布式分析（\cmd{set\_hier\_config -enable\_top\_only\_flow}）中，若该引脚被视为活动对象则返回 \texttt{true}。 \\
+\end{longtable}
+
+\begin{longtable}{@{}p{0.35\textwidth} p{0.55\textwidth}@{}}
+\caption{端口（Port）对象的 HyperScale 属性}\label{tab:hs-port-attr}\\
+\toprule
+端口属性 & 说明 \\
+\midrule
+\endfirsthead
+\multicolumn{2}{c}{\tablename\ \thetable{}（续）}\\
+\toprule
+端口属性 & 说明 \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\texttt{is\_active}（布尔） &
+在 HyperScale 仅顶层分布式分析（\cmd{set\_hier\_config -enable\_top\_only\_flow}）中，若该端口被视为活动对象则返回 \texttt{true}。 \\
+\end{longtable}
+
+% ============================================================
+\section{旧版基于路径的 SMVA}
+\subsection*{Legacy Path-Based SMVA}
+
+\begin{noteBox}
+这是旧版仅基于路径的 SMVA 功能的原始文档，在 \cmd{timing\_cross\_voltage\_domain\_analysis\_mode} 变量设为 \texttt{legacy} 时使用。
+
+当前 SMVA 功能（见 SMVA Graph-Based Simultaneous Multivoltage Analysis）同时支持 PBA 与 GBA 分析。
+\end{noteBox}
+
+在多电压设计中，某些时序路径可能从一个电源域跨越到另一个电源域。当电源域可在多种供电电压下工作时，PrimeTime 需要考虑给定路径的最坏可能工作电压组合。为确保检测到所有潜在时序违例，默认分析考虑路径中每个单元的最坏供电电压。然而该分析偏悲观，因为属于同一域的单元不能同时工作在不同供电电压下。
+
+图~\ref{fig:smva-two-domains} 中，从 U1/CK 到 U7/D 的时序路径跨越两个电源域 P1 与 P2。每个域可在低、高两种电压之一工作。每个单元的延时标于单元旁，红色与蓝色值分别表示低、高供电电压下的延时。
+
+\figplaceholder{Figure 464: Timing Path Through Two Power Domains}{跨越两个电源域的时序路径}{fig:smva-two-domains}
+
+对 setup 检查，默认分析考虑数据路径上的最长延时与时钟路径上的最短延时，因此使用图中所圈的最坏情况延时值。结果偏悲观，例如单元 U2 不可能在低电压工作而单元 U3 在高电压工作——二者属于同一电源域，必须同时工作在低或高电压。
+
+若在此分析中发现时序违例，可通过用每种固定供电电压组合（如 V1/V2 设为 low/low、low/high、high/low、high/high）多次分析设计来降低悲观性。但电源域数量很大时，电压组合数量也非常大，多次分析的成本可能过高。
+
+同时多电压分析（simultaneous multivoltage analysis，SMVA）在单次基于路径的分析运行中消除跨域电压悲观性，且运行时间开销很小。采用该策略，PrimeTime 考虑每条路径所跨越域的低、高电压的所有组合效应，但仅针对跨域路径，且仅使用 UPF 命令定义的各域允许供电电压组合。
+
+图~\ref{fig:smva-slack-calc} 展示使用同时多电压分析的路径 setup 时序计算。在基于路径的分析期间，PrimeTime 分别考虑来自电源域 P1 与 P2 对 setup slack 的贡献，并考虑每个域的高、低供电电压，但不在给定域内混合高、低电压。
+
+\figplaceholder{Figure 465: Simultaneous Multivoltage Slack Calculation}{同时多电压 Slack 计算}{fig:smva-slack-calc}
+
+本例中，最坏情况 slack 为 $-5$，而非常规最坏情况时序分析得到的悲观值 $-9$。最坏供电电压组合为 P1 低、P2 高。注意，同时多电压分析仅在基于路径的分析期间进行，因为最坏供电电压组合可能因路径而异。
+
+要在基于路径的分析期间执行同时多电压分析，将 \cmd{timing\_enable\_cross\_voltage\_domain\_analysis} 变量设为 \texttt{true}。默认为 \texttt{false}，执行常规最坏情况时序分析。
+
+若变量设为 \texttt{true}，在下次时序更新时 PrimeTime 识别跨越多个电源域的路径，并随后将报告限制为仅这些路径。若随后使用 \cmd{report\_timing} 的 \opt{-pba\_mode path} 执行基于路径的分析，PrimeTime 对跨域路径执行高效的基于路径重算，找出每条路径所跨越各域的最坏情况电压（由 \cmd{set\_voltage} 与 UPF 命令定义），同时消除标准片上变分分析中的悲观性。
+
+同时多电压分析期间，工具执行以下功能：
+\begin{itemize}
+  \item 识别并忽略在 CRPR 公共点之前跨越电源域的路径，如图~\ref{fig:smva-analyzed-path} 所示。
+\end{itemize}
+
+\figplaceholder{Figure 466: Analyzing Only Paths Affected by Domain Crossings}{仅分析受域跨越影响的路径}{fig:smva-analyzed-path}
+
+\begin{itemize}
+  \item 识别重汇聚时钟路径，如图~\ref{fig:smva-clock-reconv} 所示。
+\end{itemize}
+
+\figplaceholder{Figure 467: Clock Path Reconverges}{时钟路径重汇聚}{fig:smva-clock-reconv}
+
+\begin{itemize}
+  \item 当路径跨越电源域时，改善序贯时钟网络的悲观性降低，如图~\ref{fig:smva-seq-clock} 所示。
+\end{itemize}
+
+\figplaceholder{Figure 468: Sequential Clock Network Crosses Power Domains}{序贯时钟网络跨越电源域}{fig:smva-seq-clock}
+
+\subsubsection{同时多电压分析使用流程}
+\paragraph*{Simultaneous Multivoltage Analysis Usage Flow}
+
+同时多电压分析期间，默认情况下每个单元在各电压电平的延时由 PrimeTime 现有多电压延时计算方法确定。使用 CCS 库并通过 \cmd{define\_scaling\_lib\_group} 调用库缩放组可获得最准确结果。若无这些模型，PrimeTime 使用可用的 NLDM 模型。
+
+同时多电压分析旨在仅分析与报告跨越电源域边界的时序路径。使用此功能前，建议先按常规方法修复域内时序路径；这些运行中可忽略任何跨域时序路径。完成后，执行同时多电压分析运行以全面分析跨域路径。
+
+当具有多电压表征数据的库可用时，在修复所有域内违例后，跨域路径同时多电压分析的典型使用流程如下：
+\begin{lstlisting}
+set search_path
+set link_path "* mylib_1V.db"
+read_verilog ...
+link_design
+read_parasitics
+load_upf ...
+read_sdc ... #includes set_voltage commands
+
+\section{Derate margins not including variation due to voltage level settings}
+set_timing_derate -early 0.92
+set_timing_derate -late 1.08
+define_scaling_lib_group "mylib_1V.db mylib_0.8V.db \
+                          mylib_1.2V.db mylib 1.4V.db"
+
+\section{Invoke accurate multivoltage analysis for cross-domain paths}
+set timing_enable_cross_voltage_domain_analysis true
+
+\section{Conservative cross-domain-only timing report}
+report_timing ...
+\section{Path-based cross-domain timing report with reduced pessimism}
+report_timing -pba_mode path ...
+\end{lstlisting}
+
+\subsubsection{使用跨域 Derating 的分析}
+\paragraph*{Analysis Using Cross-Domain Derating}
+
+若无关于电压变分的可靠库表征信息，可使用跨域 derating 分析不同供电电压的效应。为此，用 \cmd{set\_cross\_voltage\_domain\_analysis\_guardband} 指定 derating 因子调整值。例如：
+\begin{lstlisting}
+pt_shell> set_cross_voltage_domain_analysis_guardband -late 0.1
+\end{lstlisting}
+
+该 derating 会加到 \cmd{set\_timing\_derate} 指定的普通 derating 以及由 \cmd{timing\_aocvm\_enable\_analysis} 变量调用的先进片上变分（AOCV）分析之上。本例中，若 \cmd{set\_timing\_derate} 设置的常规 late derating 为 1.05，额外 late guard band 0.1 使最终 late derating 为 $1.05 + 0.1 = 1.15$。derating 因子 1.15 建模跨越电源域的时序路径上由片上变分效应与变化电压引起的组合时序变分。
+
+额外 guard band 0.1 旨在在无此电压变分库表征数据时建模供电电压变分的时序效应。若有多电压库表征数据，则不需要 \cmd{set\_cross\_voltage\_domain\_analysis\_guardband} 命令。但 PrimeTime 仍接受该命令，且在启用跨域分析时应用额外 derating。
+
+若无多电压库表征数据，在修复所有域内违例后，使用 derating 进行跨域路径同时多电压分析的典型流程如下：
+\begin{lstlisting}
+set search_path
+set link_path
+read_verilog ...
+link_design
+read_parasitics
+load_upf ...
+read_sdc #includes set_voltage commands
+
+\section{Example margins, not including V_OCV}
+set_timing_derate -early 0.92
+set_timing_derate -late 1.08
+
+\section{Invoke accurate multivoltage analysis for cross-domain paths}
+set timing_enable_cross_voltage_domain_analysis true
+
+\section{Specify derating for voltage supply settings, +/- 10%}
+set_cross_voltage_domain_analysis_guardband -early 0.9
+set_cross_voltage_domain_analysis_guardband -late 1.1
+
+\section{Conservative cross-domain-only timing report with low-high derating}
+report_timing ...
+\section{Path-based cross-domain timing report with reduced pessimism}
+report_timing -pba_mode path ...
+\end{lstlisting}

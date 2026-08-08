@@ -1,0 +1,766 @@
+                                                                                       Feedback
+
+
+
+
+5
+Working With Design Data
+     Before you perform timing analysis, you need to read and link the design and associated
+     logic libraries. To learn about working with design data, see these topics:
+     •   Logic Libraries
+     •   Reading and Linking the Design
+     •   Working With Design Objects
+     •   Setting the Current Design and Current Instance
+     •   Working With Attributes
+     •   Saving Attributes
+     •   Saving and Restoring Sessions
+     •   Creating Test Cases
+
+
+Logic Libraries
+     A logic library describes the timing and function of macro cells in an ASIC technology
+     by using the Library Compiler tool. Other Synopsys tools, such as the Design Compiler
+     synthesis tool and the IC Compiler place-and-route tool, also use these logic libraries.
+     A logic library contains library cell descriptions that include
+     •   Cell, bus, and pin structure that describes each cell’s connection to the outside world
+     •   Logic function of output pins of cells
+     •   Timing analysis and design optimization information, such as the pin-to-pin timing
+         relationships, delay parameters, and timing constraints for sequential cells
+     •   Other parameters that describe area, power, and design rule constraints
+     PrimeTime can read logic libraries in the .db and .lib formats. The libraries can have
+     different units of time, capacitance, and voltage.
+     For more information about logic libraries, see the Library Compiler documentation.
+
+
+
+PrimeTime® User Guide                                                                           158
+T-2022.03
+                                                                                        Feedback
+Chapter 5: Working With Design Data
+Reading and Linking the Design
+
+
+
+Reading and Linking the Design
+      Before you perform timing analysis, you need to read and link the design and logic
+      libraries. PrimeTime can read the following file formats:
+
+Input data                  Supported file formats
+
+Design data                 Binary database (.db)
+                            Milkyway
+                            Synopsys logical database (.ddc)
+                            Verilog
+                            VHDL
+
+Logic libraries             Binary database (.db)
+                            Synopsys Library Compiler format (.lib)
+
+
+      To read and link the design data, follow these steps:
+      1. Specify the directories in which PrimeTime searches for designs, logic libraries, and
+         other design data such as timing models. To do this, set the search_path variable. For
+         example:
+          pt_shell> set_app_var search_path ". /abc/design /abc/libs"
+
+          PrimeTime searches the directories in the order that you specify.
+      2. Specify the libraries in which PrimeTime finds elements in the design hierarchy by
+         setting the link_path variable. For example:
+          pt_shell> set_app_var link_path "* STDLIB.db"
+
+          The variable can contain an asterisk (*), library names, and file names. The asterisk
+          instructs PrimeTime to search for a design in memory. PrimeTime searches libraries in
+          the order that you specify. The main library is the first library in the link path.
+      3. Read the design into memory:
+          pt_shell> read_verilog TOP.v
+
+          If the search path includes files that contain the subdesigns, you need to read only the
+          top-level design. The search path entry must include the full path to the subdesign file,
+          not just the directory containing the file.
+      4. Link the design to resolve references to library cells and subdesigns:
+          pt_shell> link_design TOP
+
+
+
+
+PrimeTime® User Guide                                                                           159
+T-2022.03
+                                                                                                Feedback
+Chapter 5: Working With Design Data
+Reading and Linking the Design
+
+
+          During design linking, the tool automatically loads the subdesigns if the subdesign
+          names match the file names.
+      5. Verify the loaded designs and libraries by using the list_designs and list_libs
+         commands.
+
+
+      Identifying and Verifying the Required Design Files
+      It can be useful to quickly identify all design files required by your script, and verify that
+      they exist, before running full timing analysis.
+      To do this, set the following variable before running your script:
+      pt_shell> set_app_var sh_program_mode file_identification
+
+      In this mode, the tool opens and immediately closes any accessed files, but no design
+      data is read. Tool commands use the modified behaviors, described in Table 6, designed
+      to allow the script run to completion without design data.
+      Table 6          Modified Command Behaviors
+
+Command type                   Modified behavior
+
+Commands that explicitly       Opens the libraries to confirm read access, then immediately closes them.
+or implicitly read libraries   Libraries are gathered from the configuration settings (the link_path
+                               variable, scaling groups, and so on) in the usual way.
+
+Commands that read files       Opens files to confirm read access, then immediately closes them. The
+                               search_path variable is used in the usual way.
+
+Commands that return           Returns a special =mock_collection= collection handle.
+collections
+
+The get_attribute              For a =mock_collection= object, returns a string value of
+command                        =mock_collection=attr=.
+
+The sizeof_collection          For a =mock_collection= object, returns a value of 1.
+command
+
+Conditional and iterating      If the condition or iteration list contains the special =mock_collection=
+(looping) commands             collection handle, then the command body is executed once. Otherwise, the
+                               loop or condition is evaluated in the usual way.
+
+The restore_session            Opens all files in the session directory, then immediately closes them. No
+command                        data is read or restored.
+
+The echo command               Prints output in the usual way.
+
+All other commands             Returns a value of 1.
+
+
+
+
+PrimeTime® User Guide                                                                                       160
+T-2022.03
+                                                                                         Feedback
+Chapter 5: Working With Design Data
+Reading and Linking the Design
+
+
+     You can use the -x option of the pt_shell invocation command to set the variable before
+     your script runs. Here are some usage examples:
+     •   Running a local script:
+         % $PT_PATH/pt_shell \
+             -x 'set sh_program_mode file_identification' \
+             -f my_script.pt
+
+     •   Using the Synopsys Testcase Packager (STP) utility:
+         % stp -r \
+             "$PT_PATH/pt_shell \
+               -x 'set sh_program_mode file_identification' \
+               -f my_script.pt"
+
+     •   Using the Synopsys Cloud Transfer Packager (SCTP) utility:
+         % sctp -r \
+             "$PT_PATH/pt_shell \
+               -x 'set sh_program_mode file_identification' \
+               -f my_script.pt"
+
+     To identify the full list of files used by your script, you can use the Synopsys Cloud
+     Transfer Packager. This utility creates a list of required files for review; you do not need to
+     package your test case to generate this list.
+     Note the following limitations:
+     •   DMSA analysis is not supported.
+     •   Distributed analysis is not supported.
+     •   Scripts that derive file names from design object names (such as creating SDC file
+         names from design names) are not supported.
+
+
+     Per-Instance Link Library Paths
+     The link_path variable provides a link path specification that is used for the entire
+     design.
+     If needed, you can apply link path specifications to individual cell instances. These per-
+     instance link paths take precedence over the global link_path specification.
+     Per-instance link specifications can be used to model process and layout effects, such
+     as body bias and proximity interactions. They can also be used to assign voltage-specific
+     libraries to design blocks (although scaling library groups are recommended for this).
+
+
+
+
+PrimeTime® User Guide                                                                             161
+T-2022.03
+                                                                                         Feedback
+Chapter 5: Working With Design Data
+Reading and Linking the Design
+
+
+     There are two ways to specify per-instance link paths:
+     •   The link_path_per_instance variable, set to the list of all per-instance link paths
+     •   The set_link_lib_map command, specifying a file containing per-instance link paths
+     Both methods are functionally identical. The link_path_per_instance variable requires
+     no additional files but the specification is stored in memory; it is suitable for smaller link
+     path lists. The set_link_lib_map command requires one or more files, read only during
+     link; It is suitable for larger link path lists. They cannot be used together.
+
+     link_path_per_instance
+     The link_path_per_instance variable format is a list of lists. Each sublist consists of a
+     pair of elements: a set of instances and a link_path specification to be used for those
+     instances. The variable must be set before the design is linked. For example,
+     set_app_var link_path {* lib1.db}
+     set_app_var link_path_per_instance [list
+         [list {ucore1 ucore2}         {* lib2.db}]
+         [list {ucore1/usubblk}        {* lib3.db}]
+         [list {ucore1/U12 ucore1/U34} {* lib4.db}]]
+
+     read_verilog my_design.v
+     link_design MY_DESIGN
+
+     The listed instances can be hierarchical cells (blocks) or leaf cells. All instance paths are
+     relative to the top-level design. The precedence rules are as follows:
+     •   Specifications propagate downward into hierarchy.
+     •   Lower-level specifications take precedence over higher-level specifications.
+     •   Leaf cell specifications take precedence over block specifications.
+
+     set_link_lib_map
+     The set_link_lib_map command uses a file as input. Each line of the file contains a set
+     of instances, a colon separator character (:) with spaces on both sides, and a link_path
+     specification to be used for the instances. For example,
+     % cat ./link_paths.txt
+     ucore1 ucore2          : * lib2.db
+     ucore1/usubblk         : * lib3.db
+     ucore1/U12 ucore1/U34 : * lib4.db
+
+     The set_link_lib_map takes this file as input before the design is linked. For example,
+     set_app_var link_path {* lib1.db}
+     set_link_lib_map ./link_paths.txt
+
+
+
+
+PrimeTime® User Guide                                                                            162
+T-2022.03
+                                                                                         Feedback
+Chapter 5: Working With Design Data
+Working With Design Objects
+
+
+     read_verilog my_design.v
+     link_design MY_DESIGN
+
+     The listed instances can be hierarchical cells (blocks) or leaf cells. By default, the instance
+     paths are relative to the top-level design. However, the set_link_lib_map command
+     provides two options that allow files to be applied relative to cell instances and design
+     references:
+     set_link_lib_map -instance {ucore1/usubblk1} ./link_paths_subcore.txt
+     set_link_lib_map -reference {subblk}         ./link_paths_subcore.txt
+
+     The -instance option applies the file relative to the specified cell instance. The
+     -reference option applies the file relative to all cell instances of the specified design
+     name. These options allow long instance names to be shortened in input files. Both
+     options accept a single name.
+     The precedence rules are as follows:
+     •   Specifications propagate downward into hierarchy.
+     •   Lower-level specifications take precedence over higher-level specifications.
+     •   Leaf cell specifications take precedence over block specifications.
+     •   -instance specifications take precedence over -reference specifications.
+
+
+
+Working With Design Objects
+     Designs are hierarchical entities composed of objects such as cells, ports, and nets.
+
+Figure 22     Typical design objects
+
+                         n1
+            IN1
+                         n2           X1                 OUT1
+            IN2
+
+
+
+                  Port        Net     Cell         Pin
+
+
+     In the PrimeTime tool, a design contains the objects in the following table.
+
+
+
+
+PrimeTime® User Guide                                                                            163
+T-2022.03
+                                                                                            Feedback
+Chapter 5: Working With Design Data
+Working With Design Objects
+
+
+       Table 7       Design objects in PrimeTime
+
+Object class          Description                                     Command to create object
+                                                                      collection
+
+cell                  Instance in the design; can be a hierarchical   get_cells
+                      block or primitive library cells
+
+clock                 Clock                                           get_clocks
+
+design                Design                                          get_designs
+
+lib                   Library                                         get_libs
+
+lib_cell              Cell in a logic library                         get_lib_cells
+
+lib_pin               Pin on a library cell                           get_lib_pins
+
+lib_timing_arc        Timing arc on a library cell                    get_lib_timing_arcs
+
+net                   Net in the current design                       get_nets
+
+path_group            Group of paths for cost-function calculations   get_path_groups
+                      and timing reports
+
+pin                   Pin of a lower-level cell in the design; can be get_pins
+                      input, output, or inout (bidirectional)
+
+port                  Port of the current design; can be input,       get_ports
+                      output, or inout (bidirectional)
+
+timing_arc            Timing arc                                      get_timing_arcs
+
+timing_path           Timing path                                     get_timing_paths
+
+
+
+       To constrain the design, perform detailed timing analysis, and locate the source of timing
+       problems, you need to access the design objects. You can do this by creating collections
+       of objects with the appropriate “get” command. For example, the get_ports command
+       creates a collection of ports.
+       You can nest the result of a “get” command within another command that operates on the
+       objects. For example:
+       pt_shell> set_input_delay 2.3 [get_ports IN*]
+
+       For more information, see the “Searching for Design Objects” section in Using Tcl With
+       Synopsys Tools, available on SolvNetPlus.
+
+
+
+
+PrimeTime® User Guide                                                                             164
+T-2022.03
+                                                                                                 Feedback
+Chapter 5: Working With Design Data
+Setting the Current Design and Current Instance
+
+
+
+Setting the Current Design and Current Instance
+     The current design and current instance define the focus of many PrimeTime commands.
+     To set or return the current design or instance, use the following commands.
+     Table 8         Current design objects
+
+Object         Description                                             Command to set or return
+                                                                       current object
+
+Current        The top level of the current design; most objects are current_design
+design         referenced relative to the current design
+
+Current        The instance (hierarchical cell) that is the current    current_instance
+instance       scope within the current design; you traverse the
+               hierarchy by changing the current instance
+
+
+
+
+Working With Attributes
+     An attribute is a string or value associated with an object that carries some information
+     about that object. You can write programs in Tcl to get attribute information from the design
+     database and generate custom reports on the design.
+     PrimeTime provides the following commands for setting, reporting, listing, and creating
+     attributes.
+     Table 9         Commands for Working With Attributes
+
+Attribute command              Description
+
+define_user_attribute          Creates a new attribute for one or more object classes
+
+get_attribute                  Retrieves the value of any attribute from a single object
+
+list_attributes                Shows the attributes defined for each object class or a specified
+                               object class; optionally shows application attributes
+
+remove_user_attribute          Removes a user-defined attribute from one or more objects
+
+report_attribute               Displays the value of all attributes on one or more objects; optionally
+                               shows application attributes
+
+set_user_attribute             Sets a user-defined attribute on one or more objects
+
+
+
+
+PrimeTime® User Guide                                                                                    165
+T-2022.03
+                                                                                      Feedback
+Chapter 5: Working With Design Data
+Saving Attributes
+
+
+     For descriptions of the predefined application attributes of each object class, see the man
+     pages. For example, to see the descriptions of library cell attributes, use the following
+     command:
+     pt_shell> man lib_cell_attributes
+
+
+
+Saving Attributes
+     The save_session command does not save attributes. To save attributes that you applied
+     during a session, create a script in the in the pt_shell, dc_shell, or dctcl format by using
+     the write_script command. When you restore the PrimeTime session, you can use the
+     script to re-create the attributes on the design.
+
+
+Saving and Restoring Sessions
+     You can use the save_session and restore_session commands to save the design
+     data from one session, then restore it into a later session for continued use.
+     A session is a tool-created directory that contains the following information:
+     •   Linked design and loaded libraries
+     •   Clocks, timing exceptions, and other constraints
+     •   Operating conditions
+     •   Back-annotated SDF delays and parasitics
+     •   Variable settings
+     •   Netlist edits (insert_buffer, size_cell, swap_cell)
+     •   Analysis data
+     •   Cross-coupled delay data and noise data
+     The save and restore feature is intended only as a PrimeTime session tool, not a design
+     database archiving tool. The tool does not save or restore the following information:
+     •   Collections of derived data types
+     •   Tcl procedures and command history
+     •   GUI state (timing path tables, schematics, histograms, and so on)
+
+
+
+
+PrimeTime® User Guide                                                                         166
+T-2022.03
+                                                                                      Feedback
+Chapter 5: Working With Design Data
+Saving and Restoring Sessions
+
+
+     •   Quick timing model generation state (between the create_qtm_model and
+         save_qtm_model commands)
+
+     •   Context characterization state (between the characterize_context and
+         write_context commands)
+
+
+     Saving Sessions
+     To save a session, use the save_session command and specify the directory name for
+     the session (required):
+     pt_shell> save_session my_session
+     Saving environmental constraints.....
+     Saving netlist information.....
+     Saving miscellaneous application information.....
+     Saving timing information.....
+     Saving variable information.....
+     Information: Executed with 4 workers
+     Information: At least 6 MB of free disk space in pt_tmp_dir will be
+      required to restore this session. (SR-044)
+
+     If the directory already exists, the tool issues an information message and overwrites the
+     directory contents:
+     pt_shell> save_session my_session
+     Information: Cleaning and overwriting all data in the existing directory
+      '/remote/cae1180/chrispy/hist/my'. (SR-002)
+     Saving environmental constraints.....
+     ...
+
+
+     Saving Version-Compatible Sessions
+     By default, the save_session command saves a version-specific session that can only be
+     restored into the same tool version.
+     However, the -version option allows you to save a session that is version-specific (the
+     default), version-compatible, or both:
+     •   save_session -version compatible
+
+         Saves a version-compatible session that can be restored into the same or later version
+         of the PrimeTime tool. A timing update is always needed when restoring the session.
+
+
+
+
+PrimeTime® User Guide                                                                          167
+T-2022.03
+                                                                                       Feedback
+Chapter 5: Working With Design Data
+Saving and Restoring Sessions
+
+
+     •   save_session -version specific
+
+         Saves a version-specific session. A timing update is not needed when restoring the
+         session. Although this is the default, the keyword provides an explicit way to specify the
+         default.
+     •   save_session -version both
+
+         Saves a combined version-compatible and version-specific session. A timing update is
+         only needed when restoring the session into a different version.
+     To identify a saved session as version-compatible, the tool includes the following note in
+     the README file inside the session directory:
+     ******** This session is saved in version compatible mode and
+              it can be restored in newer versions of PrimeTime ******
+
+     This session format cannot store the in-memory data from a timing update; thus, a timing
+     update is needed to perform analysis after restoring the session. This can result in slight
+     QoR differences, particularly when restoring into a newer version of the tool.
+     Similarly, in-memory physical data for ECO fixing is not stored and will be reloaded when
+     the check_eco command or a fix_eco_* command is run.
+     A typical version-compatible session is restored as follows:
+     # restore the session
+     restore_session session_name
+
+     # (optional) apply any new settings not stored in the session
+     set_app_var ...
+     set_app_var ...
+
+     # recompute timing
+     update_timing
+
+     # perform any additional analysis operations here (reporting, etc.)
+     ...
+
+     In an ECO flow, the preceding script is continued as follows:
+     # (optional) apply any new settings not stored in the session
+     set_eco_options ...
+
+     # ensure everything is ready to go
+     check_eco
+
+     # perform ECO fixing
+     fix_eco_*
+
+     # perform any additional ECO operations here
+
+
+
+
+PrimeTime® User Guide                                                                          168
+T-2022.03
+                                                                                          Feedback
+Chapter 5: Working With Design Data
+Saving and Restoring Sessions
+
+
+
+     Including ECO Physical Data in Saved Sessions
+     When you save a version-compatible session in a physically aware ECO flow, you can
+     include a copy of the physical data files by using the physical_data keyword with the
+     -include option:
+     pt_shell> save_session my_session \
+                 -version compatible \
+                 -include {physical_data}
+
+     As described in Physically Aware ECO, the physical data files are configured by the
+     set_eco_options command. This includes:
+
+     •   LEF technology and cell definition files
+     •   DEF design data files
+     •   Physical library constraints and rules
+     •   Via ladder definitions and associations
+     When you use this feature to include physical data in a saved session file, the ECO
+     physical data directory is copied into the saved session directory. (By default, the ECO
+     configuration data is still stored, but it points to files outside the session directory.)
+     Note:
+         The IC Compiler II reference libraries, specified with the set_eco_option
+         -physical_icc2_lib option, are not copied to the session directory. Their
+         original location is stored in the session_dir/eco_config file. If needed, edit these
+         paths before restoring the session.
+     This feature is supported only for version-compatible sessions.
+
+
+     Restoring Sessions
+     The restore_session command reads a directory that was written by the save_session
+     command, restoring a PrimeTime session to the same state as the session where the
+     save_session command was issued.
+
+     By default, PrimeTime requires that you restore into the same PrimeTime version as used
+     for the original session. Locate the version used to save the session from the README file
+     located in the session directory.
+
+
+
+
+PrimeTime® User Guide                                                                             169
+T-2022.03
+                                                                                         Feedback
+Chapter 5: Working With Design Data
+Saving and Restoring Sessions
+
+
+     If you use the feature described in Saving Version-Compatible Sessions, then the session
+     can be restored into the same or later PrimeTime version. In this case, the tool reports the
+     original tool version when the session is restored:
+     pt_shell> restore_session my_vc_session
+     ...
+     Information: Restoring the version compatible session saved with version
+     'Q-2019.12-SP4'. (SR-048)
+
+     If there is existing design or library data in memory, it is removed before restoring the
+     session.
+     The command first tries to grab all licenses that were present at the time of the
+     save_session command. If this fails, restoring the session fails.
+
+     The restore directory contains a lib_map ASCII file name. This file contains the path and
+     leaf name for each logic library needed to restore the session. If necessary, you can edit
+     the path names to give the restore_session command the updated locations of the
+     needed logic library files. The leaf names of those files cannot be changed. The logic
+     libraries are assumed to be the same as those used when the save_session command
+     was issued.
+
+
+     Restoring Version-Compatible Sessions
+     PrimeTime saves two types of settings in a session:
+     •   Application variables – the default and user-specified settings that are reported by the
+         report_app_var command
+
+     •   Program options – internal program settings that affect the analysis and sometimes
+         changes across releases, but are not reported by the report_app_var command
+     When you restore a version-compatible session into a different version, the
+     restore_session command allows you to control how the internal program options are
+     handled:
+     •   restore_session -program_options save_version
+
+         This setting uses the program options stored in the saved session, which helps the
+         analysis in the new version match the original session. This is the default.
+     •   restore_session -program_options restore_version
+
+         This option uses the program option defaults of the current (restoring) version, which
+         allows updated program options in the current release to be used.
+
+
+
+
+PrimeTime® User Guide                                                                            170
+T-2022.03
+                                                                                            Feedback
+Chapter 5: Working With Design Data
+Creating Test Cases
+
+
+
+Creating Test Cases
+     In some cases, you might want to extract part of the design logic into a standalone
+     runnable test case. For example, you might want to experiment with settings or constraints
+     to see how the analysis is affected. Or, you might need to send a test case to Synopsys
+     Support for further investigation.
+     You can use the create_testcase command to do this. It creates a directory with the
+     specified portion of the design, a constraints file which applies to that portion of the design,
+     any detailed parasitics used, and a run script for the test case.
+     The syntax of the create_testcase command is as follows:
+     Usage:
+      create_testcase       # Create a testcase for specified design objects
+        [-paths list]           (create testcase for the given paths)
+        [-ports list]           (create testcase for the given ports)
+        [-endpoints list]       (create testcase for the given endpoints)
+        [-cells list]           (create testcase for the given cells)
+        [-directory string]     (Output directory name)
+        [-include_libs]         (Include libraries)
+        [-mim]                  (Include multi-instance modules)
+
+     These options are described in the following sections.
+
+
+     Controlling What Design Logic to Keep
+     The create_testcase command keeps only the design logic that you specify. Table 10
+     lists the different ways you can specify what to keep.
+     Table 10      Specifying the Design Logic for create_testcase to Keep
+
+Option name         Design logic that is kept                                 Clock paths to
+                                                                              registers included?
+
+-paths              All cells along the timing paths, including startpoints   Yes
+path_collection     and endpoints
+
+-ports port_list Fanout logic from input ports, including endpoints           Yes
+                    Fanin logic to output ports, including startpoints
+
+-endpoints          Fanin logic to endpoint pins/ports, including startpoints Yes
+pin_port_list
+
+-cells cell_list The specified leaf cells                                     No
+                    The nets driven by the cells
+                    The leaf cells and ports connected to the driven nets
+
+
+
+
+PrimeTime® User Guide                                                                               171
+T-2022.03
+                                                                                       Feedback
+Chapter 5: Working With Design Data
+Creating Test Cases
+
+
+     A single design logic option (-paths, -ports, -endpoints, or -cells) is required.
+     Multiple options cannot be combined.
+     In a PrimeTime SI analysis, the aggressor stages with annotated aggressor timing
+     windows are included.
+     A timing-updated design is not required when using the -ports or -endpoints option. In
+     this case, the aggressors use zero input pin slews and infinite windows. This is useful for
+     reproducing crashes in the initial timing update.
+
+
+     Including the Logic Libraries
+     By default, the create_testcase command creates a test case that references the
+     required logic libraries in their current location. This avoids using unnecessary disk space
+     for test cases that are used in the current design environment.
+     If the test case must run in another design environment, specify the -include_libs option
+     to copy the required logic libraries into the test case directory:
+     pt_shell> create_testcase ... -include_libs
+
+
+     Specifying the Output Directory
+     By default, the test case is created in a directory named after the current design:
+     pt_shell> create_testcase ...
+     ...
+     Testcase is generated in the TOP directory.
+     1
+
+     To specify a particular test case output directory, use the -directory option:
+     pt_shell> create_testcase ... -directory ./my_testcase_FLAT
+     ...
+     Testcase is generated in the my_testcase_FLAT directory.
+     1
+
+
+     Creating a Multiple-Instance Module Test Case
+     For designs with multiple-instance modules (MIMs), the create_testcase command
+     provides a feature to keep the same logic in parallel across the MIM instances.
+     When you keep logic to an endpoint inside an MIM block, you can specify the -mim option
+     to keep the same endpoint-fanin logic across all instances of that MIM block:
+     pt_shell> create_testcase \
+                -endpoints $endpoint_in_one_MIM \
+                -mim
+
+
+
+PrimeTime® User Guide                                                                          172
+T-2022.03
+                                                                                 Feedback
+Chapter 5: Working With Design Data
+Creating Test Cases
+
+
+     This feature requires that the -endpoints option be used.
+
+
+     Limitations
+     The create_testcase command does not support the following tool features:
+     •   HyperScale data (block models or context data)
+     •   SMVA/DVFS analysis
+
+
+
+
+PrimeTime® User Guide                                                                  173
+T-2022.03
+

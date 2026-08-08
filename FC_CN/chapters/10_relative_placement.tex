@@ -1,0 +1,835 @@
+% 第 9 章
+\bichapter{相对布局物理数据通路}{Physical Datapath With Relative Placement}
+\label{chap:rp}
+
+相对布局（relative placement，RP）是 Fusion Compiler 中用于精确控制一组单元之间相对列、行位置关系的布局约束机制。设计者可以把若干单元组织成一个矩阵状的“相对布局组”，在后续粗布局（coarse placement）、优化、时钟树综合与绕线过程中，工具会把该组中的单元当作一个整体来维护其内部拓扑，不会随意打散重排。业界也常把这种能力称为“物理数据通路”（physical datapath）或“结构化布局”（structured placement）。
+
+本章围绕以下主题展开：
+\begin{itemize}
+  \item 相对布局技术概述与收益
+  \item 相对布局的整体流程
+  \item 创建相对布局组
+  \item 向组中添加对象（leaf cell、硬宏、层次化子组、blockage 等）
+  \item 相对布局组选项的设置（锚定、对齐、tiling、方向、keepout、固定单元处理、优化限制、legalize 移动量等）
+  \item 修改已有相对布局组的结构
+  \item 为时钟 sink 自动生成相对布局组
+  \item 相对布局组的布局与合法化
+  \item 相对布局组的分析与查询
+  \item 相对布局信息的保存
+  \item 相对布局命令速查
+\end{itemize}
+
+% ============================================================
+\section{相对布局技术概述}
+\subsection*{Introduction to Physical Datapath With Relative Placement}
+
+相对布局最常见的应用场景是数据通路（datapath）与寄存器阵列这类具有明显规律性的电路结构，但原则上可以把任意单元纳入相对布局组，从而人为固定一组门级逻辑之间的拓扑关系，直接决定版图上的排布方式。借助这种手段，设计者可以主动探索多种 QoR（Quality of Result）收益，例如缩短关键连线、降低局部拥塞、改善时序、控制寄存器间的时钟偏斜（skew）、减少 via 数量，以及提升良率、降低动态与漏电功耗。
+
+相对布局组一旦创建并添加了单元，就会在网表上隐式生成一个“矩阵结构”，并在随后的物理优化流程中，被当作一个不可拆散的实体来保持内部相对位置——组本身既可以随布局自由浮动（floating），也可以被固定（fixed）在指定坐标。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 130：Relative Placement in a Floorplan）}\\[0.3em]
+\small 示意浮动/固定的相对布局组、宏、标准单元、blockage 在 floorplan 中的相对关系，请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{Floorplan 中的相对布局组}
+\label{fig:rp-floorplan}
+\end{figure}
+
+\subsection{相对布局的主要收益}
+\subsubsection*{Benefits of Relative Placement}
+
+相对布局与具体工艺无关，并且天然有利于提升可绕线性，此外还能带来以下收益：
+\begin{itemize}
+  \item 在设计的关键区域缩小布局搜索空间，从而使线长、时序、功耗、面积等 QoR 指标以及拥塞情况更加可预测；
+  \item 在粗布局、优化、时钟树综合与绕线的各个阶段都能保持相对布局关系不被破坏；
+  \item 为迁移旧版本（legacy）设计或第三方 IP 中已验证过的结构化版图提供了一种可靠的维持手段；
+  \item 同时支持扁平（flat）与层次化（hierarchical）设计；
+  \item 允许在保持相对布局拓扑不变的前提下，对组内单元做 sizing（换驱动能力）。
+\end{itemize}
+
+% ============================================================
+\section{相对布局流程}
+\subsection*{Relative Placement Flow}
+
+一次典型的相对布局工作，大致按以下步骤展开：
+\begin{enumerate}
+  \item 按常规方法完成设计准备工作（库、约束、DEF/网表导入等）。
+  \item 按需要设置好布局相关约束（例如多电压域相关的布局约束）。
+  \item 定义相对布局的具体结构与选项：
+  \begin{enumerate}
+    \item 用 \cmd{create\_rp\_group} 创建相对布局组，见「创建相对布局组」；
+    \item 用 \cmd{add\_to\_rp\_group} 把单元、层次化子组或 blockage 加入组中，见「向组中添加对象」；
+    \item 用 \cmd{set\_rp\_group\_options} 设置组的锚定、对齐、tiling、方向等属性，见「设置相对布局组选项」。
+  \end{enumerate}
+  \item 执行常规的布局与优化流程（例如 \cmd{place\_opt}）。
+  \item 检查相对布局的实际效果，见「分析相对布局组」；若布局结果不理想，可以调整相对布局组的结构或选项，再重新执行布局与优化。
+\end{enumerate}
+
+% ============================================================
+\section{创建相对布局组}
+\subsection*{Creating Relative Placement Groups}
+
+相对布局组本质上是一份“容器”定义：它把一批 leaf cell、下级相对布局组以及 blockage，组织到一个由若干行、列构成的矩阵格点中。使用 \cmd{create\_rp\_group} 创建组时，必须用 \opt{-name} 指定组名；可以用 \opt{-columns} 与 \opt{-rows} 指定矩阵的列数与行数，若不指定则默认创建一个 1 行 1 列的组。
+
+例如，创建一个名为 \texttt{RP1}、有 6 行 6 列的相对布局组：
+\begin{lstlisting}
+fc_shell> create_rp_group -name RP1 -columns 6 -rows 6
+\end{lstlisting}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 131：Relative Placement Column and Row Positions）}\\[0.3em]
+\small 展示组内位置的行列编号方式，请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{相对布局组的列、行位置编号}
+\label{fig:rp-rowcol}
+\end{figure}
+
+关于组内行列位置的几条基本规则：
+\begin{itemize}
+  \item 列编号从 0 开始，0 为最左列；行编号从 0 开始，0 为最底行；
+  \item 一列的宽度由该列中最宽的单元决定，一行的高度由该行中最高的单元决定；
+  \item 矩阵中的位置不要求全部占满——可以只使用其中一部分格点，其余位置保持为空。
+\end{itemize}
+
+默认情况下，相对布局组创建在当前设计（current design）中；若需要在其他设计中创建，可用 \opt{-design} 选项指定目标设计名。如果该设计在顶层被多次例化（instantiate），那么对其中某一个例化实例所做的相对布局组修改，会同步反映到所有其他例化实例上。
+
+要删除相对布局组，使用 \cmd{remove\_rp\_groups} 命令。
+
+% ============================================================
+\section{向组中添加对象}
+\subsection*{Adding Objects to a Group}
+
+创建好相对布局组之后，可以用 \cmd{add\_to\_rp\_group} 命令向其中添加以下几类对象：
+\begin{itemize}
+  \item Leaf cell（含 physical-only cell），见「添加 Leaf Cell」；
+  \item 硬宏（hard macro），见「添加硬宏单元」；
+  \item 其他相对布局组（层次化嵌套），见「层次化相对布局组」；
+  \item Blockage（占位/留白），见「添加 Blockage」。
+\end{itemize}
+
+添加对象时需要遵守以下限制：
+\begin{itemize}
+  \item 目标相对布局组必须已经存在；
+  \item 只能把对象加到组内一个尚为空的位置；
+  \item 每个位置只能容纳一个对象。
+\end{itemize}
+
+要从组中移除对象，使用 \cmd{remove\_from\_rp\_group} 命令：可分别用 \opt{-cells}、\opt{-rp\_group}、\opt{-blockage} 移除 leaf cell、子组或 blockage。被移除对象原来占用的位置会重新变为空位。
+
+\subsection{添加 Leaf Cell}
+\subsubsection*{Adding Leaf Cells}
+
+用 \opt{-cells} 选项配合 \cmd{add\_to\_rp\_group} 可以把 leaf cell（含 physical-only cell）加入组中，并用 \opt{-column}、\opt{-row} 指定其在组内矩阵中的位置。
+
+一个 leaf cell 可以跨越多个列或多个行的位置，这称为“单元跨位”（straddling）。跨越的列数、行数分别用 \opt{-num\_columns}、\opt{-num\_rows} 指定，不设置时二者默认均为 1。例如，把单元 \texttt{U23} 加到位置 (0,0)，且它横跨 2 列、占 1 行：
+\begin{lstlisting}
+fc_shell> add_to_rp_group rp1 -cells U23 \
+    -column 0 -row 0 -num_columns 2 -num_rows 1
+\end{lstlisting}
+
+需要注意，跨位仅适用于 leaf cell，不能用于层次化子组或 blockage。
+
+\subsection{指定 Leaf Cell 的方向}
+\subsubsection*{Specifying Orientations for Leaf Cells}
+
+添加 leaf cell 时可以指定其摆放方向；若不指定，工具会自动为其分配一个合法方向。指定方向有两种方式：
+\begin{itemize}
+  \item 在 \cmd{add\_to\_rp\_group} 中用 \opt{-orientation} 给出一组候选方向，工具会从中挑选一个合法方向；
+  \item 用 \cmd{set\_attribute} 命令在单元上设置 \texttt{rp\_orientation} 属性。
+\end{itemize}
+
+\subsection{添加硬宏单元}
+\subsubsection*{Adding Hard Macro Cells}
+
+\cmd{add\_to\_rp\_group} 也支持把硬宏加入相对布局组。与普通 leaf cell 不同的是，添加硬宏时不能使用 \opt{-pin}（指定用于对齐的 pin）或 \opt{-orientation}（指定方向）选项。
+
+处理含硬宏的相对布局组，建议按如下步骤操作：
+\begin{enumerate}
+  \item 先创建相对布局组、加入含硬宏在内的所有单元，并设置好相关选项；
+  \item 用 \cmd{create\_placement -floorplan} 完成一次布局；
+  \item 用 \cmd{set\_placement\_status fixed} 把组内硬宏的位置固定下来——在继续做后续布局与优化之前，组内硬宏必须已被布局并固定，组内其他单元也必须已经完成布局；
+  \item 再执行后续的布局与优化。
+\end{enumerate}
+
+\subsection{层次化相对布局组}
+\subsubsection*{Adding Relative Placement Groups (Hierarchical RP)}
+
+层次化相对布局允许把一个相对布局组作为对象嵌入到另一个组当中，被嵌入的组在父组眼中就像一个普通 leaf cell 一样参与排布。
+
+采用层次化结构来组织相对布局约束，通常有以下好处：
+\begin{itemize}
+  \item 可以让相对布局的组织方式与 RTL（Verilog/VHDL）的层次结构相呼应，便于维护和理解；
+  \item 便于复用重复出现的电路模式（例如加法器阵列）；
+  \item 能显著减少需要重复编写的相对布局脚本行数；
+  \item 便于对独立模块做整体集成；
+  \item 为搭建复杂的组合形态提供了很大的灵活性。
+\end{itemize}
+
+\subsubsection{创建层次化相对布局组}
+\subsubsection*{Creating Hierarchical Relative Placement Groups}
+
+要把一个组嵌入到另一个组中，在 \cmd{add\_to\_rp\_group} 中使用 \opt{-rp\_group} 选项指定被嵌入的子组名，并用 \opt{-column}、\opt{-row} 指定它在父组矩阵中的位置。被嵌入的子组必须与父组处于同一设计中。
+
+一个子组一旦被嵌入某个父组，就相当于直接“焊死”在父组内部：同一个子组在同一设计中只能被嵌入一次；但是，包含了某个子组的父组本身，还可以被进一步嵌入到该设计中的另一个组里，或者被例化到另一个设计的组中。
+
+下面的示例构造一个两级层次：先建立三个各含两个单元的底层组 \texttt{g\_a}、\texttt{g\_b}、\texttt{g\_c}，再把它们作为三行嵌入到顶层组 \texttt{g\_top} 中：
+\begin{lstlisting}
+create_rp_group -name g_a -columns 2 -rows 1
+add_to_rp_group g_a -cells U1 -column 0 -row 0
+add_to_rp_group g_a -cells U4 -column 1 -row 0
+
+create_rp_group -name g_b -columns 2 -rows 1
+add_to_rp_group g_b -cells U2 -column 0 -row 0
+add_to_rp_group g_b -cells U5 -column 1 -row 0
+
+create_rp_group -name g_c -columns 2 -rows 1
+add_to_rp_group g_c -cells U3 -column 0 -row 0
+add_to_rp_group g_c -cells U6 -column 1 -row 0
+
+create_rp_group -name g_top -columns 1 -rows 3
+add_to_rp_group g_top -rp_group g_a -column 0 -row 0
+add_to_rp_group g_top -rp_group g_b -column 0 -row 1
+add_to_rp_group g_top -rp_group g_c -column 0 -row 2
+\end{lstlisting}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 132：Including Groups in a Hierarchical Group）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{层次化相对布局组的嵌套结构}
+\label{fig:rp-hier}
+\end{figure}
+
+\subsubsection{层次化结构中的跨位}
+\subsubsection*{Using Hierarchical Relative Placement for Straddling}
+
+前面提到的“跨位”不仅可以发生在单个 leaf cell 上，配合层次化嵌套还可以构造出既有列跨位又有行跨位的复杂形状：先分别定义只含 leaf cell 的底层组，再定义一个中间层组把它们组合起来，最后再定义一个顶层组，把这个中间层组和另一个额外的 leaf cell 一起嵌入，就可以让该 leaf cell 同时跨越多列。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.3cm}
+\textit{（原书 Figure 133/134：Hierarchical Relative Placement Group With Straddling）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.3cm}}}
+\caption{层次化结构中的行/列跨位组合}
+\label{fig:rp-hier-straddle}
+\end{figure}
+
+\subsubsection{利用层次化结构做压缩布局}
+\subsubsection*{Using Hierarchical Relative Placement for Compression}
+
+默认情况下，相对布局的构造方式是从每个单元的左下角开始对齐排布的。“压缩”（compression）则会去除每一行中多余的空白，使结构更紧凑；压缩之后，各列不再严格对齐，但被压缩区域的利用率会更高。
+
+要构造压缩结构，可以先分别创建若干个各含一行 leaf cell 的底层组，再创建一个父组把这些底层组按列的方式组合起来：
+\begin{lstlisting}
+create_rp_group -name g_a -columns 2 -rows 1
+add_to_rp_group g_a -cells U1 -column 0 -row 0
+add_to_rp_group g_a -cells U4 -column 1 -row 0
+
+create_rp_group -name g_b -columns 2 -rows 1
+add_to_rp_group g_b -cells U2 -column 0 -row 0
+add_to_rp_group g_b -cells U5 -column 1 -row 0
+
+create_rp_group -name g_c -columns 2 -rows 1
+add_to_rp_group g_c -cells U3 -column 0 -row 0
+add_to_rp_group g_c -cells U6 -column 1 -row 0
+
+create_rp_group -name g_top -columns 1 -rows 3
+add_to_rp_group g_top -rp_group g_a -column 0 -row 0
+add_to_rp_group g_top -rp_group g_b -column 0 -row 1
+add_to_rp_group g_top -rp_group g_c -column 0 -row 2
+\end{lstlisting}
+
+也可以不依赖层次化结构，而是直接在 \cmd{set\_rp\_group\_options} 上用 \opt{-tiling\_type} 选项，对水平方向应用压缩，详见「控制组内 Tiling 方式」。
+
+\subsection{添加 Blockage}
+\subsubsection*{Adding Blockages}
+
+用 \opt{-blockage} 选项配合 \cmd{add\_to\_rp\_group}，可以在相对布局组内部预留一块不允许放置相对布局单元的空间。添加 blockage 时可以指定：
+\begin{itemize}
+  \item 位置：用 \opt{-column}、\opt{-row} 指定，若不指定则默认放在位置 (0,0)；
+  \item 尺寸：用 \opt{-height}、\opt{-width} 指定。若不指定，工具会根据组的 tiling 类型自动确定尺寸——tiling 类型为 \texttt{bit\_slice} 时，高度取 site row 高度、宽度取所在列宽度；tiling 类型为 \texttt{compression} 系列时，高度取 site row 高度、宽度取一个 site 的宽度；
+  \item 是否允许与其他相对布局 blockage 或非相对布局对象重叠：用 \opt{-allow\_overlap} 选项。
+\end{itemize}
+
+例如，在 \texttt{rp1} 组的位置 (0,2) 添加一个名为 \texttt{gap1}、高 1 行、宽 5 列的 blockage：
+\begin{lstlisting}
+fc_shell> add_to_rp_group rp1 -blockage gap1 \
+    -column 0 -row 2 -width 5 -height 1
+\end{lstlisting}
+
+\subsection{在预定义区域内自由添加单元}
+\subsubsection*{Adding Cells Within a Predefined Relative Placement Area}
+
+如果只想约束一批单元落在组内某个矩形区域中，而不严格规定每个单元的具体格点，可以用 \opt{-free\_placement} 选项配合 \cmd{add\_to\_rp\_group}。使用该选项时必须同时指定：
+\begin{itemize}
+  \item 放置区域的原点：\opt{-column}、\opt{-row}；
+  \item 放置区域的高度和宽度：\opt{-height}、\opt{-width}；
+  \item 该单元自身占用的列数与行数：\opt{-num\_columns}、\opt{-num\_rows}。
+\end{itemize}
+
+例如，把单元 \texttt{U41} 加入一个原点在 (0,0)、高 4、宽 5 的区域中，且该单元自身占 2 列 2 行：
+\begin{lstlisting}
+fc_shell> add_to_rp_group rp2 -cells U41 -free_placement \
+    -column 0 -row 0 -height 4 -width 5 -num_columns 2 -num_rows 2
+\end{lstlisting}
+
+% ============================================================
+\section{设置相对布局组选项}
+\subsection*{Specifying Options for Relative Placement Groups}
+
+相对布局组的各类属性统一通过 \cmd{set\_rp\_group\_options} 命令设置。表~\ref{tab:rp-options} 汇总了主要选项及其作用，详细用法见后续小节。
+
+\begin{table}[htbp]
+\centering
+\caption{set\_rp\_group\_options 主要选项一览}
+\label{tab:rp-options}
+\begin{tabularx}{\textwidth}{lX}
+\toprule
+选项 & 作用 \\
+\midrule
+\opt{-x\_offset}, \opt{-y\_offset} & 指定锚点坐标（见「锚定相对布局组」） \\
+\opt{-anchor\_corner} & 指定锚点对应组的哪个角（见「锚定相对布局组」） \\
+\opt{-alignment} & 指定组内单元的对齐方式（见「列内 Leaf Cell 对齐」） \\
+\opt{-pin\_name} & Pin 对齐时使用的对齐 pin 名 \\
+\opt{-tiling\_type} & 指定 tiling 方式（见「控制组内 Tiling 方式」） \\
+\opt{-group\_orientation} & 指定组的方向（见「相对布局组方向」） \\
+\opt{-utilization} & 指定利用率，默认 100\% \\
+\opt{-place\_around\_fixed\_cells} & 指定 legalize 时如何处理固定单元（见「处理布局中的固定单元」） \\
+\opt{-optimization\_restriction} & 限制组内单元允许的优化类型（见「控制 RP 单元优化」） \\
+\opt{-move\_effort} & 控制 legalize 时组的移动幅度（见「控制 Legalize 时的移动量」） \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+要移除已设置的选项，使用 \cmd{remove\_rp\_group\_options} 命令；必须指定组名和至少一个选项，否则该命令不产生任何效果。
+
+\subsection{锚定相对布局组}
+\subsubsection*{Anchoring Relative Placement Groups}
+
+默认情况下，工具可以把一个顶层相对布局组放在 core 区域内的任意位置。如果需要精确控制某个顶层组的位置，可以用 \cmd{set\_rp\_group\_options} 的 \opt{-x\_offset}、\opt{-y\_offset} 选项对其进行“锚定”。这两个偏移量都是相对 core 区域左下角的浮点数（单位微米）。
+
+\begin{itemize}
+  \item 如果 x、y 坐标都指定了，组会被锚定在该固定点上；
+  \item 如果只指定了其中一个坐标，工具会保持已指定的坐标不变，沿另一个方向自由滑动来确定最终位置。
+\end{itemize}
+
+用 \opt{-anchor\_corner} 可以指定用组的哪个角来对齐锚点，取值包括：
+\begin{itemize}
+  \item \texttt{bottom\_left}：以组的左下角为锚点（默认）；
+  \item \texttt{bottom\_right}：以组的右下角为锚点；
+  \item \texttt{top\_left}：以组的左上角为锚点；
+  \item \texttt{top\_right}：以组的右上角为锚点；
+  \item \texttt{rp\_location}：以组内某个具体位置的元素为锚点，该位置由 \opt{-anchor\_row}、\opt{-anchor\_column} 指定，且该位置必须已放有单元、keepout 或子组。
+\end{itemize}
+
+例如，把组 \texttt{misc1} 的左下角锚定在坐标 (100, 100)：
+\begin{lstlisting}
+fc_shell> set_rp_group_options misc1 -anchor_corner bottom_left \
+    -x_offset 100 -y_offset 100
+\end{lstlisting}
+
+也可以用组内指定位置的元素来锚定，例如让 \texttt{RP1} 组第 1 列第 2 行处的单元被锚定到坐标 (100, 100)：
+\begin{lstlisting}
+fc_shell> set_rp_group_options RP1 \
+    -anchor_corner rp_location -anchor_column 1 -anchor_row 2 \
+    -x_offset 100 -y_offset 100
+\end{lstlisting}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.3cm}
+\textit{（原书 Figure 136–138：锚点角与 rp\_location 锚定示意）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.3cm}}}
+\caption{相对布局组的锚定方式}
+\label{fig:rp-anchor}
+\end{figure}
+
+\subsection{列内 Leaf Cell 对齐}
+\subsubsection*{Aligning Leaf Cells Within a Column}
+
+组内同一列中的 leaf cell，可以按以下三种方式对齐：左对齐（默认）、右对齐、按 pin 对齐。合理选择对齐方式，有助于改善时序和可绕线性。
+
+\subsubsection{左对齐（默认）}
+\subsubsection*{Aligning by the Left Edges}
+
+工具默认按左边缘对齐组内单元；若要显式声明这一行为，可使用 \opt{-alignment left}。
+
+\subsubsection{右对齐}
+\subsubsection*{Aligning by the Right Edges}
+
+使用 \opt{-alignment right} 可让组内单元按右边缘对齐。
+
+\begin{noteBox}
+对于层次化相对布局组，右对齐（bottom-right alignment）设置不会沿层次向下传播到子组。
+\end{noteBox}
+
+\subsubsection{按 Pin 位置对齐}
+\subsubsection*{Aligning by Pin Location}
+
+使用 \opt{-alignment pin} 配合 \opt{-pin\_name}，可以让工具按某个指定 pin 的位置对齐该列中的单元。工具会在列内每个单元上查找该 pin：若某单元存在该 pin，就按该 pin 的位置对齐；若某单元不存在该 pin，则退化为左对齐，并给出提示信息；若整列中没有任何单元含该 pin，则给出告警信息。
+
+\begin{lstlisting}
+create_rp_group -name rp1 -columns 1 -rows 4
+set_rp_group_options rp1 -alignment pin -pin_name A
+add_to_rp_group rp1 -cells U1 -column 0 -row 0
+add_to_rp_group rp1 -cells U2 -column 0 -row 1
+add_to_rp_group rp1 -cells U3 -column 0 -row 2
+add_to_rp_group rp1 -cells U4 -column 0 -row 3
+\end{lstlisting}
+
+按 pin 对齐时，工具会尝试不同的单元方向，从中挑选出使该列宽度最小的组合；但如果在 \cmd{add\_to\_rp\_group} 中已经用 \opt{-orientation} 显式指定了某单元的方向，工具会尊重该设定，不再自动调整。
+
+组一级设置的对齐 pin 会作用于组内所有单元；如果个别单元需要使用不同的对齐 pin，可以在 \cmd{add\_to\_rp\_group} 添加该单元时用 \opt{-pin\_name} 单独覆盖。例如下面的脚本中，组 \texttt{rp2} 整体按 pin A 对齐，但其中 \texttt{I5}、\texttt{I6} 两个单元改用 pin B 对齐：
+\begin{lstlisting}
+create_rp_group -name rp2 -columns 1 -rows 6
+set_rp_group_options rp2 -alignment pin -pin_name A
+add_to_rp_group rp2 -cells I3 -column 0 -row 0
+add_to_rp_group rp2 -cells I4 -column 0 -row 1
+add_to_rp_group rp2 -cells I5 -column 0 -row 2 -pin_name B
+add_to_rp_group rp2 -cells I6 -column 0 -row 3 -pin_name B
+add_to_rp_group rp2 -cells I7 -column 0 -row 4
+add_to_rp_group rp2 -cells I8 -column 0 -row 5
+\end{lstlisting}
+
+\subsubsection{添加对象时覆盖对齐方式}
+\subsubsection*{Overriding the Alignment When Adding Objects}
+
+在 \cmd{add\_to\_rp\_group} 中使用 \opt{-override\_alignment} 选项，可以为正在添加的单个对象单独指定与组整体设置不同的对齐方式；但如果该组是按 pin 对齐的，则不能用该选项覆盖。
+
+例如，组 \texttt{rp1} 整体为右对齐，但其中 \texttt{U0} 单独覆盖为左对齐，其余单元维持组的右对齐设置：
+\begin{lstlisting}
+fc_shell> create_rp_group -name rp1 -columns 1 -rows 4
+fc_shell> set_rp_group_options rp1 -alignment right
+fc_shell> add_to_rp_group rp1 -cells U0 -column 0 -row 0 \
+    -override_alignment left
+fc_shell> add_to_rp_group rp1 -cells U1 -column 0 -row 1
+fc_shell> add_to_rp_group rp1 -cells U2 -column 0 -row 2
+fc_shell> add_to_rp_group rp1 -cells U3 -column 0 -row 3
+\end{lstlisting}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.3cm}
+\textit{（原书 Figure 139–143：左对齐/右对齐/按 Pin 对齐/覆盖对齐示意）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.3cm}}}
+\caption{几种列内对齐方式的效果对比}
+\label{fig:rp-align}
+\end{figure}
+
+\subsection{控制组内 Tiling 方式}
+\subsubsection*{Controlling the Tiling Within Relative Placement Groups}
+
+组内对象的排布疏密方式，由 \cmd{set\_rp\_group\_options} 的 \opt{-tiling\_type} 选项控制，可选设置见表~\ref{tab:rp-tiling}。
+
+\begin{table}[htbp]
+\centering
+\caption{-tiling\_type 选项设置}
+\label{tab:rp-tiling}
+\begin{tabularx}{\textwidth}{lX}
+\toprule
+设置 & 说明 \\
+\midrule
+\texttt{bit\_slice}（默认） & 按位切片方式排布，同时保持行、列两个方向的对齐；行高取该行最高单元高度，列宽取该列最宽单元宽度 \\
+\texttt{horizontal\_compression} & 每行内水平方向压缩，仍保持行对齐 \\
+\texttt{vertical\_compression} & 每列内垂直方向压缩，仍保持列对齐 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.3cm}
+\textit{（原书 Figure 144：Bit-Slice Placement Versus Horizontal or Vertical Compression）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.3cm}}}
+\caption{Bit-slice 排布与水平/垂直压缩的对比}
+\label{fig:rp-tiling}
+\end{figure}
+
+需要注意，\opt{-tiling\_type} 的设置不会从父组自动传递给子组，每一层需要单独设置。
+
+即使组内含有跨行、跨列的 leaf cell，也同样可以应用压缩：
+\begin{lstlisting}
+fc_shell> add_to_rp_group rp -cells U5 \
+    -column 0 -row 0 -num_columns 1 -num_rows 2
+fc_shell> set_rp_group_options rp -tiling_type horizontal_compression
+\end{lstlisting}
+
+\subsection{相对布局组方向}
+\subsubsection*{Specifying the Orientation of Relative Placement Groups}
+
+Fusion Compiler 支持以下四种相对布局组方向：
+\begin{itemize}
+  \item \texttt{R0}：列方向从左到右、行方向从下到上；
+  \item \texttt{R180}：列方向从右到左、行方向从上到下（相对 R0 整体旋转 180 度）；
+  \item \texttt{MY}：列方向从右到左、行方向从下到上（相对 R0 沿 Y 轴镜像）；
+  \item \texttt{MX}：列方向从左到右、行方向从上到下（相对 R180 沿 X 轴镜像）。
+\end{itemize}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.3cm}
+\textit{（原书 Figure 146：Orientation of Relative Placement Groups）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.3cm}}}
+\caption{相对布局组的四种方向}
+\label{fig:rp-orient}
+\end{figure}
+
+工具默认会自动为相对布局组选择能够最小化线长的方向，也可以用 \cmd{set\_rp\_group\_options} 的 \opt{-group\_orientation} 选项手动指定：
+\begin{lstlisting}
+fc_shell> set_rp_group_options [get_rp_groups design::rp] \
+    -group_orientation MY
+\end{lstlisting}
+
+对于含有层次化子组的设计，方向设置会沿层次一路向下传播到最底层。
+
+\begin{noteBox}
+改变相对布局组的方向时，之前设定的对齐方式、利用率等约束仍会按原有指定继续保持。
+\end{noteBox}
+
+\subsection{Keepout Margin}
+\subsubsection*{Specifying a Keepout Margin}
+
+如果希望阻止其他相对布局组紧贴某个特定组放置，可以用 \cmd{set\_rp\_group\_options} 的 \opt{-rp\_only\_keepout\_margin} 选项，为该组的左、下、右、上四个方向分别指定一个只针对其他相对布局组生效的留白边距。
+
+例如，为组 \texttt{rp1} 设置左右边距 15、上下边距 10：
+\begin{lstlisting}
+fc_shell> set_rp_group_options rp1 \
+    -rp_only_keepout_margin {15 10 15 10}
+\end{lstlisting}
+
+\subsection{处理布局中的固定单元}
+\subsubsection*{Handling Fixed Cells During Relative Placement}
+
+Legalize 相对布局组时如何对待 floorplan 中已固定的单元，由 \cmd{set\_rp\_group\_options} 的 \opt{-place\_around\_fixed\_cells} 选项控制，取值见表~\ref{tab:rp-fixed}。
+
+\begin{table}[htbp]
+\centering
+\caption{-place\_around\_fixed\_cells 选项设置}
+\label{tab:rp-fixed}
+\begin{tabularx}{\textwidth}{lX}
+\toprule
+设置 & 说明 \\
+\midrule
+\texttt{standard} & 围绕固定的标准单元做 legalize，同时避开固定的 physical-only 单元 \\
+\texttt{physical\_only} & 围绕固定的 physical-only 单元做 legalize，同时避开固定的标准单元 \\
+\texttt{all}（默认） & 同时围绕固定的标准单元与 physical-only 单元做 legalize \\
+\texttt{none} & 同时避开固定的标准单元与 physical-only 单元 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+对于层次化相对布局组，可以给顶层组和下级子组分别设置不同的取值；若未给某个下级子组单独设置，则沿用顶层组的取值。
+
+\subsection{允许非相对布局单元}
+\subsubsection*{Allowing Nonrelative Placement Cells}
+
+默认情况下，非相对布局单元在粗布局阶段不允许出现在相对布局组内部，但在优化与 legalize 阶段是允许的。若希望在粗布局阶段就利用某个组内的空闲区域来降低拥塞、改善 QoR，可以用 \opt{-allow\_non\_rp\_cells} 选项打开该行为：
+\begin{lstlisting}
+fc_shell> set_rp_group_options rp1 \
+    -allow_non_rp_cells
+\end{lstlisting}
+
+如果组内含有通过 \opt{-blockage} 添加的留白区域，默认这些区域在布局、优化、legalize 各阶段都不允许放置任何单元。若希望连这些 blockage 区域也一并对非相对布局单元开放，可以使用 \opt{-allow\_non\_rp\_cells\_on\_blockages} 选项：
+\begin{lstlisting}
+fc_shell> set_rp_group_options rp2 \
+    -allow_non_rp_cells_on_blockages
+\end{lstlisting}
+
+\subsection{控制相对布局单元的优化}
+\subsubsection*{Controlling the Optimization of Relative Placement Cells}
+
+对相对布局单元做修改或移动，都可能破坏组内既定的结构；如果某个单元在优化过程中被直接删除，其相对布局信息也会随之丢失。为了在后续优化中保护既有结构，可以用 \opt{-optimization\_restriction} 选项限制允许的优化类型，取值见表~\ref{tab:rp-opt-restrict}。
+
+\begin{table}[htbp]
+\centering
+\caption{-optimization\_restriction 选项设置}
+\label{tab:rp-opt-restrict}
+\begin{tabularx}{\textwidth}{lX}
+\toprule
+设置 & 说明 \\
+\midrule
+\texttt{all\_opt} & 不限制，允许对组内单元做任意优化 \\
+\texttt{size\_only} & 仅允许换驱动能力（sizing） \\
+\texttt{size\_in\_place} & 仅允许原位（in-place）sizing \\
+\texttt{no\_opt} & 禁止对组内单元做任何优化 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+对于层次化相对布局组，该选项在顶层的设置会直接向下传播到各级子组，子组自身单独设置的值会被忽略。
+
+\subsection{控制 Legalize 时的移动量}
+\subsubsection*{Controlling Movement When Legalizing Relative Placement Groups}
+
+粗布局阶段，工具会为每个顶层相对布局组估算一个初始位置；在随后的 legalize 阶段，\opt{-move\_effort} 选项决定该组允许在多大范围内偏离这个初始位置来消除相对布局约束的违例。把该选项从较高的移动力度调低，相当于缩小了为该组搜索合法位置时所考察的区域范围。
+
+\subsection{处理 Tap Column 与相对布局组重叠}
+\subsubsection*{Handling Tap Columns and Relative Placement Group Overlaps}
+
+在粗布局阶段，为了避免相对布局组与 tap cell 所在列发生重叠，可以设置应用选项 \appopt{place.coarse.no\_split\_rp\_width\_threshold}。只有宽度小于相邻 tap column 间距的相对布局组，才能被工具自动挪开以消除重叠；该选项能帮助布局引擎提前获知 tap column 之间的间距信息。此选项主要用于 N5 及更早的工艺节点；N3 及更先进节点下，tap column 间距会被自动计算，无需手动设置。
+
+\begin{lstlisting}
+place.coarse.no_split_rp_width_threshold 46
+\end{lstlisting}
+
+% ============================================================
+\section{修改相对布局组结构}
+\subsection*{Changing the Structures of Relative Placement Groups}
+
+对已经创建好的相对布局组，可以用 \cmd{modify\_rp\_groups} 命令做结构性调整：
+\begin{itemize}
+  \item 用 \opt{-add\_rows}、\opt{-add\_columns} 增加行或列；
+  \item 用 \opt{-remove\_rows}、\opt{-remove\_columns} 删除行或列；
+  \item 用 \opt{-flip\_row}、\opt{-flip\_column} 翻转某一行或某一列；
+  \item 用 \opt{-swap\_rows}、\opt{-swap\_columns} 交换两行或两列。
+\end{itemize}
+
+例如，交换组 \texttt{my\_rp\_group} 的第 0 列与第 2 列：
+\begin{lstlisting}
+fc_shell> modify_rp_groups [get_rp_groups my_rp_group] \
+    -swap_columns {0 2}
+\end{lstlisting}
+
+再例如，翻转该组的第 1 列：
+\begin{lstlisting}
+fc_shell> modify_rp_groups [get_rp_groups my_rp_group] \
+    -flip_column 1
+\end{lstlisting}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.3cm}
+\textit{（原书 Figure 147/148：Swapping / Flipping Columns of a Relative Placement Group）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.3cm}}}
+\caption{列交换与列翻转示意}
+\label{fig:rp-modify}
+\end{figure}
+
+% ============================================================
+\section{为时钟 Sink 生成相对布局组}
+\subsection*{Generating Relative Placement Groups for Clock Sinks}
+
+在已完成布局的设计中，可以用 \cmd{create\_clock\_rp\_groups} 命令，为时钟 sink 及其驱动单元自动生成相对布局组。之后再执行布局与优化时，工具会依照这些自动生成的约束来放置时钟 sink 及其驱动单元，从而改善可绕线性、降低动态功耗。
+
+可以通过以下方式控制参与该自动分组的 sink 范围：
+\begin{itemize}
+  \item 用 \opt{-min\_sinks}、\opt{-max\_sinks} 指定单个驱动单元所驱动 sink 数量的下限与上限（默认下限为 2、上限为 128）；
+  \item 用 \opt{-timing\_driven} 选项决定是否排除时序关键 sink（默认会排除所有 slack 为负的 sink）；
+  \item 用 \opt{-cells} 指定要考虑的单元范围（默认考虑所有 sink）。
+\end{itemize}
+
+还可以通过以下方式控制生成的组的规模与形状：
+\begin{itemize}
+  \item 用 \opt{-distance} 指定同一组内 sink 之间允许的最大曼哈顿距离（默认 100 微米），超出该距离的 sink 会被划入不同的组；
+  \item 用 \opt{-max\_rp\_rows} 指定组的最大行数（默认 32）；
+  \item 用 \opt{-auto\_shape} 让工具依据单元的实际分布情况，自动决定组的行列数。
+\end{itemize}
+
+运行 \cmd{create\_clock\_rp\_groups} 前，设计必须已经完成布局；生成相应的时钟相对布局组之后，需要用 \cmd{reset\_placement} 重置布局，再用 \cmd{place\_opt} 重新执行布局与优化。
+
+% ============================================================
+\section{相对布局组的布局与合法化}
+\subsection*{Performing Placement and Legalization of Relative Placement Groups}
+
+\subsection{存在 Obstruction 时的相对布局}
+\subsubsection*{Relative Placement in a Design Containing Obstructions}
+
+在布局过程中，相对布局组会自动避开 DEF 文件中定义的、或者由 \cmd{create\_placement\_blockage} 命令创建的 placement blockage（obstruction）。当组的路径上存在这类障碍时，组可以被拆分成若干段跨越该障碍，同时仍然维持内部的相对布局关系。
+
+具体处理方式取决于障碍的高度：如果障碍高度低于某个阈值，相对布局单元会被垂直方向挪动以避开它；如果障碍高度超过该阈值，则整列单元会被水平方向整体挪动。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.3cm}
+\textit{（原书 Figure 149：Relative Placement in a Design Containing Obstructions）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.3cm}}}
+\caption{存在 Obstruction 时相对布局的处理方式}
+\label{fig:rp-obstruction}
+\end{figure}
+
+\subsection{对已布局设计做相对布局组合法化}
+\subsubsection*{Legalizing Relative Placement Groups in a Placed Design}
+
+要在一个已完成布局的设计上，只针对相对布局组做局部改善，可以用 \cmd{legalize\_rp\_groups} 命令——该命令只 legalize 相对布局组，不涉及非相对布局单元；也可以指定只对部分相对布局组生效。
+
+用 \opt{-prototype} 选项可以做一次快速 legalize，此时工具不保证所有合法性约束都被满足，因此该选项更适合在方案摸索阶段使用。
+
+用 \opt{-legalize\_over\_rp} 选项，可以允许某个相对布局组 legalize 时覆盖到其他相对布局组之上。例如，让组 \texttt{RP3} 可以合法化到 \texttt{RP1}、\texttt{RP2} 之上：
+\begin{lstlisting}
+fc_shell> legalize_rp_groups -legalize_over_rp RP3
+\end{lstlisting}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.3cm}
+\textit{（原书 Figure 150：Legalizing the RP3 Relative Placement Group Over Other Groups）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.3cm}}}
+\caption{允许某相对布局组覆盖其他组做 Legalize}
+\label{fig:rp-legalize-over}
+\end{figure}
+
+用 \cmd{legalize\_rp\_groups} 对一个或多个相对布局组做完 legalize 后，可能会与其他相对布局组或非相对布局单元产生新的重叠。此时应使用 \cmd{check\_legality} 命令检查是否存在重叠，再用 \cmd{legalize\_placement} 命令消除剩余的重叠问题。
+
+\subsection{在已布局设计中新增相对布局组}
+\subsubsection*{Creating New Relative Placement Groups in a Placed Design}
+
+也可以在一个已经布局完成的设计中新建相对布局组，再用 \cmd{place\_opt -from final\_place} 命令做增量式的相对布局与优化。需要注意，如果被选中纳入同一相对布局组的单元，在初始布局中彼此相距较远，这种增量式相对布局可能会拖累 QoR。
+
+\begin{lstlisting}
+fc_shell> create_rp_group -name new_rp -columns 1 -rows 2
+fc_shell> add_to_rp_group new_rp -cells U1 -column 0 -row 0
+fc_shell> add_to_rp_group new_rp -cells U2 -column 0 -row 1
+...
+fc_shell> place_opt -from final_place
+\end{lstlisting}
+
+如果是在已布局设计中新建组，并且通过 \cmd{set\_rp\_group\_options} 的 \opt{-x\_offset}、\opt{-y\_offset} 为其指定了锚点，也可以直接用 \cmd{legalize\_rp\_groups} 命令，把该新建组 legalize 到指定坐标上。相比重新跑一遍完整的 \cmd{place\_opt}，这种增量式做法能显著缩短运行时间。
+
+% ============================================================
+\section{分析相对布局组}
+\subsection*{Analyzing Relative Placement Groups}
+
+\subsection{布局前检查约束}
+\subsubsection*{Checking Relative Placement Groups Before Placement}
+
+在正式运行布局与优化之前，可以用 \cmd{check\_rp\_constraints} 命令，提前检查相对布局约束中可能导致布局失败（无论是致命的还是非致命的）的问题。
+
+\begin{lstlisting}
+fc_shell> check_rp_constraints rp_volt1
+\end{lstlisting}
+
+该命令会输出一份摘要，列出被检查的顶层相对布局组总数，以及其中可能无法满足约束的组数；对于存在潜在问题的组，还会给出具体的告警说明（例如某组的高度超过了其所在电压域或独占移动边界的高度限制）。
+
+\subsection{分析相对布局组的可布局性}
+\subsubsection*{Analyzing the Placeability of a Relative Placement Group}
+
+在正式布局之前，还可以用 \cmd{check\_rp\_constraints -analyze\_placement} 命令，判断某个相对布局组究竟能否被成功放置：
+\begin{itemize}
+  \item 用 \opt{-region} 或 \opt{-trials} 选项，把分析范围限制在 core 区域中的某个区域，或某个数量的随机采样点内；
+  \item 用 \opt{-no\_pdc}、\opt{-no\_adv}、\opt{-no\_rp\_constraints} 选项，分别在分析时忽略物理设计约束、高级设计规则或相对布局约束；
+  \item 用 \opt{-threshold} 选项，只报告那些“可放置比例”低于指定阈值的组——即在被分析的全部采样位置中，该组实际可以合法放置的位置占比低于此阈值时才会被列出。
+\end{itemize}
+
+\subsection{报告相对布局约束违例}
+\subsubsection*{Reporting Relative Placement Constraint Violations}
+
+布局与优化完成之后，可以用 \cmd{report\_rp\_groups} 命令识别布局问题和相对布局约束违例。使用该命令时，必须显式指定要分析的组名列表，或者用 \opt{-all} 选项分析全部相对布局组。
+
+默认情况下，该命令会报告以下四类组：已放置且无违例的组、已放置但存在非致命违例的组、因致命违例而放置失败的组，以及尚未放置的组。可以用表~\ref{tab:rp-report}中的选项，改变默认的报告范围。
+
+\begin{table}[htbp]
+\centering
+\caption{report\_rp\_groups 常用选项}
+\label{tab:rp-report}
+\begin{tabularx}{\textwidth}{lX}
+\toprule
+选项 & 作用 \\
+\midrule
+\opt{-critical} & 仅报告因致命相对布局违例而未能放置的组 \\
+\opt{-non\_critical} & 仅报告已放置但不满足相对布局约束的组 \\
+\opt{-unplaced} & 仅报告尚未放置的组 \\
+\opt{-verbose} & 输出更详细的信息 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+该命令也可以在布局与优化之前运行，用来提前确认设计中哪些相对布局组尚未被放置。
+
+\subsection{查询相对布局组}
+\subsubsection*{Querying Relative Placement Groups}
+
+用 \cmd{get\_rp\_groups} 命令，可以按对象或属性值查询相关的相对布局组。例如，查询设计中全部相对布局组：
+\begin{lstlisting}
+fc_shell> get_rp_groups
+{RP_TA RP_TCO RP_HO_1 RP_HO_2 RP_HO_3 RP_HO_4 RP_THO}
+\end{lstlisting}
+
+只查询顶层相对布局组，可以加 \opt{-top} 选项：
+\begin{lstlisting}
+fc_shell> get_rp_groups -top
+{RP_TA RP_TCO RP_THO}
+\end{lstlisting}
+
+查询包含某个 leaf cell 的相对布局组，可以用 \opt{-of\_objects} 选项：
+\begin{lstlisting}
+fc_shell> get_rp_groups -of_objects U129
+{RP_HO_4}
+\end{lstlisting}
+
+\subsection{在 GUI 中分析相对布局}
+\subsubsection*{Analyzing Relative Placement in the GUI}
+
+Fusion Compiler 图形界面提供了专门用于可视化、分析相对布局组的工具，包括 Relative Placement (RP) Groups Visual Mode 与 Relative Placement (RP) Net Connection Visual Mode 两种可视化模式。更详细的用法说明请参阅《Fusion Compiler Graphical User Interface User Guide》中关于 Map 与 Visual Modes 的相关主题。
+
+% ============================================================
+\section{保存相对布局信息}
+\subsection*{Saving Relative Placement Information}
+
+当使用 \cmd{save\_lib} 保存设计库时，相对布局信息会随之自动保存到设计库数据库中。
+
+除此之外，也可以用 \cmd{write\_rp\_groups} 命令，把相对布局组及其所含对象、选项设置导出为一份可重新执行的 Tcl 脚本文件，用 \opt{-file\_name} 指定输出文件名。使用该命令时，必须显式指定要导出的相对布局组，或者用 \opt{-all} 导出全部相对布局组。
+
+默认情况下，\cmd{write\_rp\_groups} 只会写出用于创建指定组、以及向其中添加 leaf cell、层次化子组与 blockage 的命令，但不会写出用于生成层次化子组自身内部结构的命令。可以用表~\ref{tab:rp-write}中的选项调整默认行为。
+
+\begin{table}[htbp]
+\centering
+\caption{write\_rp\_groups 常用选项}
+\label{tab:rp-write}
+\begin{tabularx}{\textwidth}{lX}
+\toprule
+选项 & 作用 \\
+\midrule
+\opt{-hierarchical} & 把相对布局层次结构中所有层级的组都写出；若省略该选项，只写出顶层组，不写子组 \\
+\opt{-create} & 只写出 \cmd{create\_rp\_group} 命令 \\
+\opt{-cell} & 只写出 \cmd{add\_to\_rp\_group -cells} 命令 \\
+\opt{-rp\_group} & 只写出 \cmd{add\_to\_rp\_group -rp\_group} 命令 \\
+\opt{-blockage} & 只写出 \cmd{add\_to\_rp\_group -blockage} 命令 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+% ============================================================
+\section{相对布局命令汇总}
+\subsection*{Summary of Relative Placement Commands}
+
+表~\ref{tab:rp-cmd-summary} 汇总了本章涉及的主要相对布局命令及其对应小节，便于查阅。
+
+\begin{table}[htbp]
+\centering
+\caption{相对布局主要命令一览}
+\label{tab:rp-cmd-summary}
+\begin{tabularx}{\textwidth}{lX}
+\toprule
+命令 & 对应小节 \\
+\midrule
+\cmd{create\_rp\_group}, \cmd{remove\_rp\_groups} & 创建相对布局组 \\
+\cmd{add\_to\_rp\_group}, \cmd{remove\_from\_rp\_group} & 向组中添加对象 \\
+\cmd{set\_rp\_group\_options}, \cmd{remove\_rp\_group\_options} & 设置相对布局组选项 \\
+\cmd{modify\_rp\_groups} & 修改相对布局组结构 \\
+\cmd{create\_clock\_rp\_groups} & 为时钟 Sink 生成相对布局组 \\
+\cmd{legalize\_rp\_groups} & 对已布局设计做相对布局组合法化 \\
+\cmd{check\_rp\_constraints} & 布局前检查约束 / 分析可布局性 \\
+\cmd{report\_rp\_groups} & 报告相对布局约束违例 \\
+\cmd{get\_rp\_groups} & 查询相对布局组 \\
+\cmd{write\_rp\_groups} & 保存相对布局信息 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{seeAlsoBox}
+关于设计准备、放置约束设置、通用布局与优化流程，请参阅前述各章内容。
+\end{seeAlsoBox}

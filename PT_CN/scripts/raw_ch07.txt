@@ -1,0 +1,3028 @@
+                                                                                       Feedback
+
+
+
+
+7
+Clocks
+     An essential part of timing analysis is accurately specifying clocks and clock effects, such
+     as latency (delay from the clock source) and uncertainty (amount of skew or variation in
+     the arrival of clock edges). To learn how to specify, report, and analyze clocks, see
+     •   Clock Overview
+     •   Specifying Clocks
+     •   Specifying Clock Characteristics
+     •   Using Multiple Clocks
+     •   Clock Sense
+     •   Specifying Pulse Clocks
+     •   Timing PLL-Based Designs
+     •   Specifying Clock-Gating Setup and Hold Checks
+     •   Specifying Internally Generated Clocks
+     •   Generated Clock Edge Specific Source Latency Propagation
+     •   Clock Mesh Analysis
+
+
+Clock Overview
+     PrimeTime supports the following types of clock information:
+     Multiple clocks
+         You can define multiple clocks that have different waveforms and frequencies.
+         Clocks can have real sources in the design (ports and pins) or can be virtual. A
+         virtual clock has no real source in the design itself.
+     Clock network delay and skew
+         You specify the delay of the clock network relative to the source (clock latency)
+         and the variation of arrival times of the clock at the destination points in the
+         clock network (clock skew). For multiclock designs, you can specify interclock
+
+
+PrimeTime® User Guide                                                                          204
+T-2022.03
+                                                                                         Feedback
+Chapter 7: Clocks
+Specifying Clocks
+
+
+         skew. You can specify an ideal delay of the clock network for analysis before
+         clock tree generation, or you can specify that the delay needs to be computed
+         by PrimeTime for analysis after clock tree generation. PrimeTime also supports
+         checking the minimum pulse width along a clock network.
+     Gated clocks
+         You can analyze a design that has gated clocks. A gated clock is a clock signal
+         under the control of gating logic (other than simple buffering or inverting a clock
+         signal). PrimeTime performs both setup and hold checks on the gating signal.
+     Generated clocks
+         You can analyze a design that has generated clocks. A generated clock is a
+         clock signal generated from another clock signal by a circuit within the design
+         itself, such as a clock divider.
+     Clock transition times
+         You can specify the transition times of clock signals at register clock pins. The
+         transition time is the amount of time it takes for the signal to change from one
+         logic state to another.
+
+
+Specifying Clocks
+     You need to specify all clocks used in the design. The clock information includes:
+     •   Period and waveform
+     •   Latency (insertion delay)
+     •   Uncertainty (skew)
+     •   Divided and internally generated clocks
+     •   Clock-gating checks
+     •   Fixed transition time for incomplete clock networks
+     PrimeTime supports analysis of the synchronous portion of a design. PrimeTime analyzes
+     paths between registers or ports. For a design with multiple interacting clocks, PrimeTime
+     determines phase relationship between the startpoint and endpoint clocks. The clocks can
+     be single phase, multiple phase, or multiple frequency clocks.
+
+
+     Creating Clocks
+     You must specify all of the clocks in the design by using the create_clock command.
+     This command creates a clock at the specified source. A source can be defined at an input
+
+
+
+PrimeTime® User Guide                                                                          205
+T-2022.03
+                                                                                      Feedback
+Chapter 7: Clocks
+Specifying Clocks
+
+
+     port of the design or an internal pin. PrimeTime traces the clock network automatically so
+     the clock reaches all registers in the transitive fanout of its source.
+     A clock you create with the create_clock command has an ideal waveform that ignores
+     the delay effects of the clock network. After you create the clock, you must describe the
+     clock network to perform accurate timing analysis. See Specifying Clock Characteristics.
+     The create_clock command creates a path group having the same name as the clock.
+     This group contains all paths ending at points clocked by this clock. For information about
+     path groups, see Timing Path Groups.
+     To create a clock on ports C1 and CK2 with a period of 10, a rising edge at 2, and a falling
+     edge at 4, enter
+     pt_shell> create_clock -period 10 -waveform {2 4} {C1 CK2}
+
+     The resulting clock is named C1 to correspond with the first source listed. C1 produces the
+     following waveform.
+
+Figure 36     C1 clock waveform
+
+             C1
+                    0   2   4                 10    12     14
+
+
+     PrimeTime supports analyzing multiple clocks propagated to a single register. You
+     can define multiple clocks on the same port or pin by using the -add option of the
+     create_clock command.
+
+
+     Creating a Virtual Clock
+     You can use the create_clock command to define virtual clocks for signals that interface
+     to external (off-chip) clocked devices. A virtual clock has no actual source in the current
+     design, but you can use it for setting input or output delays.
+     To create a virtual clock named vclk, enter
+     pt_shell> create_clock -period 8 -name vclk -waveform {2 5}
+
+     The vclk clock has the following waveform.
+
+Figure 37     vclk clock waveform
+
+            vclk
+
+                    0   2       5       8     10      13
+
+
+
+
+PrimeTime® User Guide                                                                         206
+T-2022.03
+                                                                                          Feedback
+Chapter 7: Clocks
+Specifying Clock Characteristics
+
+
+
+      Selecting Clock Objects
+      The get_clocks command selects clocks for a command to use, for example, to ensure
+      that a command works on the CLK clock and not on the CLK port.
+      To report the attributes of clocks having names starting with PHI1 and a period less than or
+      equal to 5.0, enter
+      pt_shell> report_clock [get_clocks -filter "period <= 5.0" PHI1*]
+
+
+      Applying Commands to All Clocks
+      The all_clocks command is equivalent to the PrimeTime get_clocks * command.
+      The all_clocks command returns a token representing a collection of clock objects. The
+      actual clock names are not printed.
+      To disable time borrowing for all clocks, enter
+      pt_shell> set_max_time_borrow 0 [all_clocks]
+
+
+      Removing Clock Objects
+      To remove a list of clock objects or clocks, use the remove_clock command.
+      Note:
+         The reset_design command removes clocks as well as other information.
+      To remove all clocks with names that start with CLKB, enter
+      pt_shell> remove_clock [get_clocks CLKB*]
+
+      To remove all clocks, enter
+      pt_shell> remove_clock -all
+
+
+
+Specifying Clock Characteristics
+      Clocks that you create with the create_clock command have perfect waveforms that
+      ignore the delay effects of the clock network. For accurate timing analysis, you must
+      describe the clock network. The main characteristics of a clock network are latency and
+      uncertainty.
+      Latency consists of clock source latency and clock network latency. Clock source latency
+      is the time a clock signal takes to propagate from its ideal waveform origin point to the
+      clock definition point in the design. Clock network latency is the time a clock signal (rise or
+      fall) takes to propagate from the clock definition point in the design to a register clock pin.
+
+
+PrimeTime® User Guide                                                                             207
+T-2022.03
+                                                                                        Feedback
+Chapter 7: Clocks
+Specifying Clock Characteristics
+
+
+      Clock uncertainty is the maximum difference between the arrival of clock signals at
+      registers in one clock domain or between domains. This is also called skew. Because
+      clock uncertainty can have an additional margin built in to tighten setup or hold checks,
+      you can specify different uncertainties for setup and hold checks on the same path.
+
+
+      Setting Clock Latency
+      PrimeTime provides two methods for representing clock latency. You can either
+      •   Allow PrimeTime to compute latency by propagating the delays along the clock
+          network. This method is very accurate, but it can be used only after clock tree
+          synthesis has been completed.
+      •   Estimate and specify explicitly the latency of each clock. You can specify this latency
+          on individual ports or pins. Any register clock pins in the transitive fanout of these
+          objects are affected and override any value set on the clock object. This method is
+          typically used before clock tree synthesis.
+
+      Setting Propagated Latency
+      You can have PrimeTime automatically determine clock latency by propagating delays
+      along the clock network. This process produces highly accurate results after clock tree
+      synthesis and layout, when the cell and net delays along the clock network are all back-
+      annotated or net parasitics have been calculated. The edge times of registers clocked by a
+      propagated clock are skewed by the path delay from the clock source to the register clock
+      pin. Using propagated latency is appropriate when your design has actual clock trees and
+      annotated delay or parasitics.
+      To propagate clock network delays and automatically determine latency at each register
+      clock pin, enter
+      pt_shell> set_propagated_clock [get_clocks CLK]
+
+      You can set the propagated clock attribute on clocks, ports, or pins. When set on a port or
+      pin, it affects all register clock pins in the transitive fanout of the object.
+      To remove a propagated clock specification on clocks, ports, pins, or cells in the current
+      design, use the remove_propagated_clock command.
+
+      Specifying Clock Source Latency
+      You can specify clock source latency for ideal or propagated clocks. Source latency is the
+      latency from the ideal waveform to the source pin or port. The latency at a register clock
+      pin is the sum of clock source latency and clock network latency.
+      For internally generated clocks, PrimeTime can automatically compute the clock source
+      latency if the master clock of the generated clock has propagated latency and there is no
+      user-specified value for generated clock source latency.
+
+
+PrimeTime® User Guide                                                                             208
+T-2022.03
+                                                                                        Feedback
+Chapter 7: Clocks
+Specifying Clock Characteristics
+
+
+      Propagated latency calculation is usually inaccurate for prelayout design because the
+      parasitics are unknown. For prelayout designs, you can estimate the latency of each clock
+      and directly set that estimation with the set_clock_latency command. This method,
+      known as ideal clocking, is the default method for representing clock latency in PrimeTime.
+      The set_clock_latency command sets the latency for one or more clocks, ports, or pins.
+      To specify an external uncertainty for source latency, use the -early and -late options of
+      the set_clock_latency command. For example, consider a source latency that can vary
+      from 1.5 to 2.5 ns.
+
+Figure 38       External source latency
+
+                                                                              Your design
+                                                             Path
+
+
+                                                                 Combinational
+                                                D     Q                                  D      Q
+                                                                 logic
+
+       Clock
+                                   CLK
+       source
+                   Delay =         pin
+                   1.5 to 2.5 ns
+
+
+
+      To specify this type of source latency, you can use commands such as the following:
+      pt_shell> create_clock -period 10 [get_ports CLK]
+      pt_shell> set_clock_latency 1.5 -source -early [get_clocks CLK]
+      pt_shell> set_clock_latency 2.5 -source -late [get_clocks CLK]
+
+      PrimeTime uses the more conservative source latency value (either early or late) for each
+      startpoint and endpoint clocked by that clock. For setup analysis, it uses the late value for
+      each startpoint and the early value for each endpoint. For hold analysis, it uses the early
+      value for each startpoint and the late value for each endpoint. The following figure shows
+      the early and late timing waveforms and the clock edges used for setup and hold analysis
+      in the case where the startpoint and endpoint are clocked by the same clock.
+
+
+
+
+PrimeTime® User Guide                                                                           209
+T-2022.03
+                                                                                            Feedback
+Chapter 7: Clocks
+Specifying Clock Characteristics
+
+
+Figure 39      Early and late source latency waveforms
+
+            Clock             Source                                              Source
+            source            latency                                             latency
+
+
+            Early (+1.5 ns)                                        Setup
+
+                                   Hold
+
+            Late (+2.5 ns)
+
+
+
+                     0                        5                            10
+
+
+
+      The following examples demonstrate how to set different source latency values for rising
+      and falling edges.
+      To set the expected rise latency to 1.2 and the fall latency to 0.9 for CLK, enter
+      pt_shell> set_clock_latency -rise 1.2 [get_clocks CLK]
+      pt_shell> set_clock_latency -fall 0.9 [get_clocks CLK]
+
+      To specify an early rise and fall source latency of 0.8 and a late rise and fall source latency
+      of 0.9 for CLK1, enter
+      pt_shell> set_clock_latency 0.8 -source -early [get_clocks CLK1]
+      pt_shell> set_clock_latency 0.9 -source -late [get_clocks CLK1]
+
+      The remove_clock_latency command removes user-specified clock network or source
+      clock latency information from specified objects.
+
+      Dynamic Effects of Clock Latency
+      Dynamic effects on the clock source latency, such as phase-locked loop (PLL) clock jitter
+      can be modeled using the -dynamic option of the set_clock_latency command. This
+      option allows you to specify a dynamic component of the clock source latency. Clock
+      reconvergence pessimism removal (CRPR) handles the dynamic component of clock
+      latency in the same way as it handles the PrimeTime SI delta delays. For more information
+      about CRPR, see CRPR With Dynamic Clock Arrivals.
+      You can model clock jitter using the set_clock_uncertainty command. However, the
+      clock uncertainty settings do not affect the calculation of crosstalk arrival windows and
+      are not considered by CRPR. The set_clock_latency command allows you to specify
+      clock jitter as dynamic source clock latency. The clock jitter specified in this manner
+      properly affects the calculation of arrival windows. The static and dynamic portions are
+      also correctly handled by CRPR.
+
+
+
+PrimeTime® User Guide                                                                             210
+T-2022.03
+                                                                                        Feedback
+Chapter 7: Clocks
+Specifying Clock Characteristics
+
+
+      For example, to specify an early source latency of 3.0 and a late source latency of 5.0 for
+      clock CLK:
+      pt_shell> set_clock_latency -early -source 3.0 [get_ports CLK]
+      pt_shell> set_clock_latency -late -source 5.0 [get_ports CLK]
+
+      To model external dynamic effects, such as jitter in the clock source, you can adjust the
+      early and late source latency values. For example, to add plus or minus 0.5 more time
+      units of dynamic latency to the static latency:
+      pt_shell> set_clock_latency -early -source 2.5               \
+                -dynamic -0.5 [get_clocks CLK]
+
+      pt_shell> set_clock_latency -source -late 5.5              \
+                -dynamic 0.5 [get_clocks CLK]
+
+      The first of these two commands specifies a total early source latency of 2.5, consisting
+      of static source latency of 3.0 and dynamic source latency of –0.5. The second command
+      specifies a total late source latency of 5.5, consisting of static source latency of 5.0 and
+      dynamic source latency of 0.5.
+      If dynamic latency has been specified as in the foregoing example and the clock named
+      CLK has been set to use propagated latency, the total latency (static and dynamic) is used
+      for delay calculations. However, for a timing path that uses different clock edges for launch
+      and capture, CRPR uses only the static latency, not the dynamic latency, leading up to
+      the common point in the clock path, and removes the resulting static pessimism from the
+      timing results.
+      The report_timing command reports the static and dynamic component of clock latency
+      separately. The report_crpr command reports the clock reconvergence pessimism
+      (CRP) time values calculated for both static and dynamic conditions, and the choice from
+      among those values actually used for pessimism removal. For more information about the
+      report_crpr command, see Reporting CRPR Calculations.
+
+
+      Setting Clock Uncertainty
+      You can model the expected uncertainty (skew) for a prelayout design with setup or hold
+      and rise or fall uncertainty values. PrimeTime subtracts a setup uncertainty value from the
+      data required time when it checks setup time (maximum paths). PrimeTime adds a hold
+      uncertainty value to the data required time when it checks the hold time (minimum paths).
+      If you specify a single uncertainty value, PrimeTime uses it for both setup checks and hold
+      checks.
+      You can specify the uncertainty or skew characteristics of clocks by using the
+      set_clock_uncertainty command. The command specifies the amount of time variation
+      in successive edges of a clock or between edges of different clocks. It captures the actual
+      or predicted clock uncertainty.
+
+
+PrimeTime® User Guide                                                                             211
+T-2022.03
+                                                                                       Feedback
+Chapter 7: Clocks
+Specifying Clock Characteristics
+
+
+      You can specify simple clock uncertainty or interclock uncertainty. Simple uncertainty is
+      the variation in the generation of successive edges of a clock with respect to the exact,
+      nominal times. You specify one or more objects, which can be clocks, ports, or pins. The
+      uncertainty value applies to all capturing latches clocked by the specified clock or whose
+      clock pins are in the fanout of the specified ports or pins.
+      Interclock uncertainty is more specific and flexible, supporting different uncertainties
+      between clock domains. It is the variation in skew between edges of different clocks. You
+      specify a “from” clock using the -from, -rise_from, or -fall_from option and a “to” clock
+      the -to, -rise_to, or -fall_to option. The interclock uncertainty value applies to paths
+      that start at the “from” clock and end at the “to” clock. Interclock uncertainty is relevant
+      when the source and destination registers are clocked by different clocks. You can define
+      uncertainty similarly between two clock pins driven from the same clock, or you can define
+      it as an interclock uncertainty between two registers with different clocks.
+
+Figure 40      Example of interclock uncertainty
+
+
+                                   ff1                            ff2
+                                   clk1                           clk2
+            CLK1
+                                            CLK2
+
+
+
+                 CLK1
+                                     max clock skew
+                  CLK2
+
+
+
+      When performing a setup or hold check, PrimeTime adjusts the timing check according
+      to the worst possible difference in clock edge times. For example, for a setup check, it
+      subtracts the uncertainty value from the data required time, thus requiring the data to
+      arrive sooner by that amount, to account for a late launch and an early capture with the
+      worst clock skew.
+      When a path has both simple clock uncertainty and interclock uncertainty, the interclock
+      uncertainty value is used, for example
+      pt_shell> set_clock_uncertainty 5 [get_clocks CLKA]
+      pt_shell> set_clock_uncertainty 2 -from [get_clocks CLKB] \
+                -to [get_clocks CLKA]
+
+      When the path is from CLKB to CLKA, the interclock uncertainty value 2 is used.
+
+
+
+
+PrimeTime® User Guide                                                                            212
+T-2022.03
+                                                                                          Feedback
+Chapter 7: Clocks
+Specifying Clock Characteristics
+
+
+      The following commands specify interclock uncertainty for all possible interactions of clock
+      domains. If you have paths from CLKA to CLKB, and CLKB to CLKA, you must specify the
+      uncertainty for both directions, even if the value is the same. For example:
+      pt_shell> set_clock_uncertainty 2 -from [get_clocks CLKA] \
+                -to [get_clocks CLKB]
+      pt_shell> set_clock_uncertainty 2 -from [get_clocks CLKB] \
+                -to [get_clocks CLKA]
+
+      To set simple clock uncertainty (setup and hold) for all paths leading to endpoints clocked
+      by U1/FF*/CP, enter
+      pt_shell> set_clock_uncertainty 0.45 [get_pins U1/FF*/CP]
+
+      To set a simple setup uncertainty of 0.21 and a hold uncertainty of 0.33 for all paths
+      leading to endpoints clocked by CLK1, enter
+      pt_shell> set_clock_uncertainty -setup 0.21 [get_clocks CLK1]
+      pt_shell> set_clock_uncertainty -hold 0.33 [get_clocks CLK1]
+
+      If you set simple uncertainty on a clock port or pin, the uncertainty applies to capturing
+      latches whose clock pins are in the transitive fanout of the specified object. If different
+      uncertainty values are propagated from multiple ports or pins to inputs of a clock MUX,
+      the worst uncertainty setting applies to the entire fanout of the MUX, even when the
+      associated clock is disabled at the MUX. To ensure usage of the proper uncertainty value
+      in this situation, set the uncertainty on the clock object rather than on a clock port or clock
+      pin.
+      To remove clock uncertainty information from clocks, ports, pins, or cells, or between
+      specified clocks, use the remove_clock_uncertainty command removes uncertainty.
+
+
+      Setting the Clock Jitter
+      To set clock jitter on a master clock, run the set_clock_jitter command. This command
+      sets the same clock jitter properties on all clocks generated from the specified master
+      clock. If you do not specify a master clock, the command sets the jitter on all clocks.
+
+      Removing the Clock Jitter
+      To remove the clock jitter, run the remove_clock_jitter command. This command
+      automatically removes the clock jitter properties from the generated clocks as well. If you
+      do not specify a master clock, the command removes the jitter from all clocks.
+
+
+
+
+PrimeTime® User Guide                                                                             213
+T-2022.03
+                                                                                           Feedback
+Chapter 7: Clocks
+Specifying Clock Characteristics
+
+
+      Reporting the Clock Jitter
+      To report the clock jitter, run the report_clock_jitter command. The report shows the
+      cycle jitter, duty-cycle jitter, and the master clock with jitter that is used by the generated
+      clocks:
+      pt_shell> report_clock_jitter
+
+      ****************************************
+      Report : clock jitter
+      ...
+      ****************************************
+
+      Clock    cycle jitter   duty-cycle jitter    master clock with jitter
+      ---------------------------------------------------------------------
+      mclk        2                   3                mclk
+      gclk        2                   3                mclk
+
+      To see the effects of clock jitter, run the report_timing command:
+      pt_shell> set_clock_uncertainty 0.3 CLK -rise
+      pt_shell> set_clock_jitter -cycle 0.4 CLK
+      pt_shell> report_timing -from ff1 -to ff2 -path_type full_clock
+
+      Point                                   Incr     Path
+      ---------------------------------------------------------
+      clock CLK   (rise edge)                 0.00     0.00
+      clock network delay (ideal)             2.00     2.00
+      ff1/clk                                 0.00     2.00 r
+      data arrival time                                2.00
+      …
+      clock CLK   (rise edge)                 10.00    10.00
+      clock network delay (ideal)             1.75     11.75
+      clock uncertainty                      -0.30     11.35
+      clock jitter                           -0.40     10.95
+      ff2/clk                                          10.95 r
+      library setup time                      -0.05    10.90
+      data required time                               10.90
+      ---------------------------------------------------------
+      data required time                               10.90
+
+
+      Estimating Clock Pin Transition Time
+      Transition times are typically computed for the ports, cells, and nets in the clock network.
+      If the clock network is not complete, the result can be inaccurate transition times on
+      register clock pins. For example, a single buffer might be driving 10,000 register clock pins
+      because the clock tree has not been constructed. This can cause a long transition time
+      on the register clock pins affecting clock-to-output delays, as well as setup and hold delay
+      calculation.
+
+
+
+PrimeTime® User Guide                                                                              214
+T-2022.03
+                                                                                         Feedback
+Chapter 7: Clocks
+Specifying Clock Characteristics
+
+
+      You can estimate the clock transition time for an entire clock network using the
+      set_clock_transition command. To specify a nonzero transition time for an ideal clock,
+      use the set_clock_transition command. For example:
+      pt_shell> set_clock_transition 0.64 -fall [get_clocks CLK1]
+
+      The transition time value applies to all nets directly feeding sequential elements clocked by
+      the specified clock.
+      Use the -rise or -fall option of the command to specify a separate transition time for
+      only rising or only falling edges of the clock. Use the -min or -max option to specify the
+      transition time for minimum operating conditions or maximum operating conditions.
+      To remove the estimated clock pin transition time, use the remove_clock_transition
+      command.
+
+
+      Checking the Minimum Pulse Width
+      Minimum pulse width checks are important to ensure proper operation of sequential
+      circuits. The pulse width of the original clock might be reduced because of gating logic or
+      delay characteristics of the clock network. Two problems can result:
+      •   If the clock pulse is too small at a register clock pin, the device might not capture data
+          properly. Library cell pins might have a minimum pulse width limit, which is checked by
+          the report_constraint command.
+      •   The pulse width might shrink so much at some point in the clock network that it is not
+          propagated further. PrimeTime can check the entire clock network to ensure that the
+          pulse does not shrink below a certain threshold.
+
+   Figure 41      Clock network pulse width check
+
+                                                          FF1
+
+                                Combinational
+                                   logic             D          Q
+
+
+                           U1              U2
+                Data   B           Z   A        Z
+                                                     CP
+                CLK    A
+
+
+                Clock network pulse width check
+
+                U1/A
+                U1/Z
+
+                U2/Z
+
+
+
+PrimeTime® User Guide                                                                              215
+T-2022.03
+                                                                                        Feedback
+Chapter 7: Clocks
+Specifying Clock Characteristics
+
+
+      No default is assumed for clock tree pulse width checks. To specify the constraint for
+      normal non-pulse generator for clocks, cells, pins, ports, and the current design, use the
+      set_min_pulse_width command. To constrain the pulse generator networks, use the
+      set_pulse_clock_min_width and set_pulse_clock_max_width commands.
+
+      Note:
+         The report_constraint command checks minimum pulse width for register
+         clock pins and for clock networks.
+      Note:
+         You can also specify minimum pulse width on clock pins in the library cell
+         description.
+      To remove minimum pulse width checks for clock signals in a clock tree or at sequential
+      devices, use the remove_min_pulse_width command.
+      By default, the clock uncertainty specified by the set_clock_uncertainty command
+      applies to all types of timing constraints, including pulse width checking. You can optionally
+      specify whether to apply clock uncertainty to pulse width checking, and if so, whether
+      to apply only setup or only hold uncertainty, or both. To use this option, set the following
+      variable:
+      set_app_var timing_include_uncertainty_for_pulse_checks \
+        none | setup_only | hold_only | setup_hold
+
+      The default is setup_hold, which applies both setup and hold uncertainty to pulse width
+      checking.
+
+      Pulse Width Measurement Thresholds
+      By default, the tool measures the width of a pulse where the signal waveform crosses
+      the voltage threshold at 50 percent of the supply voltage. You can set the measurement
+      threshold to any fraction of the supply voltage between 0.0 and 1.0 for clock network pins.
+      For more conservative minimum pulse width checking, set the threshold to something less
+      than 0.5 for low pulses and something more than 0.5 for high pulses. For example,
+      set delay_calc_waveform_analysis full_design     # Required for analysis
+      set timing_enable_min_pulse_width_waveform_adjustment true # Enable
+      set timing_min_pulse_width_low_pulse_threshold 0.12    # Low threshold
+      set timing_min_pulse_width_high_pulse_threshold 0.88   # High threshold
+      report_min_pulse_width -path_type short ...      # Perform check
+
+
+
+
+PrimeTime® User Guide                                                                           216
+T-2022.03
+                                                                                         Feedback
+Chapter 7: Clocks
+Specifying Clock Characteristics
+
+
+Figure 42      Minimum Pulse Width Checking Thresholds
+
+                                                         High pulse
+                                                    threshold = 0.88
+                                                                               width
+                                           Default threshold = 0.50
+                     width
+                                        Low pulse
+                                        threshold = 0.12
+
+
+
+      A report generated by the report_min_pulse_width -path_type ... command shows
+      path adjustments for nondefault thresholds as “open edge threshold voltage adjustment”
+      and “close edge threshold voltage adjustment.”
+
+      Voltage Swing Checking
+      You can perform voltage swing checking on clock network pins. This check determines
+      whether a high pulse gets close enough to the power rail voltage, and whether a low pulse
+      gets close enough to the ground rail voltage.
+      set delay_calc_waveform_analysis full_design # Required for analysis
+      set timing_enable_voltage_swing true         # Enable voltage swing check
+      set timing_voltage_swing_low_pulse_threshold 0.10 # Low pulse threshold
+      set timing_voltage_swing_high_pulse_threshold 0.90 # High pulse threshold
+      report_min_pulse_width -voltage_swing ...    # Perform check
+
+Figure 43      Voltage Swing Checking Thresholds
+
+                                                         High pulse                    Pass
+                                                    threshold = 0.90
+                                                                                        Fail
+
+
+                              Fail      Low pulse
+                             Pass       threshold = 0.10
+
+
+
+      Voltage swing checking is performed as a special case of a minimum pulse width check,
+      with the minimum width set to 0.0 and the width measurement made at a specified fraction
+      of the supply voltage. A pulse of any width that reaches or crosses the threshold passes
+      the voltage swing check. A pulse that fails to cross the threshold is reported as a violation.
+      For a pulse that passes the check, the positive slack is reported as the width of the pulse,
+      measured where the waveform crosses the threshold voltage.
+
+
+
+
+PrimeTime® User Guide                                                                           217
+T-2022.03
+                                                                                        Feedback
+Chapter 7: Clocks
+Specifying Clock Characteristics
+
+
+
+      Minimum Period Checking
+      Minimum period checking looks for violations of the min_period constraint for a cell pin,
+      as defined in the cell library. This constraint requires the time between successive arrivals
+      of clock edges of the same type (rising or falling) to be at least a specified value.
+      To perform minimum period checking, use one of these commands:
+      •   report_min_period [-verbose] ...
+
+      •   report_constraint -min_period [-verbose] ...
+
+      •   report_analysis_coverage -check_type min_period
+
+      The following example shows how the tool calculates and reports the minimum period
+      check with the report_min_period command.
+      pt_shell> report_min_period -path_type full_clock uff2/CP
+      ...
+        Pin: uff2/CP
+        Related clock: clk
+        Check: sequential_clock_min_period
+
+          Point                                       Incr     Path
+          ----------------------------------------------------------
+          clock clk' (fall edge)                    0.00     0.00
+          clock source latency                      0.20     0.20
+          clk (in)                                  0.00     0.20 r
+          ckbf1/Y (IBUFFX2_HVT)                     1.11 H   1.31 f
+          ckbf2/Y (INVX1_HVT)                       0.08     1.39 r
+          ckbf3/Y (INVX1_HVT)                       0.03     1.41 f
+          uff2/CP (FD1)                            -0.05     1.37 f
+          open edge clock latency                            1.37
+
+          clock clk' (fall edge)                    3.50     3.50
+          clock source latency                      0.20     3.70
+          clk (in)                                  0.00     3.70 r
+          ckbf1/Y (IBUFFX2_HVT)                     0.81 H   4.51 f
+          ckbf2/Y (INVX1_HVT)                       0.06     4.57 r
+          ckbf3/Y (INVX1_HVT)                       0.02     4.59 f
+          uff2/CP (FD1)                            -0.04     4.55 f
+          clock reconvergence pessimism             0.32     4.87
+          clock uncertainty                        -0.02     4.85
+          close edge clock latency                           4.85
+          ----------------------------------------------------------
+          required min period                                3.50
+          actual period                                      3.48
+          ----------------------------------------------------------
+          slack (VIOLATED)                                  -0.02
+
+
+
+
+PrimeTime® User Guide                                                                           218
+T-2022.03
+                                                                                         Feedback
+Chapter 7: Clocks
+Using Multiple Clocks
+
+
+     In this example, the report_min_period command reports a minimum period violation
+     at the CP pin of cell uff2. It shows two successive falling edges arriving at the pin with a
+     spacing of less than 3.50 time units, the min_period constraint for that pin.
+     The “open edge clock latency” is the latest arrival time of the first edge, taking into account
+     the maximum delays through the cells in the clock network.
+     The “close edge clock latency” is the earliest arrival time of the second edge, taking
+     into account the minimum delays through the same cells in the clock network. It also
+     adds back clock reconvergence pessimism, which lessens the calculated violation; and
+     subtracts clock uncertainty, which contributes to the calculated violation.
+     The “actual period” is the “close edge clock latency” minus the “open edge clock latency.”
+     In this example, the actual period is less than the required period, resulting in a reported
+     slack of –0.02.
+
+
+Using Multiple Clocks
+     When multiple clocks are defined for a design, the relationships between the clock
+     domains depend on how the clocks are generated and how they are used. The
+     relationship between two clocks can be synchronous, asynchronous, or exclusive, as
+     shown by the examples in the following figure.
+
+
+
+
+PrimeTime® User Guide                                                                               219
+T-2022.03
+                                                                                    Feedback
+Chapter 7: Clocks
+Using Multiple Clocks
+
+
+Figure 44     Synchronous, asynchronous, and exclusive clocks
+
+
+
+                                                                  CK1 and CK2 are
+                                                                  SYNCHRONOUS
+                                    D        Q
+                                                        CK2
+                                            QN
+                                                      create_clock -period 2 -name CK1 \
+                                                        [get_ports CKP1]
+               CK1      CKP1
+                                                      create_generated_clock -name CK2 \
+                                                        -source [get_ports CKP1] \
+                                                        -divide_by 2 [get_pins U1/Q]
+
+
+                                                                  CK1 and CK2 are
+                               On-chip                            ASYNCHRONOUS
+                               oscillator            CK2
+
+                                                     create_clock -period 2 -name CK1 \
+               CK1      CKP2                           [get_ports CKP1]
+                                                     create_clock -period 6 -name CK2 \
+                                                       [get_pins OSC/OUT]
+                                                     set_clock_groups -asynchronous \
+                                                       -group {CK1} -group {CK2}
+
+
+
+                                                                  CK1 and CK2 are
+               CK1      CKP1        0
+                                                                  EXCLUSIVE
+               CK2      CKP2        1
+                                                 create_clock -period 2 -name CK1 \
+                                                   [get_ports CKP1]
+                                                 create_clock -period 8 -name CK2 \
+                        SEL                        [get_ports CKP2]
+                                                 set_clock_groups -logically_exclusive \
+                                                    -group {CK1} -group {CK2}
+
+
+
+     For PrimeTime to analyze paths between different clock domains correctly, you might need
+     to specify false paths between clocks, exclude one or more clocks from consideration
+     during the analysis, or specify the nature of the relationships between different clocks.
+
+
+     Synchronous Clocks
+     Two clocks are synchronous with respect to each other if they share a common source
+     and have a fixed phase relationship. Unless you specify otherwise, PrimeTime assumes
+     that two clocks are synchronous if there is any path with data launched by one clock
+
+
+PrimeTime® User Guide                                                                     220
+T-2022.03
+                                                                                      Feedback
+Chapter 7: Clocks
+Using Multiple Clocks
+
+
+     and captured by the other clock. The clock waveforms are synchronized at time zero,
+     as defined by the create_clock command. For example, consider the following
+     create_clock commands:
+     pt_shell> create_clock -period 4 -name CK1 -waveform {0 2}
+     pt_shell> create_clock -period 4 -name CK2 -waveform {1 3}
+     pt_shell> create_clock -period 6 -name CK3 -waveform {2 3}
+
+     PrimeTime creates the clocks as specified in the commands, with the waveforms
+     synchronized. PrimeTime adjusts the timing relationships further for any specified or
+     calculated latency or uncertainty.
+
+Figure 45     Synchronous clock waveforms
+
+               CK1
+
+
+               CK2
+
+
+               CK3
+
+
+             Time       0   1   2     3     4     5      6     7     8     9     10
+
+
+     In a design that uses these three clocks, there might be paths launched by one clock and
+     captured by another clock. When such paths exist, to test all possible timing relationships
+     between different clock edges, PrimeTime internally “expands” the clocks to the least
+     common multiple of all synchronous clock periods, thus creating longer-period clocks
+     with multiple rising and falling edges For example, the three clocks in the foregoing
+     example have periods of 4, 4, and 6. The least common multiple of these periods, called
+     the base period, is 12. To analyze the paths that cross the clock domains, PrimeTime
+     internally expands the clocks by repeating them over the base period. The resulting clock
+     waveforms are shown in the following figure. Each expanded clock has a period of 12.
+
+
+
+
+PrimeTime® User Guide                                                                         221
+T-2022.03
+                                                                                        Feedback
+Chapter 7: Clocks
+Using Multiple Clocks
+
+
+Figure 46     Expanded clock waveforms
+
+             CK1
+
+
+             CK2
+
+
+
+             CK3
+
+
+             Time   0     2     4      6      8     10    12     14    16     18
+
+
+     PrimeTime checks timing paths between all edges in the expanded clocks. For example,
+     the most restrictive setup check between a falling edge of CK2 and a rising edge of CK3 is
+     from time=7 to time=8, as shown by the blue arrow.
+     Define multiple clocks in a manner consistent with the way they actually operate. To
+     declare clocks that are not synchronous, you can use case analysis or commands, such
+     as the set_clock_groups -logically_exclusive or set_false_path command.
+
+
+     Asynchronous Clocks
+     Two clocks are asynchronous if they do not communicate with each other in the design.
+     For example, a free-running, on-chip oscillator is asynchronous with respect to a system
+     clock signal coming into the chip from the outside. Clock edges in the two clock domains
+     can occur at any time with respect to each other.
+     You can declare a relationship between two clocks to be asynchronous. In that case,
+     PrimeTime does not check the timing paths launched by one clock and captured by the
+     other clock, which is like declaring a false path between the two clocks. In addition, if you
+     are doing crosstalk analysis, PrimeTime SI assigns infinite arrival windows to the nets in
+     aggressor-victim relationships between the two clock domains.
+     To declare an asynchronous relationship between two clocks, use the set_clock_groups
+     -asynchronous command.
+
+
+     Exclusive Clocks
+     Two clocks are exclusive if they do not interact with each other. For example, a circuit
+     might multiplex two different clock signals onto a clock line, one a fast clock for normal
+     operation and the other a slow clock for low-power operation. Only one of the two clocks is
+     enabled at any given time, so there is no interaction between the two clocks.
+
+
+
+PrimeTime® User Guide                                                                           222
+T-2022.03
+                                                                                         Feedback
+Chapter 7: Clocks
+Using Multiple Clocks
+
+
+     To prevent PrimeTime from spending time checking the interaction between exclusive
+     clocks, you can declare a false path between the clocks or use the set_clock_groups
+     -logically_exclusive command to declare the clocks to be exclusive. Otherwise, you
+     can use case analysis to disable the clock that you do not want to include in the current
+     analysis.
+     To declare clocks CK1 and CK2 to be exclusive:
+     pt_shell> set_clock_groups -logically_exclusive \
+               -group {CK1} -group {CK2}
+
+     This causes PrimeTime to ignore any timing path that starts from the CK1 domain and
+     ends at the CK2 domain, or from the CK2 to the CK1 domain. This is like setting a false
+     path from CK1 to CK2 and from CK2 to CK1. However, this setting is not reported by the
+     report_exceptions command. To find out about clock groups that have been set, use
+     the report_clock -groups command. If needed, you can also use the report_clock
+     -groups clock_list command to restrict the clock groups report to specific clocks of
+     interest.
+     Avoid setting false paths between clock domains that have been declared to be exclusive
+     because doing so is redundant. The set_clock_groups -logically_exclusive
+     command invalidates all false paths set between the exclusive clock domains. This is also
+     true for the set_clock_groups -asynchronous command.
+     You can specify multiple clocks in each group. For example, to declare clocks CK1 and
+     CK2 to be exclusive with respect to CK3 and CK4:
+     pt_shell> set_clock_groups -logically_exclusive \
+               -group {CK1 CK2} -group {CK3 CK4}
+
+     This causes PrimeTime to ignore any path that starts in one group and ends in the other
+     group.
+     If you specify more than two groups, each group is exclusive with respect to the other
+     specified groups. For example:
+     pt_shell> set_clock_groups -logically_exclusive \
+               -group {CK1 CK2} -group {CK3 CK4} -group {CK5}
+
+     If you specify just one group, that group is exclusive with respect to all other clocks. For
+     example:
+     pt_shell> set_clock_groups -logically_exclusive \
+               -group {CK1 CK2}
+
+     You can optionally assign a name to a clock group declaration, which makes it easier to
+     later remove that particular declaration:
+     pt_shell> set_clock_groups -logically_exclusive -name EX1 \
+               -group {CK1 CK2} -group {CK3 CK4}
+
+
+PrimeTime® User Guide                                                                               223
+T-2022.03
+                                                                                       Feedback
+Chapter 7: Clocks
+Using Multiple Clocks
+
+
+     The set_clock_groups -asynchronous command defines groups of clocks that are
+     asynchronous with respect to each other. Asynchronous clock group assignments are
+     separate from exclusive clock group assignments, even though both types of clock groups
+     are defined with the set_clock_groups command. Clock groups can be physically
+     exclusive as well as logically exclusive due to multiplexing of the clock signals or physical
+     separation. There can be no crosstalk between physically exclusive clocks, as well as
+     no logical interaction. In that situation, use the -physically_exclusive option rather
+     than the -logically_exclusive option. This prevents the tool from attempting to
+     perform crosstalk analysis between the clock nets. For information about the handling of
+     asynchronous clocks in crosstalk analysis, see Asynchronous Clocks.
+     To report the relationship between clocks, use the get_clock_relationship command:
+     pt_shell> get_clock_relationship {CK1 CK2}
+
+     To remove a clock grouping declaration, use the remove_clock_groups command:
+     pt_shell> remove_clock_groups -logically_exclusive -name EX1
+
+     To remove all exclusive clock grouping declarations made with the set_clock_groups
+     command:
+     pt_shell> remove_clock_groups -logically_exclusive -all
+
+     The following examples demonstrate some of the ways to specify exclusive clocks.
+     Example 1: Four Clocks and One Selection Signal
+     Consider a circuit example with four clocks, CK1 through CK4. By default, PrimeTime
+     analyzes the interactions between all combinations of clocks. However, the logic enables
+     only two clocks at a time, either CK1 and CK3 or CK2 and CK4.
+
+Figure 47      Four clocks and one selection signal
+
+
+
+                                        D      Q              Logic                     D     Q
+
+
+
+
+         CK1   CKP1          0                          CK3   CKP3          0
+
+         CK2   CKP2          1                          CK4   CKP4         1
+
+
+
+                SEL
+
+
+
+
+PrimeTime® User Guide                                                                          224
+T-2022.03
+                                                                                      Feedback
+Chapter 7: Clocks
+Using Multiple Clocks
+
+
+     One way to prevent checking between unrelated clocks is to set a false path between the
+     clocks. For example:
+     pt_shell> set_false_path -from CK1 -to CK2
+     pt_shell> set_false_path -from CK2 -to CK1
+     pt_shell> set_false_path -from CK3 -to CK4
+     pt_shell> set_false_path -from CK4 -to CK3
+     pt_shell> set_false_path -from CK1 -to CK4
+     pt_shell> set_false_path -from CK4 -to CK1
+     pt_shell> set_false_path -from CK2 -to CK3
+     pt_shell> set_false_path -from CK3 -to CK2
+
+     In that case, PrimeTime tests all of the valid combinations of enabled clocks in a single
+     run, while ignoring the invalid combinations.
+     Another way is to use case analysis and set a logic value, either 0 or 1, on the SEL input,
+     which checks the timing for a particular case of SEL=0 or SEL=1. For example:
+     pt_shell> set_case_analysis 0 [get_ports SEL]
+
+     With SEL=0, only CK1 and CK3 are active; CK2 and CK4 are ignored. If you want to
+     analyze both cases, two analysis runs are necessary: one with SEL=0 and another with
+     SEL=1.
+     Another method to accomplish the same effect is to use the set_disable_timing
+     command. For example, to disable checking of all paths leading from the CKP2 and CKP4
+     clock input pins of the design:
+     pt_shell> set_disable_timing [get_ports {CKP2 CKP4}]
+
+     Still another way is to specify which clocks can be active together at the same time and
+     which clocks are currently active. For example:
+     pt_shell> set_clock_groups -logically_exclusive -name E1 \
+                 -group {CK1 CK3} -group {CK2 CK4}
+     pt_shell> set_active_clocks [all_clocks]
+
+     The set_clock_groups command defines groups of clocks that are exclusive with respect
+     to each other. PrimeTime does not check paths that start from a clock in one group and
+     end at a clock in another group. If you specify just one group, that group is considered
+     exclusive with respect to all other clocks.
+     In the preceding example, the set_active_clocks command makes all four clocks
+     active, so that PrimeTime analyzes all valid paths while avoiding the invalid clock
+     combinations.
+
+
+
+
+PrimeTime® User Guide                                                                            225
+T-2022.03
+                                                                                       Feedback
+Chapter 7: Clocks
+Using Multiple Clocks
+
+
+     If you want to consider only the case where SEL=0, you can do it easily by using a
+     different set_active_clocks command:
+     pt_shell> set_clock_groups -logically_exclusive -name E1 \
+                -group {CK1 CK3} -group {CK2 CK4}
+     pt_shell> set_active_clocks {CK1,CK3}
+
+     Setting clocks CK1 and CK3 active means that CK2 and CK4 are inactive, which is just
+     like using case analysis and setting SEL=0 or setting false paths between all combinations
+     of clocks not using CK1 and CK3.
+     Example 2: Four Clocks and Two Selection Signals
+     Consider a circuit example with two separate clock selection inputs, S1 and S2, for the two
+     multiplexers.
+
+Figure 48     Four clocks and two selection signals
+
+
+
+                                     D      Q             Logic                    D       Q
+
+
+
+
+       CK1 CKP1           0                           CK3 CKP3         0
+
+       CK2 CKP2           1                           CK4 CKP4         1
+
+
+              S1
+
+              S2
+
+
+
+     Paths between CK1 and CK2 and between CK3 and CK4 are not valid, but all other
+     combinations are possible.
+     To check all valid paths while avoiding invalid ones, you can declare false paths between
+     the clocks:
+     pt_shell> set_false_path -from CK1 -to CK2
+     pt_shell> set_false_path -from CK2 -to CK1
+     pt_shell> set_false_path -from CK3 -to CK4
+     pt_shell> set_false_path -from CK4 -to CK3
+
+
+
+
+PrimeTime® User Guide                                                                          226
+T-2022.03
+                                                                                      Feedback
+Chapter 7: Clocks
+Using Multiple Clocks
+
+
+     Another way is to use case analysis and set logic values on S1 and S2 to check a
+     particular case. For example:
+     pt_shell> set_case_analysis 0 [get_ports S1]
+     pt_shell> set_case_analysis 0 [get_ports S2]
+
+     If you want to analyze all four cases using case analysis, four analysis runs are necessary,
+     with S1-S2 = 00, 01, 10, and 11. Still another way is to use the set_clock_groups and
+     set_active_clocks commands. For example,
+     pt_shell> set_clock_groups -logically_exclusive -name mux1 \
+               -group {CK1} -group {CK2}
+     pt_shell> set_clock_groups -logically_exclusive -name mux2 \
+               -group {CK3} -group {CK4}
+     pt_shell> set_active_clocks {CK1,CK2,CK3,CK4}
+
+     PrimeTime analyzes all valid paths from CK1 to CK3 and CK4, and from CK2 to CK3 and
+     CK4 (and in the opposite direction if there are any such paths), but not between CK1 and
+     CK2 or between CK3 and CK4.
+     If you only want to consider the case where S1-S2=00, you can do it easily by using a
+     different set_active_clocks command:
+     pt_shell> set_clock_groups -logically_exclusive -name mux1 \
+               -group {CK1} -group {CK2}
+     pt_shell> set_clock_groups -logically_exclusive -name mux2 \
+               -group {CK3} -group {CK4}
+     pt_shell> set_active_clocks {CK1,CK3}
+
+     Example 3: Multiplexed Clocks and Case Analysis
+     Consider a circuit example with the CK1 and CK2 clocks at the startpoint and endpoint of
+     one path. These clocks are also multiplexed onto a shared clock line.
+
+
+
+
+PrimeTime® User Guide                                                                        227
+T-2022.03
+                                                                                               Feedback
+Chapter 7: Clocks
+Using Multiple Clocks
+
+
+Figure 49     Multiplexed Clocks Specified With Case Analysis
+
+
+
+                                  D        Q                       D     Q                         D       Q
+
+
+
+
+            CK1 CKP1                                                                0
+
+            CK2 CKP2                                                                1
+
+
+                  SEL
+
+
+
+     If you want PrimeTime to check the valid path between CK1 and CK2, but avoid checking
+     invalid paths between the two clock domains downstream from the multiplexer, the best
+     way to do it is with case analysis.
+
+
+     Multiplexed Clock Exclusivity Points
+     Modern chip designs often use multiple clocks that can be applied to a given circuit at
+     different times, for example, to operate at a higher frequency during periods of high
+     workload and lower frequency at other times to save power. Multiplexer (MUX) cells are
+     often used to select these clocks for operation, as shown in the following figure.
+
+Figure 50     Multiplexed Clocks
+
+                            U15                            Timing path
+
+              CK1       0
+                                                      D     Q             Logic                D       Q
+              CK2       1
+
+                                          U23
+                                      0
+
+              CK3                     1         CK1, CK2, and CK3 propagated here by default
+
+
+
+
+     By default, the PrimeTime tool considers all combinations of launch and capture clocks,
+     such as data launched by CK1 and captured by CK2. However, for clocks multiplexed as
+
+
+PrimeTime® User Guide                                                                                  228
+T-2022.03
+                                                                                              Feedback
+Chapter 7: Clocks
+Using Multiple Clocks
+
+
+     shown in the figure, only one of the three clocks can operate on the path at any given time;
+     they are exclusive clocks downstream from the MUX cells as long as the MUX control
+     signals remain static between launch and capture.
+     One method of specifying exclusive clocks is to set “exclusivity points” to mark the pins in
+     the design where only one clock at a time can be propagated, as shown in the following
+     figure. For complex clock MUX configurations, this method typically offers better simplicity,
+     accuracy, completeness, and turnaround time than other methods.
+
+Figure 51     Multiplexed Clocks With Exclusivity Points
+
+                            U15   Exclusivity            Timing path
+                                  point
+              CK1       0
+                                                   D          Q            Logic              D     Q
+              CK2       1
+
+                                      U23
+                                  0
+
+              CK3                 1                               CK1 or CK2 or CK3
+                                                                  propagated here, one at a time
+                                                Exclusivity
+                                                point
+
+     You can set clock exclusivity points at specific pins in the design, or you can have the tool
+     automatically find and place these points at clock MUX output pins. The exclusivity setting
+     applies to checking of delay, minimum pulse width, and minimum period constraints.
+
+     Setting Clock Exclusivity Points Explicitly
+     To set exclusivity points manually, use the set_clock_exclusivity command:
+     pt_shell> set_clock_exclusivity -type mux -output "U15/Z"
+     pt_shell> set_clock_exclusivity -type mux -output "U23/Z"
+
+     Setting a clock exclusivity point allows only one clock at a time to be propagated through
+     the pin on which it is set. This enforces a physically exclusive relationship between the
+     different clocks in the transitive fanout of the pins. The clock exclusivity effect works
+     whether the timing_enable_auto_mux_clock_exclusivity variable is set to true or
+     false.
+
+     Inferring Clock Exclusivity Points Automatically
+     To have the tool automatically find and place exclusivity points at the outputs of clock MUX
+     cells, set the timing_enable_auto_mux_clock_exclusivity variable to true:
+     pt_shell> set_app_var timing_enable_auto_mux_clock_exclusivity true
+
+
+
+PrimeTime® User Guide                                                                               229
+T-2022.03
+                                                                                       Feedback
+Chapter 7: Clocks
+Using Multiple Clocks
+
+
+     With this variable set to true, the tool automatically finds mutiple clock signals entering a
+     MUX cell and places exclusivity points at the output of the MUX. This enforces a physically
+     exclusive relationship between the clocks in the transitive fanout of the MUX cell, without
+     affecting possible clock interactions in the transitive fanin to the MUX cell.
+     To disable this automatic inference at selected MUX cells in the design, use the following
+     command:
+     pt_shell> set_disable_auto_mux_clock_exclusivity MUX32/Z
+
+     Automatic detection of multiplexed clocks works only for MUX cells, as determined by
+     the cell’s is_mux_cell attribute. A multiplexing function built out of random logic is not
+     automatically detected, but you can still manually define an exclusivity point in such logic
+     by using the set_clock_exclusivity command. For example,
+     pt_shell> set_clock_exclusivity -type user_defined \
+       -inputs "OR1/A OR1/B" -output OR1/Z
+
+     For a non-MUX cell, you must specify the clock input pins and exclusivity output pin.
+
+     Reporting Exclusivity Points
+     To report the exclusivity points, use the -exclusivity option of the report_clock
+     command:
+     pt_shell> report_clock -exclusivity
+     ...
+     clock exclusivity points:
+
+          -type mux
+          -output MUX88/Z
+
+     This reports all exclusivity points, whether inferred globally by using the
+     timing_enable_auto_mux_clock_exclusivity variable or explicitly by using the
+     set_clock_exclusivity command.
+
+     To query the exclusivity of a pin:
+     pt_shell> get_attribute -class pin [get_pins U53/Z] is_clock_exclusivity
+     true
+
+     Alternative Methods
+     Aside from using exclusivity points, you can use the following methods to prevent an
+     overly conservative analysis that considers the interactions between exclusive clocks:
+      •   Declare a false path between the clocks (set_false_path)
+      •   Declare the clocks to be exclusive (set_clock_groups -logically_exclusive)
+
+
+
+
+PrimeTime® User Guide                                                                          230
+T-2022.03
+                                                                                           Feedback
+Chapter 7: Clocks
+Clock Sense
+
+
+     •   Use case analysis to analyze only a particular operating mode (set_case_analysis)
+     •   Disable checking of all paths leading from the different clock input pins
+         (set_disable_timing)
+     Each of these methods has advantages and disadvantages with respect to simplicity,
+     flexibility, turnaround time, and completeness. To define clocks as exclusive downstream
+     (but not upstream) from the MUX outputs, you can define new clocks on the MUX outputs.
+     For more about using these methods, see Exclusive Clocks and SolvNetPlus article
+     000005025, “Specifying MUXed Clocks in PrimeTime.”
+
+
+     Removing Clocks From Analysis
+     By default, PrimeTime analyzes all clocks specified for a design and all interactions
+     between different clock domains. In a design with multiple clocks, it is often desirable to do
+     timing analysis with only certain clocks enabled. For example, a device might use a fast
+     clock for normal operation and a slow clock in power-down mode; you might be interested
+     in the timing behavior for just one operating mode.
+     One way to specify the active clocks is to use case analysis. You specify a logic value,
+     either 0 or 1, for a port or pin that controls clock selection. For example, if a port called
+     SEL selects the active clock in the device, you could use this command:
+     pt_shell> set_case_analysis 0 [get_ports SEL]
+
+     In that case, timing analysis is restricted to the case where SEL=0.
+     Another method is to use the set_active_clocks command, which specifies the list of
+     clocks that are active for the analysis. Clocks not listed in the command are inactive and
+     not considered during the analysis. For example:
+     pt_shell> set_active_clocks {CK1 CK2}
+
+     Clocks CK1 and CK2 are considered for analysis and all others are ignored. If a generated
+     clock is based on an inactive clock, the generated clock is also made inactive. Using the
+     set_active_clocks command triggers a full timing update for the design.
+
+     To make all clocks active (the default behavior), use the set_active_clocks
+     [all_clocks] command. To choose an entirely new set of active clocks, use the
+     set_active_clocks command again; each use of the command overrides the previous
+     settings. The set_active_clocks command works for standard timing analysis, but it
+     does not work for context characterization, model extraction, or the write_sdc command.
+
+
+Clock Sense
+     The tool keeps track of inverters and buffers in clock trees. It recognizes the positive or
+     negative sense of the clock signal arriving at each register clock pin. You do not need to
+
+
+PrimeTime® User Guide                                                                                231
+T-2022.03
+                                                                                          Feedback
+Chapter 7: Clocks
+Clock Sense
+
+
+     specify the sense of a clock tree that has only buffers and inverters. In this case, the clock
+     signal arriving at the register clock pin is said to be unate.
+     A clock signal is positive unate if
+     •   A rising edge at the clock source causes a rising edge at the register clock pin.
+     •   A falling edge at the clock source causes a falling edge at the register clock pin.
+     A clock signal is negative unate if
+     •   A rising edge at the clock source causes a falling edge at the register clock pin.
+     •   A falling edge at the clock source causes a rising edge at the register clock pin.
+
+Figure 52     Positive and negative unate clock signals
+
+             CLK                    positive unate                CLK                   negative unate
+                          buffer                                             inverter
+
+
+             CLK                                positive unate
+
+                          two inverters
+
+
+              CLK
+                                        positive unate
+               EN
+                      gated clock
+
+
+     A clock signal is non-unate if the clock sense is ambiguous as a result of non-unate timing
+     arcs in the clock path. For example, a clock that passes through an XOR gate is not unate
+     because there are non-unate arcs in the gate. The clock sense could be either positive or
+     negative, depending on the state of the other input to the XOR gate.
+
+
+
+
+PrimeTime® User Guide                                                                             232
+T-2022.03
+                                                                                      Feedback
+Chapter 7: Clocks
+Clock Sense
+
+
+Figure 53     Non-unate clock signals
+                                                    CTRL = 0: positive sense
+                                                    CTRL = 1: negative sense
+
+            CLK
+                                           XOR                  not unate
+                         CTRL
+
+
+
+                                                     positive sense
+
+            CLK
+                                                                not unate
+
+
+                                                     negative sense
+                                pulse generator
+
+
+     The tool considers the output of the pulse generator at the bottom of the preceding figure
+     to be non-unate because there are both inverting and non-inverting paths through the
+     logic. The non-inverting path is the direct path through the AND gate and the inverting path
+     is through the inverter.
+     To resolve this ambiguity for the tool, specify either a positive or negative clock sense to
+     be propagated forward from a pin within a non-unate part of the clock network by using the
+     set_sense command with the following syntax:
+
+     set_sense -type clock
+       -positive | -negative
+       object_list
+
+     For example, the following command propagates only the positive unate paths through
+     the output pin of the XOR gate, with respect to the original clock source. From that point
+     onward, PrimeTime keeps track of the sense of the signal through any subsequent buffers
+     or inverters.
+     pt_shell> set_sense -type clock -positive [get_pins xor1.z]
+
+     The set_sense -type clock command affects only the non-unate part of a clock
+     network. If you specify this command for a pin in a unate part of the clock network, and
+     the requested sense disagrees with the actual sense, PrimeTime issues an error message
+     and disregards the command.
+
+
+
+
+PrimeTime® User Guide                                                                        233
+T-2022.03
+                                                                                         Feedback
+Chapter 7: Clocks
+Clock Sense
+
+
+     The positive unate setting applies to any clock that passes through the specified pin. If
+     multiple clocks can reach that pin, you can restrict the setting to specific clocks, as in the
+     following example:
+     pt_shell> set_sense -type clock -positive \
+               -clocks [get_clocks CLK] [get_pins mux1.z]
+
+     The set_sense -type clock command provides options that support pulse clocks. The
+     following examples show clock-modifying circuits and the resulting clock senses.
+
+Figure 54     Clock sense examples
+
+
+                                 CLK signal
+
+
+
+              CLK            positive unate
+
+
+
+              CLK*           negative unate
+
+
+
+       CLK                      rise-triggered
+                                high pulse
+
+
+       CLK                       rise-triggered
+                                 low pulse
+
+
+       CLK                            fall-triggered
+                                      high pulse
+
+
+       CLK                            fall-triggered
+                                      low pulse
+
+
+
+     To stop clock propagation from a specific pin or cell timing arc, use the set_sense -type
+     clock -stop_propagation command. This is appropriate in cases where the clock
+     physically does not propagate past a specific point.
+     In the following example of physical clock stopping, the control logic is such that UMUX2
+     is allowed to select CLK2, but it never selects TESTCLK. In this case, TESTCLK never
+     physically exists beyond UMUX2.
+
+
+
+
+PrimeTime® User Guide                                                                            234
+T-2022.03
+                                                                                           Feedback
+Chapter 7: Clocks
+Specifying Pulse Clocks
+
+
+Figure 55     Physical Clock Stopping
+
+
+
+
+     To model this in PrimeTime, use this command:
+     pt_shell> set_sense -type clock -stop_propagation -clocks TESTCLK UMUX2/Z
+
+     This tells the tool that the clock signal is not used as a clock at the specified pin, which
+     prevents clock gating checks on the clock network leading up to the pin.
+     To stop propagation of a clock signal at a leaf pin of a clock network, use the -clock_leaf
+     option instead of the -stop_propagation option:
+     pt_shell> set_sense -type clock -clock_leaf -clocks CLK3 UMUX3/Z
+     ...
+
+     This tells the tool that the clock signal is used as a clock at the specified pin but is not
+     propagated beyond that pin. The tool still performs clock gating checks on the clock
+     network leading up to the pin.
+     To remove the sense that was previous specified by the set_sense -type clock, use
+     the remove_sense -type clock command.
+
+
+Specifying Pulse Clocks
+     A pulse clock consists of a sequence of short pulses whose rising and falling edges are
+     both triggered by the same edge of another clock. Pulse clocks are often used to improve
+     performance and reduce power consumption.
+
+
+
+
+PrimeTime® User Guide                                                                               235
+T-2022.03
+                                                                                       Feedback
+Chapter 7: Clocks
+Specifying Pulse Clocks
+
+
+     To analyze the timing of a circuit containing pulse clocks, PrimeTime needs information
+     about the timing characteristics of the clock. There are three ways to provide this
+     information:
+     •   Use a pulse generator cell that has been characterized with pulse generator attributes
+         in the .lib description.
+     •   Use the create_generated_clock command to describe the pulse timing with respect
+         to the source clock.
+     •   Use the set_sense -type clock command to specify the sense of the generated
+         pulses with respect to the source clock.
+     The best method is to use a pulse generator cell that has been characterized in its .lib
+     library description. In that case, no additional action is necessary in PrimeTime to specify
+     the pulse clock characteristics. For information about specifying the pulse generator
+     characteristics of a library cell, see the Library Compiler documentation.
+     If characterized pulse generator cells are not available in the library, you must
+     specify the pulse clock characteristics at each pulse generation point by using either
+     the create_generated_clock or set_sense -type clock command. Using the
+     create_generated_clock command creates a new clock domain at a pulse generation
+     point. Using set_sense -type clock does not create a new clock domain, but merely
+     specifies the sense for an existing clock downstream from the specified point. In the
+     following pulse clock circuit, each rising edge of CLK generates a pulse on CLKP.
+
+Figure 56     Pulse clock specified as a generated clock
+
+                               CLK
+                                                                     CLP
+                                                 CLKB
+
+                           CLK edge number
+                           1           2     3
+
+            CLK
+
+
+            CLKB
+
+            CLKP
+
+
+                  time    0.0        1.0   2.0   3.0    4.0   5.0   6.0    7.0
+
+
+
+
+PrimeTime® User Guide                                                                          236
+T-2022.03
+                                                                                          Feedback
+Chapter 7: Clocks
+Specifying Pulse Clocks
+
+
+     The same edge (edge number 1) of the source triggers both the rising and falling edges of
+     the pulse clock. The pulse width is determined by the delay of the inverter.
+     To specify the generated pulse clock CLKP as a generated clock:
+     pt_shell> create_generated_clock -name CLKP -source CLK \
+               -edges {1 1 3} [get_pins and2/z]
+
+     Specifying the generated clock as a pulse clock using repeated edge digits (instead of
+     specifying the pulse clock edge times) ensures correct checking of delays between the
+     source clock and the pulse clock.
+     In general, the position of the repeated digit determines whether an active-high or active-
+     low pulse is generated, and the edge number that is repeated determines the type of edge
+     in the master clock used to trigger the pulse:
+     •   -edges {1 1 3} – Rising edge of source triggers high pulse.
+
+     •   -edges {2 2 4} – Falling edge of source triggers high pulse.
+
+     •   -edges {1 3 3} – Rising edge of source triggers low pulse.
+
+     •   -edges {2 4 4} – Falling edge of source triggers low pulse.
+
+     Instead of using the create_generated_clock command to define a new clock, you can
+     use the set_sense -type clock command to specify the sense of an existing clock.
+     For example, the following command specifies that the clock at the output of the AND gate
+     is a pulse that rises and falls on the rising edge of the source clock. The pulse clock is not
+     defined as a separate clock domain. Instead, it is just a different sense (rise-triggered high
+     pulse sense) of the source clock downstream from the specified point in the clock network.
+     pt_shell> set_sense -type clock -pulse rise_triggered_high_pulse \
+                [get_pins and2/z]
+
+     In general, to specify the clock sense of a pulse clock, use the following syntax:
+     set_sense
+       -type clock
+       -pulse rise_triggered_high_pulse | rise_triggered_low_pulse |
+               fall_triggered_high_pulse | fall_triggered_low_pulse
+       object_list
+
+     The nominal width of the generated pulses is zero, whether you use a pulse generator cell
+     defined in the library, the create_generated_clock command, or the set_sense -type
+     clock command. To determine the actual pulse width, PrimeTime considers the different
+     rise and fall latency values at the pulse generator output pin:
+     •   (high pulse width) = (fall network latency) – (rise network latency)
+     •   (low pulse width) = (rise network latency) – (fall network latency)
+
+
+PrimeTime® User Guide                                                                           237
+T-2022.03
+                                                                                          Feedback
+Chapter 7: Clocks
+Specifying Pulse Clocks
+
+
+     You can allow PrimeTime to calculate the propagated latency from the circuit, or you can
+     use the set_clock_latency command to specify the latency values (and therefore the
+     pulse width) explicitly. For example, the following commands set an ideal pulse width
+     to 0.5 for high pulses, for all registers downstream from pin and2/z, and with an overall
+     latency of 0.6:
+     pt_shell> set_clock_latency -rise 0.6 and2/z
+     pt_shell> set_clock_latency -fall 1.1 and2/z
+
+
+     Constraining Pulse Widths in the Fanout of Pulse Generator Cells
+     The transitive fanout of a pulse generator is a pulse clock network. The clock propagating
+     through the pulse generator in the pulse clock network is the pulse clock. However, if the
+     pulse generator has sequential arcs, its output is not a clock signal unless a generated
+     clock is defined at the output.
+     To constrain a pulse clock network, use these commands:
+     •   set_pulse_clock_min_width -transitive_fanout value object_list
+
+         The set_pulse_clock_min_width command constrains the minimum pulse width in
+         the fanout of pulse generator instances by pulse generator instance name or pulse
+         generator library cell. The minimum pulse width constraint from the library also applies
+         to the pulse clock network.
+         Note that if the CRPR is enabled, the clock reconvergence pessimism (CRP) value
+         is applied to the pulse width as a credit. The CRP is subtracted from the pulse width
+         for maximum pulse width calculation and added to the pulse width for minimum pulse
+         width calculation.
+     •   set_pulse_clock_max_width -transitive_fanout value object_list
+
+         The set_pulse_clock_max_width command constrains the maximum pulse width
+         in the fanout of pulse generator instances by pulse generator instance name or pulse
+         generator library cell.
+     If you constrain the pulse width by a clock, the constraint applies to the fanout of all pulse
+     generators driven by that clock. If you constrain the pulse width by design, the constraint
+     applies to all pulse clock networks. If there are conflicting constraints, the most restrictive
+     constraint is used.
+     The pulse width constraint of high or low is inferred based on sense propagation. In the
+     following example,
+     •   Before the inverter, the minimum pulse width of the high pulse is constrained.
+     •   After the inverter, the minimum pulse width of the low pulse is constrained.
+
+
+
+
+PrimeTime® User Guide                                                                             238
+T-2022.03
+                                                                                       Feedback
+Chapter 7: Clocks
+Specifying Pulse Clocks
+
+
+Figure 57     Sense propagation affects high and low pulse width propagation
+
+
+
+
+     To remove the minimum or maximum pulse width constraint from the pulse generator
+     network, use the remove_pulse_clock_min_width or remove_pulse_clock_max_width
+     command, respectively. When these commands, you must explicitly specify all of the
+     sources of the constraint.
+     To report the pulse width of all pulse generator networks, use these commands:
+     •   report_pulse_clock_min_width or report_constraint -pulse_clock_min_width
+
+     •   report_pulse_clock_max_width or report_constraint -pulse_clock_max_width
+
+     By default, the tool applies the general minimum pulse width constraints everywhere
+     except the pulse clock network and applies the more specific pulse clock
+     constraints in the pulse clock network. To override this default behavior, set the
+     timing_enable_pulse_clock_constraints variable to false; with this setting, the tool
+     ignores the more specific pulse clock constraints and applies the general minimum pulse
+     width constraints everywhere, including pulse clock networks.
+     Note:
+         During the report_analysis_coverage command, the tool temporarily sets
+         the timing_enable_pulse_clock_constraints variable to false to properly
+         obtain design information. An information message is also printed.
+     Applying Clock Uncertainty to Pulse Width Checking
+     By default, the clock uncertainty specified by the set_clock_uncertainty command
+     applies to all types of timing constraints, including pulse width checking. You can optionally
+     specify whether to apply clock uncertainty to pulse width checking, and if so, whether
+     to apply only setup or only hold uncertainty, or both. To use this option, set the following
+     variable:
+     set_app_var timing_include_uncertainty_for_pulse_checks \
+       none | setup_only | hold_only | setup_hold
+
+     The default is setup_hold, which applies both setup and hold uncertainty to pulse width
+     checking.
+
+
+
+PrimeTime® User Guide                                                                          239
+T-2022.03
+                                                                                           Feedback
+Chapter 7: Clocks
+Specifying Pulse Clocks
+
+
+
+     Constraining Transition Times for Pulse Generator Cells
+     PrimeTime provides support for constraining the minimum transition value at the input of a
+     pulse generator instance. To constrain the minimum transition, use the following syntax:
+     set_pulse_clock_min_transition [-rise | -fall] value object_list
+
+     You can constrain the minimum transition by pulse generator instance name, pulse
+     generator library cell, clock, or design. If the constraint is applied on a clock, the input of
+     all the pulse generators in that clock network is constrained. If the constraint is applied
+     to a design, all the pulse generator inputs are constrained. You can constrain minimum
+     transition only at the input of pulse generators.
+     To constrain the maximum transition in the fanout of pulse generator instances, use
+     the set_pulse_clock_max_transition -transitive_fanout command.You can
+     constrain this maximum transition by pulse generator instance name, pulse generator
+     library cell, clock, or design. When the constraints are set on a clock, the fanout of all
+     pulse generators driven by this clock are constrained. When the pulse clock maximum
+     transition constraint is set on the design, all the pulse networks are constrained.
+     Note:
+         The maximum transition constraint set on design by using the
+         set_max_transition command applies to the pulse network as does the
+         maximum transition constraint specified on the library pins.
+     For both the maximum and minimum case, if the constraints are conflicting the most
+     restrictive constraint are valid. You can separately constrain rise and fall transitions by
+     using the -rise and -fall options.
+     The set_pulse_clock_max_transition command also allows you to specify
+     the constraint that you want applied only to the input of pulse generators. The
+     -transitive_fanout option specifies the constraint set at the transitive fanout of pulse
+     generator. If this option is not set, only the input of the pulse generators are constrained.
+     To remove the constraint from the input of pulse generator cells or from
+     the pulse generator, use the remove_pulse_clock_min_transition or
+     remove_pulse_clock_max_transition -transitive_fanout command, respectively.
+
+     Note:
+         When removing the constraint from the input of pulse generators, do not use
+         the -transitive_fanout option.
+     To report the maximum transition computation, use the
+     report_pulse_clock_max_transition and report_constraint
+     -pulse_clock_max_transition commands. You can report the minimum
+     transition computation at the input of all pulse generator networks by using
+
+
+
+PrimeTime® User Guide                                                                              240
+T-2022.03
+                                                                                      Feedback
+Chapter 7: Clocks
+Timing PLL-Based Designs
+
+
+     the report_pulse_clock_min_transition and the report_constraint
+     -pulse_clock_min_transition commands.
+
+     Note:
+         To report the maximum transition computation at the input of pulse generator
+         cells, do not use the -transitive_fanout option.
+     To enable pulse clock constraint checking, set the
+     timing_enable_pulse_clock_constraints variable to true.
+
+
+
+Timing PLL-Based Designs
+     Phase-locked loops (PLL) are common in high-speed designs. Their ability to nearly zero
+     out the delay of a large clock tree allows for much higher speed interchip communication.
+     Certain effects, such as OCV and signal integrity analysis, requires a complete and
+     accurate static timing analysis of the design, including the PLL. The PLL reduces the clock
+     skew at launch and capture flip-flops by making the phase of the clock at the feedback pin
+     the same as the phase at the reference clock.
+     PrimeTime supports the analysis of PLL cells. The PLL library model contains the
+     information regarding the reference clock pin, output pin, and feedback pin in the form
+     of the attributes on the PLL cell pins. This information is used to perform additional error
+     checking during the definition of the generated clock at the outputs of the PLL. For each
+     PLL, you provide all of the relevant information regarding the reference, feedback, and
+     output pins so that each PLL cell is identified. During the timing update, it automatically
+     computes the timing of the feedback path and applies it as a phase correction on the PLL
+     cell. This approach improves runtime and also simplifies the analysis script. This approach
+     supports:
+     •   Multiple PLLs
+     •   PLLs with multiple output
+     •   PLL jitter and long-term drift
+     •   CRPR calculations for PLL paths
+     •   PrimeTime SI analysis
+     •   Sequential cells in the feedback path
+     •   PLL adjustment during path-based analysis
+
+
+
+
+PrimeTime® User Guide                                                                        241
+T-2022.03
+                                                                                       Feedback
+Chapter 7: Clocks
+Timing PLL-Based Designs
+
+
+
+     Usage for PLL Timing
+     You create each PLL-generated clock by using the create_generated_clock command
+     with the -pll_feedback and -pll_output options. The -pll_feedback option indicates
+     which PLL feedback pin is used for the clock's phase shift correction. The -pll_output
+     option specifies the PLL clock output pin that propagates to the feedback pin.
+     For a single-output PLL, the -pll_output pin is the same as the generated clock source
+     pin. For a multiple-output PLL with a single shared feedback path, the -pll_output pin
+     can differ from the source pin.
+     When using these options to define a PLL, only certain options are available, with the
+     following restrictions:
+     •   The source_objects option specifies a single pin object that corresponds to the clock
+         output pin of the PLL being described.
+     •   The master_pin option corresponds to the reference clock input pin of the PLL.
+     •   The feedback_pin option corresponds to the feedback input pin of the PLL.
+     •   The output_pin option corresponds to the output pin from which the feedback path
+         starts. The output_pin option can be different from the pin in the source_objects
+         option if the source pin's phase correction is determined by another clock output pin of
+         the PLL.
+     •   All four pins must belong to the same cell.
+     For the PLL adjustment to occur correctly, set the PLL output clock and reference clock
+     arriving at the reference clock pin of the PLL as propagated clocks.
+
+     Sequential Cells on a Feedback Path
+     If the feedback path has any sequential elements on it, you need to define a generated
+     clock on the output of the last sequential element. The master pin of this generated clock
+     can be any pin that satisfies the following conditions:
+     •   The fanout of the output pin is connected to the feedback pin.
+     •   The pin lies on the feedback path.
+
+
+
+
+PrimeTime® User Guide                                                                          242
+T-2022.03
+                                                                                       Feedback
+Chapter 7: Clocks
+Timing PLL-Based Designs
+
+
+Figure 58    Circuit example
+
+
+
+
+     In the preceding circuit, the PLL output clock at pin CLKO is twice the frequency of the
+     PLL reference clock at pin REFC. The sequential cell FFdiv acts as a clock divider and
+     converts the frequency of the PLL output clock to that of the reference clock. To correctly
+     define the PLL configuration, you need to define a generated clock at the output clk_out1
+     of the UPLL, using the following command:
+     create_generated_clock \
+       -name CLK_pll \
+       -source [get_pins UPLL/REFC] \
+       -pll_output [get_pins UPLL/CLKO] \
+       -pll_feedback [get_pins UPLL/FDBK] \
+       -multiply_by 2 \
+       [get_pins UPLL/CLKO]
+
+     In addition to the PLL output clock, you also need to define a clock divider at the output of
+     the FFdiv flip-flop, using the following command:
+     create_generated_clock \
+       -name pll_FDBK_clk \
+       -source [get_pins UPLL/CLKO] \
+       -divide_by 2 \
+       [get_pins FFdiv/Q]
+
+     This setup allows PrimeTime to perform correct PLL adjustment.
+
+     PLL Drift and Jitter
+     The PLL drift and PLL jitter characteristics of the phase-corrected output clock are defined
+     using the set_clock_latency command for the PLL output clock with the -pll_shift
+
+
+PrimeTime® User Guide                                                                          243
+T-2022.03
+                                                                                       Feedback
+Chapter 7: Clocks
+Timing PLL-Based Designs
+
+
+     option. The presence of the -pll_shift option implies that the delay that is specified is
+     added to the base early or late latency of the PLL generated clock.
+     This is different than the usual behavior of the set_clock_latency command, where
+     PrimeTime overrides the clock latency values with the specified values. When you specify
+     this option, the delay value corresponds to the PLL drift. PLL jitter is specified using both
+     the -pll_shift and -dynamic options. Specify the -pll_shift option for the generated
+     clock that is defined at the PLL output connected to the PLL feedback pin. PrimeTime
+     applies the same shift to every output of the PLL.
+     The following example shows the command syntax for PLL jitter:
+     set drift 0.100
+     set jitter 0.020
+
+     create_clock -period 5 [get_ports CLK]
+     create_generated_clock -name CLK_pll -divide_by 1 \
+        -source UPLL/CLKIN \
+        -pll_feedback UPLL/FDBK \
+        -pll_output UPLL/CLKOUT
+     set_clock_latency -source -pll_shift [get_clocks CLK_pll] \
+        -early -${drift} -dynamic -${jitter}
+     set_clock_latency -source -pll_shift [get_clocks CLK_pll] \
+        -late +${drift} -dynamic +${jitter}
+     set_propagated_clock {CLK CLK_pll}
+
+     For more information, see the set_clock_latency command.
+
+     CRPR Calculations for PLL Paths
+     For PLLs with more than one output, PrimeTime considers all the output clocks to have
+     the same phase. Thus, PrimeTime considers the outputs to be indistinguishable from each
+     other with respect to clock reconvergence pessimism calculations. For example, for a PLL
+     with two outputs, OUTCLK1 and OUTCLK2, and a path launched by a clock at OUTCLK1
+     and captured by a clock at OUTCLK2, PrimeTime removes the clock reconvergence
+     pessimism up to the outputs of the PLL. PrimeTime does this, even though the last
+     physical common pin on the launch and capture clock paths is the reference pin of the
+     PLL. Removing the clock reconvergence pessimism is essential as the output clocks of the
+     PLL have to be in phase with each other. The report_crpr command demonstrates this
+     behavior by showing one of the PLL outputs as the common pin for paths launched and
+     captured by different outputs of the PLL.
+
+
+
+
+PrimeTime® User Guide                                                                          244
+T-2022.03
+                                                                                        Feedback
+Chapter 7: Clocks
+Timing PLL-Based Designs
+
+
+
+     Reporting and Timing Checks
+     The check_timing command validates that a PLL clock reaches each feedback pin. This
+     check is also performed when using the update_timing command.
+     The report_timing command includes the PLL adjustment next to the output of the PLL
+     as follows:
+     ...
+     clock CLK (rise edge)                                        0.00              0.00
+     clock source latency                                         0.00              0.00
+     clk_in (in)                                                  0.00              0.00 r
+     inst_my_pll/REFCLK (my_pll)                                  0.00              0.00 r
+     inst_my_pll/OUTCLK (my_pll) (gclock source)               -798.03 *         -798.03 r
+     b1/A (buf1a1)                                                0.00           -798.03 r
+     ...
+
+
+     Requirements for PLL Library Cells
+     The PLL library cell should have a single positive unate timing arc from the reference
+     clock pin to each of the outputs of the PLL. The reference pin, output clock pin, and
+     feedback pin of the PLL are identified by is_pll_reference_pin, is_pll_output_pin,
+     and is_pll_feedback_pin attributes, respectively. You can use the is_pll_cell cell
+     attribute to identify a particular cell as a PLL cell. An example of a PLL library cell is as
+     follows:
+     cell(my_pll) {
+       is_pll_cell : true;
+
+       pin( REFCLK ) {
+         direction : input;
+         is_pll_reference_pin : true;
+       }
+
+       pin( FBKCLK ) {
+         direction : input;
+         is_pll_feedback_pin : true;
+       }
+
+       pin (OUTCLK1) {
+         direction : output;
+         is_pll_output_pin : true;
+         timing() {// Timing Arc
+           related_pin: "REFCLK";
+           timing_sense: positive_unate;
+           cell_fall(scalar) {
+             values("0.0")
+           }
+         }
+       }
+
+
+PrimeTime® User Guide                                                                           245
+T-2022.03
+                                                                                       Feedback
+Chapter 7: Clocks
+Specifying Clock-Gating Setup and Hold Checks
+
+
+
+         pin (OUTCLK2) {
+           direction : output;
+           is_pll_output_pin : true;
+           timing() {// Timing Arc
+             related_pin: "REFCLK";
+             timing_sense: positive_unate;
+             cell_fall(scalar) {
+               values("0.0")
+             }
+           }
+         }
+     }
+
+
+
+Specifying Clock-Gating Setup and Hold Checks
+     A gated clock signal occurs when the clock network contains logic other than inverters or
+     buffers. For example, if a clock signal acts as one input to a logical AND function and a
+     control signal acts as the other input, the output is a gated clock.
+     PrimeTime automatically checks for setup and hold violations on gating inputs to ensure
+     that the clock signal is not interrupted or clipped by the gate. This check is performed only
+     for combinational gates where one signal is a clock that can be propagated through the
+     gate, and the gating signal is not a clock.
+     The clock-gating setup check ensures that the control data signal enables the gate before
+     the clock becomes active. The arrival time of the leading edge of the clock pin is checked
+     against both edges of any data signal feeding the data pins to prevent a glitch at the
+     leading edge of the clock pulse or clipped clock pulse. The clock-gating setup violations
+     are shown in the following figure.
+
+
+
+
+PrimeTime® User Guide                                                                          246
+T-2022.03
+                                                                                         Feedback
+Chapter 7: Clocks
+Specifying Clock-Gating Setup and Hold Checks
+
+
+Figure 59     Clock-gating setup violations
+
+                                     D         Q     D    Q
+
+
+
+
+             CK1                               CK2
+            GATE
+
+
+             CK1
+            GATE
+
+                                Glitch
+             CK2
+
+
+            GATE
+                                     Clipped
+            CK2                      clock
+
+
+
+     The clock-gating hold check ensures that the control data signal remains stable while the
+     clock is active. The arrival time of the trailing edge of the clock pin is checked against both
+     edges of any data signal feeding the data pins using the hold equation. A clock-gating
+     hold violation causes either a glitch at the trailing edge of the clock pulse or a clipped
+     clock pulse. Note that for clock-gating checks, it is required that the gating check must
+     reach a clock pin to succeed. These clock pins include reference pins of sequential timing
+     constraints, from-pins of sequential arcs, and so on. The clock-gating hold violations are
+     shown in Figure 60.
+
+
+
+
+PrimeTime® User Guide                                                                            247
+T-2022.03
+                                                                                         Feedback
+Chapter 7: Clocks
+Specifying Clock-Gating Setup and Hold Checks
+
+
+Figure 60     Clock-gating hold violations
+
+                                     D    Q       D   Q
+
+
+
+
+             CK1                         CK2
+            GATE
+
+             CK1
+
+            GATE
+             CK2
+                           Clipped
+                           clock
+            GATE
+             CK2
+                                     Glitch
+
+
+     By default, PrimeTime checks setup and hold times for gated clocks. A value of
+     0.0 is set as the setup and hold time (unless the library cell for the gate has gating
+     setup or hold timing arcs). You can specify a nonzero setup or hold value with the
+     set_clock_gating_check command.
+
+     The set_clock_gating_check command affects only clock-gating checks that exist
+     at the specified cell or pin. To apply the clock-gating parameters for an entire clock
+     domain's network, specify a clock object by using the set_clock_gating_check ...
+     [get_clocks CLK] command. For example, to specify a setup requirement of 0.2 and a
+     hold requirement of 0.4 on all gates in the clock network of CLK1, enter
+     pt_shell> set_clock_gating_check -setup 0.2 -hold 0.4 [get_clocks CLK1]
+
+     To specify a setup requirement of 0.5 on gate and1, enter
+     pt_shell> set_clock_gating_check -setup 0.5 [get_cells and1]
+
+     The report_clock_gating_check command performs clock-gating setup and hold
+     checks. Use it to identify any clock-gating violations.
+     pt_shell> report_clock_gating_check objects
+
+     To restrict the reporting of clock gating violations to only those gates inferred automatically
+     by the PrimeTime tool, use the report_clock_gating_check command with the
+     -auto_inferred_only option. This prevents the reporting of checks inserted by the
+     Power Compiler tool or defined by clock-gating library cells.
+
+
+
+
+PrimeTime® User Guide                                                                            248
+T-2022.03
+                                                                                          Feedback
+Chapter 7: Clocks
+Specifying Internally Generated Clocks
+
+
+     To remove clock-gating checks set with the set_clock_gating_check command, use the
+     remove_clock_gating_check command.
+
+
+     Disabling or Restoring Clock-Gating Checks
+     You can specify any pin or cell in the current design or subdesigns to disable or restore
+     clock-gating checks.
+     To disable clock-gating checks on cells or pins, use this command:
+     pt_shell> set_disable_clock_gating_check objects
+
+     To restore clock-gating checks on cells or pins, use this command:
+     pt_shell> remove_disable_clock_gating_check objects
+
+     If objects are not specified, all clock-gating checks are disabled. It is equivalent to setting
+     the timing_disable_clock_gating_checks variable to true.
+     For example, to restore disabled clock-gating checks for the object U44, use this
+     command:
+     pt_shell> remove_disable_clock_gating_check U44
+
+     To disable clock-gating checks on the specified cell or pin, use this command:
+     pt_shell> set_disable_clock_gating_check U44/Z
+
+
+
+Specifying Internally Generated Clocks
+     A design might include clock dividers or other structures that produce a new clock from a
+     master source clock. A clock that is generated by on-chip logic from another clock is called
+     a generated clock.
+     The following figure shows the waveforms of the master and generated clock for a divide-
+     by-2 clock generator. The clock waveform is ideal, with no clock-to-Q delay.
+
+
+
+
+PrimeTime® User Guide                                                                             249
+T-2022.03
+                                                                                     Feedback
+Chapter 7: Clocks
+Specifying Internally Generated Clocks
+
+
+Figure 61     Divide-by-2 clock generator
+
+
+                                                                  DIVIDE
+                                             D        Q
+                      SYSCLK
+                                                  QN
+
+                                                 FF1
+
+
+            SYSCLK
+
+
+             DIVIDE
+
+
+                       1      2     3    4        5       6   7   8     9     10
+
+
+
+     PrimeTime does not consider the circuit logic of a clock generator, so you must specify
+     the behavior of a generated clock as a separate clock. However, you can define the
+     relationship between the master clock and the generated clock, so that the generated
+     clock characteristics change automatically when the master clock is changed.
+     The create_generated_clock command specifies the characteristics of an internally
+     generated clock. By default, using create_generated_clock on an existing generated
+     clock object overwrites that clock. Generated clock objects are expanded to real
+     clocks at the time of analysis. The clock expansion happens automatically within the
+     report_timing command or explicitly with the update_timing command.
+
+     You can create the generated clock as a frequency-divided clock (-divide_by option),
+     frequency-multiplied clock (-multiply_by option), or edge-derived clock (-edges option).
+     You can modify the generated clock waveform by specifying either -multiply_by,
+     -divide_by, or -edges with the -combinational option. When you create the generated
+     clock using the -combinational option, there must be a valid path for propagating the
+     rise and fall edges of master clock to the generated clock source pin and the source
+     latency paths for this type of generated clock only includes the logic where the master
+     clock propagates.
+
+
+     Specifying a Divide-by-2 Generated Clock
+     To specify a divide-by clock, use the -divide_by option of the create_generated_clock
+     command and specify the frequency division factor. For example, to create the divide-by-2
+     generated clock in Figure 61, shown previously, specify 2 as the frequency division factor:
+     pt_shell> create_generated_clock -name DIVIDE \
+               -source [get_ports SYSCLK] -divide_by 2 [get_pins FF1/Q]
+
+
+PrimeTime® User Guide                                                                          250
+T-2022.03
+                                                                                               Feedback
+Chapter 7: Clocks
+Specifying Internally Generated Clocks
+
+
+     Specify a port or a pin (not a clock name) as the master source from which the new clock
+     is generated. Specify a pin as the creation point for the new generated clock.
+     Note that generated clock edges are based on occurrences of rising edges at the master
+     clock source pin (specified with the -source option). If you need to create a generated
+     clock based on falling edges at the master clock source pin, use the -edges option rather
+     than the -divide_by option (see Creating a Divide-by Clock Based on Falling Edges).
+
+
+     Creating a Generated Clock Based on Edges
+     You can use the create_generated_clock -edges command to specify the generated
+     clock in terms of edges of the master clock waveform on the master pin. For example,
+     consider the following clock generator circuit.
+
+Figure 62     Divide-by-3 clock generator
+
+
+
+
+                                                                                       DIV3A
+                                                 D        Q           D        Q
+
+                                                      QN
+                 SYSCLK
+                                                     U1                   U2
+
+
+
+                          create_clock -period 2 -name SYSCLK [get_ports SYSCLK]
+
+              SYSCLK
+
+
+               DIV3A
+
+
+            Clock edge    1     2        3   4            5   6   7       8        9   10      11
+
+
+
+     The generated clock signal DIV3A has a period three times longer than the master clock,
+     with an asymmetrical waveform. To specify this waveform, enter
+     pt_shell> create_generated_clock -edges { 1 5 7 } \
+               -name DIV3A -source [get_ports SYSCLK] [get_pins U2/Q]
+
+
+     Creating Clock Senses for Pulse Generators
+     Pulse generators can improve circuit performance and save power consumption. Because
+     of clock gating, skew management, and preserving generated pulse integrity, it might
+
+
+PrimeTime® User Guide                                                                                251
+T-2022.03
+                                                                                            Feedback
+Chapter 7: Clocks
+Specifying Internally Generated Clocks
+
+
+     be necessary to insert thousands of pulse generators in a design to control the pulse.
+     Although you can specify create_generated_clock with nondecreasing edges at the
+     output of each pulse generator, it does not scale well. Not only do you have to find and
+     specify each generated clock, the proliferation of clock groups makes it hard to use.
+     Therefore, for pulse generators that do not change the frequency of the incoming clock,
+     you can set the pulse_clock attribute to the following senses to support the pulse
+     generators:
+      •   rise_triggered_high_pulse
+
+      •   rise_triggered_low_pulse
+
+      •   fall_triggered_high_pulse
+
+      •   fall_triggered_low_pulse
+
+     Setting these clock senses supports the four types without the need to add a generated
+     clock.
+
+Figure 63     Pulse clock types that do not change frequency
+
+            Master
+
+            rise_triggered_high_pulse
+
+            rise_triggered_low_pulse
+
+            fall_triggered_low_pulse
+
+            fall_triggered_high_pulse
+
+
+     This pin is allowed on internal, bidirectional, or output pins. If you set it on a bidirectional
+     pin, it affects only those clock paths that follow through the output side of that pin. The
+     ideal clock width for clocks with any of the pulse clock senses is 0. The pulse width is
+     computed as:
+     high pulse = fall_network_latency - rise_network_latency
+     low pulse = rise_network_latency - fall_network_latency
+
+     Use the set_clock_latency command to set the ideal clock pulse width. You can add
+     the command to any pin in the clock network that affects all registers in the fanout of the
+     command. For example, to set an ideal pulse high width of 0.5 for all registers downstream
+     from pin PG/Z and with an overall latency of 0.6, use these commands:
+     set_clock_latency -rise 0.6 PG/Z
+     set_clock_latency -fall 1.1 PG/Z
+
+
+
+
+PrimeTime® User Guide                                                                               252
+T-2022.03
+                                                                                     Feedback
+Chapter 7: Clocks
+Specifying Internally Generated Clocks
+
+
+     If your waveform is non-monotonic, yet has increasing values, use the create_clock
+     -waveform command. This instructs PrimeTime to create the correct clock for those clocks
+     driven by a pulse generator. For example,
+     create_clock -waveform {0.0 0.0} -period 10 [get_ports BCK]
+     set_clock_latency -source -rise 0.23 -fall 0.65 [get_ports BCK]
+
+     PrimeTime generates an error for any clock specified as a pulse generator if it combines
+     with another sense of the same clock. To specify the clock sense in those locations where
+     multiple senses of the same clock have merged together, and it is ambiguous which sense
+     PrimeTime should use, use the set_sense -type clock command. Specify the type
+     of pulse clock sense you want using the set_sense -type clock -pulse command,
+     specifying the value as rise_triggered_high_pulse, rise_triggered_low_pulse,
+     fall_triggered_high_pulse, or rise_triggered_low_pulse.
+
+     As previously mentioned, you can handle pulse generators that alter frequency by using
+     the create_generated_clock command. For example, this approach works well in the
+     case of frequency doublers.
+
+Figure 64     Pulse clock types that change frequency
+
+
+            Master
+
+
+            Frequency doublers
+
+
+
+
+     If the requested sense of clock does not exist, PrimeTime issues a warning. For example,
+     if there was only a positive unate path from the clock source to a pin with set_sense
+     -type clock -pulse rise_triggered_high_pulse, PrimeTime does not run the
+     command as no rising at the clock source to failing at the clock sense pin path is found.
+     However, if there are both a positive and a negative unate path from the clock source to
+     a pin, PrimeTime runs this same command with the rise latency coming from the positive
+     unate path and the fall latency coming from the negative unate path.
+
+
+     Creating a Divide-by Clock Based on Falling Edges
+     If you need to create a generated clock based on falling edges at the master clock pin, use
+     the create_generated_clock command with the -edges option. The following generated
+     clock examples show how to do this.
+
+
+
+
+PrimeTime® User Guide                                                                       253
+T-2022.03
+                                                                                             Feedback
+Chapter 7: Clocks
+Specifying Internally Generated Clocks
+
+
+Figure 65     Generated divide-by-2 clocks based on different edges
+
+
+                                                      DIV2A                      DIV2B
+                                   D         Q                     D         Q
+
+                                             QN                          QN
+            SYSCLK
+                                       FF1                             FF2
+
+                                                           Z
+                                                      U1
+
+
+
+             SYSCLK
+
+
+               DIV2A
+
+
+               DIV2B
+
+            Clock edge        1          2        3        4   5             6   7       8
+
+
+     The generated clock DIV2A is based on the rising edge of the master clock at the
+     SYSCLK port, so you can specify the generated clock using either the -divide_by option
+     or the -edges option:
+     pt_shell> create_generated_clock -name DIV2A \
+               -source [get_ports SYSCLK] -divide_by 2 [get_pins FF1/Q]
+
+     pt_shell> create_generated_clock -name DIV2A \
+                  -source [get_ports SYSCLK] -edges { 1 3 5 } [get_pins FF1/Q]
+
+     The generated clock DIV2B is based on the falling edge of the master clock at the
+     SYSCLK port, so you cannot use the -divide_by option. However, you can still use the
+     -edges option:
+     pt_shell> create_generated_clock -name DIV2B \
+                  -source [get_ports SYSCLK] -edges { 2 4 6 } [get_pins FF2/Q]
+
+     Another way to specify DIV2B is to use a different source pin:
+     pt_shell> create_generated_clock -name DIV2B \
+               -source [get_pins U1/Z] -edges { 1 3 5 } [get_pins FF2/Q]
+
+
+
+
+PrimeTime® User Guide                                                                              254
+T-2022.03
+                                                                                                Feedback
+Chapter 7: Clocks
+Specifying Internally Generated Clocks
+
+
+
+     Shifting the Edges of a Generated Clock
+     You can shift the edges of a generated clock by a specified amount of time. This shift is
+     not considered clock latency. For example, consider the following clock generator circuit.
+
+Figure 66     Generated Divide-by-3 Clock With Shifted Edges
+
+
+                                                                         DIV3B
+
+
+
+                                                     D         Q                 D        Q
+                                                                                                       DIV3C
+                                                             QN                        QN
+             SYSCLK
+                                                         U3                          U4
+
+
+
+
+        SYSCLK
+
+
+          DIV3B
+
+
+         DIV3C
+
+      Clock edge      1       2          3     4         5         6     7       8        9      10      11
+
+      Time            0.0     1.1        2.2   3.3       4.4       5.5   6.6     7.7      8.8    9.9     11.0
+
+
+
+     To specify the master source clock and the two generated clocks, you could use
+     commands such as the following:
+     pt_shell> create_clock -period 2.2 -name CLK [get_ports SYSCLK]
+
+     pt_shell> create_generated_clock -edges { 3 5 9 } \
+                -name DIV3B -source [get_ports SYSCLK] [get_pins U3/Q]
+
+     pt_shell> create_generated_clock -edges { 3 5 9 } \
+               -edge_shift { 2.2 2.2 2.2 } \
+               -name DIV3C -source [get_ports SYSCLK] [get_pins U4/QN]
+
+
+
+
+PrimeTime® User Guide                                                                                    255
+T-2022.03
+                                                                                      Feedback
+Chapter 7: Clocks
+Specifying Internally Generated Clocks
+
+
+     Note:
+         You can use the -edge_shift option only in conjunction with the -edges
+         option.
+     The report_clock command reports the specified clock as follows,
+           p - propagated_clock
+           G - Generated clock
+
+     Clock          Period   Waveform        Attrs     Sources
+     ---------------------------------------------------------
+     -
+     CLK              2.20   {0 1.1}                   {SYSCLK}
+     DIV3B            6.60   {2.2 4.4}       G         {U3/Q}
+     DIV3C            6.60   {4.4 6.6}       G         {U4/Q}
+
+     Generated     Master       Generated    Waveform
+     Clock         Source       Source       Modification
+     ---------------------------------------------------------
+     -
+     DIV3B         MYCLK        U3/Q         edges( 3 5 9 )
+     DIV3C         MYCLK        U4/Q         edges( 3 5 9 )
+                                             shifts( 2.2 2.2 2.2 )
+
+
+     Multiple Clocks at the Source Pin
+     The create_generated_clock command defines a clock that depends on the
+     characteristics of a clock signal reaching a pin in the design, as specified by the -source
+     argument. Because it is possible for the source pin to receive multiple clocks, you
+     might need to specify which clock is used to create the generated clock. To specify
+     a clock, use the -master_clock option together with the -source option of the
+     create_generated_clock command.
+
+     To get information about a generated clock, use the report_clock command. The report
+     tells you the name of the master clock, the name of the master clock source pin, and the
+     name of the generated clock pin.
+
+
+     Selecting Generated Clock Objects
+     The get_clocks command selects a clock object. You can restrict the clock selection to
+     certain clocks according to naming conventions or by filtering. This command returns a
+     token that represents a collection of clocks whose names match the pattern and whose
+     attributes pass a filter expression. For example, if all generated clock names match the
+     pattern CLK_DIV*, you can do the following:
+     pt_shell> set_false_path \
+               -from [get_clocks CLK_DIV*] \
+               -to [get_clocks CLKB]
+
+
+PrimeTime® User Guide                                                                         256
+T-2022.03
+                                                                                     Feedback
+Chapter 7: Clocks
+Generated Clock Edge Specific Source Latency Propagation
+
+
+     If the generated clocks do not follow a naming pattern, you can use filtering based on
+     attributes instead. For example:
+     pt_shell> set_false_path \
+               -from [get_clocks CLK* \
+               -filter "is_generated==true"] \
+               -to [get_clocks CLKB]
+
+
+     Reporting Clock Information
+     For information about clocks and generated clocks in the current design, use the
+     report_clock command. For a detailed report about a clock network, use the
+     report_clock_timing command as described in Clock Network Timing Report.
+
+     To show the clock networks in your design, use the report_transitive_fanout
+     -clock_tree command.
+
+
+     Removing Generated Clock Objects
+     To remove generated clocks, use the remove_generated_clock command.
+     For example, the following command removes the CLK_DIV2 generated clock (and its
+     corresponding clock object):
+     pt_shell> remove_generated_clock CLK_DIV2
+
+
+
+Generated Clock Edge Specific Source Latency Propagation
+     PrimeTime calculates the clock source latency for a generated clock taking into account
+     the edge relationship between master clock and generated clock. It finds the worst-case
+     path that propagates forward to produce the specified edge type defined by the generated
+     clock with respect to the master clock source.
+     If paths exist, but they do not satisfy the needed edge relationships, PrimeTime returns
+     an error message (UITE-461) stating that no path is reported for generated clock source
+     latency (zero clock source latency is used). The following is an example of an unsatisfied
+     generated clock returning a UITE-461 error message:
+     Error: Generated clock 'clk_div2' 'rise_edge' is not
+     satisfiable; zero source latency will be used. (UITE-461)
+     Error: Generated clock 'clk_div2' 'fall_edge' is not
+     satisfiable; zero source latency will be used. (UITE-461)
+
+     Path Type: min
+
+     Point                                    Incr       Path
+       ----------------------------------------------------------
+
+
+
+PrimeTime® User Guide                                                                         257
+T-2022.03
+                                                                                       Feedback
+Chapter 7: Clocks
+Clock Mesh Analysis
+
+
+         clock clk_div2 (rise edge)                       0.000         0.000
+         clock source latency                             0.000         0.000
+         Udiv/Q (FD1)                                     0.000         0.000 r
+
+         clock clk_div2 (rise edge)                       0.000         0.000
+         clock source latency                             0.000         0.000
+         Udiv/Q (FD1)                                     0.000         0.000 r
+         ….
+
+
+
+Clock Mesh Analysis
+     PrimeTime SI provides an easy-to-use method to analyze a clock mesh network with
+     transistor-level accuracy using SPICE simulation. If the clock network remains unchanged,
+     you can reuse the simulation results in subsequent timing and signoff analysis in
+     PrimeTime.
+     To learn how to perform clock mesh analysis, see
+     •   Overview of Clock Mesh Analysis
+     •   Performing Clock Mesh Analysis
+     •   Clock Network Simulation Commands
+
+
+     Overview of Clock Mesh Analysis
+     To use clock mesh analysis, specify the root node of the clock network you want to
+     analyze. Beginning at this node, PrimeTime SI traces the entire clock network, including
+     the clock mesh and sequential device loads. Next, PrimeTime invokes an external
+     HSPICE-compatible circuit simulator to simulate the network and determine the exact
+     timing of each individual cell arc and net arc in the clock network.
+     PrimeTime SI back-annotates the measured delays on the design and then performs
+     timing arc reduction on the clock mesh structure. This reduction process retains a single
+     mesh driver and disables the timing through the other drivers of the mesh. The timing arcs
+     starting from the disabled drivers are replaced by equivalent timing arcs that start from the
+     single retained driver.
+
+
+
+
+PrimeTime® User Guide                                                                          258
+T-2022.03
+                                                                                         Feedback
+Chapter 7: Clocks
+Clock Mesh Analysis
+
+
+Figure 67    Clock mesh analysis and circuit reduction
+
+
+
+      Clock network                                                      Circuit simulation by
+                                                                         SPICE simulator
+
+
+
+
+      Reduced clock
+      network
+
+                                                                                Timing arc delays
+                                                                                calculated by SPICE
+                                                                                circuit simulation
+
+
+                                                     Delay annotation and circuit
+                                                     reduction in PrimeTime
+
+
+
+
+     The purpose of circuit reduction is to avoid the large number of combinations of drivers
+     and loads in a full-mesh analysis, while maintaining accurate driver-to-load timing results.
+     If the mesh has n drivers and m loads, there are n x m timing arcs between drivers and
+     loads in the mesh. However, by reducing the mesh circuit to a single driver, the number of
+     driver-to-load timing arcs is reduced to just m.
+     The circuit has various delay values from the single mesh driver to many loads on the
+     mesh. For clock reconvergence pessimism removal (CRPR), the shortest delay from the
+     mesh driver to the nearest mesh load represents the amount of delay that is shared by
+     all the timing arcs from the driver to the loads. To gain the most benefit of CRPR, this
+     shared delay is accounted for before the CRPR common point. During CRPR calculations,
+     PrimeTime SI makes the following adjustment.
+
+
+
+
+PrimeTime® User Guide                                                                            259
+T-2022.03
+                                                                                      Feedback
+Chapter 7: Clocks
+Clock Mesh Analysis
+
+
+Figure 68    Clock Reconvergence Pessimism Removal From Mesh
+
+
+
+
+                                          9                                                  5
+
+
+
+
+                                          7                                                  3
+
+                              2                                                 6
+                                          4                                                  0
+
+
+
+                                                    Shortest mesh delay subtracted
+                  CRPR common point
+                                                    from all mesh delays and added
+                                                    to delay of retained driver
+
+
+
+     PrimeTime SI uses the output of the single retained mesh driver as the CRPR common
+     point. It finds the shortest net delay through the mesh, adds that value to the mesh driver
+     cell delay, and subtracts that same value from all net delays through the mesh.
+     If you use the report_timing command to report a timing path that goes through the
+     mesh, the report shows the timing through the single retained mesh driver and reflects the
+     results obtained from the SPICE simulations.
+
+
+
+
+PrimeTime® User Guide                                                                            260
+T-2022.03
+                                                                                     Feedback
+Chapter 7: Clocks
+Clock Mesh Analysis
+
+
+
+     Performing Clock Mesh Analysis
+     To perform clock mesh analysis:
+     1. Generate the clock mesh model using clock network simulation commands. Perform
+        this step one time.
+
+   Figure 69     Generating the Clock Mesh Model
+
+                        Set up the simulation environment
+                        (sim_setup_simulator)
+
+                        Set up association between library
+                        cells and SPICE circuit files
+                        (sim_setup_library)
+
+
+
+
+                                                                  Fix setup issues
+
+                             Is the SPICE setup valid?
+                             (sim_validate_setup)            No
+
+
+                                           Yes
+                  Enable clock mesh model generation:
+                  sim_setup_spice_deck -enable_clock_mesh
+
+
+
+                        Load design and constraints
+
+
+                        Simulate and analyze clock network
+                        (sim_analyze_clock_network)
+
+                        (Output results to the
+                        $clock_mesh_model.tcl file)
+
+
+
+
+                                    Quit
+
+
+
+
+PrimeTime® User Guide                                                                      261
+T-2022.03
+                                                                                              Feedback
+Chapter 7: Clocks
+Clock Mesh Analysis
+
+
+     2. Reuse the generated clock mesh model as many times as necessary.
+        If the clock network model remains the same for different analysis runs such as timing
+        analysis, engineering change order (ECO) netlist editing, and constraints clean up, you
+        can reuse the generated clock mesh model.
+
+Figure 70    Reusing the Clock Mesh Model in PrimeTime Analysis
+
+             Reuse the clock simulation results many times if the clock network model is untouched
+
+                      Mode - 1                       Mode - 2               ...           Mode - N
+                Design setup with               Design setup with                     Design setup with
+                clock constraints               clock constraints                     clock constraints
+
+
+
+            Load clock simulation results   Load clock simulation results         Load clock simulation results
+            source                          source                                source
+            clock_mesh_model.tcl            clock_mesh_model.tcl                  clock_mesh_model.tcl
+
+
+
+            Perform update_timing           Perform update_timing                 Perform update_timing
+            and continue with the           and continue with the                 and continue with the
+            PrimeTime SI analysis           PrimeTime SI analysis                 PrimeTime SI analysis
+
+
+     To prepare for the clock network simulation, use the sim_setup_simulator command
+     to set up the SPICE simulator. Set up the SPICE circuit files associated with the logic
+     library cells that are used in the clock network with the sim_setup_library command.
+     Optionally, check the setup with the sim_validate_setup command.
+     To perform the simulation and back-annotate the timing results on the clock network, use
+     the sim_analyze_clock_network command. The simulation results are stored in a Tcl
+     script file.
+     The following script demonstrates the clock network simulation and analysis flow:
+     # Setup simulation environment -- SPICE simulator, working directory,
+     # transistor models, ...
+
+     sim_setup_simulator -simulator /usr/bin/hspice -work_dir ./tmp_dir \
+       -sim_options ".option ingold=2 numdgt=6 statfl=1 ..."
+
+     foreach_in_collection lib [get_libs *] {
+       sim_setup_library -library $lib -sub_circuit ...
+     }
+
+     # Validate setup for each library if needed
+
+
+PrimeTime® User Guide                                                                                  262
+T-2022.03
+                                                                                    Feedback
+Chapter 7: Clocks
+Clock Mesh Analysis
+
+
+     sim_validate_setup -lib_cell ...
+
+     # Enable clock mesh model generation
+     sim_setup_spice_deck -enable_clock_mesh
+
+     # Set up design, parasitics, and clock-related constraints
+     read_verilog ...
+     link
+     read_parasitics ...
+     create_clock ...
+     ...
+
+     # Perform clock network related timing update, simulation and
+     # back-annotation.
+     sim_analyze_clock_network -from $clock_root_pin \
+       -output $clock_mesh_model.tcl ...
+
+     In subsequent PrimeTime analysis runs, you can reuse the same simulation results
+     without repeating the clock mesh model generation steps if the clock network has not
+     changed. Source the Tcl script file generated by the sim_analyze_clock_network
+     command for each subsequent PrimeTime analysis run.
+
+
+     Clock Network Simulation Commands
+     The following commands support the clock network simulation and analysis feature:
+     •   sim_setup_simulator
+     •   sim_setup_library
+     •   sim_setup_spice_deck
+     •   sim_validate_setup
+     •   sim_analyze_clock_network
+
+     sim_setup_simulator
+     The sim_setup_simulator command sets up the simulation environment by specifying
+     the simulator location, simulator type, and working directory. Here is an example of the
+     sim_setup_simulator command.
+     pt_shell> sim_setup_simulator -simulator /usr/bin/hspice \
+                -simulator_type hspice -work_dir ./tmp_dir \
+                -sim_options ".option ingold=2 numdgt=6 statfl=1 ..."
+
+
+
+
+PrimeTime® User Guide                                                                       263
+T-2022.03
+                                                                                     Feedback
+Chapter 7: Clocks
+Clock Mesh Analysis
+
+
+     sim_setup_library
+     The sim_setup_library command performs library setup tasks such as mapping the
+     transistor models to the gate-level models. Here is an example of the sim_setup_library
+     command.
+     pt_shell> sim_setup_library -library $lib_name \
+               -sub_circuit /u/xtalk/si_lib_gen/unit/gem/hspice \
+               -header /u/xtalk/si_lib_gen/unit/gem/model_hspice \
+               -file_name_pattern {my_%s.spc}
+
+     sim_setup_spice_deck
+     The sim_setup_spice_deck command specifies the setup options to write out the SPICE
+     deck. Here is an example of using this command to enable clock model generation flow.
+     pt_shell> sim_setup_spice_deck -enable_clock_mesh
+
+     sim_validate_setup
+     Setting the SPICE simulation environment incorrectly can cause problems in the
+     clock mesh analysis flow. To help ensure that the setup is correct, you can use the
+     sim_validate_setup command. This command invokes the simulator specified by the
+     sim_setup_simulator command on the timing arcs of a given library cell and verifies that
+     the basic characterization setting in the library matches the SPICE setup specified by the
+     sim_setup_simulator and sim_setup_library commands. The sim_validate_setup
+     command supports only combinational cells.
+     The sim_validate_setup command checks for the presence of a SPICE executable,
+     SPICE netlists, SPICE model files, and applicable licenses. It checks for necessary SPICE
+     options and data such as I/O rail settings and correct unit sizes. It also checks the model
+     license and compatibility of the SPICE version with the model. If no errors are found, the
+     delay and slew values computed by SPICE and PrimeTime are displayed.
+     Before you use the sim_validate_setup command, the library must be fully validated
+     for accuracy. This command assumes that the library is correct and accurate, and any
+     mismatch between PrimeTime and SPICE is caused by an incorrect simulator setting, not
+     library errors. You can only use the command when no designs are loaded into PrimeTime.
+     Here is an example of the sim_validate_setup command.
+     pt_shell> sim_validate_setup -from A -to Y \
+               -lib_cell [get_lib_cells $lib_name/IV170BQ] \
+               -capacitance 48 -transition_time 0.2
+
+     sim_analyze_clock_network
+     The sim_analyze_clock_network command extracts the clock network from the
+     specified clock root and invokes the simulator specified by the sim_setup_simulator
+     command. It creates a SPICE deck, links to the simulation environment, runs the
+
+
+PrimeTime® User Guide                                                                       264
+T-2022.03
+                                                                                   Feedback
+Chapter 7: Clocks
+Clock Mesh Analysis
+
+
+     simulation, and back-annotates the results onto the design in PrimeTime. Here is an
+     example of the sim_analyze_clock_network command.
+     pt_shell> sim_analyze_clock_network -from [get_ports CLK1] \
+               -output ./clock_mesh_model.tcl
+
+
+
+
+PrimeTime® User Guide                                                                      265
+T-2022.03
+

@@ -1,0 +1,1301 @@
+CHAPTER 14 — Chip Power Modeling (CPM)                                       RedHawk User Manual      | 394
+Introduction
+
+
+                                                  Chapter 14
+                                   Chip Power Modeling (CPM)
+                  Note: The generation of CPM is considerably more complex than regular dynamic
+                  voltage drop analysis, since the CPM generation process must preserve both the
+                  time and frequency domain response of the underlying circuit for a wide range of
+                  frequency points (DC to multi-GHz). However, the typical usage model of CPM
+                  creation assumes a continuation of a dynamic voltage drop analysis, whose settings
+                  and network formulation may not be appropriate for CPM generation, resulting in
+                  additional complexities.
+
+                  Starting in version 12.2, RedHawk requires users to use a separate CPM creation
+                  flow (using the GSR keyword setting: GENERATE_CPM 1), which ensures that the
+                  CPM generation flow is distinct from dynamic voltage drop analysis. This provides
+                  RedHawk the flexibility to provide additional optimization necessary for CPM creation
+                  without affecting standard dynamic voltage drop analysis.
+
+Introduction
+
+              Chip package and printed circuit board (PCB) designers need an accurate and relatively
+              simple IC power model to design and optimize effective chip packages and boards --
+              including key parameters such as impedance and resonant frequencies of the global
+              power delivery network (PDN). An equivalent circuit for the chip PDN must provide not
+              only an accurate multiple-terminal impedance model, but also accurate current
+              waveforms to represent a realistic worst-case switching scenario for the chip.
+              Apache's Chip Power Model (CPM) enables die-package-board co-design and co-
+              verification for dynamic power integrity. Built on the RedHawk full-chip dynamic power
+              integrity platform, CPM generates a compact and accurate model of the full-chip power
+              delivery network at various key stages of chip and package design.
+              CPM supports the VectorLess™ clock gating switching mode, in addition to the default
+              vectorless and VCD modes. In clock gating Vectorless mode, RedHawk generates a
+              switching scenario that mimics the transition from one clock gating mode to another
+              during multi-cycle transient analysis. A CPM created in this mode captures the current
+              transitions when this clock gating scenario change occurs. This change in current
+              demand is particularly useful to understand the associated Ldi/dt effect in package and
+              board level analyses. CPM has a Resonance Frequency Aware Excitation Mode, in which
+              the RedHawk VectorLess engine generates a multiple-cycle switching scenario for the
+              current signature that introduces most of the energy around the chip-package-system
+              resonance frequency. You only need to specify the system resonance frequency when
+              creating the model, and the CPM technology automatically creates the frequency-based
+              form of on-die excitation, while maintaining the logic and timing properties of the circuit.
+              CPM bridges the design of the power delivery network between the IC and the associated
+              package and PCB. System designers can use CPM to guide and verify the off-chip PDN
+              design by evaluating the impact of on-die parasitics over the global PDN impedance,
+              diagnose potential chip-package LC resonance, validate the package/board dynamic
+              voltage noise margin, as well as to optimize the off-chip decoupling capacitor placements.
+              Both current signatures and parasitic network are distributed across a multiple-terminal
+              equivalent circuit to reflect their temporal and spatial dependencies. The simplest element
+              of the CPM model can be considered to be a serially-connected RDIE and a CDIE, in
+              parallel with a current switch, as shown in Figure 14-1.
+
+
+
+
+ANSYS, Inc.
+CHAPTER 14 — Chip Power Modeling (CPM)                                    RedHawk User Manual     | 395
+Design Flow
+
+
+
+
+              Figure 14-1       Power Delivery Network and simple Chip Power Model
+
+              SPICE-compatible CPM includes parasitics of non-linear switching and non-switching
+              devices, parasitics of power/ground wires, decoupling capacitors, and effective RC's of
+              the loading capacitors from signal interconnects. In addition, CPM contains full-chip
+              switching current signatures based on transistor-level SPICE simulations.
+
+Design Flow
+
+              CPM technology can be useful at all stages of the package-IC system co-design process,
+              as shown in the Figure 14-2 flow diagram.
+
+
+
+                       Synthesis
+                        Synthesis
+
+
+
+                  Floor                            Early-stage CPM
+                           PowerPlan
+                   Floor&&Power  Plan                PG prototyping          Pkg/Brdprototyping
+                                                                            Pkg/Brd  prototyping
+
+
+
+                  Placement&&Routing
+                 Placement    Routing
+                                                    Refined CPM             Refining&&Optimizing
+                                                                           Refining   Optimizing
+
+                      Timingclosure
+                     Timing  closure
+                       De-capInsertion
+                      De-cap  Insertion
+
+
+
+
+                   PhysicalVerification
+                  Physical  Verification              Final CPM             Die-Pkg-brdSign-off
+                                                                            Die-Pkg-brd Sign-off
+                          DRCLVS
+                         DRC  LVS
+
+
+              Figure 14-2       CPM-based IC system co-design process
+
+              The generation of CPM is considerably more complex that regular dynamic voltage drop
+              analysis, since the CPM generation process must preserve both the time and frequency
+              domain response of the underlying circuit for a wide range of frequency points (DC to
+              multi-GHz).
+              An improved CPM creation flow using the required GSR keyword ‘GENERATE_CPM 1’
+              ensures that the CPM generation flow is distinct from the dynamic voltage drop analysis
+              flow, and provides RedHawk the flexibility to optimize CPM creation without affecting
+              dynamic voltage drop analysis.
+
+
+ANSYS, Inc.
+CHAPTER 14 — Chip Power Modeling (CPM)                                               RedHawk User Manual        | 396
+RedHawk Modeling of Chip Power Delivery Network
+
+RedHawk Modeling of Chip Power Delivery Network
+
+              A chip power delivery network can be modeled in several ways by CPM, depending upon
+              the number of power/ground pads involved and also the desired trade-off between speed
+              and accuracy of analysis.
+
+              Modeling Choices Based on Number of Pads
+
+              If a large number of die pads are involved, such as several thousand in a typical flip chip
+              package design, the die pad area is partitioned into smaller rectangular areas and CPM
+              generates a set of terminals corresponding to each Vdd and Vss net within each partition.
+              For wirebond designs with a large number of pads, they also can be grouped into
+              individual partitions of pads for better analysis based on the Spice node name
+              specification in the PLOC file. For designs with a smaller manageable number of power/
+              ground pads, all pads are represented individually by CPM terminals.
+              All significant sources of capacitance in a chip, including parasitics and decoupling, are
+              included in the RedHawk chip model, as shown in the circuit of Figure 14-3:
+               • Intentional de-caps, from RedHawk characterization
+               • Intrinsic device de-caps, from RedHawk characterization
+               • Signal loading capacitance, from SPEF (StarRC)
+               • Coupling capacitance between power and ground wires, from RedHawk extraction
+
+
+
+               Vdd Pad
+                                i (t)
+
+                            L           Rpg                                              Cdev
+                                                                   Rdecap   Rmacro
+                                                   is(t)    +
+                                                                                                      Rload
+                                                           v (t)
+                                                                   Cdecap   Cmacro Cpg
+               Vss Pad                                      -
+                                                        Cload                                                  Cload
+
+
+
+                                          Switching instance                          Non-switching instance
+                                                                                          Output: 1->1
+
+
+              Figure 14-3       RedHawk chip power modeling circuit
+
+              CPM for Flip Chip Designs
+              For flip chip designs, the chip bump area can be partitioned into N x M tiles. Assuming
+              there are K power/ground nets (that is, one or more Vdd nets and one or more Vss nets),
+              then the maximum number of external terminals of the resulting CPM will be K x N x M.
+              Figure 14-4 shows a flip chip example with one VDD net and one VSS net. The number of
+              partitions is 4 (N=2, M =2).
+
+
+
+
+ANSYS, Inc.
+CHAPTER 14 — Chip Power Modeling (CPM)                                   RedHawk User Manual    | 397
+RedHawk Modeling of Chip Power Delivery Network
+
+
+
+
+              Figure 14-4     Modeling a chip power circuit for a flip-chip package
+
+              CPM for Wirebond Designs
+              For wire-bond designs, an N-terminal CPM is created, for which typically each wire-bond
+              pad corresponds to a terminal of the model, as shown in Figure 14-5.
+              For PLOC files that have grouped ports (package nodes) and named them accordingly,
+              CPM by default uses the PLOC port groups and generates a set of external ports that
+              follow the grouping pattern in the PLOC file.
+
+
+
+
+              Figure 14-5     Modeling a chip power circuit for a wirebond package
+
+              3DIC CPM Generation
+              A combined CPM can be generated for the complete 3DIC structure, as shown in Figure
+              14-6. For example, if there is a memory die stacked on a logic die, CPM generation for
+              both logic and memory die combined can be performed using the following Tcl
+              commands:
+                        import gsr mem.gsr -die mem
+                        import gsr logic.gsr -die logic
+                        setup design
+                        perform pwrcalc
+                        perform extraction -power -ground -r -c
+                        perform powermodel -nx 1 -ny 1 -o 3dic_cpm.sp
+
+
+
+
+ANSYS, Inc.
+CHAPTER 14 — Chip Power Modeling (CPM)                                      RedHawk User Manual     | 398
+RedHawk Modeling of Chip Power Delivery Network
+
+
+
+
+              Figure 14-6      3DIC CPM generation
+
+              Modeling Choices Based on Analysis Speed and Accuracy
+
+              High speed modeling
+              The “model order reduction” (MOR) methodology is based on a DC/zero frequency-
+              centered solution, that becomes more inaccurate as the switching frequencies of the
+              design become higher, but saves runtime for conditions that do not require high
+              frequencies and high accuracy.
+              In general an assumption of power-ground symmetry is made, which means that package
+              power and ground impedances are considered similar. However, setting the GSR
+              keyword DYNAMIC_SOLVER_MODE to 1 allows a P/G solution without this assumption,
+              increasing the accuracy, although this makes it a more time-consuming and memory-
+              intensive methodology.
+
+              High Accuracy Modeling
+
+                  “AC” Modeling
+              The default AC analysis-based version of CPM significantly improves the accuracy of the
+              model, and has far better correlation with RedHawk simulations. CPM model construction
+              consists of two parts: calculation of current signatures and the reduction of the passive
+              part of the circuit.
+              The AC analysis-based CPM generation uses grid RC reduction applied to the original
+              RC network that contains not just the resistance and capacitance representing the
+              parasitics of the power/ground wires, but also the series RC branches that model the
+              parasitics of non-switching instances. Switching instances are modelled as time and
+              voltage-dependent current sources.
+              The analysis takes the large network of resistors and capacitors (typically with millions of
+              nodes) and generates a much smaller network (typically with tens or hundreds of nodes),
+              whose frequency domain response at the specified ports for the specified frequency
+              range matches that of the original network, with a tolerance better than 0.2 %. The
+              resulting network, which consists of R, C, and possibly L and G (constant Voltage
+              Controlled Current Source) elements, is exported as a SPICE netlist. The netlist is
+              guaranteed to be passive by construction, and thus suitable to be used in transient
+              simulations with SPICE or another transient simulator. This netlist can be used with any
+              version of SPICE (such as NSPICE from Apache and HSPICE from Synopsys) as it only
+              uses classic circuit elements.
+
+                  S-Parameter Modeling
+              CPM can generate an S-parameter model of the RLC grid and export it to a Touchstone
+              file. This allows you to generate frequency-dependent S-parameters for the on-die power
+
+
+
+ANSYS, Inc.
+CHAPTER 14 — Chip Power Modeling (CPM)                                          RedHawk User Manual      | 399
+RedHawk Modeling of Chip Power Delivery Network
+
+              grid netlist. The S-parameters are calculated at the frequencies at which the AC analysis
+              is performed. To use this capability, you need to specify the configuration file in the
+              command
+                         perform powermodel -grid [RC |RLC ]
+                               -options <config_file_path>'
+              or RC_reduction.config in the run directory. In the configuration file, you must specify the
+              path to the port definition file as:
+                        portFileName=<port file name>
+              and specify the flag to enable S-parameter model generation (‘sParam=true’). You can
+              also specify the value of the reference impedance (Zo=<value>).Also, to generate the
+              N+1 broadband spice model, add the option “broadbandSpice=true” in the
+              configuration file.
+              Example configuration file:
+                      sParam=true
+                      Zo=50
+                      portFileName=port.file
+                      broadbandSpice=true
+              In this case, the reference impedance is 50 Ohms (default is Zo=2 Ohms), and the port
+              file is port.file in the run directory. In the port file, the ports of the S-parameter model are
+              specified as CPM port (terminal) pairs. The format of the port file is:
+                            <CPM_port_name1> <CPM_port_name2>
+              Note that the CPM port name is either the pad name, if there is no grouping (no 6th
+              column in the ploc file), or the name given in the 6th column of the PLOC file. An example
+              of a port file follows:
+                          pwr_0 gnd_0
+                          pwr_1 gnd_1
+                          pwr_2 gnd_2
+                          pwr_3 gnd_3
+                          pwr_4 gnd_4
+                          pwr_5 gnd_5
+              Note: there is no S-parameter port name; the first port is between the CPM ports
+              (terminals) pwr_0, gnd_0, the second port is between (pwr_1, gnd_1), and the 10th port is
+              between (pwr_9, gnd_9).
+              In automatic port definition instead of using a port file,
+               • for wirebond design, RedHawk will create port for each pin automatically.
+               • for flip chip design, RedHawk will create port for the partition power node defined.The
+                 reference pin will be assigned randomly.
+              Example CPM command:
+                  perform powermodel -grid RC -plocname -options rc.config -o output.sp
+              The S-parameter (Touchstone) filename is based on the specified output filename. For
+              example, for an output specification ‘-o rc_grid.sp’, the Touchstone filename is
+              re_grid.Snp, where n is the number of ports. For example, if the output file is output.sp
+              and there are 10 ports, the S parameter file is output.s10p, written to the run directory.
+              There is also a regular CPM grid netlist output output*sp file.
+              A sample PLOC file follows:
+                       VDD01 10 20 metal5 POWER VDD_group1
+                       VSS01 11 21 metal5 GROUND VSS_group1
+                       VDD02 5 20 metal1 POWER VDD_group2
+                       VSS02 6 21 metal1 GROUND VSS_group2
+
+
+
+ANSYS, Inc.
+CHAPTER 14 — Chip Power Modeling (CPM)                                       RedHawk User Manual       | 400
+CPM Simulation Procedures
+
+              Note that automatic presim time determination is supported in S-parameter package
+              models. Set the GSR keyword 'DYNAMIC_PRESIM_TIME -1' to enable this function.
+
+              ESD- aware CPM Models
+              ESD-aware CPM models can be created for system-level ESD analysis. Clamp
+              connections are modeled as ports in the CPM model, and sub-circuits for clamp devices
+              then are included in the CPM model. The command steps are as follows:
+                        setup analysis_mode esd
+                        setup design <GSR_file>
+                        ...
+                        perform extraction –power –ground
+                        ...
+                        perform powermodel –esd ?-esd_clamp <file>? ...
+              Note that the ‘-esd_clamp’ option is not needed if a clamp file is specified using the
+              ‘ESD_CLAMP_FILE’ keyword in the GSR.
+
+
+
+CPM Simulation Procedures
+
+              Initial Setup and Preparation
+
+              The required input data for CPM is the same as you need for a full-chip RedHawk DvD
+              analysis. You must use the correct APL characterization data, or AVM characterization if
+              APL data is missing for memories and custom macros (see Chapter 9, "Characterization
+              Using Apache Power Library").
+              The switching current component of the CPM depends on the switching activity in the
+              design during transient simulation. Hence setting proper switching rates is critical. This
+              can be achieved either by using the Vectorless algorithm (see Chapter 5, "Dynamic
+              Voltage Drop Analysis"), or by using a VCD file (either gate level or RTL level VCD). In
+              contrast to the DvD analysis flow, you do NOT need to specify any package models
+              during a CPM run.
+              Additional input parameters to be decided and specified for a flip chip CPM model are the
+              number of partitions desired in the X and Y directions.
+
+              Running CPM
+
+              The Chip Power Model is created from the RedHawk flow, by reading the input data,
+              performing power calculation and on-die P/G extraction, and then creating the electrical
+              model of the chip power delivery network and current profiles based on the defined
+              partitioned network.
+              The RedHawk command line setup and invocation command steps are as follows:
+                1.   Import and set up design.
+                     The GSR file contains the paths to all design and library files (including APL/AVM)
+                     data and simulation conditions. See section "Global System Requirements File
+                     (*.gsr)", page C-577, for a description of the GSR keywords. The keyword
+                     ‘GENERATE_CPM 1’ must be set or the CPM run fails.
+                         setup design <design>.gsr
+                2.   Specify a temporary file location on a local disk. Particularly when multiple
+                     processors are used and for large designs (more than 10 M nodes), writing
+                     temporary files to a disk on the network slows down execution because of I/O
+
+
+ANSYS, Inc.
+CHAPTER 14 — Chip Power Modeling (CPM)                                        RedHawk User Manual     | 401
+CPM Simulation Procedures
+
+                    operations. Put temporary files on a local disk by setting the CACHE_DIR GSR
+                    keyword. After chip power modeling finishes, the temporary files (linear.*) in
+                    CACHE_DIR are deleted.
+               3.   Determine appropriate toggle rates and calculate average power.
+                      perform pwrcalc
+               4.   Extract RLC parasitics of on-die P/G networks.
+                       perform extraction -power -ground -c -l
+               5.   Set up the files to determine an accurate switching scenario for dynamic analysis:
+                      a. To use a vectorless method to determine the switching scenario, including
+                         clock gating, see section "Vectorless Dynamic Analysis", page 5-82, for
+                         instructions on setting up the proper GSR keyword settings.
+                      b. To use a VCD file to specify the switching scenario, use the GSR keyword
+                         VCD_FILE. Refer to section "VCD_FILE", page C-616, for syntax and usage.
+               6.   The command syntax for generating a CPM is as follows:
+                  perform powermodel [ -wirebond | <flip chip partitions>| -cdie| -static
+                  | -lowpower | -esd ] ? -esd_clamp <file> ? ? -parasitic ? ?-vcd ?
+                  ?<no model option-default>? ? -pincurrent ? ? -rleak ? ? -rleak_par?
+                  ?-solver mor? ?-plocname? ? -ind? ? -no_afs? ? -passive ?
+                  ? [ -noglobal_gnd | -global_gnd ] ? ? -high_capacity 1 ?
+                  ? -repeat_current [ <start_time> | presim | best ]? -probe ?
+                  ? -internal_node -cell_file <cell_list_filename> ? ? -reportcap ?
+                  ? -o <output_filename> ? ? -reuse ? ? -io ? ? port_grouping
+              <group_cfg_file> ? ? -esd_spice ? ? -cecm_subckt
+                    where
+                     -wirebond : specifies a wirebond package
+                     <flip chip partitions> : -nx <num_x_ partitions> -ny <num_y_partitions>, specifies
+                          the number of partitions in the x and y directions. For -nx 1, -ny 1, a Cdie/
+                          Rdie report is generated in the adsRpt/CPM/apache.Cdie file.
+                     -cdie : sets nx=1 and ny=1, and connects all power nets together and all ground
+                          nets together to obtain a single-port solution to obtain the equivalent Cdie
+                          and Rdie values for the chip. No current waveform is generated. A Cdie/Rdie
+                          report is generated in the adsRpt/CPM/apache.Cdie file.
+                            Note that the -cdie option just provides faster run time by not calculating the
+                            current waveforms. For all other purposes it is equivalent to using ‘-nx1 -ny1’.
+                     -static : creates static analysis chip power model, using DC conditions, a
+                          resistance-based circuit, and average current.
+                     -lowpower: CPM generation support for ramp-up analysis.
+                     -esd: creates a CPM that includes clamp device models/characteristics, along
+                         with the PDN model Spice deck. Clamp connections are modeled as ports in
+                         the CPM model, and sub-circuits for clamp devices are included in the CPM
+                         model. You must also specify the clamp files in the GSR. If the clamp files
+                         are not present in the GSR, use the “–esd_clamp” option to specify the clamp
+                         file.
+                     -parasitic: generates only the passive part of the CPM, without performing
+                         transient simulation, to generate the current signatures of the CPM ports, an
+                         extension of -cdie option for multi-partition CPMs. This can save time in
+                         transient simulation. However, the CPM model generated with -parasitic can
+                         only be used for DC and AC analysis (not usable for transient analysis).
+                     -vcd : uses VCD file as basis for determining the worst case switching scenario
+
+
+
+
+ANSYS, Inc.
+CHAPTER 14 — Chip Power Modeling (CPM)                                       RedHawk User Manual      | 402
+CPM Simulation Procedures
+
+                  -pincurrent: specifies that CPM generate the model without current conservation
+                       (balanced current between Vdd and Vss) to achieve better correlation with
+                       RedHawk dynamic simulation results. In general, CPM enforces current
+                       conservation. However, in cases when RedHawk does not produce balanced
+                       VDD and VSS currents, this option can be used.
+                  -rleak: causes the leak resistance to be added between ports on the VDD (power)
+                       net and the reference port on the VSS net.
+                  -rleak_par: inserts leakage resistance between the VDD and VSS ports of each
+                       defined partition. Note that this option only works with partitioned CPM
+                       models. See the following section for more details on usage.
+                  -solver mor: turns off the default ‘solver ac’ function, which is an accurate
+                       frequency-based linear solver AC solution with passivity enforcement.
+                  -plocname: specifies pad/group names for CPM port names. If the '-wirebond'
+                       option is used, the subcircuit terminal names are taken from the pad names
+                       (if no grouping is specified), or the group names from the 6th column of the
+                       .ploc file. These group names are also known as SPICE node names, as this
+                       mechanism is used to connect a package using the keyword
+                       'PACKAGE_SPICE_SUBCKT'. If this option is used with '-nx # -ny #' options,
+                       the node names are generated in the following form: PAR_0_0_VDD1,
+                       PAR_0_0_VSS2, ... For wirebond CPMs without any grouping, the subckt
+                       terminal name is the ploc name.
+                  -ind: accounts for on-chip inductance, if the option '-l' of the RedHawk 'perform
+                       extraction' command has been used
+               Note: If you specify the '-l' option of the 'perform extraction' command, but not '-ind',
+               inductance is ignored. Not specifying the ‘-l’ option and using ‘-ind’ is an error.
+                  -no_afs : turns off the default AFS function. Adaptive Frequency Sweep for AC
+                      mode execution intelligently selects seven to nine frequencies (enough to
+                      reach convergence) to perform AC analysis, as opposed to 26 frequency
+                      samples that are performed by default in ‘solver ac’ mode. This option is
+                      recommended for design sizes exceeding 50 ports. Port count can be
+                      determined by computing N * M * P, where N = number of X partitions in the
+                      CPM (-nx option), M = number of Y partitions in the CPM (-ny option), and P
+                      = number of power and ground domains.
+                  -passive : only effective with the MOR function, which uses MOR to generate a
+                      passivity-enforced SPICE model, which can reduce accuracy. This mode can
+                      be useful if the SPICE simulation of the package/PCB CPM has convergence
+                      issues. The SPICE netlist is significantly smaller than using the default mode.
+                      But CPM is a compact model, so complexity is not a concern for cases with,
+                      for example, 100 bond pads, or up to 10x10 partitions for a flip-chip design.
+                  -noglobal_gnd | -global_gnd: specifies the type of parasitic modeling in CPM,
+                      either (a) without Spice Node 0, using option '-noglobal_gnd' (the default),
+                      where there is a direct connection between the power and ground ports
+                      without going through Spice node 0, or (b) using Spice Node 0, using option
+                      '-global_gnd’, in which the RLC parasitics from power and ground are
+                      connected to Spice global ground (node 0).
+                  -high_capacity 1: specifies use of the asim3d solver for CPM. The default CPM
+                       generation solver is ASIM3D(on by default). Specifying -high_capacity 0 will
+                       switch the solver to asim_mixed.
+                  -repeat_current: specifies that the CPM current signature is repeated starting
+                      from the specified time point. Either a <start_time> in ns, the ‘presim’ time, or
+                      ‘best’ (chosen to cause the best continuity at the repeat point), can be
+                      chosen as the starting point of the repeating waveform. A warning is issued
+
+
+
+ANSYS, Inc.
+CHAPTER 14 — Chip Power Modeling (CPM)                                     RedHawk User Manual      | 403
+CPM Simulation Procedures
+
+                       for incorrect values (such as a negative value or value greater than the
+                       maximum time of the PWL source). For non-zero values the closest time in
+                       the PWL definition is used. For example, if a ‘-repeat_current 1n’ option is
+                       specified, and PWL time values ..., 900, 930, 960, 990, 1020, ... ps are
+                       defined, ‘R=990 ps’ is used. This is required for SPICE to accept the netlist.
+                       For the ‘best’ option to work well, the presim time and the transient simulation
+                       time need to be set to “n*T”, where n is a positive integer, and T is the period
+                       of the clock frequency. With this option, the repeat time may be different for
+                       each individual PWL current source. Usage examples:
+                          perform powermodel -nx 2 -ny 2 -repeat_current 0
+                       which repeats starting from the beginning, t=0. Or,
+                          perform powermodel -nx 2 -ny 2 -repeat_current 2n
+                       which repeats starting from the time value in the PWL source definition
+                       closest to the 2ns time specified.
+                  -probe: invokes the iCPM utility that enables the visibility of sensitive P/G
+                      connections in the design, and allows you to probe device locations inside
+                      the chip. You must set the PROBE_NODE_FILE GSR keyword, as described
+                      in section "iCPM- Internal Node Probing", page 14-408.
+                  -internal_node: specifies additional ports located at P/ G pins on the same net
+                       that are to be shorted together to form one internal port. These nodes are
+                       named with the format '<instance name>_<netname>' in the CPM, such as
+                       “inst_1_VDD”. Note that the option “–internal_node” is not supported in static
+                       analysis.
+                       Note that the options '-internal_node' and '-cell_file' are required to execute
+                       this feature, and the '-pincurrent' option should be used to keep the CPM
+                       currents at the correct value without further modifying the port currents, so
+                       that the sum of all port currents is zero. This feature also allows you to
+                       include/exclude the instance current profile and device capacitance from
+                       CPM creation, using the EXCLUDE option in the GSC file. To exclude
+                       instance current profiles and device capacitance, use the GSC syntax:
+                       '<instance name> EXCLUDE'.
+                  -cell_file <cell_list_filename>: specifies a file containing a list of the instances
+                       whose internal P/G pins are to be exposed.
+                  -port_grouping <group_cfg_file>: to enable Power/Ground bump grouping on
+                       different layers and regions.
+                    Synatx of <group_cfg_file> :
+
+                      CPM_Port_Grouping {
+                      #region_name layer nx ny llx lly urx ury_in_um
+                      ....
+                      }
+                    Example:
+                     CPM_Port_Grouping {
+                      #region_name layer nx ny llx lly urx ury_in_um
+                      DIE1_G PM0         20    20     3000.00        -4700.00        10000.00
+                      4800.00
+                      DIE2_G      PM0    30    30     3000.00       -16100.00        10000.00
+                      -6400.00
+                      BGA_G   UBM        20    40    -2500.00       -30000.00        15000.00
+                      5000.00
+
+
+ANSYS, Inc.
+CHAPTER 14 — Chip Power Modeling (CPM)                                       RedHawk User Manual      | 404
+CPM Simulation Procedures
+
+                          }
+                          -reportcap: creates a log file report of all capacitance components included in
+                           the CPM generation. Example output:
+                             Capacitance components -
+                                   Intentional Decap - 0.000000e+00 pF
+                                   Intrinsic        Decap - 2.404236e+02 pF
+                                   Load             Decap - 1.945542e+02 pF
+                                   Power grid Decap - 3.260729e+00 pF
+                                   Well             Decap - 0.000000e+00 pF
+                             Total - 4.382385e+02 pF
+                      -esd_spice : to define the name of generated circuit spice file.
+                      Please note that -esd_spice file is not naming the CECM model but the spice
+                      file containing the ESD circuits. If these options are not specified default values
+                      will be used.
+                      -cecm_subckt : defines the name of sub-circuit to be generated.
+                      -o <output_filename> : specifies output filename (default - PowerModel.sp, with
+                          the passive part in the file PowerModel.sp.inc)
+                      -reuse : allows reuse of the generated current waveforms after one CPM run, if
+                          chip power models with different partitioning schemes are desired
+                      -io : specifies that the I/O cells are to be included in the chip power model
+
+
+                7.   So to generate a CPM for a flip chip design:
+                       a. to use a vectorless methodology for an accurate solution:
+                             perform powermodel
+                                  -nx <num_x_partitions>
+                                  -ny <num_y_partitions> -o <output_filename>
+                       b. to use a VCD scenario, use the same command as in step (a) and use
+                          the ‘-vcd’ option.
+                       c. to generate a CPM quickly for a wirebond design:
+                             perform powermodel -wirebond -solver mor
+                             -o <output_filename>
+                       d. to generate the passive part of a CPM (in a file cpm.sp.inc) with 2 x 3
+                          partitioning:
+                             perform powermodel -nx 2 -ny 3 -parasitic -o cpm.sp
+              Note that AC mode analysis in Chip Power Modeling can provide a fast solution using the
+              linear solver with multi-threading. You can set the maximum number of processors to be
+              used, which by default is the lesser of the number of processors available or 8. To use
+              more than 8 processors, or fewer, you can set the Linux/UNIX environment variable
+              'MAX_CPU <number>'. Then the number of processors used is the lesser of the
+              processors available and the MAX_CPU value. For example, using 'setenv MAX_CPU 4'
+              limits the maximum number of processors in use to four.
+
+              Basic power integrity analysis
+              The following GSR keywords settings are recommended for creating CPMs for basic
+              power integrity analysis:
+                      DYNAMIC_TIME_STEP <ps> : time step should be less than 20ps
+                      DYNAMIC_PRESIM_TIME < time> <TSM=1> : do not use TSM > 1.0. For
+                         example:
+                           DYNAMIC_PRESIM_TIME 10n 1.0
+
+
+ANSYS, Inc.
+CHAPTER 14 — Chip Power Modeling (CPM)                                       RedHawk User Manual    | 405
+CPM Simulation Procedures
+
+              For multiple-Vdd designs, the following GSR keyword must be used. Note that run time
+              and memory use will increase significantly for these cases.
+                      DYNAMIC_SOLVER_MODE 1
+              The recommended command options to generate CPM for power integrity analysis are:
+                       perform powermodel [-wirebond | -nx <x-part.> -ny <y-part.>
+                       ] -plocname -repeat_current <start_time> -rleak -ind
+              The effects of using the -pincurrent option are described in Table 14-1 below.
+
+              Use of option      Dynamic I(t)                                Passive portion
+              -pincurrent        Solver
+              Not used               0        Current from N-1 ports flow Coupled between VDD and
+                                              to one common VSS port.     VSS. Not affected by these
+                                                                          options.
+              Not used               1        Current from N-1 ports flow Coupled between VDD and
+                                              to one common VSS port.     VSS. Not affected by these
+                                                                          options.
+              Used                   0        Current for all N ports flow   Coupled between VDD and
+                                              to Spice node 0.               VSS. Not affected by these
+                                                                             options.
+              Used                   1        Current for all N ports flow   Coupled between VDD and
+                                              to Spice node 0.               VSS. Not affected by these
+                                                                             options
+
+                       Table 14-1         Effects of -pincurrent option use
+              The effects of using the -noglobal_gnd and -global_gnd options are described in Table
+              14-2 below.
+
+              Use of options Dynamic
+               -noglobal_gnd Solver                        I(t)                   Passive portion
+              and -global_gnd
+              -global_gnd             0       Not affected by these          Capacitance connected to
+                                              options. Controlled by         Spice node 0 (global
+                                              –pincurrent.                   ground)
+              -global_gnd             1       Not affected by these          Coupled between Vdd and
+                                              options. Controlled by         Vss.
+                                              –pincurrent.
+              -noglobal_gnd           0       Not affected by these          Coupled between Vdd and
+              (default)                       options. Controlled by         Vss.
+                                              –pincurrent.
+              -noglobal_gnd           1       Not affected by these          Coupled between Vdd and
+              (default)                       options. Controlled by         Vss.
+                                              –pincurrent.
+
+                       Table 14-2         Effects of -noglobal_gnd and -global_gnd option use
+
+              EMI modeling
+              The following GSR keywords settings are recommended for creating CPMs for EMI
+              analysis:
+                      COUPLEC 1
+
+
+
+ANSYS, Inc.
+CHAPTER 14 — Chip Power Modeling (CPM)                                      RedHawk User Manual    | 406
+CPM Simulation Procedures
+
+                      DYNAMIC_SOLVER_MODE 1
+                      DYNAMIC_TIME_STEP <ps> : time step should be less than 20ps
+                      DYNAMIC_PRESIM_TIME < time> <TSM=1> : do not use TSM > 1.0
+              The recommended command options to generate CPM for EMI analysis are:
+                       perform powermodel -pincurrent -couple_gridc [-wirebond |
+                           -nx <x-part.> -ny <y-part.> ]
+                           -plocname -repeat_current <start_time> -rleak -ind
+
+              User-specified Grouping for Port Creation
+              CPM port generation has two methodologies, wirebond and flip chip, matching the pack
+              designs. For designs with a low number or power and ground connections, such as
+              wirebond designs, the wirebond option (‘perform powermodel -wirebond’) is
+              recommended. By using the wirebond option, a CPM is created with a port representing
+              each of the power and ground connections, as defined by the PLOC file.
+              For designs with a higher port count or those containing a distributed sea of power and
+              ground connections, such as a flip chip design, the flip-chip configuration is
+              recommended. In this approach, the chip is divided into regions specified by the user
+              (that is, ‘perform powermodel -nx 4 -ny 4’). In each region, a CPM port is created for each
+              analyzed domain.
+              In some cases, the user may want use a hybrid approach. For example, for some
+              domains, per-pad resolution (wirebond) is required, but for other domains a grouped
+              representation is preferred. This section describes the procedure to enable user-
+              specified grouping for the CPM wirebond option.
+
+                  Wirebond Grouping Procedure
+              Arbitrary partitions are created by adding a 6th column to the PLOC file, and then using
+              the '-wirebond' option of the 'perform powermodel' command. In the following example,
+              there are 8 individual entries to the PLOC file. The 6th column represents the user-
+              specified group name. The first two power source locations (DVDD1 and DVDD2) are
+              grouped into a single CPM port (GROUP_POWER_1). Similarly, the first two ground
+              sources (DVSS1 and DVSS2) are grouped together into a single CPM port
+              (GROUP_GROUND_1), as shown in Figure 14-7. The remaining PLOC sources are
+              represented by a unique CPM port.
+
+
+
+
+              Figure 14-7      Wirebond port grouping
+
+              Example PLOC file:
+
+
+ANSYS, Inc.
+CHAPTER 14 — Chip Power Modeling (CPM)                                         RedHawk User Manual      | 407
+CPM Simulation Procedures
+
+                        #source name #loc_x #loc_y #layer name #POWER/GROUND #Group name
+                        DVDD1 10 5 METAL6 POWER GROUP_POWER_1
+                        DVDD2 15 5 METAL6 POWER GROUP_POWER_1
+                        DVDD3 10 5 METAL6 POWER POWER_2
+                        DVDD4 15 10 METAL6 POWER POWER_3
+                        DVSS1 10 15 METAL6 GROUND GROUP_GROUND_1
+                        DVSS2 15 15 METAL6 GROUND GROUP_GROUND_1
+                        DVSS3 10 5 METAL6 GROUND GROUND_2
+                        DVSS4 5 5 METAL6 GROUND GROUND_3
+              To generate a CPM with user-configured grouping, use ‘perform powermodel -wirebond’.
+              If the ‘-plocname’ option is used, the CPM port names reflect the 6th column group names
+              from the PLOC file.
+
+              Modeling leakage resistance using arbitrary partitioning
+              You can use the '-rleak_par' option to capture leakage resistance in CPM between
+              POWER/GROUND ports defined in arbitrary partitions. Arbitrary partitions are created by
+              adding a 6th column to the PLOC file and then using the '-wirebond' option of the 'perform
+              powermodel' command. Pads with the same “package node” (the entry in the 6th column
+              of the PLOC file) are grouped together, forming a so-called “CPM port”. Unlike geometric
+              grouping using '-nx # -ny #'' partitioning, an additional file partition.txt is needed to define
+              which VCC and VSS ports belong to the same partition. The format of the partition.txt file
+              is '<package node> < group name>'.
+              The following is an example partition definition in a partition.txt file:
+                        bump_vcc1 part1
+                        bump_vcc2 part2
+                        ref1 part1
+                        ref2 part2
+              In this example, the partition named 'part1' has'bump_vcc1' as its VCC port, and 'ref1' as
+              its 'VSS port'. The partition named 'part2' has 'bump_vcc2' as its VCC port, and 'ref2' as
+              its VSS ports. So if you specify ‘-rleak_par’, two leakage resistances are added, one
+              between 'bump_vcc1' and 'ref1', and the other between 'bump_vcc2' and 'ref2'. The file
+              partition.txt should be placed in the run directory.
+
+
+              The CPM command is:
+                      perform powermodel              -rleak_par -wirebond
+              Example PLOC file
+                  #source name #loc_x #loc_y #layer name #POWER/GROUND #Group name
+                      DVDD41 35 3426 METAL6 POWER GROUP41_POWER
+                      DVSS41 35 3548 METAL6 GROUND GROUP41_GROUND
+                      DVDD42 35 3730 METAL6 POWER GROUP42_POWER
+                      DVSS42 35 3790 METAL6 GROUND GROUP42_GROUND
+                      DVDD43 35 3976 METAL6 POWER GROUP43_POWER
+                      DVSS43 35 4028 METAL6 GROUND GROUP43_GROUND
+                      DVDD44 35 4212 METAL6 POWER GROUP44_POWER
+                      DVSS44 35 1270 METAL6 GROUND GROUP44_GROUND
+              The leakage resistance in the output CPM model appears as follows:
+                       R0_A320 GROUP44_GROUND GROUP44_POWER 99660.431993
+                       R0_D821 GROUP43_POWER GROUP43_GROUND 64882.488351
+                       R0_N863 GROUP42_POWER GROUP42_GROUND 87442.938928
+
+
+
+
+ANSYS, Inc.
+CHAPTER 14 — Chip Power Modeling (CPM)                                       RedHawk User Manual     | 408
+CPM Simulation Procedures
+
+              iCPM- Internal Node Probing
+              iCPM enables access to sensitive P/G connections in the design, and allows you to probe
+              device locations inside the chip. This capability can evaluate the drop through the on-die
+              PDN in a fast system-level simulation. You can not only see the impact of changes at the
+              boundary between the die and the package (at the pads or C4 bumps), but also deep
+              inside the chip at critical locations, such as near the PLL or the FGU blocks.
+              CPMs created iCPM technology have terminals at user-defined device locations, in
+              addition to the traditional C4 bump and/or pad locations. The iCPM model is created in an
+              incremental step after simulation:
+                         perform powermodel -nx 1 -ny 1 -probe -o cpm_probe.sp
+              In the GSR, add the keyword 'PROBE_NODE_FILE <file_path>'. The file format is:
+                       <X_location> <Y_location> <Metal_layer_name> <Port_name>
+              For example:
+                      68.81       47.76      METAL1      port_vdd
+                      67.25       40.10      METAL1      port_vss
+              Or you can use the options ‘-internal_node’ and ‘-cell_file <instance_list_file> to specify
+                    particular instances that should have probe access.
+
+              Resonance frequency-aware mode
+              In the Resonance Frequency Aware mode, the RedHawk VectorLess™ engine generates
+              a multiple-cycle switching scenario for the current signature that introduces most of the
+              energy around the chip-package-system resonance frequency. You only need to specify
+              the system resonance frequency when creating the model, and CPM analysis
+              automatically creates the frequency-based form of on-die excitation, while maintaining the
+              logic and timing properties of the circuit, as shown in the Figure 14-8.
+
+
+
+
+              Figure 14-8      Frequency-aware CPM mode
+
+
+
+
+ANSYS, Inc.
+CHAPTER 14 — Chip Power Modeling (CPM)                                     RedHawk User Manual     | 409
+CPM Simulation Procedures
+
+              To use this option, first generate a regular CPM model and use its passive part to perform
+              AC analysis for the circuit that includes the CPM and package (and PCB if desired). This
+              AC analysis yields the resonance frequency. Then a second CPM generation run is
+              performed with the GSR setting: DYNAMIC_FREQUENCY_AWARE <frequency in Hz>
+              For example, for a resonance frequency of f= 40 MHz:
+                      DYNAMIC_FREQUENCY_AWARE 40e6
+
+              Power Transient Mode (variable power)
+              Power Transient Analysis, also known as Variable Power, provides greater flexibility to
+              simulate frame-by-frame power/current transient behavior, such as for Gated Clock
+              operations, and more accurately models power transients on the chip.
+              While the resonance-aware mode generates current transients that match a particular
+              resonance frequency, variable power mode has more flexibility to include a range of
+              frequencies. By capturing the power stepup, the impact of various chip transitions--such
+              as from reset to running mode, from traffic to no-traffic mode, or from memory-on to
+              memory-off mode--can be modeled, as shown in Figure 14-9. These power transients
+              affect the entire VRM, board, package, and die system to varying degrees, based on the
+              duration and amplitude of the power step. The variable power CPM also can be used to
+              create a low-frequency spectrum, as opposed to a traditional high-frequency spectrum, to
+              allow testing of the package and PCB in the low-to-middle frequency range.
+
+
+
+
+              Figure 14-9      CPM Power Transient mode
+
+              CPM gets the Power Transient Analysis from the RedHawk dynamic run. The following
+              GSR keyword are used to specify its operation:
+                      POWER_TRANSIENT_ANALYSIS {
+                           <duration_frame_1_sec> <config_file_1>
+                           <duration_frame_2_sec> <config_file_2>
+                           <duration_frame_3_sec> <config_file_3>
+                           ...
+                      }
+
+                  Power transient configuration file
+              The CPM configuration file supports the following GSR keywords:
+               • GSC_FILE
+
+
+ANSYS, Inc.
+CHAPTER 14 — Chip Power Modeling (CPM)                                        RedHawk User Manual     | 410
+CPM Simulation Procedures
+
+               • INSTANCE_POWER_FILE
+               • GSC_OVERRIDE_IPF
+               • BLOCK_POWER_FOR_SCALING (and BLOCK_POWER_FOR_SCALING_FILE)
+               • STATE_PROPAGATION {
+                      PROPAGATION_MODE
+                      GATED_ON_PERCENTAGE
+                      CONSTRAINT_FILE
+                      GATED_CONTROL_FILE
+                      }
+               • TOGGLE_RATE_RATIO_COMB_FF
+               • INSTANCE_TOGGLE_RATE (and INSTANCE_TOGGLE_RATE_FILE)
+               • BLOCK_TOGGLE_RATE (and BLOCK_TOGGLE_RATE_FILE)
+               • TOGGLE_RATE
+
+                  Settings in the configuration file versus the GSR file
+              The configuration keyword, if defined, overrides the same keyword in the GSR. The GSR
+              keyword is used if the configuration file keyword is not defined, except for
+               • GSC_FILE
+               • STATE_PROPAGATION
+              which are ignored in the GSR if the Config file keyword is not defined.
+              Note that at present Power Transient Analysis works only in the Vectorless mode, and it
+              does not support keywords other than the list above. It does not support:
+                      (a) VCD_FILE or BLOCK_VCD_FILE
+                      (b) STA_FILE or BLOCK_STA_FILE
+                      (c) BLOCK_POWER_ASSIGNMENT
+                      (d) PAR or BLOCK_PAR
+              Also note that simulation uses charge from the first frame for its simulation reference, so
+              the dynamic simulation result may vary depending on the first frame config setting.
+
+              User-configurable mode
+              The user-configurable mode enables package and board designers to divide and
+              customize a CPM for multiple individual system simulations, each targeting a specific
+              operating mode or area of the chip, without having to regenerate the model for each
+              single operating mode. The user-configurable CPM allows package and board engineers
+              to mix and match contributions from different user-specified regions, or functional blocks
+              of the die, creating unique scenarios that reflect different operating states of the chip. For
+              example, an analysis of EMI from different blocks on the chip could be performed
+              separately with one run.
+              First, you must partition the chip into groups of functions by hierarchical blocks and
+              instances. Each group is represented by its unique current signature that can be enabled
+              or disabled independently of the current signatures of other groups. The current signature
+              sources corresponding to different groups are connected in parallel to each other, with
+              sources belonging to each group marked by SPICE comments to activate one or more
+              groups in a particular SPICE simulation, as shown in the Figure 14-10. Note that the sum
+              of currents of all groups is equal to the current of the original CPM model. The passive
+              part is also identical to that of the original CPM model.
+
+
+
+
+ANSYS, Inc.
+CHAPTER 14 — Chip Power Modeling (CPM)                                        RedHawk User Manual     | 411
+CPM Simulation Procedures
+
+              The partitioning of the IC into multiple groups is achieved by specifying a list of blocks and
+              instances that belong to each group in a “group file.” The resulting CPM model can be
+              constructed for a vectorless or a VCD case.
+
+
+
+
+              Figure 14-10     Creating a user-configurable CPM
+
+              To use the user-configurable feature, the following options of the 'perform powermodel'
+              command are used:
+                      -user_config : enables the user-configurable feature (note that it does nothing
+                          specifically involving emi)
+                      -group_file <file name>: specifies the name of the file used to define the
+                          partitioning of the chip into groups of hierarchical blocks and instances. A full
+                          or relative path to the file is allowed, but tilde '~' and environment variables
+                          are not allowed. The purpose of the group file is to assign switching
+                          instances (in the apache.scenario file) to groups. Note that instances can be
+                          grouped in hierarchical blocks, and the separator for blocks is slash ('/').
+                          Users can assign a whole hierarchical block, a sub-block, or an individual
+                          instance to a group. Any instances that do not belong to any user-defined
+                          group are assigned to group Ng+1 (Ng = number of groups), with the name
+                          “others”.
+              The format of the group file is as follows:
+                       GROUP <group name1>
+                       INSTANCE <inst_name_1A> ...                ;
+                       GROUP <group name2>
+                       INSTANCE <inst_name_2A> ...                ;
+                       ...
+              The keywords are case-sensitive, as are instance names. Wildcard names are supported,
+              and lines starting with '#' are considered comments.
+              Example group file:
+                      GROUP GS1
+                      INSTANCE Bl_1
+                      Bl_2/Inst1
+                      Inst2
+                      Bl_3/MEM*;
+                      ...
+              In this example, 'Bl_1' could be a hierarchical block name, 'Bl_2/Inst1' could be an
+              instance name (or level 2 hierarchical block name), and 'Inst 2' may be an individual
+              instance name. The syntax does not specify this. So group 1 contains all instances whose
+
+
+
+ANSYS, Inc.
+CHAPTER 14 — Chip Power Modeling (CPM)                                         RedHawk User Manual      | 412
+CPM Simulation Procedures
+
+              full name starts with “Bl_1”, followed either by '/' or white space, and also “Bl_2/Inst1”
+              followed either by '/' or white space, and “Inst2” followed either by '/' or white space. If P =
+              number of CPM ports, the resulting CPM model has (P-1)*Ng current signature PWL
+              sources without the '-pincurrent' option, or P*Ng current sources with the '-pincurrent'
+              option. The PWL sources belonging to the same group have names starting with the
+              group name, such as “Icsg1_1”, “Icsg1_2”, for a group named “csg1”, and so on. This
+              allows third party tools to easily enable or disable sources belonging to a particular group.
+              User-configurable CPMs can easily be applied to power delivery analysis because the
+              current contribution from different portions of the chip has impact on voltage drops. For
+              example, the worst voltage drop can be observed and optimized by turning off the current
+              contribution of certain blocks in the chip. The source of noise can be identified using this
+              approach, where different die activity scenarios are explored, to understand the block-
+              level contribution to the overall system noise. Results for a sample design are shown in
+              Figure 14-11 and Figure 14-12.
+
+
+
+
+                            Current Demand                                  Bump Voltage
+
+              Figure 14-11      Analysis of multiple group current/voltages
+
+
+
+                  Block 1      Block 2     Rest of Chip       Peak Current         Peak-to-Peak DvD
+
+                    ON           ON              ON               192A                    95mV
+                   OFF           ON              ON               139A                    72mV
+                    ON           OFF             ON               130A                    66mV
+                    ON           ON             OFF               116A                    53mV
+                   OFF           OFF             ON                76A                    42mV
+
+
+              Figure 14-12      Example CPM analysis results
+
+              CPM LDO analysis support
+              CPM models can be generated for chips with LDO features using the 'perform
+              powermodel' command with no additional options. The number of terminals created
+              corresponds to the behavioral LDO models that APLDO generates. The presence of LDO
+              features is detected automatically. The CPM option '-plocname' is always enabled if LDOs
+              are present. CPM generates additional internal ports at the pins (terminals) of the LDO
+              models. The main CPM subcircuit (.SUBCKT adsPowerModel) has terminals only for the
+              CPM ports at the pads, the same as it would without the LDO models. The CPM contains
+              comments indicating the name of the LDO instance and the name of the SPICE subcircuit
+              instantiated for the LDO instance. For example:
+
+
+ANSYS, Inc.
+CHAPTER 14 — Chip Power Modeling (CPM)                                       RedHawk User Manual     | 413
+CPM Simulation Procedures
+
+                        * ****** CPM-LDO ***
+                        * LDO cell | SPICE subcircuit name
+                        * --------------------------------
+                        * VDD_REG_FC_ISO_580173    VDD_REG_FC_ISO
+                        * --------------------------------
+                        * VDDCO_REG_FC_ISO_580174    VDDCO_REG_FC_ISO
+                        * --------------------------------
+              If LDOs are present, the top level CPM subcircuit adsPowerModel instantiates the LDO
+              subcircuits with one per LDO instance present. For example:
+                   **** Instantiation of the LDO subcircuits : ***
+                   X_VDD_REG_FC_ISO_580173 VDD_REG_FC_ISO_580173__vddhv
+                        VDD_REG_FC_ISO_580173__vddcore0
+                   + VDD_REG_FC_ISO_580173__vddcore1 VDD_REG_FC_ISO_580173__vss
+                        VDD_REG_FC_ISO
+                   X_VDDCO_REG_FC_ISO_580174 VDDCO_REG_FC_ISO_580174__vddhvcore
+                        VDDCO_REG_FC_ISO_580174__vddcore0
+                   + VDDCO_REG_FC_ISO_580174__vddcore1 VDDCO_REG_FC_ISO_580174__vss
+                        VDDCO_REG_FC_ISO
+                   *********************************************
+
+              To perform system-level simulation with CPM, you must create a SPICE netlist that
+              includes the models for package/PCB and supply sources. If LDOs are present, you must
+              also provide the LDO subcircuits, which can be either transistor-level SPICE models or
+              behavioral models. Transistor-level LDO models provide the greatest accuracy, while the
+              behavioral models may have better simulation speed. If transistor-level LDO models are
+              used, they typically have additional terminals, such as for the bias pins. They must be
+              “wrapped”, along with the bias voltage sources and other required circuitry, to generate
+              the subcircuit that is invoked by the CPM.
+              For best accuracy, the following two options of the 'perform powermodel' command are
+              recommended: -pincurrent and -global_gnd.
+              Notes on using the LDO methodology:
+                1.   No LDO subcircuits are instantiated in the binary CPM (Sentinel-PI format).
+                2.   The CPM header includes coordinates and layer information for the LDO subcircuit
+                     terminals.
+                3.   LDO can be used with the CPM '-probe' option to create additional CPM ports at
+                     internal nodes, but not with the '-internal_node’ or ‘-cell' options of the 'perform
+                     powermodel' command. Example:
+                         perform powermodel -wirebond -global_gnd -pincurrent
+                              -o ABCD_ldo_de BZ.sp -probe
+                4.   The -probe option requires that the PROBE_NODE_FILE GSR keyword be used,
+                     as shown below:
+                        PROBE_NODE_FILE <file_path>
+                      Format of the probe node file:
+                        <x coordinate> < y coordinate> <layer> <probe name>
+                        ...
+                5.   It is possible to have a probe node exactly at the location of the LDO terminal. In
+                     this case, the probe node becomes one CPM port and it becomes exposed.
+                     Normally, the terminals of the LDO subcircuits are not exposed.
+
+
+
+
+ANSYS, Inc.
+CHAPTER 14 — Chip Power Modeling (CPM)                                          RedHawk User Manual      | 414
+CPM Simulation Procedures
+
+              CPM Outputs
+
+              The outputs from CPM processing are the following:
+                  • CPM model files
+                  • get_cdie.sp NSpice netlist file
+                  • *.cdie file, effective die series resistance and capacitance values for ‘1 X 1’ partition
+                    models
+                  • differential output voltages from S-parameter models
+              These outputs are described in the following paragraphs.
+
+
+
+
+              CPM Model Files
+              The CPM model has several elements: the passive part of the CPM model (*.sp.inc), and
+              the current signatures by partition (*.sp), as shown in Figure 14-13. The output of
+              RedHawk CPM simulation is a hierarchical SPICE netlist that includes the switching
+              current signature, as well as the reduced-order model of the die power delivery network.
+              The complexity of the SPICE netlist is determined by the number of partitions over which
+              the CPM model is created.
+              Three types of models are generated simultaneously during the run, and written to the
+              adsRpt/CPM directory:
+                  • standard SPICE (default)
+                  • CPM optimized for HSPICE (adsRpt/CPM/<design_name>_hspice.sp). For designs
+                    with a large number of ports (100+), the use of HSPICE-specific elements (Foster
+                    VCCS) is important, to provide a way to eliminate internal nodes, improve simulation
+                    speed and reduce memory consumption.
+                  • Sentinel-PI CPM (adsRpt/CPM/<design_name>_snpi.sp), which is the same as the
+                    HSPICE format, but in binary form.
+              .
+
+
+
+
+              Figure 14-13        CPM model elements
+
+
+ANSYS, Inc.
+CHAPTER 14 — Chip Power Modeling (CPM)                                       RedHawk User Manual     | 415
+CPM Simulation Procedures
+
+              get_cdie.sp File
+              The NSPICE netlist is exported to the file get_cdie.sp, which can be used to calculate
+              Rdie/Cdie at the specified frequency (50 MHz by default, unless you modify it in the
+              get_cdie.sp file), and to plot Cdie(f) and Rdie(f) for frequencies ranging from 1 MHz to 1
+              GHz. This file eliminates user errors, which are likely for a CPM model with a large
+              number of ports, and also saves time that would be required to create the netlist by hand.
+              For designs with multiple power/ground nets RedHawk generates a separate
+              get_cdie*.sp file for each pair of nets. If there are only two nets, the file name is still
+              get_cdie.sp. Otherwise file names of the form get_cdie_<pwr_net>_<gnd_net>.sp are
+              written to the working directory.
+
+
+
+
+              *.cdie File
+              If you run CPM simulation with the 1 x 1 partition option using ‘-nx 1 -ny 1’ (even for a
+              wirebond design), or the -cdie option, a *.Cdie file is generated in the <workdir>/
+              adsRpt/CPM/apache.Cdie directory. The *.Cdie file contains the effective capacitance, as
+              well as the effective series resistance, of the die PDN at various frequency points. This is
+              useful as a quick ballpark assessment of die parasitics.
+              The following is an example of a *.Cdie file:
+                   Cdie and Rdie between nets VDD and VSS
+                   4.700000e+08 Hz, Cdie=2.662143e-11 F, Rdie=2.902836e+00 Ohm
+                   6.250000e+08 Hz, Cdie=2.635451e-11 F, Rdie=2.874828e+00 Ohm
+                   9.350000e+08 Hz, Cdie=2.571951e-11 F, Rdie=2.811440e+00 Ohm
+                   1.250000e+09 Hz, Cdie=2.501593e-11 F, Rdie=2.746562e+00 Ohm
+                   1.875000e+09 Hz, Cdie=2.362147e-11 F, Rdie=2.634761e+00 Ohm
+                   2.500000e+09 Hz, Cdie=2.229990e-11 F, Rdie=2.548309e+00 Ohm
+              Note that the *.Cdie file reports results only at the frequencies at which actual calculation
+              of the Y matrix has been performed, and no approximations are involved in calculating the
+              Rdie and Cdie (an exact calculation that does not rely on the equivalent circuit).
+              For AC analysis, you should connect to the parasitics part only (.inc file), and not connect
+              the CPM port to global ground (Spice node 0). For current signature, by default, CPM
+              uses the Norton current model. It picks one of the ground ports as the negative terminal
+              for every PWL current source. The sum of all port currents will be zero. If you generate a
+              CPM with the option’ -pincurrent’ it does not use the Norton current model. Every PWL is
+              referenced to node 0. Note that some tools do not support non-Norton current models.
+              The CPM is described in hierarchical subcircuit-based SPICE netlists. The main CPM
+              Spice deck includes piecewise linear switching current signatures, which are connected
+              to the parasitic model of the die power delivery network, which is in turn described in a
+              second SPICE netlist file (.inc file). A two-port equivalent model is shown in Figure 14-14.
+
+
+
+
+ANSYS, Inc.
+CHAPTER 14 — Chip Power Modeling (CPM)                                                  RedHawk User Manual   | 416
+CPM Simulation Procedures
+
+
+
+
+                    C u rre n t s ig n a tu re
+                                             V D D (p o r t 2 )
+                                                                       T o p o lo g y o f G ij
+                                                                                i
+                                           G 11
+
+                                       G 1P2 a ra s itic n e tw o rk
+                                                                                    …
+                                             G 22
+
+
+                                                                                j
+                                            V S S (p o rt 1 )
+
+              Figure 14-14      Two-port CPM equivalent circuit
+
+              The following is a simple CPM generated for a die (one Vdd and one Vss net) using a 1x
+              1 partition. The Chip Package Protocol section lists the name of the die pad, x and y
+              location of the pad, the corresponding SPICE node name, as well as the partition and net
+              information of the pad.
+
+
+
+
+              ********************************************
+              * Apache RedHawk Chip Power Model [ Ver 1.00 ]
+              * @Apache Design Solutions 2002 - 2006
+              * Presimulation time 3500.000000ps
+              ********************************************
+
+              .INCLUDE “PowerModel.sp.inc”
+
+              * Begin Chip Package Protocol --->
+              * die_area 0 0 293.04 313.17
+              * Vdd_130564_1645 : (65.000000 0.000000) : p1 = PAR_0_0_VDD
+              * Vdd_326658_1645 : (163.000000 0.000000) : p1 = PAR_0_0_VDD
+              * Vdd_526412_2605 : (263.000000 0.000000) : p1 = PAR_0_0_VDD
+              * Vdd_527135_6258365 : (264.000000 313.000000) : p1 = PAR_0_0_VDD
+              * Vdd_327130_6258415 : (164.000000 313.000000) : p1 = PAR_0_0_VDD
+              * Vdd_126096_6259955 : (63.000000 313.000000) : p1 = PAR_0_0_VDD
+
+              ..... * End Chip Package Protocol <---
+
+              .subckt adsPowerModel
+              + p1 p2
+
+              Xpdn
+              + p1 p2
+              + PowerModel
+
+              Icursig1 p1 p2 pwl(
+              + 0.000000ps 0.000178
+
+
+ANSYS, Inc.
+CHAPTER 14 — Chip Power Modeling (CPM)                                     RedHawk User Manual     | 417
+Validating the Model
+
+              + 10.000000ps 0.000657
+              + 20.000000ps 0.005198
+              + 30.000000ps 0.007278
+              ....
+
+              Note that the PowerModel.sp file reports the presimulation time in the header. This is
+              useful for CPM-to-RedHawk correlation, as you must shift the RedHawk waveform by the
+              presimulation time.
+              The PowerModel.sp.inc file, generated with AC analysis CPM, has the following header
+              (note “Accurate RC reduction”):
+              **********************************************************
+              * Apache RedHawk Chip Power Model [Accurate RC reduction]
+              * Model Subcircuit of Die PDN
+              * @Apache Design Solutions 2007
+              **********************************************************
+
+              Using the Chip Power Model
+
+              You can attach the SPICE netlist created from CPM to the package/PCB models and
+              simulate those using NSPICE or any other SPICE compatible simulator.
+              Some of the key applications of Chip Power Model technology are:
+               • Determining global Power Delivery Network impedance, identifying IC-package
+                 resonance using AC analysis (use the parasitic part only).
+               • Performing dynamic voltage noise budgeting at board and package level
+               • Package and board decap optimization
+
+              Differential Voltage Waveforms
+              Since designers typically want to look only at differential voltages to review results, S-
+              parameter models used for RedHawk package-aware analysis are differential in nature.
+              For this reason the wire voltage drop summary in redhawk.log is disabled, and differential
+              voltage waveform probing at the pads is enabled, using the TCL command
+                   plot voltage -pad_pair {<vdd_pad> <vss_pad>} ??-sv? ?-xgr?? ?-o
+              <output_file> ?
+              Example command:
+                  plot voltage -pad_pair {VDD1 VSS2} -sv -o vdrop.txt
+
+
+
+Validating the Model
+
+              One type of accuracy validation of the Chip Power Model involves the following steps:
+                1.   Run RedHawk without the package model to generate the CPM. The accuracy
+                     improves if the time step is reduced. A time step of 10ps provides the best
+                     accuracy (there is no need to use a smaller one). To change the time step, add the
+                     following to the GSR file:
+                         DYNAMIC_TIME_STEP 10e-12
+                     The best accuracy is achieved if you let the presimulation time step be the same as
+                     during simulation. However, the time step can be changed as follows (see section
+                     "DYNAMIC_PRESIM_TIME", page C-712, for details):
+                        DYNAMIC_PRESIM_TIME [<presim_time_ps>| -1] ?<TSM> ?
+                        ?<TSM_fraction>?
+
+
+ANSYS, Inc.
+CHAPTER 14 — Chip Power Modeling (CPM)                                     RedHawk User Manual    | 418
+Validating the Model
+
+                     The time step during the presimulation time is TSM*TS, where TS is the time step
+                     specified in the DYNAMIC_TIME_STEP GSR keyword. For example,
+                        DYNAMIC_PRESIM_TIME 2e-9 1
+                     The value of 1 sets the presimulation time step at the normal length.
+                2.   Attach a package model to the CPM model and run using SPICE.
+                3.   Measure the current and the voltage at the connection points (die pads) of the
+                     CPM model to the package model.
+                4.   Attach the same package model to RedHawk and run DvD analysis (with the same
+                     pre-simulation time as used for CPM generation). Remember to shift the RedHawk
+                     waveform by the pre-simulation time, which is prior to t=0 in RedHawk and after it
+                     in Spice. The presimulation time is reported in the header of the CPM output file.
+                5.   Measure the current profile for all the bumps and the VDD/GND waveform at any
+                     bump.
+                6.   Compare the two waveforms.
+              Figure 14-15 shows waveforms from the measurement of current from one test-case
+              using the above procedure. The red current profile is from measuring the bump current in
+              a RedHawk run, while the yellow current profile is from measuring the bump current from
+              the SPICE run with the CPM model.
+
+
+
+
+              Figure 14-15     Comparison of CPM model with full RedHawk chip
+                               simulation.
+
+
+
+
+ANSYS, Inc.
+

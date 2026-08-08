@@ -1,0 +1,1060 @@
+﻿% 第 16 章 Pathfinder ESD 分析（原书 16-435 … 16-507）
+\bichapter{Pathfinder ESD 分析}{Pathfinder ESD Analysis}
+\label{chap:esd}
+
+\section{ESD 问题引言}
+\subsection*{Introduction - The ESD Problem}
+
+静电放电（ESD）是芯片设计常见可靠性问题：极高放电电流可致命损伤敏感电路或影响工作。据报约 35\% 现场失效与 ESD 相关。半导体 ESD 损伤包括氧化层击穿、结烧毁、金属化烧毁。三类放电/测试模型：
+
+\begin{itemize}
+  \item \textbf{人体模型（HBM）}：带电人体接触器件
+  \item \textbf{机器模型（MM）}：测试设备放电
+  \item \textbf{带电器件模型（CDM）}：未接地器件充电后经接地 pin 放电
+\end{itemize}
+
+\figplaceholder{Figure 16-1}{三种常见 ESD 事件模型与放电波形}
+
+传统 ESD 验证：电路级设计/测试芯片验证 $\rightarrow$ SoC I/O 集成 ESD 测试单元 $\rightarrow$ 流片前专家审查。经验方法易错、失败成本高。ESD 为短时域瞬态，纯 Spice 级仿真难以处理 clamp 负阻 snap-back；现有方案容量与运行时间受限，仅能覆盖小部分设计。
+
+静态技术（在 clamp 导通假设下检查放电路径电阻）可合理估算 bump 间或宏单元到 clamp 的路径电阻；若路径电阻远大于阈值，HBM/MM 下可能无有效放电路径，CDM 下大宏单元亦可能失效。
+
+\section{ESD 分析}
+\subsection*{ESD Analysis}
+
+\subsection{概述}
+\subsubsection*{Overview}
+
+PathFinder-S（PF-S）提供模拟与 SoC 设计的全面 ESD 验证：PF-S 用静态规则检查，PathFinder-D 用动态瞬态仿真（图~\ref{fig:esd-pf-overview}）。
+
+\figplaceholder{Figure 16-2}{PathFinder ESD 分析与覆盖验证}
+
+PF-S 可用于设计规划（clamp 布局/数量/设计）或 sign-off（放电准则、器件阈值）。适用于 HBM、MM、CDM。能力分两类：
+\begin{itemize}
+  \item 验证 clamp 相对 pad、其他单元的连接与拓扑
+  \item 验证单个 clamp 电路设计（原理图/版图级）
+\end{itemize}
+
+包括拓扑/连接检查及 pad-clamp、clamp-clamp、clamp-核心单元间精确电阻计算。
+
+\subsection{Clamp 单元定义}
+\subsubsection*{Clamp Cell Definition}
+
+\subsubsection{Clamp 文件}
+所有 ESD 分析须为二极管/clamp 指定 I-V 曲线。可单独 clamp 文件或与规则合并。手动 clamp 文件语法：
+\begin{lstlisting}
+BEGIN_CLAMP_CELL
+    NAME <cell name>
+    TYPE <user_type_name>
+    ? PIN [<pin_name> | NA] [<x_loc> <y_loc>]
+        [ BOTTOM | TOP |<layername>] <locID> ?
+    ? XTOR <xtorName>:<net> <x_loc> <y_loc> <layer> <locID> ?
+    ...
+    ? RON <clamp_On_Resistance_Ohms> ?
+    ? ESD_PIN_PAIR <loc_ID1> <loc_ID2> [
+        [ <RON> | [ <RON+>|OFF] [<RON->|OFF] |
+        <I-V_clamp_name> ]?
+    ? IMAX <I1> [<I2>] ?
+    ? VMAX <V1> [<V2>] ?
+END_CLAMP_CELL
+
+BEGIN_CLAMP_IV
+    NAME <I-V_clamp_name>
+    RON <RON+> [<RON->]
+    VT1 <VT1+> [<VT1->]
+    VH <VH+> [<VH->]
+    ROFF <ROFF+> [<ROFF->]
+    ION2    0.9
+    RON2    0.1
+    IT2     3.0
+    RT2     1.0
+    VT2     0.5
+    IMAX <I1> [<I2>]
+    VMAX <V1> [<V2>]
+    TLP_FILE <tlp_filename>
+    TLP_I_RESOLUTION <value>
+END_CLAMP_IV
+\end{lstlisting}
+
+主要关键字：
+\begin{itemize}
+  \item \texttt{NAME}、\texttt{TYPE}：标识单元/类型
+  \item \texttt{PIN}：pin 名或坐标/层/locID；占位用 ``\texttt{-}'' 而非 ``\texttt{NA}''；未指定时自动选近最小电阻到 pad 的 pin
+  \item \texttt{XTOR}：MMX 块晶体管连接（同 PIN，加 \texttt{:<net>}）
+  \item \texttt{RON}：导通电阻（默认 0.0001\,$\Omega$）；\texttt{RON+}/\texttt{RON-} 正/反向
+  \item \texttt{OFF}：该极性方向开路
+  \item \texttt{ESD\_PIN\_PAIR}：合法 B2B 放电路径及双向电阻
+  \item \texttt{IMAX}/\texttt{VMAX}：击穿检查阈值（clamp I-V 规则优先于 cell 规则）
+\end{itemize}
+
+\texttt{CLAMP\_IV} 关键字（图~\ref{fig:esd-iv}）：\texttt{ROFF}（默认 1e6\,$\Omega$）、\texttt{VT1}、\texttt{VH}、\texttt{ION2}/\texttt{RON2}/\texttt{IT2}/\texttt{RT2}/\texttt{VT2}、\texttt{TLP\_FILE}、\texttt{TLP\_I\_RESOLUTION}。
+
+\figplaceholder{Figure 16-3}{二极管/clamp I-V 特性}
+
+\texttt{pfscrypt} 可加密 clamp I-V：
+\begin{lstlisting}
+pfscrypt <clampfile> [-d] [-p <Password>] [-o <OutputFile>]
+\end{lstlisting}
+
+\subsubsection{Clamp 文件示例}
+IO 单元 clamp 示例：
+\begin{lstlisting}
+BEGIN_CLAMP_CELL
+    NAME IO_cell
+    PIN PAD 7.29 362.14 METAL1 pad_1
+    PIN VSS 7.39 362.04 METAL2 vss_1
+    PIN VDD 7.29 363.66 METAL1 vdd_1
+    RON 0.01
+    ESD_PIN_PAIR pad_1 vss_1 0.001 0.05
+    ESD_PIN_PAIR vdd_1 vss_1 0.02 OFF
+END_CLAMP_CELL
+\end{lstlisting}
+
+MMX 晶体管级 clamp：
+\begin{lstlisting}
+BEGIN_CLAMP_CELL
+NAME IO
+XTOR mos1__2:VDD 2.24 328.14 BOTTOM
+XTOR mos1__2:VSS 2.34 328.14 BOTTOM
+ESD_PIN_PAIR mos1__2:VDD mos1__2:VSS diode
+END_CLAMP_CELL
+
+BEGIN_CLAMP_IV
+  NAME diode
+  RON 0.1 100K
+  VT1 0.4
+  ROFF 100K
+END_CLAMP_IV
+
+BEGIN_CLAMP_IV
+  NAME sback
+  RON 0.3 0.2
+  VT1 1.2 1.5
+  VH 0.1 0.15
+END_CLAMP_IV
+\end{lstlisting}
+
+默认：\texttt{VH = VT1}；未指定 \texttt{RON-} 等则取正向默认值。TLP 文件逗号/空格/制表符分隔；\texttt{\#} 为注释。
+
+\paragraph{CLAMP\_IV 参数说明}
+\begin{itemize}
+  \item \kw{ROFF}：关断电阻（默认 1e6\,$\Omega$）；\kw{ROFF+}/\kw{ROFF-} 正/反向
+  \item \kw{VT1}：导通阈值（默认 0，即线性 RON 模型）
+  \item \kw{VH}：保持电压（默认 VH=VT1；范围 $0 \le \mathrm{VH} \le \mathrm{VT1}$）
+  \item \kw{ION2}/\kw{RON2}/\kw{IT2}/\kw{RT2}/\kw{VT2}：高导通区与击穿区建模
+  \item \kw{TLP_FILE}、\kw{TLP_I_RESOLUTION}：TLP 曲线（典型分辨率 0--0.001）
+\end{itemize}
+
+加密后 \texttt{adsRpt/ESD/ClampInfo.rpt} 显示 \texttt{\# Encrypted}。
+
+\begin{seeAlsoBox}
+Clamp 连接与建模详见 GSR \kw{ESD_CLAMP_PIN_FILE}（附录 C）与 Tcl \kw{pfs}（附录 D）。
+\end{seeAlsoBox}
+
+\subsubsection{Clamp 文件示例}
+IO 单元 clamp 示例：
+\begin{lstlisting}
+BEGIN_CLAMP_CELL
+    NAME IO_cell
+    PIN PAD 7.29 362.14 METAL1 pad_1
+    PIN VSS 7.39 362.04 METAL2 vss_1
+    PIN VDD 7.29 363.66 METAL1 vdd_1
+    RON 0.01
+    ESD_PIN_PAIR pad_1 vss_1 0.001 0.05
+    ESD_PIN_PAIR vdd_1 vss_1 0.02 OFF
+END_CLAMP_CELL
+\end{lstlisting}
+
+MMX 晶体管级 clamp：
+\begin{lstlisting}
+BEGIN_CLAMP_CELL
+NAME IO
+XTOR mos1__2:VDD 2.24 328.14 BOTTOM
+XTOR mos1__2:VSS 2.34 328.14 BOTTOM
+ESD_PIN_PAIR mos1__2:VDD mos1__2:VSS diode
+END_CLAMP_CELL
+
+BEGIN_CLAMP_IV
+  NAME diode
+  RON 0.1 100K
+  VT1 0.4
+  ROFF 100K
+END_CLAMP_IV
+
+BEGIN_CLAMP_IV
+  NAME sback
+  RON 0.3 0.2
+  VT1 1.2 1.5
+  VH 0.1 0.15
+END_CLAMP_IV
+\end{lstlisting}
+
+默认：\texttt{VH = VT1}；未指定 \texttt{RON-} 等则取正向默认值。TLP 文件逗号/空格/制表符分隔；\texttt{\#} 为注释。
+
+\paragraph{CLAMP\_IV 参数说明}
+\begin{itemize}
+  \item \kw{ROFF}：关断电阻（默认 1e6\,$\Omega$）；\kw{ROFF+}/\kw{ROFF-} 正/反向
+  \item \kw{VT1}：导通阈值（默认 0，即线性 RON 模型）
+  \item \kw{VH}：保持电压（默认 VH=VT1；范围 $0 \le \mathrm{VH} \le \mathrm{VT1}$）
+  \item \kw{ION2}/\kw{RON2}/\kw{IT2}/\kw{RT2}/\kw{VT2}：高导通区与击穿区建模
+  \item \kw{TLP_FILE}、\kw{TLP_I_RESOLUTION}：TLP 曲线（典型分辨率 0--0.001）
+\end{itemize}
+
+加密后 \texttt{adsRpt/ESD/ClampInfo.rpt} 显示 \texttt{\# Encrypted}。
+
+\begin{seeAlsoBox}
+Clamp 连接与建模详见 GSR \kw{ESD_CLAMP_PIN_FILE}（附录 C）与 Tcl \kw{pfs}（附录 D）。
+\end{seeAlsoBox}
+
+\subsubsection{Clamp 文件示例}
+IO 单元 clamp 示例：
+\begin{lstlisting}
+BEGIN_CLAMP_CELL
+    NAME IO_cell
+    PIN PAD 7.29 362.14 METAL1 pad_1
+    PIN VSS 7.39 362.04 METAL2 vss_1
+    PIN VDD 7.29 363.66 METAL1 vdd_1
+    RON 0.01
+    ESD_PIN_PAIR pad_1 vss_1 0.001 0.05
+    ESD_PIN_PAIR vdd_1 vss_1 0.02 OFF
+END_CLAMP_CELL
+\end{lstlisting}
+
+MMX 晶体管级 clamp：
+\begin{lstlisting}
+BEGIN_CLAMP_CELL
+NAME IO
+XTOR mos1__2:VDD 2.24 328.14 BOTTOM
+XTOR mos1__2:VSS 2.34 328.14 BOTTOM
+ESD_PIN_PAIR mos1__2:VDD mos1__2:VSS diode
+END_CLAMP_CELL
+
+BEGIN_CLAMP_IV
+  NAME diode
+  RON 0.1 100K
+  VT1 0.4
+  ROFF 100K
+END_CLAMP_IV
+
+BEGIN_CLAMP_IV
+  NAME sback
+  RON 0.3 0.2
+  VT1 1.2 1.5
+  VH 0.1 0.15
+END_CLAMP_IV
+\end{lstlisting}
+
+默认：\texttt{VH = VT1}；未指定 \texttt{RON-} 等则取正向默认值。TLP 文件逗号/空格/制表符分隔；\texttt{\#} 为注释。
+
+\paragraph{CLAMP\_IV 参数说明}
+\begin{itemize}
+  \item \kw{ROFF}：关断电阻（默认 1e6\,$\Omega$）；\kw{ROFF+}/\kw{ROFF-} 正/反向
+  \item \kw{VT1}：导通阈值（默认 0，即线性 RON 模型）
+  \item \kw{VH}：保持电压（默认 VH=VT1；范围 $0 \le \mathrm{VH} \le \mathrm{VT1}$）
+  \item \kw{ION2}/\kw{RON2}/\kw{IT2}/\kw{RT2}/\kw{VT2}：高导通区与击穿区建模
+  \item \kw{TLP_FILE}、\kw{TLP_I_RESOLUTION}：TLP 曲线（典型分辨率 0--0.001）
+\end{itemize}
+
+加密后 \texttt{adsRpt/ESD/ClampInfo.rpt} 显示 \texttt{\# Encrypted}。
+
+\begin{seeAlsoBox}
+Clamp 连接与建模详见 GSR \kw{ESD_CLAMP_PIN_FILE}（附录 C）与 Tcl \kw{pfs}（附录 D）。
+\end{seeAlsoBox}
+
+\subsubsection{Clamp 文件示例}
+IO 单元 clamp 示例：
+\begin{lstlisting}
+BEGIN_CLAMP_CELL
+    NAME IO_cell
+    PIN PAD 7.29 362.14 METAL1 pad_1
+    PIN VSS 7.39 362.04 METAL2 vss_1
+    PIN VDD 7.29 363.66 METAL1 vdd_1
+    RON 0.01
+    ESD_PIN_PAIR pad_1 vss_1 0.001 0.05
+    ESD_PIN_PAIR vdd_1 vss_1 0.02 OFF
+END_CLAMP_CELL
+\end{lstlisting}
+
+MMX 晶体管级 clamp：
+\begin{lstlisting}
+BEGIN_CLAMP_CELL
+NAME IO
+XTOR mos1__2:VDD 2.24 328.14 BOTTOM
+XTOR mos1__2:VSS 2.34 328.14 BOTTOM
+ESD_PIN_PAIR mos1__2:VDD mos1__2:VSS diode
+END_CLAMP_CELL
+
+BEGIN_CLAMP_IV
+  NAME diode
+  RON 0.1 100K
+  VT1 0.4
+  ROFF 100K
+END_CLAMP_IV
+
+BEGIN_CLAMP_IV
+  NAME sback
+  RON 0.3 0.2
+  VT1 1.2 1.5
+  VH 0.1 0.15
+END_CLAMP_IV
+\end{lstlisting}
+
+默认：\texttt{VH = VT1}；未指定 \texttt{RON-} 等则取正向默认值。TLP 文件逗号/空格/制表符分隔；\texttt{\#} 为注释。
+
+\paragraph{CLAMP\_CELL 关键字详述}
+\begin{description}[leftmargin=2.8cm,style=nextline]
+\item[\kw{NAME}] 单元或 I-V 设备标识字符串。
+\item[\kw{TYPE}] 用户定义的 clamp 类型名，供 \kw{FROM_CLAMP_TYPE}/\kw{TO_CLAMP_TYPE} 筛选。
+\item[\kw{PIN}] 以 pin 名、坐标 \texttt{<x> <y>}、\kw{BOTTOM}/\kw{TOP}/层名、\kw{locID} 指定连接点。占位符仅用 ``\texttt{-}''，勿用 ``\texttt{NA}''。仅 pin 名时默认选近最小电阻到 pad 的节点；未指定时每域自动选一个近最小电阻 pin。
+\item[\kw{XTOR}] MMX 块晶体管连接，语法同 \kw{PIN}，另加 \texttt{:<net>} 表示晶体管所接网络。
+\item[\kw{RON}] 导通电阻（默认 0.0001\,$\Omega$）；\kw{RON+}/\kw{RON-} 为正/反向电流电阻。
+\item[\kw{OFF}] 该 zapping 极性方向开路；pin 对两向均为 \kw{OFF} 为语法错误。
+\item[\kw{ESD_PIN_PAIR}] 合法 B2B 放电路径及双向电阻；可写对称 \kw{RON}、非对称 \kw{RON+}/\kw{RON-}、\kw{OFF} 或引用 \kw{BEGIN_CLAMP_IV} 名称。
+\item[\kw{IMAX}/\kw{VMAX}] 击穿检查电流/电压阈值；优先级：clamp I-V 规则 $>$ clamp cell 规则 $>$ ESD 规则。
+\end{description}
+
+\paragraph{CLAMP\_IV 参数说明}
+\begin{itemize}
+  \item \kw{ROFF}：关断电阻（默认 1e6\,$\Omega$）；\kw{ROFF+}/\kw{ROFF-} 正/反向
+  \item \kw{VT1}：导通阈值（默认 0，即线性 RON 模型）
+  \item \kw{VH}：保持电压（默认 VH=VT1；范围 $0 \le \mathrm{VH} \le \mathrm{VT1}$）
+  \item \kw{ION2}/\kw{RON2}/\kw{IT2}/\kw{RT2}/\kw{VT2}：高导通区与击穿区建模
+  \item \kw{TLP_FILE}、\kw{TLP_I_RESOLUTION}：TLP 曲线（典型分辨率 0--0.001）
+\end{itemize}
+
+加密后 \texttt{adsRpt/ESD/ClampInfo.rpt} 显示 \texttt{\# Encrypted}。
+
+\begin{seeAlsoBox}
+Clamp 连接与建模详见 GSR \kw{ESD_CLAMP_PIN_FILE}（附录 C）与 Tcl \kw{pfs}（附录 D）。
+\end{seeAlsoBox}
+
+\subsubsection{Clamp 文件示例}
+IO 单元 clamp 示例：
+\begin{lstlisting}
+BEGIN_CLAMP_CELL
+    NAME IO_cell
+    PIN PAD 7.29 362.14 METAL1 pad_1
+    PIN VSS 7.39 362.04 METAL2 vss_1
+    PIN VDD 7.29 363.66 METAL1 vdd_1
+    RON 0.01
+    ESD_PIN_PAIR pad_1 vss_1 0.001 0.05
+    ESD_PIN_PAIR vdd_1 vss_1 0.02 OFF
+END_CLAMP_CELL
+\end{lstlisting}
+
+MMX 晶体管级 clamp：
+\begin{lstlisting}
+BEGIN_CLAMP_CELL
+NAME IO
+XTOR mos1__2:VDD 2.24 328.14 BOTTOM
+XTOR mos1__2:VSS 2.34 328.14 BOTTOM
+ESD_PIN_PAIR mos1__2:VDD mos1__2:VSS diode
+END_CLAMP_CELL
+
+BEGIN_CLAMP_IV
+  NAME diode
+  RON 0.1 100K
+  VT1 0.4
+  ROFF 100K
+END_CLAMP_IV
+
+BEGIN_CLAMP_IV
+  NAME sback
+  RON 0.3 0.2
+  VT1 1.2 1.5
+  VH 0.1 0.15
+END_CLAMP_IV
+\end{lstlisting}
+
+默认：\texttt{VH = VT1}；未指定 \texttt{RON-} 等则取正向默认值。TLP 文件逗号/空格/制表符分隔；\texttt{\#} 为注释。
+
+\paragraph{CLAMP\_CELL 关键字详述}
+\begin{description}[leftmargin=2.8cm,style=nextline]
+\item[\kw{NAME}] 单元或 I-V 设备标识字符串。
+\item[\kw{TYPE}] 用户定义的 clamp 类型名，供 \kw{FROM_CLAMP_TYPE}/\kw{TO_CLAMP_TYPE} 筛选。
+\item[\kw{PIN}] 以 pin 名、坐标 \texttt{<x> <y>}、\kw{BOTTOM}/\kw{TOP}/层名、\kw{locID} 指定连接点。占位符仅用 ``\texttt{-}''，勿用 ``\texttt{NA}''。仅 pin 名时默认选近最小电阻到 pad 的节点；未指定时每域自动选一个近最小电阻 pin。
+\item[\kw{XTOR}] MMX 块晶体管连接，语法同 \kw{PIN}，另加 \texttt{:<net>} 表示晶体管所接网络。
+\item[\kw{RON}] 导通电阻（默认 0.0001\,$\Omega$）；\kw{RON+}/\kw{RON-} 为正/反向电流电阻。
+\item[\kw{OFF}] 该 zapping 极性方向开路；pin 对两向均为 \kw{OFF} 为语法错误。
+\item[\kw{ESD_PIN_PAIR}] 合法 B2B 放电路径及双向电阻；可写对称 \kw{RON}、非对称 \kw{RON+}/\kw{RON-}、\kw{OFF} 或引用 \kw{BEGIN_CLAMP_IV} 名称。
+\item[\kw{IMAX}/\kw{VMAX}] 击穿检查电流/电压阈值；优先级：clamp I-V 规则 $>$ clamp cell 规则 $>$ ESD 规则。
+\end{description}
+
+\paragraph{CLAMP\_IV 参数说明}
+\begin{itemize}
+  \item \kw{ROFF}：关断电阻（默认 1e6\,$\Omega$）；\kw{ROFF+}/\kw{ROFF-} 正/反向
+  \item \kw{VT1}：导通阈值（默认 0，即线性 RON 模型）
+  \item \kw{VH}：保持电压（默认 VH=VT1；范围 $0 \le \mathrm{VH} \le \mathrm{VT1}$）
+  \item \kw{ION2}/\kw{RON2}/\kw{IT2}/\kw{RT2}/\kw{VT2}：高导通区与击穿区建模
+  \item \kw{TLP_FILE}、\kw{TLP_I_RESOLUTION}：TLP 曲线（典型分辨率 0--0.001）
+\end{itemize}
+
+加密后 \texttt{adsRpt/ESD/ClampInfo.rpt} 显示 \texttt{\# Encrypted}。
+
+\begin{seeAlsoBox}
+Clamp 连接与建模详见 GSR \kw{ESD_CLAMP_PIN_FILE}（附录 C）与 Tcl \kw{pfs}（附录 D）。
+\end{seeAlsoBox}
+
+\subsubsection{Clamp DB 创建}
+\begin{lstlisting}
+perform esdcheck
+    -clamp <clamp_file> ? -setupClamp ? ? -shortNode [ 0 | 1 | 2 ] ?
+\end{lstlisting}
+
+\begin{itemize}
+  \item \texttt{-clamp}：clamp 文件；GSR \texttt{ESD\_CLAMP\_FILE} 已设则可省略
+  \item \texttt{-setupClamp}：导入并保存 clamp DB，加速后续检查
+  \item 规则文件 \texttt{SAVE\_CLAMP\_DB 1} / \texttt{LOAD\_CLAMP\_DB 1}（仅其一生效）
+  \item \texttt{-shortNode}：0 不短接；1 短接所有 clamp pin；2 仅短接文件中指定 x/y/layer 的 pin
+\end{itemize}
+
+\subsubsection{从 clamp 节点做 SPT 追踪}
+须先 \texttt{perform esdcheck -clamp <file> -setupClamp}，然后：
+\begin{lstlisting}
+perform min_res_path -instance <inst> -fromClamp
+# 或
+perform min_res_path -set fromclamp on
+\end{lstlisting}
+
+
+
+
+
+
+
+
+
+\subsection{ESD 规则文件}
+\subsubsection*{ESD Rules Files}
+
+规则文件定义检查类型（\kw{BUMP2BUMP}、\kw{BUMP2CLAMP}、\kw{CLAMP2CLAMP}、\kw{PIN2CLAMP}、\kw{PIN2PIN}）、规则名、\kw{ARC_R}/\kw{LOOP_R}/\kw{PARALLEL_R} 限值、级数及包含/排除的 clamp、bump、网表。
+
+\subsubsection{定义网表组}
+\begin{lstlisting}
+BEGIN_NET_GROUP
+    NAME <userDefinedGroupName>
+    NET <netName1>
+    NET <netName2>
+    ...
+END_NET_GROUP
+\end{lstlisting}
+
+\subsection{缩小设计规模}
+\subsubsection*{Reducing Design Size for Improved ESD Analysis}
+
+\begin{enumerate}
+  \item 原 GSR 加 \kw{ESD_CLAMP_FILE}、\kw{ESD_RULE_FILE}
+  \item 规则文件加 \kw{ESD_GSR 1}
+  \item 运行至 \texttt{setup design}，生成 \texttt{esdGsr.gsr}（\kw{IGNORE_CELLS}、移除 \kw{SPLIT_VIA_ARRAY}、\kw{DEF_IGNORE_SPECIFIC_LAYERS} 等）
+  \item 用 \texttt{esdGsr.gsr} 替换原 GSR 重跑（可提速约 50\%）
+\end{enumerate}
+
+\section{Bump 与 Clamp 拓扑及连接检查}
+\subsection*{Topology and Connectivity Checking of Bumps and Clamps}
+
+\begin{lstlisting}
+perform clampcheck ?-o <file>? ?-instConn?
+    ? -isolatedBump? ?-cell <cell_name>? ?-celltype <type>?
+    ? -inst <inst_name>? ? -volt <voltage>? ?-net <net_name>?
+    ? -netConn <net1> <net2> ...? ? -allNetConn ?
+    ? -bumpConn <bump_name> ? ? -allBumpConn ? ? -loop?
+    ? -loopLength <stage_num>? ? -b2bLoopLength <stage_num>?
+    ? -roff <R_thresh> ? ? -rptDisConn ?
+    ? -rule <rule_file> ? ? -esdStage {min,max} | <stage_num>?
+    ? -detail? ?-append?
+\end{lstlisting}
+
+主要选项：\texttt{-instConn} 未连接 clamp；\texttt{-isolatedBump} 与 clamp 隔离的 bump；\texttt{-netConn}/\texttt{-allNetConn} 网表对连通性；\texttt{-rptDisConn} 无 clamp 的网表对；\texttt{-esdStage} 级数范围；\texttt{-loopLength} 精确级数；\texttt{-roff} clamp 关断电阻阈值（默认 1e6\,$\Omega$）。
+
+示例：\texttt{perform clampcheck -o instConn.txt -instConn}、\texttt{report clampcheck -rptDisConn -allNetConn}。
+
+\section{Bump 与 Clamp 版图电阻检查}
+\subsection*{Layout Resistance Checking of Bumps and Clamps}
+
+\subsection{概述}
+\subsubsection*{Overview}
+
+PF-S 支持六类电阻检查（低功耗分析模式自动关闭 ESD）：
+\begin{itemize}
+  \item \textbf{B2B}（\kw{BUMP2BUMP}）：含多级
+  \item \textbf{B2C}（\kw{BUMP2CLAMP}）
+  \item \textbf{B2I}（\kw{BUMP2INSTANCE}）
+  \item \textbf{C2C}（\kw{CLAMP2CLAMP}）
+  \item \textbf{C2I}（\kw{CLAMP2INST}）
+  \item \textbf{C2M}（\kw{CLAMP2MACRO}）
+\end{itemize}
+
+\subsection{数据流与输入}
+\subsubsection*{Data Flow / Description of Inputs}
+
+可在 RedHawk（LEF/DEF，亦支持 GDS）或 Totem（GDS + Spice）中运行（图~\ref{fig:esd-dataflow}）。
+
+\figplaceholder{Figure 16-4}{PathFinder 数据流}
+
+输入：Technology LEF、Apache tech 文件、PLOC 文件、ESD 规则与 clamp 定义、\texttt{setup analysis\_mode ESD}。
+
+PLOC 示例：
+\begin{lstlisting}
+# pad location points
+vdd1  6808  11091  metal7  POWER
+vss1  7038  11612  metal7  GROUND
+\end{lstlisting}
+
+作业控制：\texttt{-thread} 多线程；\texttt{-jobCount} 多进程（建议先 \texttt{-setupClamp}）。
+
+\paragraph{HBM、MM 与 CDM 测试背景}
+\textbf{HBM}：带电人体（约 100\,pF、1.5\,k$\Omega$）接触器件引脚，放电经保护网络到参考地，用于模拟生产/使用中的静电损伤。
+
+\textbf{MM}：测试设备（低阻抗、小电容）向器件放电，上升时间更短、峰值更高，检验快速 ESD 脉冲下的保护能力。
+
+\textbf{CDM}：器件在组装中积累电荷，经接地 pin 对地放电；对大宏单元与 I/O 尤其重要，PathFinder 的 C2I/C2M 规则针对此类失效机制。
+
+传统流片前审查难以覆盖全芯片所有放电路径；PF-S 在 clamp 导通假设下计算静态电阻，并结合电流密度检查评估 IR 与 EM，作为动态仿真的互补 sign-off 手段。
+
+\subsection{各类电阻检查说明}
+\subsubsection*{B2C、B2I、C2C、C2I、C2M 与 D2R}
+
+\textbf{Bump-to-Clamp（B2C）}：计算 pad 到 clamp 有效电阻并与 \kw{ARC_R} 比较。pad 与 clamp 连接点可手工指定或由工具自动选取（默认倾向有效电阻最大点）。\kw{CLAMP_POS_PIN 1} 仅测 HBM 二极管阳极；\kw{CLAMP_NEG_PIN 1} 仅测阴极。
+
+\textbf{Bump-to-Instance（B2I）}：对每个 bump，比较到实例电阻与到保护 clamp（最小 B2C 电阻）的电阻；若存在更小实例路径则失败。
+
+\textbf{Clamp-to-Clamp（C2C）}：报告任意两 clamp 间有效电阻，与 \kw{ARC_R} 比较。
+
+\textbf{Clamp-to-Inst（C2I）}：核心实例到 clamp 的 CDM 风险检查。须提供实例列表；标准单元选\textbf{最小}有效电阻点，宏单元选\textbf{最大}有效电阻点（宏面积大，最坏点更保守）。同时报告 \kw{LOOP_R} 与 \kw{ARC_R} 通过/失败。
+
+\textbf{Clamp-to-Macro（C2M）}：与 C2I 类似，但在 LEF pin 几何的 bottom/top/指定层上选\textbf{多个}最小电阻节点以提高覆盖；仅报告 \kw{ARC_R}。
+
+\textbf{跨域 D2R-to-Bump}：检查跨电压域驱动-接收实例对的 P/G pin 到各 bump 的电阻差或比值（经 clamp 间接连接 포함）。
+
+\subsection{封装电阻与 3D-IC}
+\subsubsection*{Package and 3D-IC Inputs}
+
+封装子电路显著影响 ESD 路径：电感短接、互感开路、电容开路。GSR \kw{PACKAGE_SPICE_SUBCKT} 引入封装后，电阻从 BGA 经封装、bump、P/G 网络、clamp 再回到 VSS/BGA。
+
+封装相关规则：
+\begin{itemize}
+  \item \kw{PIN2CLAMP}（P2C）：封装 pin 到 clamp，类似 B2C
+  \item \kw{PIN2PIN}（P2P）：封装 pin 间，类似 B2B（含多级）
+  \item P2C/P2P/P2PM 必须以封装 pin 为端点；其他规则默认不含封装（\kw{PACKAGE 0}）
+\end{itemize}
+
+\textbf{3D-IC 关键字：}
+\begin{itemize}
+  \item \kw{FROM_DIE}/\kw{TO_DIE}：zapping 源高/低端所在 die
+  \item \kw{DIE_NAME}：仅分析指定 die；clamp 中可标注 \kw{DIE_NAME}
+  \item \kw{BEGIN_DIE}/\kw{END_DIE}：按 die 组织 clamp 列表
+\end{itemize}
+
+\subsection{perform esdcheck 命令选项详述}
+\begin{lstlisting}
+perform esdcheck
+    -rule {<file1> <file2> ...}
+    -clamp {<file1> <file2> ...}
+    ? -thread <num_threads> ?
+    ? -optimize <mode>? ? -detail ? ? -append ?
+    ? -outDir <results_dir> ? ? -ignoreError ?
+    ? -saveDBDir <path> ? ? -jobCount <num_jobs> ?
+    ? -collate ? ? -jobFile <job_defin_file> ?
+    ? -progress <timeInterval> ?
+    ? -noCompress ?
+    ? -slaveOnly | -hostOnly ?
+\end{lstlisting}
+
+\begin{itemize}
+  \item \texttt{-thread}：线程数（默认 2）
+  \item \texttt{-optimize}：0 全关；1 基本优化（约 2$\times$）；2 激进优化（默认，最高约 20$\times$）；3 对 C2I/C2M/B2I 额外优化
+  \item \texttt{-detail}：B2B/多级检查含坐标、层、单元名
+  \item \texttt{-ignoreError}：单条规则出错仍继续其余规则
+  \item \texttt{-saveDBDir}：保存 DB 供同事务重载
+  \item \texttt{-jobCount}：多进程；建议先 \texttt{-setupClamp}
+  \item \texttt{-collate}：合并多作业文本报告到 \texttt{-outDir}
+  \item \texttt{-progress}：写 \texttt{esd\_progress.rpt}（小时为单位）
+  \item \texttt{export esdcheck}/\texttt{import esdcheck}：导出/导入 DB
+  \item \texttt{report esdcheck}：生成文本报告
+  \item DMP：\texttt{-slaveOnly} 仅 worker；\texttt{-hostOnly} master+worker
+\end{itemize}
+
+\paragraph{作业分配文件}
+\begin{lstlisting}
+BEGIN_ESD_JOB
+    NAME Job1
+    WORK_DIR ./adsESD1
+    RULE CD my_cd_rule 50.0
+    RULE_COUNT C2I core_rule 100
+    EXCLUDE_RULE B2B slow_b2b
+    CLAMP clamp_file.txt
+END_ESD_JOB
+\end{lstlisting}
+\texttt{RULE <percent>} 与 \texttt{RULE_COUNT <arcCount>} 可拆分 CD/R 规则的 from/to 弧；\texttt{arcCount} 优先于 \texttt{percent}。未分配规则由 PF-S 自动均衡到各 job。
+
+\subsection{C2I/C2M/B2I 规则示例}
+C2I：
+\begin{lstlisting}
+BEGIN_ESD_RULE
+    NAME core_usage_1
+    TYPE C2I
+    INST_FILE inst.list
+    ARC_R 2.3
+    LOOP_R 4
+END_ESD_RULE
+\end{lstlisting}
+
+C2M（含层与晶体管 pin）：
+\begin{lstlisting}
+BEGIN_ESD_RULE
+    NAME macro_c2m
+    TYPE C2M
+    INST_FILE macro.list
+    ARC_R 5.0
+    LAYER BOTTOM
+    SAMPLE_POINT 4
+    TRANSISTOR_PIN 1
+END_ESD_RULE
+\end{lstlisting}
+
+B2I：
+\begin{lstlisting}
+BEGIN_ESD_RULE
+    NAME esd_b2i_rule
+    TYPE B2I
+    B2C_NAME esd_b2c_rule
+    INST_FILE inst.list
+    RES_RATIO 1.2
+    B2I_REPORT_PARTIAL_PASS 1
+END_ESD_RULE
+report esdcheck -type b2i -name esd_b2i_rule -b2cName esd_b2c_rule
+\end{lstlisting}
+
+\subsection{电阻检查 GUI 与工具}
+Tools $\rightarrow$ Path Finder S $\rightarrow$ ESD Resistance Check 启动电阻检查对话框（图~\ref{fig:esd-gui-res}）。
+
+\figplaceholder{Figure 16-5}{ESD 电阻检查对话框}
+
+\texttt{perform res\_calc} 约束文件 \kw{IP_RESISTANCE} 示例：
+\begin{lstlisting}
+# CELL CONSTRAINT: <cell> <Pin> <Res_Constr> ?<x> <y> ?<layer>?
+CHECKBUMP 5
+INSTANCE inst_129422/inst_7768 VSS 3.0
+\end{lstlisting}
+输出默认 \texttt{adsRpt/<design\_name>.res\_calc}，含 PASS/FAIL 与最远 bump 列表。
+
+\subsection{B2B 电阻检查详述}
+\subsubsection*{Bump-to-Bump (B2B) Details}
+
+对每个 bump 对，PF-S 计算每条 bump$\rightarrow$clamp$\rightarrow$bump 路径的 \kw{LOOP_R}。超过阈值的环路中 clamp 视为无效，不参与后续 \kw{PARALLEL_R} 并行等效电阻计算。支持多级 bump 路径（\kw{ESD_STAGE}、\kw{B2B_LOOP_LENGTH}）。
+
+\subsection{电阻规则文件关键字}
+\begin{longtable}{@{}p{0.32\textwidth}p{0.63\textwidth}@{}}
+\toprule
+\textbf{关键字} & \textbf{说明} \\
+\midrule
+\endhead
+\kw{TYPE} & \texttt{BUMP2BUMP|BUMP2CLAMP|CLAMP2CLAMP|PIN2CLAMP|PIN2PIN|BUMP2INSTANCE|CLAMP2INST|CLAMP2MACRO} \\
+\kw{NAME} & 用户规则名 \\
+\kw{ARC_R} & B2C/C2C/C2I/C2M 弧电阻阈值（$\Omega$） \\
+\kw{LOOP_R} & B2B 单路径环路电阻阈值 \\
+\kw{PARALLEL_R} & B2B 并行等效电阻；未指定时以最小 LOOP\_R 为通过准则 \\
+\kw{ESD_STAGE} & 多级 B2B 级数范围（max $\le 5$，\kw{MAX_ESD_STAGE} 可覆盖） \\
+\kw{PACKAGE [0|1]} & 是否含封装电阻 \\
+\kw{PACKAGE_PIN [0|1]} & P2C/P2P 以封装 pin 为端点 \\
+\kw{PAD_FILE} & PLOC/pcell bump 列表 \\
+\kw{BUMP_LIST} & 限定 bump 集合 \\
+\kw{NET_PAIR} & 网表对 \\
+\kw{USE_CLAMP_CELL/INST/FILE} & 限定参与 clamp \\
+\kw{B2B_LOOP_LENGTH} & 各级 clamp 数量 \\
+\kw{RADIUS} & C2C/B2C CD 选择半径（$\mu$m） \\
+\kw{SHORT_BUMP_IN_NET} & 短接同网 bump（封装低阻路径） \\
+\kw{SHORT_BUMP_IN_NET_GROUP} & 按 POWER/GROUND/SIGNAL 短接 \\
+\kw{CLAMP_POS_PIN}/\kw{CLAMP_NEG_PIN} & B2C 分别测 HBM 二极管阳/阴极 \\
+\kw{INST_FILE}/\kw{CELL_FILE} & C2I/C2M/B2I 实例或单元列表 \\
+\kw{SAMPLE_POINT} & C2M 采样点（BOTTOM/TOP/层） \\
+\kw{TRANSISTOR_PIN} & MMX 晶体管 pin 模式 \\
+\kw{RES_RATIO} & B2I 电阻比阈值 \\
+\kw{SAMPLE_MODE} & \texttt{UNIFORM|RES_BY_AREA} \\
+\kw{B2I_MACRO_MODE} & 宏单元 B2I 模式 \\
+\kw{B2C_NAME} & B2I 引用的 B2C 规则名 \\
+\kw{CHECK_CONNECTION 1} & 输出 \texttt{esd_info.rpt}（未保护实例等） \\
+\kw{SAVE_CLAMP_DB}/\kw{LOAD_CLAMP_DB} & 保存/加载 clamp DB（仅一生效） \\
+\kw{ESD_GSR 1} & 生成精简 \texttt{esdGsr.gsr} \\
+\bottomrule
+\end{longtable}
+
+\subsection{电阻报告示例}
+\texttt{perform clampcheck -o instConn.txt -instConn} 输出未连接 clamp：
+\begin{lstlisting}
+######## List of Unconnected Clamp Instances ########
+# <CELL NAME>:
+#     <PIN_NAME> <X> <Y> <LAYER> <LOCID> <INSTANCE_NAME>
+inst_ndiode_0:
+VDDO 1.07374e+06 1.07374e+06 metal1 VDDO inst_ndiode_0/adsU4
+\end{lstlisting}
+
+\texttt{-isolatedBump} 报告与 clamp 隔离的 bump。B2B 报告含 bump 对、\kw{LOOP_R}、\kw{PARALLEL_R}、clamp locID。
+
+\subsection{GUI 查看电阻结果}
+View $\rightarrow$ ESD Resistance Lists / Maps：
+\begin{itemize}
+  \item List of Bump-to-Clamp、Clamp-To-Clamp（按网表/实例过滤）
+  \item Bump to Bump Resistance：绿/红表示是否参与通过 B2B 路径
+  \item List of Bump-to-Bump Para：最差 \kw{PARALLEL_R}
+  \item F-Line：环路飞线；Loop\_R 列表；SPT 最小电阻路径
+  \item C2I 超限飞线与最差路径；Analysis Histogram
+\end{itemize}
+
+\figplaceholder{Figure 16-9}{按网表/实例名的电阻检查}
+\figplaceholder{Figure 16-10}{Bump-to-bump 电阻显示}
+\figplaceholder{Figure 16-12}{F-line 环路 R 路径}
+\figplaceholder{Figure 16-14}{最小电阻路径}
+\figplaceholder{Figure 16-19}{直方图对话框}
+
+\section{电流密度检查}
+\subsection*{Current Density Checking}
+
+PF-S 对用户指定 B2B、P2P、P2PM ESD 路径做电流密度分析，报告 IR 与 EM，GUI 显示图，支持 DC 路径分析与违例诊断。
+
+\begin{itemize}
+  \item \textbf{模式 1}：考虑所有 clamp 路径，迭代收敛确定 On/Off clamp 集合
+  \item \textbf{模式 2}：指定 clamp 路径与 bump 对
+\end{itemize}
+
+命令：\texttt{perform esdcheck}（见上文选项详述）。
+
+
+\subsection{模式 1 电流密度规则关键字详述}
+除前文示例外，\kw{TYPE CURRENT_DENSITY}（或 \kw{DC}/\kw{CD}）支持：
+
+\begin{longtable}{@{}p{0.34\textwidth}p{0.61\textwidth}@{}}
+\toprule
+\textbf{关键字} & \textbf{说明} \\
+\midrule
+\endhead
+\kw{B2B_RULE_NAME} & 复用已有 B2B 结果加速非线性 clamp CD \\
+\kw{BUMP_PAIR}/\kw{PIN_PAIR} & 放电端点对；首 bump 接 zapping 正极 \\
+\kw{BUMP_PAIR_FILE} & bump 对列表文件 \\
+\kw{PIN_PAIR_VTH} & 差分电压超过阈值写入 \texttt{esd_pinPair.rpt} \\
+\kw{SHOTGUN_MODE} & 多网联合弧分析，缩短 I/O 到 clamp 的 CD 时间 \\
+\kw{CDM_ALL_NET} & 对所有经 clamp 连接的域充电（CDM） \\
+\kw{NET_PAIR_DOMAIN} & \texttt{SAME|DIFF} 同域/跨域违例报告 \\
+\kw{FROM_NET}/\kw{TO_NET}/\kw{TERMINAL_NET} & 网表级 from/to/终端 \\
+\kw{*_NET_GROUP} & Power/Ground/Signal 组 \\
+\kw{JEDEC_MODE} & \texttt{BIDIR|POS|NEG}，可选 \texttt{OPEN} \\
+\kw{ZAP_VOLTAGE}/\kw{ZAP_R}/\kw{ZAP_CURRENT} & zapping 源；电流模式忽略电压/电阻 \\
+\kw{ZAP_*_RANGE} & 多电平扫描，摘要写入 \texttt{esd_summary.rpt} \\
+\kw{ZAP_FROM}/\kw{ZAP_TO} & 命名坐标点 \\
+\kw{EXTEND_CLAMP_CONN 1} & 经 power rail 并联放电；同网 clamp 两端 \\
+\kw{IGNORE_EM_IN_CLAMP} & DC 中忽略 clamp 内 EM（默认 0） \\
+\kw{EM_SCALE}/\kw{EM_RULE_SET} & EM 电流缩放与规则集 \\
+\kw{NET_PAIR_VTH}/\kw{PEAK_VOLT}/\kw{DIFF_VOLT} & 驱动-接收与峰值/差分电压 \\
+\kw{CLAMP_IMAX}/\kw{CLAMP_VMAX} & 击穿阈值（I-V 规则优先） \\
+\kw{SHORT_CLAMP_NODE} & 计算电阻时短接 clamp 节点 \\
+\kw{CACHE_EM} & 0/1/2/3：EM 缓存加速（2 显著加速；3 存 DB） \\
+\kw{EM/REFF/I/V_THRESHOLD} & 保存 DB 的阈值 \\
+\kw{SAVE_CLAMP_FAIL}/\kw{SAVE_EM} & 条件保存 DB；\texttt{import esdcd} 重载 EM \\
+\kw{EXCEL}/\kw{EXCEL_REPORT} & 生成 \texttt{esd_excel.rpt} \\
+\bottomrule
+\end{longtable}
+
+仅指定 \kw{ESD_STAGE} 时不计算 B2B 电阻以省时；若指定 \kw{LOOP_R} 或 \kw{PARALLEL_R} 则计算。
+
+\subsection{模式 2：指定 clamp 路径}
+\begin{lstlisting}
+CLAMP_INST_PIN <instance> <locID1> <locID2>
+USE_CLAMP_FILE <file>
+# 文件中 USE_CLAMP_CELL / USE_CLAMP_INST（支持通配符）
+\end{lstlisting}
+
+\subsection{弧基电流密度关键字}
+\kw{ZAP_BUMP_CLAMP}、\kw{ZAP_CLAMP_BUMP}、\kw{ZAP_CLAMP_CLAMP}、\kw{ZAP_PIN_CLAMP}、\kw{ZAP_CLAMP_PIN}；
+
+网表内：\kw{ZAP_B2C_NET}、\kw{ZAP_C2B_NET}、\kw{ZAP_C2C_NET}、\kw{ZAP_P2C_NET}、\kw{ZAP_C2P_NET} 及 \kw{*_NET_GROUP}。
+
+\kw{FROM_CLAMP_TYPE}/\kw{TO_CLAMP_TYPE}、\kw{SAME_CLAMP_TYPE}、\kw{DIFF_CLAMP_TYPE}；
+
+\kw{TIE_CLAMP <method> ?m?}：\texttt{PARALLEL|INST|MIN_DIST}，多指并联二极管。
+
+\kw{FROM_TO_SELECT}：\texttt{FROM_MIN_DIST|FROM_MIN_RES|TO_MIN_DIST|TO_MIN_RES} 与数量。
+
+\kw{USE_CLAMP_IV 1} 或按 CELL/INST/TYPE 含 clamp 电阻。
+
+点到点：
+\begin{lstlisting}
+perform esdcheck
+    -from {<x> <y> <layer> <net>} -to {...}
+    ? -zapI <I> | -zapV <V> -zapR <R> ?
+    -ruleName <name> ? -clamp <file> ?
+\end{lstlisting}
+多个 \texttt{-from}/\texttt{-to} 可短接后接 zapping 源（须同网物理连通）。
+
+\section{查看电流密度检查结果}
+\subsection*{Viewing Current Density Checking Results}
+
+\subsection{CD 规则文件完整模板}
+\begin{lstlisting}
+BEGIN_ESD_RULE
+    NAME mydc
+    TYPE CURRENT_DENSITY
+    LOOP_R 6.0
+    ESD_STAGE 2
+    B2B_RULE_NAME esd_b2b_rule
+    BUMP_PAIR VSS1 VDD5
+    ZAP_VOLTAGE 100
+    ZAP_R 1000
+    NET_PAIR_VTH 0.2 VDD VSS
+    PEAK_VOLT 25.0
+    DIFF_VOLT 7.0
+    CACHE_EM 2
+    SAVE_EM 1
+    EXCEL 1
+END_ESD_RULE
+\end{lstlisting}
+
+\subsection{报告文件说明}
+执行 \texttt{perform esdcheck} 后（默认 \texttt{adsRpt/ESD/}）：
+\begin{itemize}
+  \item \texttt{esd\_fail.rpt}/\texttt{esd\_pass.rpt}：失败/通过路径明细
+  \item \texttt{esd\_summary.rpt}：摘要；含 zapping 源、等效电阻、clamp 电流
+  \item \texttt{esd\_info.rpt}：连接性、采样点、作业分配（\kw{CHECK_CONNECTION}）
+  \item \texttt{esd\_inst.rpt}：clamp 实例 IR
+  \item \texttt{esd\_em.rpt}：路径 EM 百分比；\kw{EM_BY_LIMIT_ONLY 1} 过滤低百分比
+  \item \texttt{esd\_pad.rpt}：pad 电流列表
+  \item \texttt{esd\_pinPair.rpt}：\kw{PIN_PAIR_VTH} 超限 pin 对
+  \item \texttt{esd\_excel.rpt}：Excel 汇总（\kw{EXCEL 1}）
+\end{itemize}
+
+\texttt{report esdcheck -type B2C -name abc* -glob -detail -excel} 支持通配符与按单元过滤。\texttt{-failedOnly} 仅失败项。\texttt{-summary} 主要为 CD 摘要。
+
+\subsection{导入/导出 CD 数据库}
+\begin{lstlisting}
+import esdcd RuleABC
+export esdcd -rule RuleABC -outDir ./esd_db
+\end{lstlisting}
+默认压缩 DB；\texttt{-noCompress} 或规则 \kw{COMPRESS_DB 0} 关闭。阈值 \kw{EM_THRESHOLD}、\kw{REFF_THRESHOLD}、\kw{I_THRESHOLD}、\kw{V_THRESHOLD} 控制哪些结果写入 DB。
+
+\subsection{GUI 电流密度彩图}
+View $\rightarrow$ ESD Current Density $\rightarrow$ Current Density Test List 列出已完成 CD 规则。
+
+\begin{itemize}
+  \item \textbf{Peak Voltage Map}：各节点峰值电压；可 on-the-fly 改阈值重绘
+  \item \textbf{Differential Voltage Map}：差分电压分布
+  \item \textbf{Current Map}：金属/Via 电流密度
+  \item \textbf{Wire \& Via Voltage Map}：线/过孔电压；点选可在 Log 窗口看详细值
+  \item \textbf{Electromigration Map}：EM 百分比色阶；配合 \texttt{get em} 查询
+  \item \textbf{Pad Current Map}：pad 注入电流
+\end{itemize}
+
+色阶范围可通过各图 ``Set Color Range'' 配置。失败路径可用 SPT 追踪最小电阻路由辅助 debug。
+
+\subsection{perform clampcheck 选项补充}
+\begin{itemize}
+  \item \texttt{-cell}/\texttt{-celltype}：按单元名或 clamp 类型过滤报告
+  \item \texttt{-inst}：指定 clamp 实例
+  \item \texttt{-volt}：列出连接到某节点电压的 clamp
+  \item \texttt{-net}：列出连接到指定网络（双向）的 clamp 节点
+  \item \texttt{-bumpConn}/\texttt{-allBumpConn}：bump 到 clamp 连通性
+  \item \texttt{-loop}：列出查询网表对的全部 B2B 环路 clamp 实例
+  \item \texttt{-b2bLoopLength}：与 \texttt{-loopLength} 类似，专用于 B2B 精确级数
+  \item \texttt{-append}：追加到已有输出文件
+\end{itemize}
+
+\subsection{perform esdcheck 高级选项}
+\texttt{-addNode}：在指定坐标创建节点以提高电阻精度（配合 \texttt{-from}/\texttt{-to} 点查）。
+
+\texttt{-name}/\texttt{-type}：仅运行规则文件中匹配名称/类型的规则。
+
+\texttt{-excel}：生成 \texttt{esd\_excel.rpt} 汇总电阻与 CD 结果。
+
+\texttt{-hostOnly}/\texttt{-slaveOnly}：DMP 流程下控制 master/worker 执行范围。
+
+\texttt{export esdcheck -outDir <dir>}：导出 DB 供 \texttt{import esdcheck} 在其他会话加载（须首条 Tcl 为 \texttt{setup analysis\_mode esd}）。
+
+\subsection{Bump-Clamp 与 Clamp-Clamp 电流密度检查}
+\subsubsection*{Bump-to-Clamp and Clamp-to-Clamp Current Density Checking}
+
+除 B2B 经 clamp 放电外，PF-S 支持弧基 CD：bump$\rightarrow$clamp、clamp$\rightarrow$bump、clamp$\rightarrow$clamp、pin$\rightarrow$clamp 等。网表级 \kw{ZAP_*_NET} 与 \kw{ZAP_*_NET_GROUP} 可对 POWER/GROUND/SIGNAL 全网表自动配对 zapping。
+
+\kw{RADIUS} 限制 C2C/B2C 所选 clamp 距离；\kw{SAME_CLAMP_TYPE}/\kw{DIFF_CLAMP_TYPE} 控制同类型或异类型 clamp 间检查。
+
+\figplaceholder{Figure 16-21}{ESD 彩图菜单}
+\figplaceholder{Figure 16-22}{峰值与差分电流密度图}
+\figplaceholder{Figure 16-23}{电流密度检查结果}
+\figplaceholder{Figure 16-24}{线/过孔电压 ESD 结果}
+\figplaceholder{Figure 16-25}{EM 检查结果}
+
+\subsection{B2B/B2C/C2C 规则文件示例}
+\begin{lstlisting}
+BEGIN_ESD_RULE
+    NAME esd_b2b_rule
+    TYPE BUMP2BUMP
+    LOOP_R 5.0
+    PARALLEL_R 2.0
+    ESD_STAGE 1 3
+    B2B_LOOP_LENGTH 1 2
+    PAD_FILE design.ploc
+    SHORT_BUMP_IN_NET VSS
+    USE_CLAMP_FILE clamp_cells.txt
+END_ESD_RULE
+
+BEGIN_ESD_RULE
+    NAME esd_b2c_rule
+    TYPE BUMP2CLAMP
+    ARC_R 3.0
+    CLAMP_POS_PIN 1
+    NET_PAIR VDD VSS
+END_ESD_RULE
+
+BEGIN_ESD_RULE
+    NAME esd_c2c_rule
+    TYPE CLAMP2CLAMP
+    ARC_R 1.5
+    RADIUS 500
+    SAME_CLAMP_TYPE 0
+    DIFF_CLAMP_TYPE 1
+END_ESD_RULE
+\end{lstlisting}
+
+\subsection{合并规则与 Clamp Pin 节点}
+规则与 clamp pin 位置可合并为单一 \texttt{-rule} 文件。GSR \kw{ESD_CLAMP_FILES} 在指定 pin 坐标创建节点以提高弧电阻精度。Tcl \kw{pfs export clamp_pin} 可导出模板；\kw{pfs setup clamp} 与 \texttt{perform esdcheck -setupClamp} 配合缓存 DB。
+
+\subsection{弧基 CD 规则示例}
+\begin{lstlisting}
+BEGIN_ESD_RULE
+    NAME b2c_cd_rule
+    TYPE CURRENT_DENSITY
+    ZAP_BUMP_CLAMP VDD1 clamp_io_0 pad_1
+    ZAP_VOLTAGE 50
+    ZAP_R 1500
+    FROM_CLAMP_TYPE io_clamp
+    TO_CLAMP_TYPE pwr_clamp
+    TIE_CLAMP PARALLEL 4
+    FROM_TO_SELECT FROM_MIN_RES 3
+    USE_CLAMP_IV 1
+END_ESD_RULE
+
+BEGIN_ESD_RULE
+    NAME c2c_cd_sig
+    TYPE CD
+    ZAP_C2C_NET_GROUP SIGNAL
+    ZAP_CURRENT 0.5
+    CACHE_EM 2
+END_ESD_RULE
+\end{lstlisting}
+
+\subsection{排除关键字补充说明}
+除前述 \kw{EXCLUDE_*} 外，规则文件还支持：
+\begin{itemize}
+  \item \kw{EXCLUDE_PAD_FILE}：与 \kw{PAD_FILE} 配合排除部分 bump
+  \item \kw{NO_SHORT_BUMP_IN_NET}：在 \kw{SHORT_BUMP_IN_NET_GROUP} 下排除特定网表
+  \item \kw{EXCLUDE_RULE}：在 \texttt{BEGIN_ESD_JOB} 中排除整条规则
+  \item 通配符：\kw{USE_CLAMP_CELL}/\kw{USE_CLAMP_INST} 名称支持 \texttt{*} 与正则（\texttt{report esdcheck -regexp}）
+\end{itemize}
+
+\subsection{电阻/电流密度报告片段}
+B2B 失败路径示例（\texttt{esd\_fail.rpt}）：
+\begin{lstlisting}
+# BUMP2BUMP Rule: esd_b2b_rule
+# Bump1 Bump2 LOOP_R PARALLEL_R Status
+VDD1 VSS1 8.2 3.1 FAIL
+# Clamp path: clamp_a/loc1 -> clamp_b/loc2
+\end{lstlisting}
+
+CD 摘要（\texttt{esd\_summary.rpt}）：
+\begin{lstlisting}
+# Rule: mydc  TYPE: CURRENT_DENSITY
+# Zap: VDD5 -> VSS1  V=100V  R=1000Ohm  I=0.1A
+# Clamp IR: clamp_12/locA 2.5V  clamp_34/locB 1.8V
+# Worst EM: metal3_seg_44  112.3%
+\end{lstlisting}
+
+\subsection{GUI 菜单索引}
+\textbf{File}：Import/Export ESD DB（导入已保存的 esdcheck 数据库）。
+
+\textbf{Edit}：ESD Clamp ECO——GUI 增删改 clamp 单元/实例参数。
+
+\textbf{View $\rightarrow$ ESD Resistance Lists}：Bump-to-Clamp、Clamp-to-Clamp、Bump-to-Bump Para、Loop\_R、C2I 失败列表；底部 SPT 按钮追踪最小电阻路径。
+
+\textbf{View $\rightarrow$ ESD Resistance Maps}：电阻色图；可 on-the-fly 修改阈值并重绘。
+
+\textbf{View $\rightarrow$ ESD Clamp Lists}：clamp 实例与 pin 对列表。
+
+\textbf{View $\rightarrow$ ESD Current Density}：Peak/Diff Voltage、Current、Wire/Via Voltage、EM、Pad Current 彩图。
+
+\textbf{Results $\rightarrow$ Analysis Histogram}：电阻或 EM 结果直方图统计。
+
+\subsection{HBM/MM/CDM 与检查类型对照}
+\begin{table}[htbp]
+\centering
+\caption{ESD 模型与 PathFinder 检查类型}
+\small
+\begin{tabular}{p{2cm}p{4.5cm}p{6.5cm}}
+\toprule
+\textbf{模型} & \textbf{典型失效} & \textbf{推荐 PF-S 规则} \\
+\midrule
+HBM & I/O 与电源 clamp 路径 & B2B、B2C、B2I、CD（zap 跨 VDD/VSS） \\
+MM & 快速脉冲、多指二极管 & B2C、C2C、弧基 CD、\kw{TIE_CLAMP} \\
+CDM & 宏单元/core 到 clamp & C2I、C2M、\kw{CDM_ALL_NET}、\kw{SHOTGUN_MODE} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{PathFinder-D 与规则检查关系}
+PathFinder-D 对 IP 级版图做 HBM/CDM/MM 瞬态仿真 sign-off；PF-S 规则检查覆盖全芯片单元级电阻与 CD，二者互补。模拟/混合信号 IP 另见 PathFinder 应用笔记（Totem 流程）。
+
+\begin{seeAlsoBox}
+GSR ESD 关键字（\kw{ESD_CLAMP_FILE}、\kw{ESD_RULE_FILE}、\kw{ESD_CLAMP_PIN_NODE_DISTANCE} 等）见附录 C；\texttt{perform esdcheck}、\texttt{perform clampcheck}、\texttt{pfs} 完整 Tcl 语法见附录 D。
+\end{seeAlsoBox}
+
+\section{规则文件包含与排除}
+\subsection*{General Rule File Inclusions and Exclusions}
+
+电阻与电流密度规则均可指定包含/排除的 clamp、bump、实例或 pin。
+
+\subsection{Clamp 元素排除}
+\begin{lstlisting}
+EXCLUDE_CLAMP <cellname>
+EXCLUDE_CLAMP_INST <instance_name>
+EXCLUDE_CLAMP_CELL_PIN <cellname> <loc_ID>
+EXCLUDE_CLAMP_INST_PIN <instance_name> <loc_ID>
+\end{lstlisting}
+
+\subsection{Bump 排除}
+\begin{lstlisting}
+EXCLUDE_BUMP <bump_name>
+EXCLUDE_BUMP_FILE <filename>
+\end{lstlisting}
+
+\subsection{实例与单元排除}
+\begin{lstlisting}
+EXCLUDE_INSTANCE <inst_name>
+EXCLUDE_INSTANCE_FILE <filename>
+EXCLUDE_CELL <cell_name>
+EXCLUDE_CELL_FILE <filename>
+\end{lstlisting}
+
+\subsection{包含关键字（对照）}
+\begin{lstlisting}
+USE_CLAMP_CELL <cell> ?<locID1> <locID2>?
+USE_CLAMP_INST <inst> ?<locID1> <locID2>?
+USE_CLAMP_FILE <file>
+BUMP_LIST { <bump1> ... }
+INST_FILE <filename>
+CELL_FILE <filename>
+INCLUDE_NET_GROUP <groupName>
+EXCLUDE_NET_GROUP <groupName>
+\end{lstlisting}
+
+\begin{noteBox}
+低功耗分析模式（\texttt{setup analysis\_mode lowpower}）下 ESD 检查自动关闭。运行 ESD 前须 \texttt{setup analysis\_mode ESD}。大规模设计建议 \kw{ESD_GSR} 流程、\texttt{-jobCount}、\kw{CACHE_EM}、\texttt{-setupClamp} 提升吞吐。
+\end{noteBox}
+
+\subsection{快速参考：常用 Tcl 命令}
+\begin{lstlisting}
+setup analysis_mode ESD
+perform esdcheck -clamp clamp.txt -setupClamp
+perform esdcheck -rule rules.txt -thread 4 -optimize 2 -jobCount 4
+perform clampcheck -instConn -isolatedBump -o topo.rpt
+report esdcheck -type B2B -name esd_b2b_rule -detail
+report esdcheck -type CD -name mydc -excel -failedOnly
+import esdcd mydc
+pfs export clamp_pin clamp_out.txt -esdCell clamp.txt
+perform min_res_path -instance core_inst/foo -fromClamp
+\end{lstlisting}

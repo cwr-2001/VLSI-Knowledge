@@ -1,0 +1,2143 @@
+9
+Using Floorplan Physical Constraints
+The principal reason for using floorplan physical constraints is to improve timing
+correlation with the post-layout tools, such as IC Compiler, by considering these
+constraints during optimizations. You provide floorplan physical constraints to DC Explorer
+by using one of the following methods:
+•
+Export the floorplan information in DEF files or a Tcl script from IC Compiler and import
+this information into DC Explorer
+•
+Create these constraints manually
+To learn how to create, import, reset, save, and report floorplan physical constraints, see
+•
+Importing Floorplan Information
+•
+Physical Constraints Overview
+•
+Saving Physical Constraints
+•
+Saving in ASCII Format for IC Compiler II
+•
+Including Physical-Only Cells
+•
+Relative Placement
+Importing Floorplan Information
+You can import floorplan information to DC Explorer by using one of the following methods:
+•
+Using DEF files
+Export the floorplan information from IC Compiler by using the write_def
+command and import this information into DC Explorer by using the
+extract_physical_constraints command.
+◦
+Using the write_def Command in IC Compiler
+◦
+Reading DEF Information in DC Explorer
+•
+Using a Tcl script
+
+Importing Floorplan Information
+◦
+Saving the Floorplan Information in IC Compiler
+◦
+Reading the Floorplan Script in DC Explorer
+See Also
+•
+Imported DEF Information
+•
+Imported Physical Constraints
+Using the write_def Command in IC Compiler
+To improve timing, area, and power correlation between DC Explorer and IC Compiler,
+you can read your mapped DC Explorer netlist into IC Compiler, create a basic floorplan
+in IC Compiler, export this floorplan from IC Compiler, and read the floorplan back into DC
+Explorer.
+You use the write_def command in IC Compiler to export floorplan information to
+a Design Exchange Format (DEF) file which you can read into DC Explorer. The
+following example uses the write_def command to write floorplan information to the
+my_physical_data.def file:
+icc_shell> write_def -version 5.7 -rows_tracks_gcells -macro -pins \
+   -blockages -specialnets -vias -regions_groups -verbose \
+   -output my_physical_data.def
+Reading DEF Information in DC Explorer
+To import floorplan information from a DEF file, use the extract_physical_constraints
+command. This command imports floorplan information from the specified DEF file
+and applies this information to the design. The applied floorplan information is saved
+in the .ddc file and does not need to be reapplied when you read in the .ddc file in
+subsequent de_shell sessions.
+The following command shows how to import physical constraints from multiple DEF files:
+de_shell> extract_physical_constraints {des_1.def des2.def … des_N.def}
+By default, the extract_physical_constraints command runs in incremental mode.
+That is, if you use the command to process multiple DEF files, the command preserves
+existing physical annotations on the design. In incremental mode, the placement area is
+imported based on the current core area and site rows in the DEF files. When incremental
+
+Importing Floorplan Information
+mode is disabled, the placement area is imported based on the site rows in the DEF files.
+Conflicts are resolved as follows:
+•
+Physical constraints that can have only one value are overwritten by the value from the
+latest DEF file. That is, port location and macro location are overwritten.
+•
+Physical constraints that can have accumulated values are recomputed. That is, core
+area can be recomputed based on the existing value and the site row definitions in the
+latest DEF file. Placement keepouts from different DEF files are accumulated and the
+final keepout geometry is computed internally during synthesis.
+Figure 37 shows an example of incremental extraction performed by the
+extract_physical_constraints command.
+Figure 37
+Incremental Extraction With the extract_physical_constraints Command
+de_shell> extract_physical_constraints DEF1.def DEF2.def
+To disable incremental mode, specify the -no_incremental option with the
+extract_physical_constraints command.
+To learn about the imported DEF information and port and macro name matching
+considerations, see
+•
+Imported DEF Information
+•
+Name Matching of extract_physical_constraints
+•
+Resolving Site Names Mismatches
+
+Importing Floorplan Information
+Imported DEF Information
+DC Explorer supports high-level floorplan physical constraints, such as die area, core area
+and shape, port location, macro location and orientation, keepout margins, placement
+blockages, preroutes, bounds, vias, tracks, voltage areas, and wiring keepouts:
+•
+Die Area
+•
+Placement Area
+•
+Macro Location and Orientation
+•
+Hard, Soft, and Partial Placement Blockages
+•
+Wiring Keepouts
+•
+Placement Bounds
+•
+Port Location
+•
+Preroutes
+•
+Site Array Information
+•
+Vias
+•
+Routing Tracks
+•
+Keepout Margins
+To visually inspect your extracted physical constraints, use the layout view in the Design
+Vision layout window. All physical constraints extracted from the DEF file are automatically
+added to the layout view.
+Note:
+Voltage areas are not defined in a DEF file. Therefore, for multivoltage designs,
+you have to use the create_voltage_area command to define voltage areas
+for the tool. If you are using IC Compiler as your floorplanning tool, you can
+use the write_floorplan and read_floorplan commands to obtain floorplan
+information that automatically includes voltage areas. You do not need to define
+voltage areas manually when using these commands.
+Die Area
+The extract_physical_constraints command supports automatic die area extraction
+from DEF files. DEF files are generated by floorplanning tools and used by DC Explorer to
+import physical constraints. The tool can extract both rectangular and rectilinear die areas
+that are defined in the DEF files. The die area is also known as the cell boundary. The die
+area represents the silicon boundary of a chip and encloses all objects of a design, such
+as pads, I/O pins, and cells.
+
+Importing Floorplan Information
+Example 3 shows a die area definition in a DEF file:
+Example 3
+DEF
+   UNITS DISTANCE MICRONS 1000 ;
+   DIEAREA ( 0 0 ) ( 0 60000 ) ( 39680 60000 ) ( 39680 40000 ) \
+           ( 59360 40000 ) ( 59360 0 ) ;
+Example 4 shows how DC Explorer translates the DEF definition into Tcl when you write
+out your physical constraints using the write_floorplan -all command:
+Example 4
+de_shell> create_die_area -polygon { { 0.000 0.000 } { 0.000 60.000 } \
+   { 39.680 60.000 } { 39.680 40.000 } { 59.360 40.000 } \
+   { 59.360 0.000 } { 0.000 0.000 } }
+Placement Area
+Placement area is computed as the rectangular bounding box of the site rows.
+Macro Location and Orientation
+When you use the extract_physical_constraints command, for each cell with a
+location and the FIXED attribute specified in the DEF, DC Explorer sets the location on the
+corresponding cell in the design. Example 5 shows DEF macro location and orientation
+information, where the letters E and W denote east rotation and west rotation respectively.
+The equivalent Tcl commands are shown in Example 6.
+Example 5
+COMPONENTS 2 ;
+   - macro_cell_abx2 + FIXED ( 4350720 8160 ) E ;
+   - macro_cell_cdy1 + FIXED ( 4800 8160 ) W ;
+END COMPONENTS
+Example 6
+de_shell> set_cell_location macro_cell_abx2 \
+   -coordinates { 4350.720 8.160 } -orientation E -fixed
+de_shell> set_cell_location macro_cell_cdy1 \
+   -coordinates { 4.800 8.160 } -orientation W -fixed
+Hard, Soft, and Partial Placement Blockages
+The extract_physical_constraints command can import hard, soft, and partial
+placement blockages defined in the DEF file.
+Note:
+DEF versions before version 5.7 did not support partial blockages. In addition,
+if your floorplanning tool creates a DEF file with DEF version 5.6, you need
+
+Importing Floorplan Information
+to manually add the #SNPS_SOFT_BLOCKAGE pragma to specify a soft
+blockage, as shown in .
+Example 7 shows DEF hard placement blockage information, and Example 8 shows the
+equivalent Tcl command.
+Example 7
+BLOCKAGES 50 ;
+...
+   - PLACEMENT RECT ( 970460 7500 ) ( 3247660 129940 )
+...
+END BLOCKAGES
+Example 8
+de_shell> create_placement_blockage -name def_obstruction_23 \
+   -bbox { 970.460 7.500 3247.660 129.940 }
+For a soft placement blockage, if your extracted DEF information is as shown in
+Example 9 (DEF version 5.7) or Example 9 (DEF version 5.6), Example 11 shows the
+equivalent Tcl command.
+Example 9
+DEF Version 5.7 Soft Placement Blockage Information
+BLOCKAGES 50 ;
+...
+   - PLACEMENT + SOFT RECT ( 970460 7500 ) ( 3247660 129940 ) ;
+...
+END BLOCKAGES
+Example 10
+DEF Version 5.6 Soft Placement Blockage Information
+BLOCKAGES 50 ;
+...
+   - PLACEMENT RECT ( 970460 7500 ) ( 3247660 129940 ) ;
+ #SNPS_SOFT_BLOCKAGE
+...
+END BLOCKAGES
+Example 11
+de_shell> create_placement_blockage -name def_obstruction_23 \
+   -bbox { 970.460 7.500 3247.660 129.940 } -type soft
+For a partial placement blockage, if the extracted DEF information is as shown in
+Example 12, Example 13 shows the equivalent Tcl command.
+Example 12
+BLOCKAGES 50 ;
+...
+   - PLACEMENT + PARTIAL 80 RECT ( 970460 7500 ) ( 3247660 129940 ) ;
+
+Importing Floorplan Information
+...
+END BLOCKAGES
+Example 13
+de_shell> create_placement_blockage -name def_obstruction_23 \
+   -bbox { 970.460 7.500 3247.660 129.940 } -type partial \
+   -blocked_percentage 80
+Wiring Keepouts
+For wiring keepouts defined in the DEF file, DC Explorer creates wiring keepouts on the
+design.
+Example 14 shows DEF wiring keepout information.
+Example 14
+BLOCKAGES 30 ;
+...
+    - LAYER METAL6 RECT ( 0 495720 ) ( 4050 1419120 );
+...
+END BLOCKAGES
+Placement Bounds
+If REGIONS defining bounds exist in the DEF file, the extract_physical_constraints
+command imports placement bounds. Also, if any cells in the related GROUP are attached
+to the region, fuzzy cell matching occurs between these cells and the ones in the design,
+and the matched cells are attached to the bounds in the following two ways:
+•
+If there are regions in the design with the same name as in the DEF, the cells in
+the related group are attached to the region by the update_bounds command in
+incremental mode.
+•
+If the region does not exist in the design, it is created with the same name as in the
+DEF file by applying the create_bounds command; matched cells in the related group
+are also attached.
+Example 15 shows imported placement bounds information, and Example 16 shows the
+equivalent Tcl command.
+Example 15
+REGIONS 1 ;
+- c20_group ( 201970 40040 ) ( 237914 75984 ) + TYPE FENCE ;
+END REGIONS
+
+GROUPS 1 ;
+- c20_group
+     cell_abc1
+     cell_sm1
+
+Importing Floorplan Information
+     cell_sm2
+     + SOFT
+     + REGION c20_group ;
+END GROUPS
+Example 16
+de_shell> create_bounds -name "c20_group" \
+   -coordinate {201970 40040 237914 75984} \
+   -exclusive {cell_abc1 cell_sm1 cell_sm2}
+Port Location
+When you use the extract_physical_constraints command, for each port with the
+location specified in the DEF file, DC Explorer sets the location on the corresponding port
+in the design.
+Example 17 shows imported port location information, and Example 18 shows the
+equivalent Tcl commands.
+Example 17
+PINS 2 ;
+   -Out1 + NET Out1 + DIRECTION OUTPUT + USE SIGNAL +
+      LAYER M3 (0 0) (4200 200) + PLACED (80875 0) N;
+   -Sel0 + NET Sel0 + DIRECTION INPUT + USE SIGNAL +
+      LAYER M4 (0 0)(200 200) + PLACED (135920 42475) N;
+END PINS
+Example 18
+de_shell> set_port_location Out1 -coordinate {80.875 0.000} \
+   -layer_name M3 -layer_area {0.000 0.000 4.200 0.200}
+de_shell> set_port_location Sel0 -coordinate {135.920 0.000} \
+   -layer_name M4 -layer_area {0.000 0.000 0.200 0.200}
+Ports with changed names and multiple layers are supported. Example 19 shows DEF
+information for such a case, and Example 20 shows the equivalent Tcl commands.
+Example 19
+PINS 2 ;
+- sys_addr\[23\].extra2 + NET sys_addr[23] + DIRECTION INPUT +USE SIGNAL
++ LAYER METAL4 ( 0 0 ) ( 820 5820 ) + FIXED ( 1587825 2744180 ) N ;
+- sys_addr[23] + NET sys_addr[23] + DIRECTION INPUT + USE SIGNAL + LAYER
+  METAL3 ( 0 0 ) ( 820 5820 ) + FIXED ( 1587825 2744180 ) N ;
+END PINS
+Example 20
+de_shell> set_port_location sys_addr[23] \
+   -coordinate { 1587.825 2744.180 } \
+   -layer_name METAL3 -layer_area {0.000 0.000 0.820 5.820}
+
+Importing Floorplan Information
+de_shell> set_port_location sys_addr[23] \
+   -coordinate { 1587.825 2744.180 } \
+   -layer_name METAL4 -layer_area {0.000 0.000 0.820 5.820} -append
+Port orientation is also supported. Example 21 shows DEF information for such a case,
+and Example 22 shows the equivalent Tcl command.
+Example 21
+PINS 1;
+   - OUT + NET OUT + DIRECTION INPUT + USE SIGNAL
+      + LAYER m4 ( -120 0 ) ( 120 240 )
+      + FIXED ( 4557120 1726080 ) S ;
+END PINS
+Example 22
+de_shell> set_port_location OUT -coordinate { 4557.120 1726.080 } \
+   -layer_name m4 -layer_area {-0.120 -0.240 0.120 0.000}
+Preroutes
+DC Explorer extracts preroutes that are defined in the DEF file.
+Example 23 shows imported preroute information, and Example 24 shows the equivalent
+Tcl command.
+Example 23
+SPECIALNETS 2 ;
+- vdd
+   + ROUTED METAL3 10000 + SHAPE STRIPE ( 10000 150000 ) ( 50000 * )
+   + USE POWER ;
+...
+END SPECIALNETS
+Example 24
+de_shell> create_net_shape -type path -net vdd -datatype 0 -path_type 0 \
+   -route_type pg_strap -layer METAL3 -width 10.000 \
+   -points {{10.000 150.000} {50.000 150.000}}
+Site Array Information
+DC Explorer imports site array information that is defined in the DEF file. Site arrays in the
+DEF file define the placement area.
+Example 25 shows imported site array information, and Example 26 shows the equivalent
+Tcl command.
+Example 25
+ROW ROW_0 core 0 0 N DO 838 BY 1 STEP 560 0;
+
+Importing Floorplan Information
+Example 26
+de_shell> create_site_row -name ROW_0 -coordinate {0.000 0.000} \
+   -kind core -orient 0 -dir H -space 0.560 -count 838
+Vias
+The extract_physical_constraints command extracts vias that are defined in the DEF
+file. Vias are stored in the .ddc file in the same way as other physical constraints.
+Example 27 shows how DC Explorer translates the DEF definition into Tcl when you write
+out your physical constraints using the write_floorplan -all command.
+Example 27
+de_shell> create_via -type via -net VDD -master VIA67 \
+   -route_type pg_strap -at {746.61 2279} -orient N
+de_shell> create_via -type via_array -net VDD -master FATVIA45 \
+   -route_type pg_strap -at {1491.79 2127.8} -orient N -col 5 -row 2 \
+   -x_pitch 0.23 -y_pitch 0.23
+Routing Tracks
+The extract_physical_constraints command extracts any track information that is
+defined in the DEF file. Tracks define the routing grid for designs based on standard cells.
+They can be used during routing, and track support can enhance congestion evaluation
+and reporting in DC Explorer to make congestion routing more precise and match more
+closely with IC Compiler. Track information is stored in the .ddc file in the same way as
+other physical constraints. If you have a floorplan with track information, such as track
+types and locations, the track information is passed to IC Compiler during floorplan
+exploration.
+The following example shows track data in a DEF file:
+TRACKS X 330 DO 457 STEP 660 LAYER METAL1 ;
+TRACKS Y 280 DO 540 STEP 560 LAYER METAL1 ;
+Example 28 shows how DC Explorer translates the DEF definition into Tcl when you write
+out your physical constraints using the write_floorplan -all command.
+Example 28
+de_shell> create_track -layer metal1 -dir X -coord 0.100 -space 0.200 \
+   -count 11577 -bounding_box {{0.000 0.000} {2315.400 2315.200}}
+de_shell> create_track -layer metal1 -dir Y -coord 0.200 -space 0.200 \
+   -count 11575 -bounding_box {{0.000 0.000} {2315.400 2315.200}}
+Keepout Margins
+The extract_physical_constraints command extracts keepout margins that are
+defined in the DEF file. Keepout margins are stored in the .ddc file in the same way as
+other physical constraints.
+
+Importing Floorplan Information
+The following example shows a keepout margin definition in a DEF file:
+COMPONENTS 2 ;
+- U542 OAI21XL + FIXED( 80000 80000 ) FN + HALO 10000 10000 50000 50000 ;
+- U543 OAI21XL + FIXED( 10000 20000 ) FN + HALO SOFT 15000 15000 15000
+ 15000 ;
+END COMPONENTS
+See Also
+•
+Reading DEF Information in DC Explorer
+•
+Defining Physical Constraints
+Name Matching of extract_physical_constraints
+When the extract_physical_constraints command applies physical constraints,
+it matches macros and ports in the DEF file with macros and ports in memory. The
+command uses the intelligent name matching capability when it does not find an exact
+match.
+The extract_physical_constraints command reads the DEF files generated from
+a netlist that could have different object names than the netlist in memory. These name
+mismatches can be caused by automatic ungrouping and the change_names command.
+Typically, hierarchy separators and bus notations are sources of these mismatches.
+For example, automatic ungrouping by the compile_exploration command followed
+by the change_names command might result in the forward slash (/) separator being
+replaced with an underscore (_). Therefore, a macro named a/b/c/macro_name in
+the RTL might be named a/b_c_macro_name in the mapped netlist, which is the
+input to the back-end tool. When extracting physical constraints from the DEF file,
+the extract_physical_constraints command automatically resolves these name
+differences by using the intelligent name matching capability.
+By default, the following characters are considered equivalent:
+•
+Hierarchical separators { / _ . }
+For example, a cell named a.b_c/d_e is automatically matched with the string a/b_c.d/e
+in the DEF file.
+•
+Bus notations { [ ] __ ( ) }
+For example, a cell named a [4] [5] is automatically matched with the string a_4__5_ in
+the DEF file.
+To disable intelligent name matching, you can specify the -exact option of the
+extract_physical_constraints command. Setting this option specifies to match
+objects in the netlist in memory exactly with the corresponding objects in the DEF file.
+
+Importing Floorplan Information
+When you use the -verbose option with the extract_physical_constraints command,
+the tool displays the following information message:
+Information: Fuzzy match cell %s in netlist with instance
+%s in DEF.
+To define the rules used by the intelligent name matching capability, use the
+set_query_rules command.
+See Also
+•
+Resolving Site Names Mismatches
+Resolving Site Names Mismatches
+When you use the extract_physical_constraints command to read a DEF file,
+DC Explorer automatically matches the site name in the floorplan with the name of the tile
+in the Milkyway reference libraries. Milkyway reference libraries usually have the site name
+set to unit by default. However, you might still need to define the name mappings if the
+site dimension does not match unit or more than one site type is used in the DEF files. To
+define the name mappings, use the mw_site_name_mapping variable. For example,
+de_shell> set mw_site_name_mapping \
+{{def_site_name1 mw_ref_lib_site_name} \
+{def_site_name2 mw_ref_lib_site_name} }
+You can specify multiple pairs of values for the mw_site_name_mapping variable.
+See Also
+•
+Name Matching of extract_physical_constraints
+Saving the Floorplan Information in IC Compiler
+To improve timing, area, and power correlation between DC Explorer and IC Compiler,
+you can read your mapped DC Explorer netlist into IC Compiler, create a basic floorplan
+in IC Compiler, export this floorplan from IC Compiler, and read the floorplan back into DC
+Explorer.
+You can use the write_floorplan command in IC Compiler to export floorplan
+information and write this information in a Tcl script that you read into DC Explorer to
+re-create the floorplan information of the specified design. The following example uses
+the write_floorplan command to write out all placed standard cells to a file called
+placed_std.fp:
+icc_shell> write_floorplan \
+   -placement {io terminal hard_macro soft_macro} -create_terminal \
+   -row -create_bound -preroute -track floorplan_for_DC.fp
+
+Importing Floorplan Information
+Reading the Floorplan Script in DC Explorer
+You use the read_floorplan command to read in a script file generated by the
+write_floorplan command that contains commands describing floorplan information.
+You can also use the source command to import the floorplan information. However, the
+source command reports errors and warnings that are not applicable to DC Explorer. The
+read_floorplan command removes these unnecessary errors and warnings. In addition,
+you need to enable fuzzy name matching manually when you use the source command.
+The read_floorplan command automatically enables fuzzy name matching.
+To visually inspect your imported physical constraints, use the layout view in the Design
+Vision layout window.
+Imported physical constraints are automatically saved to your .ddc file. To save the
+physical constraints in a separate file, use the write_floorplan command after
+extraction. This command saves the floorplan information so that you can read the
+floorplan back into DC Explorer.
+The read_floorplan command should not be used to perform incremental floorplan
+modifications. The read_floorplan command imports the entire floorplan information
+exported from IC Compiler with the write_floorplan command and overwrites any
+existing floorplan. The write_floorplan  command usually includes commands to
+remove any existing floorplan.
+To learn more about imported physical constraints, floorplan modification issues, and port
+and macro name matching considerations, see
+•
+Imported Physical Constraints
+•
+Name Matching of read_floorplan
+Imported Physical Constraints
+These are some of the physical constraints imported from the floorplan file:
+•
+Voltage areas
+•
+Die Area
+The die area represents the silicon boundary of a chip and encloses all objects of a
+design, such as pads, I/O pins, and cells.
+•
+Placement Area
+•
+Macro Location and Orientation
+For each cell with a location and the FIXED attribute specified, DC Explorer sets the
+location on the corresponding cell in the design.
+•
+Hard and Soft Placement Blockages
+
+Importing Floorplan Information
+For defined placement blockages, DC Explorer creates placement blockages on the
+design.
+•
+Wiring Keepouts
+Wiring keepout information is imported from the floorplan file. The
+create_route_guide command creates a wiring keepout.
+•
+Placement Bounds
+Placement bounds are extracted from the floorplan file in the following two ways:
+◦
+If there are regions in the design with the same name as in the floorplan file,
+the cells in the related group are attached to the region by the update_bounds
+command in incremental mode.
+◦
+If the region does not exist in the design, it is created with the same name as in the
+floorplan file by applying the create_bounds command. Matched cells in the related
+group are also attached.
+•
+Port Locations
+For each port with the location specified in the floorplan file, DC Explorer sets the
+location on the corresponding port in the design.
+Ports with changed names and multiple layers are supported.
+•
+Preroutes
+DC Explorer imports preroutes that are defined in the floorplan file. A preroute is
+represented with the create_net_shape command.
+•
+User Shapes
+DC Explorer imports user shapes that are defined in the floorplan file and includes
+them in the preroute section.
+•
+Site Array Information
+DC Explorer extracts site array information that is defined in the floorplan file. Site
+arrays define the placement area.
+•
+Vias
+DC Explorer imports vias that are defined in the floorplan file and includes them in the
+preroute section.
+•
+Tracks
+DC Explorer imports any track information that is defined in the floorplan file.
+
+Importing Floorplan Information
+Name Matching of read_floorplan
+When the read_floorplan command applies physical constraints in topographical mode,
+it automatically matches macros and ports in the floorplan file with macros and ports in
+memory. The command uses the intelligent name matching capability when it does not find
+an exact match.
+The read_floorplan command reads from floorplan files generated from a netlist that
+could have different object names from the netlist in memory. Name mismatches can be
+caused by automatic ungrouping and the change_names command. Typically, hierarchy
+separators and bus notations are sources of these mismatches.
+For example, automatic ungrouping by the compile_exploration command followed
+by the change_names command might result in the forward slash (/) separator being
+replaced with an underscore (_) character. Therefore, a macro named a/b/c/macro_name
+in the RTL might be named a/b_c_macro_name in the mapped netlist, which is the
+input to the back-end tool. When extracting physical constraints from the DEF file,
+the extract_physical_constraints command automatically resolves these name
+differences by using DC Explorer’s intelligent name matching capability.
+By default, the following characters are considered equivalent:
+•
+Hierarchical separators { / _ . }
+For example, a cell named a.b_c/d_e is automatically matched with the string a/b_c.d/e
+in the floorplan file.
+•
+Bus notations { [ ] __ ( ) }
+For example, a cell named a [4] [5] is automatically matched with the string a_4__5_ in
+the floorplan file.
+To define the rules used by the intelligent name matching capability, use the
+set_query_rules command.
+Note:
+Using the source command is not recommended. However, if you use the
+source command to import your floorplan information, you need to enable fuzzy
+name matching manually by setting the enable_rule_based_query variable to
+true before you source the floorplan file. For example,
+de_shell> set enable_rule_based_query true
+de_shell> source design.fp
+de_shell> set enable_rule_based_query false
+
+Physical Constraints Overview
+Physical Constraints Overview
+You manually define physical constraints when you cannot obtain this information from
+a DEF file or from the read_floorplan command. After you have manually defined
+your physical constraints in a Tcl script file, use the source command to apply these
+constraints. You should read in the design before applying user-specified physical
+constraints.
+To learn how to manually define physical constraints, see
+•
+Defining Physical Constraints
+•
+Commands for Defining Physical Constraints
+To report any physical constraints that are applied to the design, use the
+report_physical_constraints command. To reset all physical constraints, use the
+reset_physical_constraints command before reading in a new or modified floorplan.
+To report a collection of polygons that exactly cover the region computed by performing a
+Boolean operation on the input polygons, use the compute_polygons command.
+See Also
+•
+Reading DEF Information in DC Explorer
+•
+Reading the Floorplan Script in DC Explorer
+Defining Physical Constraints
+If you do not provide any floorplan physical constraints using a floorplanning tool, DC
+Explorer uses the following default physical constraints:
+•
+Aspect ratio of 1.0 (that is, a square placement area)
+•
+Utilization of 0.6 (that is, forty percent of empty space in the core area)
+You can also manually define physical constraints as shown in the following topics:
+•
+Defining the Die Area
+•
+Defining Placement Area
+•
+Defining the Core Placement Area
+•
+Defining Port Locations
+•
+Defining Macro Locations
+•
+Defining Placement Blockages
+
+Physical Constraints Overview
+•
+Defining Voltage Area
+•
+Creating Placement Bounds
+•
+Creating Wiring Keepouts
+•
+Creating Preroutes
+•
+Creating User Shapes
+•
+Defining Physical Constraints for Pins
+•
+Creating Vias
+•
+Creating Routing Tracks
+•
+Creating Keepout Margins
+•
+Placement Bounds Overview
+See Also
+•
+Physical Constraints Overview
+•
+Placement Bounds Overview
+•
+Saving Physical Constraints
+Defining the Die Area
+DC Explorer allows you to manually define the die area, also known as the cell boundary.
+The die area represents the silicon boundary of a chip, and it encloses all objects of a
+design, such as pads, I/O pins, and cells. There should be only one die area in a design.
+Typically, you create floorplan constraints, including the die area, in your floorplanning
+tool, and import these physical constraints into DC Explorer. However, if you are not
+using a floorplanning tool, you need to manually create your physical constraints. The
+create_die_area command allows you to define the die area from within DC Explorer.
+When using the create_die_area command, you can use the -coordinate option if
+your die area is a rectangle. If your die area is rectilinear, you must use the -polygon
+option. You can use the -polygon option to specify rectangles, but you cannot use the
+-coordinate option to specify rectilinear die areas. For example, the following commands
+create the same rectangular die area:
+de_shell> create_die_area -coordinate { 0 0 100 100 }
+de_shell> create_die_area -coordinate { {0 0} {100 100} }
+de_shell> create_die_area -polygon { {0 0} {100 0} {100 100} {0 100} }
+You can use the get_die_area command to return a collection containing the die area of
+the current design. If the die area is not defined, the command returns an empty string.
+
+Physical Constraints Overview
+Use the get_attribute command to get information about the die area, such as the
+object class, bounding box information, coordinates of the current design’s die area, die
+area boundary, and die area name.
+You can use the report_attribute command to browse attributes, such as
+object_class, bbox, boundary, and name.
+For example, you create a new die area by entering the following command:
+de_shell> create_die_area -polygon {{0 0} {0 400} {200 400} {200 200} \
+{400 200} {400 0}}
+Then, use the get_attribute command to get the following information about the die
+area:
+•
+To return the object class, specify the object_class attribute.
+de_shell> get_attribute [get_die_area] object_class
+die_area
+•
+To return the bounding box information and the coordinates of the die area of the
+current design, specify the bbox attribute.
+de_shell> get_attribute [get_die_area] bbox
+{0.000 0.000} {400.000 400.000}
+•
+To return the die area boundary, specify the boundary attribute.
+de_shell> get_attribute [get_die_area] boundary
+{0.000 0.000} {0.000 400.000} {200.000 400.000} {200.000 200.000}
+{400.000 200.000} {400.000 0.000} {0.000 0.000}
+•
+To return the die area name, specify the name attribute.
+de_shell> get_attribute [get_die_area] name
+{my_design_die_area}
+Defining Placement Area
+If you have not defined your die area with the create_die_area command, defined a
+floorplan area with the create_site_row command, or imported floorplan information
+from a floorplanning tool, you can use the set_aspect_ratio and set_utilization
+commands to estimate the placement area.
+The aspect ratio is the height-to-width ratio of a block; it defines the shape of a block.
+Utilization specifies how densely you want cells to be placed within the block. Increasing
+utilization reduces the core area.
+Figure 38 illustrates how to use these commands.
+
+Physical Constraints Overview
+Figure 38
+Using the set_aspect_ratio and set_utilization Commands
+Defining the Core Placement Area
+Define the core placement area with the create_site_row command.
+The core placement area is a box that contains all rows and represents the placeable area
+for standard cells. The core area is smaller than the cell boundary (the die area). Pads, I/O
+pins, and top-level power and ground rings are typically outside the core placement area.
+Standard cells, macros, and wire tracks are typically found inside the core placement area.
+There should be only one core area in a design.
+You use the create_site_row command to create a row of sites or a site array at a
+specified location. A site is a predefined valid location where a leaf cell can be placed; a
+site array is an array of placement sites and defines the placement core area.
+To create a horizontal row of 100 CORE_2H sites with a bottom-left corner located at
+(10,10) and rows spaced 5 units apart, enter
+de_shell> create_site_row-count 100 -kind CORE_2H \
+-space 5 -coordinate {10 10}
+Use the report_area -physical command to report floorplan information, such as core
+area, aspect ratio, utilization, total fixed cell area, and total movable cell area.
+Defining Port Locations
+You can define constraints that restrict the placement and sizing of ports by using the
+set_port_side command or set_port_location command. You can specify relative or
+exact constraints.
+To learn how to define relative and exact port locations, see
+
+Physical Constraints Overview
+•
+Defining Relative Port Locations
+•
+Defining Exact Port Locations
+Defining Relative Port Locations
+Use the set_port_side command to define relative port locations as follows:
+de_shell> set_port_side port_name -side port_side
+Valid sides are left (L), right (R), top (T), or bottom (B). A port can be placed at any location
+along the specified side. If the port side constraints are provided, the ports are snapped to
+the specified side. Otherwise, by default, the ports are snapped to the side nearest to the
+port location assigned by the coarse placer. Figure 39 shows how you define port sides by
+using the set_port_side command.
+Figure 39
+Setting Relative Port Sides
+Defining Exact Port Locations
+Use the set_port_location command to annotate the port location on the specified port:
+de_shell> set_port_location port_name -coordinate  {x y}
+The following example annotates the Z port, a top-level port in the current design, with the
+location at 100, 5000.
+de_shell> set_port_location -coordinate {100 5000} Z
+In addition, you can use the -layer_name option and -layer_area option to define metal
+layer geometry. For example, the following command specifies that the layer geometry is a
+rectangle of dimensions 10 by 20 for the Z port.
+de_shell> set_port_location -layer_name METAL1 \
+   -layer_area {-5 -10 5 10} Z
+These options allow you to define long ports so that connections to the long port can be
+made along any point on the specified metal layer during virtual-layout based optimization.
+
+Physical Constraints Overview
+A long port can be an input, output, or bidirectional port. You specify a long port location by
+using a dimension greater than the minimum metal area. Figure 40 illustrates the different
+types of port dimensions: Long port, flushed port, and multiple port.
+•
+A long port has the metal area defined with a single metal layer and touches only one
+side of the block core area boundary.
+•
+A flushed port has the metal area defined with a single metal layer and touches the
+block core area boundary on two sides.
+•
+A multiple port has more than one connection to the block and can touch the block
+boundary on two or more sides and can use one or more layers. To create a multiple
+port, use the -append option of the set_port_location command. With this option
+you add multiple shapes a port and create a multiple port.
+Figure 40
+Types of Port Dimension Specifications
+Defining Macro Locations
+You can define exact macro locations by setting the following command:
+de_shell> set_cell_location cell_name -coordinates{x y} -fixed \
+-orientation orientation_value
+where -coordinates is the coordinate of the lower-left corner of the cell’s bounding box.
+The coordinate numbers are displayed in microns relative to the block orientation. The
+orientation value is one of the rotations: N (default), S, E, W, FN, FS, FE, and FW.
+Defining Placement Blockages
+Use the create_placement_blockage command to define placement blockages. The
+following example uses the -bbox option to specify the coordinates of the bounding box
+of the blockage and the -type option to specify the type of placement blockage to be
+created, as shown in Figure 41.
+
+Physical Constraints Overview
+de_shell> create_placement_blockage -name Blockage1 \
+   -type hard -bbox {50 160 300 280}
+Figure 41
+Defining a Hard Placement Blockage
+You can use the get_placement_blockages command to return a collection of placement
+blockages from the current design. The command returns a collection of placement
+blockages if one or more blockages meet the specified criteria. If no blockages match the
+criteria, it returns an empty string. You can use the get_placement_blockages command
+as an argument to another command or assign its result to a variable.
+To create a collection containing all blockages within a specified region, use the
+-within region option with the get_placement_blockages command. The region
+boundary can be a rectangle or a polygon. In the following example, DC Explorer returns
+one rectangular placement blockage based on the specified region. In the example, the
+first xy pair {2 2} represents the lower-left corner of the rectangle, and the second xy pair
+{25 25} represents the upper-right corner of the rectangle:
+de_shell> get_placement_blockages * -within {{2 2} {25 25}}
+{"PB#5389"}
+To filter the collection with an expression, use the -filter expression option with the
+get_placement_blockages command. In the following example, DC Explorer returns all
+placement blockages that have an area greater than 900:
+de_shell> get_placement_blockages * -filter "area > 900"
+{"PB#4683"}
+Defining Voltage Area
+You define voltage areas by using the create_voltage_area command. This command
+enables you to create a voltage area on the core area of the chip. The voltage area is
+associated with hierarchical cells. The tool assumes the voltage area to be an exclusive,
+hard move bound and tries to place all the cells associated with the voltage area within
+the defined voltage area, as well as place all the cells not associated with the voltage area
+outside the defined voltage area.
+
+Physical Constraints Overview
+Example 29 uses the create_voltage_area command to constrain the instance INST_1
+to lie within the voltage area whose coordinates are lower-left corner (100 100) upper-right
+corner (200 200).
+Example 29
+de_shell> create_voltage_area -name my_area \
+   -coordinate {100 100 200 200} INST_1
+Example 30 uses the create_voltage_area command to constrain cells in power domain
+PD1 to lie within the voltage area whose coordinates are lower-left corner (100 100)
+upper-right corner (200 200).
+Example 30
+de_shell> create_voltage_area -power_domain PD1 \
+   -coordinate {100 100 200 200}
+Voltage areas are automatically defined when you import your floorplan information from
+IC Compiler with the read_floorplan command. You need to define voltage areas
+manually when importing floorplan information from a DEF file.
+To visually inspect your defined voltage areas, use the visual mode in the Design Vision
+layout window.
+See Also
+•
+Reading the Floorplan Script in DC Explorer
+Creating Placement Bounds
+To use placement bounds effectively, make the number of cells you define in placement
+bounds relatively small compared with the total number of cells in the design. When you
+define placement bounds, you also reduce the solution space available to the placer to
+reach the optimal placement result.
+You should create placement bounds in the following order:
+1. Floating group bounds where location and dimension are optimized by the tool. For
+these bounds, do not specify dimensions.
+2. Floating group bounds with fixed dimensions. For these bounds, specify dimensions.
+3. Fixed move bounds with fixed location and dimension. For these bounds, specify
+coordinates that define the bound.
+Use the following guidelines when you create placement bounds:
+•
+Use soft and hard move bounds sparingly in your design.
+•
+Avoid placing cells in more than one bound.
+
+Physical Constraints Overview
+•
+Be aware that including small numbers of fixed cells in group bounds can move the
+bound.
+•
+Do not use placement bounds as keepouts.
+•
+Maintain even cell density distribution over the chip.
+Use the create_bounds command to specify placement bounds. You can specify the
+following types of placement bounds:
+•
+Soft group bound
+de_shell> create_bounds -dimension {100 100} -name temp1 INST1
+•
+Soft move bound
+de_shell> create_bounds -coordinate {0 0 10 10} -name temp2 INST2
+•
+Hard group bound
+de_shell> create_bounds -dimension {100 100} \
+   -type hard -name temp3 INST3
+•
+Hard move bound
+de_shell> create_bounds -coordinate {0 0 10 10} \
+   -type hard -name temp4 INST4
+•
+Exclusive move bound
+de_shell> create_bounds -coordinate {0 0 10 10} \
+   -type hard -exclusive -name temp5 INST5
+To return a collection of bounds from the current design, use the get_bounds command.
+You can use the get_bounds command at the command prompt or nest it as an argument
+to another command, such as the report_bounds command. You can also assign the
+get_bounds result to a variable.
+When issued from the command prompt, the get_bounds command behaves as though
+you have called the report_bounds command to report the objects in the collection. By
+default, it displays a maximum of 100 objects. You can change this maximum by using the
+collection_result_display_limit variable.
+The following example returns all bounds with the my_bound prefix:
+de_shell> get_bounds my_bound*
+See Also
+•
+Placement Bounds Overview
+
+Physical Constraints Overview
+Creating Wiring Keepouts
+You can create wiring keepouts by using the create_route_guide command. The
+following example uses the create_route_guide command to create a keepout named
+my_keepout_1 in the METAL1 layer at coordinates {12 12 100 100}.
+de_shell> create_route_guide -name "my_keepout_1" \
+   -no_signal_layers "METAL1"-coordinate {12 12 100 100}
+Creating Preroutes
+You can preroute a group of nets, such as clock nets, before routing the rest of the nets
+in the design. During global routing, the tool considers these preroutes while computing
+the congestion map; this map is consistent with IC Compiler. This feature also addresses
+correlation issues caused by inconsistent floorplan information.
+To define preroutes, you use the create_net_shape command. You can create three
+different types of net shapes as shown in Figure 42: path, wire (horizontal and vertical),
+and rectangle.
+Figure 42
+Types of Preroutes
+The following three examples show how to create the net shapes shown in Figure 42.
+Example 31 uses the create_net_shape command to create two wire net shapes.
+Example 31
+de_shell> create_net_shape -type wire -net VSS \
+   -bbox {0 60 80 80} -layer METAL5 -route_type pg_strap \
+
+Physical Constraints Overview
+   -net_type ground
+de_shell> create_net_shape -type wire -net VSS \
+   -origin {50 100} -width 20 -length 80 -layer METAL4 \
+   -route_type pg_strap -vertical
+Example 32 uses the create_net_shape command to create the path net shape.
+Example 32
+de_shell> create_net_shape -type path -net VSS \
+   -points {70 30 110 30 110 90 150 90 150 110} \
+   -width 0.20 -layer M3 -route_type pg_std_cell_pin_conn
+Example 33 uses the create_net_shape command to create the rectangle net shape.
+Example 33
+de_shell> create_net_shape -type rect -net VSS \
+   -bbox {{80 140} {160 180}} -layer METAL1 -route_type pg_strap
+Creating User Shapes
+You can create user shapes by using the create_user_shape command. A user shape is
+a metal shape that is not associated with a net. You can specify the following types of user
+shapes by using the -type option: wire (horizontal or vertical), path, rectangle, polygon,
+and trapezoid.
+If you do not specify the -type option, the user shape type is determined by the following
+rules, in order of precedence:
+1. If you use the -origin option, the user shape is a wire. The wire is horizontal unless
+you also specify the -vertical option.
+2. If you use the -bbox option, the user shape is a wire if you also use the -path_type,
+-route_type, or -vertical options. If you do not use any of these additional options,
+the user shape is a rectangle.
+3. If you use the -points option, the user shape is a path.
+In the following example, DC Explorer creates a wire user shape:
+de_shell> create_user_shape -type wire \
+   -origin {0 0} -length 10 -width 2 -layer M1
+Use the write_floorplan -user_shape command to save user shapes to the generated
+floorplan file. Alternatively, use the write_floorplan -preroute command to save user
+shapes and net shapes to the floorplan file.
+
+Physical Constraints Overview
+The create_user_shape commands are saved in the Preroute section of the floorplan
+file, as shown in the following example:
+#*************************************************
+#   SECTION: Preroutes, with number: 6
+#*************************************************
+remove_user_shape *
+create_user_shape -type wire -layer METAL1 -datatype 0 \
+-path_type 0 -width 2000 -route_type signal_route \
+-length 3000 -origin {100 1500}
+create_user_shape -type wire -layer METAL2 -datatype 0 \
+-path_type 0 -width 2000 -route_type signal_route \
+-length 3000 -origin {100 1500}
+create_user_shape -type path -layer METAL4 -datatype 0 \
+-path_type 0 -width 200 -route_type signal_route \
+-points {{100 100} {400 100} {400 400} {600 400}}
+create_user_shape -type rect -layer METAL5 -datatype 0 \
+-route_type user_enter -bbox {{100 100} {600 600}}
+create_user_shape -type poly -layer METAL6 -datatype 0 \
+-boundary {{100 100}{300 200} {600 600} {400 400} {200 400} {100 100}}
+create_user_shape -type trap -layer METAL3 -datatype 0 \
+-boundary {{100 100}{600 100} {400 600} {200 600}}
+To remove objects that are user shapes, use the remove_user_shape command. Use the
+asterisk (*) to indicate that all user shapes in the design should be removed, as shown in
+the following example:
+de_shell> remove_user_shape *
+You can use the layout window in DC Explorer Graphical to view user shapes in the
+floorplan. You control the visibility of user shapes in the active layout view by setting
+options on the View Settings panel. For more information about viewing user shapes in the
+floorplan, see the “Examining Preroutes” topic in Design Vision Help.
+For information, see the “Examining Preroutes” topic in Design Vision User Guide.
+Defining Physical Constraints for Pins
+You can use the set_pin_physical_constraints and the create_pin_guide
+commands to control the placement of I/O cells and terminals.
+Note:
+DC Explorer supports only the placement of top-level design ports. It does not
+support the plan group or macro pin placement that is supported in IC Compiler
+design planning.
+
+Physical Constraints Overview
+You can set physical constraints, such as the width and depth, on specified pins by using
+the set_pin_physical_constraints command. The following example shows the typical
+usage for this command:
+de_shell> set_pin_physical_constraints -pin_name {CCEN} -width 1.2 \
+   -depth 1.0 -side 1 -offset 10 -order 2
+In the example, the command sets constraints on the CCEN pin. The geometry width is
+1.2 microns, the depth is 1.0 micron, and the pin abuts to the side 1 edge, which is the
+lower left-most vertical edge. The offset distance is 10 microns, and the relative placement
+order is 2. Therefore, the pin is placed at a location on the left-most edge.
+You can also use the create_pin_guide command to create a pin guide to constrain the
+pin assignment to a specified bounding box. This allows you to specify which area the
+port should be placed. The following example creates a pin guide named abc for all ports
+whose name begins with the xyz prefix:
+de_shell> create_pin_guide -bbox {{-20 50} {20 800}} \
+   [get_ports xyz*] -name abc
+The compile_exploration command honors the constraints that you specify.
+By default, DC Explorer snaps ports to tracks during pin placement. However, you can
+prevent the snapping of ports to tracks by setting the dct_port_dont_snap_onto_tracks
+variable to true.
+The pin constraints are saved to the design in the .ddc file. When you read the .ddc file in
+to a new DC Explorer session, the pin constraints are restored.
+The write_floorplan and report_physical_constraints commands do not report
+the pin constraint information. However, you can use the layout window in DC Explorer
+to verify that the pin constraints are placed correctly in the floorplan. To view the pin
+constraints in the layout view, select the Pin Guide visibility option (Vis) on the View
+Settings panel in the layout window.
+DC Explorer does not pass the pin constraints to floorplan exploration, and floorplan
+exploration does not pass the pin constraints to DC Explorer.
+For information, see also the “Examining Physical Constraints” topic in Design Vision User
+Guide.
+Creating Vias
+You can create vias by using the create_via command if the master via is defined in the
+technology file. Use the -type option to specify the type of via you want to create. The
+following example shows the creation of a via instance with its center specified as {213
+
+Physical Constraints Overview
+215} and with an orientation of E. The via’s size is determined by the via master, via1,
+which is defined in the technology file:
+de_shell> create_via -type via -net vdd -master via1 \
+   -route_type pg_strap -at {213 215} -orient E
+The following example creates a via array with four columns and three rows, and the via
+master is via4:
+de_shell> create_via -type via_array -net vdd -master via4 \
+   -route_type signal_route -at {215 215} -orient W -col 4 -row 3 \
+   -x_pitch 0.4 -y_pitch 0.5
+If a via is defined in the DEF file and it does not exist in the technology file, a FRAM
+view is created in the Milkyway design library to save that via master. When that via is
+instantiated as a preroute in the floorplan, its instance is saved as a via cell that references
+the via master in the FRAM view. To remove a via, use the remove_via command.
+Note:
+The write_floorplan command cannot write out via master definitions to
+be used in a new session. The via master in the FRAM view is not passed to
+the new session; therefore, IC Compiler and DC Explorer cannot source the
+create_via commands that use undefined via masters in the technology file.
+You can visually examine preroute vias in your floorplan by viewing them in the Design
+Vision layout window. You can display or hide vias in the active layout view by setting
+options on the View Settings panel. Vias are visible by default. For more information about
+controlling the visibility of vias in the active layout view, see the Design Vision User Guide.
+Creating Routing Tracks
+You can create tracks for routing layers and polygon layers by using the create_track
+command. Tracks cover the entire die area. If the die area is a polygon, the tracks cover
+the die area in a rectangle, stretching outside the polygon die area.
+The create_track command creates a group of tracks on the floorplan, so the router can
+use them to perform detail routing. You must specify either a polygon layer or a routing
+layer for the tracks. Creating the tracks on a polygon layer does not support routing on the
+polygon layer.
+The following example creates routing tracks for a routing layer named MET3:
+de_shell> create_track -layer MET3 -dir Y -coord 0.000 -space 0.290 \
+   -count 4827 -bounding_box {{0.000 0.000} {1460.000 1400.000}}
+de_shell> create_track -layer MET3 -dir X -coord 0.000 -space 0.290 \
+   -count 5034 -bounding_box {{0.000 0.000} {1460.000 1400.000}}
+To return a collection of tracks in the current design that meet your selection criteria, use
+the get_tracks command. For example, you can use the -within rectangle option
+
+Physical Constraints Overview
+to create a collection containing all tracks within the specified rectangle. The format of a
+rectangle specification is {{llx lly} {urx ury}}, which specifies the lower-left and upper-right
+corners of the rectangle. The coordinate unit is specified in the technology file.
+The following example returns the tracks within the rectangle with the lower-left corner at
+{2 2} and the upper-right corner at {25 25}:
+de_shell> get_tracks * -within {{2 2} {25 25}}
+{"USER_TRACK_5389"}
+The following example returns all tracks:
+de_shell> get_tracks "*TRACK_*"
+{"DEF_TRACK_4683 USER_TRACK_5389"}
+To get a report that shows the metal layer, the metal direction, the starting point, the
+number of tracks, the metal pitch, and the origin of the attributes, use the report_track
+command without any options.
+Table 16 summarizes the commands related to tracks. The create_track and
+remove_track commands are written out by the write_floorplan command, while the
+other commands listed in the table are not.
+Table 16
+Summary of Routing Track Commands
+Command
+Description
+create_track
+Creates tracks for routing layers and polygon layers.
+remove_track
+Removes tracks from the current design.
+report_track
+Reports the routing tracks for a specified layer or for all layers.
+get_tracks
+Returns a collection of tracks in the current design that meet the selection
+criteria.
+Creating Keepout Margins
+You can create a keepout margin for the specified cell or library cell by using the
+set_keepout_margin command. You can also have keepout margins derived
+automatically by specifying the -tracks_per_macro_pin option, as shown in the following
+example. In this example, the keepout margin is calculated from the track width, the
+number of macro pins, and the specified track-to-pin ratio, which is typically set to a value
+near 0.5. A larger value results in larger keepout margins.
+de_shell> set_keepout_margin -tracks_per_macro_pin .6 \
+   -min_padding_per_macro .1 -max_padding_per_macro 0.2
+
+Physical Constraints Overview
+The derived keepout margin is always hard; the -type option setting is ignored. The
+-all_macros, -macro_masters, and -macro_instances options are not allowed for
+derived margins. The derived margins are subject to minimum and maximum values that
+are specified by the -min_padding_per_macro and -max_padding_per_macro options.
+To remove keepout margins of a specified type for the specified cells or library cells in the
+design, use the remove_keepout_margin command. To report keepout margins, use the
+report_physical_constraints command or the report_keepout_margin command.
+The following example reports hard keepouts for cells in an object list named MY_CELL:
+de_shell> report_keepout_margin -type hard MY_CELL
+Placement Bounds Overview
+A placement bound is a rectangular or rectilinear area within which to place cells and
+hierarchical cells. A placement bound groups together clock-gating cells or other timing-
+critical groups of cells. During placement, the tool ensures that the cells you grouped
+remain together and are not separated by other logic.
+It is recommended not to impose bounds constraints but to allow the tool full flexibility to
+optimize placement for timing and routability. However, when QoR does not meet your
+requirements, you might improve QoR by using the create_bounds command.
+You can specify two different types of bounds: move bounds and group bounds. Move
+bounds can be soft, hard, or exclusive. Group bounds can be soft or hard.
+•
+Soft bounds specify placement goals, with no guarantee that the cells are placed inside
+the bounds. If timing or congestion cost is too high, cells might be placed outside the
+region. This is the default.
+•
+Hard bounds force placement of the specified cells inside the bounds.
+•
+Exclusive bounds force the placement of the specified cell inside the bounds. All other
+cells must be placed outside the bounds.
+Table 17 summarizes the commands related to placement bounds.
+Table 17
+Summary of Bounds Commands
+Command
+Description
+create_bounds
+Creates rectangular and rectilinear move bounds and
+group bounds
+update_bounds
+Updates a bound by adding or removing contents
+get_bounds
+Returns a collection of bounds from the current design
+remove_bounds
+Removes bounds set using create_bounds
+
+Physical Constraints Overview
+Table 17
+Summary of Bounds Commands (Continued)
+Command
+Description
+report_bounds
+Reports bounds and bound IDs set using
+create_bounds
+See Also
+•
+Creating Placement Bounds
+Commands for Defining Physical Constraints
+Table 18 lists the commands that you use to define physical constraints.
+Table 18
+Commands for Defining Physical Constraints
+To define this physical constraint
+Use this command
+Die Area (For details, see Defining the Die Area.)
+create_die_area
+Floorplan estimate when exact area is not known (For details, see
+Defining Placement Area.)
+set_aspect_ratio and
+set_utilization
+Exact core area (For details, see Defining the Core Placement Area.)
+create_site_row
+Relative port locations (For details, see Defining Port Locations.)
+set_port_side
+Exact port locations (For details, see Defining Port Locations.)
+set_port_location
+Macro location and orientation (For details, see Defining Macro
+Locations.)
+set_cell_location
+Placement keepout (blockages) (For details, see Defining Placement
+Blockages.)
+create_placement_blockage
+Voltage area (For details, see Defining Voltage Area.)
+create_voltage_area
+Placement bounds (For details, see Creating Placement Bounds.)
+create_bounds
+Wiring keepouts (For details, see Creating Wiring Keepouts.)
+create_route_guide
+Preroutes (For details, see Creating Preroutes.)
+create_net_shape
+User shapes (For details, see Creating User Shapes.)
+create_user_shape
+Pin physical constraints (For details, see Defining Physical Constraints
+for Pins.)
+set_pin_physical_constrai
+nts and create_pin_guide
+Vias (For details, see Creating Vias.)
+create_via
+
+Saving Physical Constraints
+Table 18
+Commands for Defining Physical Constraints (Continued)
+To define this physical constraint
+Use this command
+Tracks (For details, see Creating Routing Tracks.)
+create_track
+Keepout margins (For details, see Creating Keepout Margins.)
+set_keepout_margin
+To report any physical constraints that are applied to the design, use the
+report_physical_constraints command. To reset all physical constraints, use the
+reset_physical_constraints command before reading in a new or modified floorplan.
+To report a collection of polygons that exactly cover the region computed by performing a
+Boolean operation on the input polygons, use the compute_polygons command.
+See Also
+•
+Physical Constraints Overview
+Saving Physical Constraints
+You can use the write_floorplan command to save the floorplan information in IC
+Compiler or IC Compiler II format.
+IC Compiler Format
+By default, the write_floorplan command writes out physical constraint information in
+IC Compiler format. The output is a command script file that contains floorplan information,
+such as bounds, placement blockages, route guides, plan groups, and voltage areas.
+When writing out the floorplan from DC Explorer, you should use the -all option to write
+out the complete floorplan information. The write_floorplan command also provides
+options that allow you to write out partial floorplan information.
+To use this output to create the floorplan information in IC Compiler, you must read it from
+the top level of the design with the read_floorplan command. You can also use the
+source command to import the floorplan information. However, the source command
+reports errors and warnings that are not applicable to DC Explorer. The read_floorplan
+command removes these unnecessary errors and warnings. In addition, you need
+to enable fuzzy name matching manually when you use the source command. The
+read_floorplan command automatically enables fuzzy name matching.
+IC Compiler II Format
+To save floorplan information in IC Compiler II format, use the write_floorplan -format
+icc2 command. The output is a folder that contains files in Tcl and DEF format.
+
+Saving in ASCII Format for IC Compiler II
+When you specify the -format icc2 option, the tool writes out complete floorplan
+information. Any write_floorplan command options that allow you to write out partial
+floorplan information are ignored. To use this floorplan information in IC Compiler II, you
+must read it from the top-level design by sourcing the floorplan.tcl file in the output folder
+to load all the constraints to the IC Compiler II session.
+The following table lists the files generated by the command and the constraints
+transferred through these files:
+File name
+Constraints transferred
+floorplan.def
+Die area, rows, tracks, components, pins, vias, special nets, keepout
+margins, and so on
+floorplan.tcl
+Route guides, placement blockages, bounds, layer routing directions
+voltage_area.tcl
+Voltage areas
+rp.tcl
+Relative placement groups
+routing_rule.layer.tcl
+Routing layer constraints on nets
+routing_rule.tcl
+Nondefault routing rule definitions
+routing_rule.net.tcl
+Routing rules on nets
+Saving in ASCII Format for IC Compiler II
+You can generate all the files needed to load a design into IC Compiler II by using the
+write_icc2_files command.
+The command writes the design files and Tcl scripts for the current design into the
+directory specified by the -output option. The files can include the following data:
+•
+Netlist in Verilog format
+•
+Propagated switching activity information (backward SAIF file)
+•
+Tcl floorplan and DEF files
+•
+Design’s power intent as a UPF command script
+•
+Scan chain information in SCANDEF format
+•
+Constraints in SDC format
+•
+Timing contexts (scenarios)
+
+Saving in ASCII Format for IC Compiler II
+In addition, the write_icc2_files command writes the following scripts:
+•
+The DC Explorer settings in IC Compiler II format
+•
+The top-level script to load all data generated in IC Compiler II
+The write_icc2_files command writes the timing contexts (scenarios) in a format that
+can be read into IC Compiler II to create the same set of scenarios as specified in DC
+Explorer.
+The scripts generated by the write_icc2_files command do not include scripts for
+library creation in IC Compiler II. You need to create a library that is consistent with the
+library used in DC Explorer and then source the top-level script.
+When used with the set_host_options command, the write_icc2_files command
+uses up to the user-specified number of CPU cores on the same computer for parallel
+execution. For more details, see Using Multicore Technology.
+The following examples show how to use the write_icc2_files command in DC
+Explorer to write the design files and Tcl scripts for the current design and then how to use
+the top-level script in IC Compiler II to load the design:
+Example 34
+Writing the Design Information From DC Explorer in IC Compiler II Format
+# Perform synthesis
+de_shell> compile_exploration -scan -gate_clock
+
+# Change names if needed
+de_shell> change_names -rules verilog -hierarchy
+
+# Save the file for IC Compiler II using the write_icc2_files command
+de_shell> write_icc2_files -output ./icc2_files
+de_shell> quit
+Example 35
+Reading the Design Into the IC Compiler II Tool
+# Perform library setting in IC Compiler II
+icc2_shell> source -echo -verbose icc2_lib_setting.tcl
+
+# Load the design using script created by the write_icc2_files command
+icc2_shell> source -echo -verbose icc2_files/ORCA.icc2_script.tcl
+
+# Continue with the flow
+icc2_shell> commit_upf
+icc2_shell> place_opt
+
+Saving in ASCII Format for IC Compiler II
+If you run the command and warnings or errors occur, the tool issues an information
+message that points to the location of the log file that contains the warning or error
+message information:
+de_shell> write_icc2_files -output ./icc2_files
+Information: During the execution of write_icc2_files error messages were
+issued, please check ./icc2_files/write_icc2_files.log files. (DCT-228)
+Limitations
+The write_icc2_files command currently has the following limitations:
+•
+Hierarchical flows are not supported.
+•
+Only the following constraints set on library cells are included:
+◦
+SDC constraints: set_timing_derate and set_driving_cell
+◦
+UPF constraints: map_isolation_cell, map_retention_cell, and
+•
+The following commands are partially supported:
+◦
+set_congestion_options
+The -max_util option is included only for global settings, but not for regional
+settings.
+◦
+set_multi_vth_constraint
+The setting is passed only for threshold-voltage groups defined in the library; the
+settings in user-defined groups are not included.
+•
+The following variables are partially supported:
+◦
+power_default_toggle_rate_type
+The equivalent IC Compiler II variable only supports the fastest_clock value. The
+absolute setting is not passed.
+◦
+placer_channel_detect_mode
+The equivalent IC Compiler II variable only supports the true and false values.
+The auto value is not passed.
+◦
+bus_naming_style
+Only these delimiters defined in IC Compiler II are supported: [ ], { }, ( ), and < >.
+
+Including Physical-Only Cells
+Including Physical-Only Cells
+You can include physical cells that do not have logic functions in your floorplan. These
+cells are referred to as physical-only cells. Examples of physical-only cells include filler
+cells, tap cells, flip-chip pad cells, endcap cells, and decap cells. Although physical-only
+cells have no logic function, they create placement blockages that the tool considers
+during optimization and congestion analysis.
+The following sections describe support for physical-only cells:
+•
+Specifying Physical-Only Cells
+•
+Extracting Physical-Only Cells From a DEF File
+•
+Reporting Physical-Only Cells
+Specifying Physical-Only Cells
+To specify physical-only cells manually, perform the following steps:
+1. Create the physical-only cell by specifying the -only_physical option with the
+create_cell command. For example,
+de_shell> create_cell -only_physical MY_U_PO_CELL
+ MY_FILL_CELLInformation: create physical-only cell 'MY_U_PO_CELL'
+ Warning: The newly created cell does not have location.
+         Timing will be inaccurate. (DCT-004)
+This creates the physical-only cell MY_U_PO_CELL, which references the
+MY_FILL_CELL physical library cell, and sets the is_physical_only attribute on the
+created cell.
+2. Assign a location to the cell.
+Unlike physical cells with logic functions, DC Explorer does not assign a location to a
+physical-only cell during synthesis.
+To assign a location to a physical-only cell, use one of the following methods:
+•
+Assign a location by using a DEF file.
+You can define the location of a physical-only cell in a DEF file, as shown in the
+following example:
+COMPONENTS 1 ;
+- MY_U_PO_CELL MY_FILL_CELL + FIXED ( 3100000 700000 ) N ;
+END COMPONENTS
+After you define the location in a DEF file, apply the location to the physical-only cell
+by using the extract_physical_constraints command.
+
+Including Physical-Only Cells
+•
+Assign a location using Tcl commands.
+You can define the location of physical-only cells in a Tcl floorplan file. For example,
+the following commands define the location of the MY_U_PO_CELL cell:
+de_shell> set obj [get_cells {"MY_U_PO_CELL"} -all]
+de_shell> set_attribute -quiet $obj orientation N
+de_shell> set_attribute -quiet $obj origin {3100.000 700.000}
+de_shell> set_attribute -quiet $obj is_fixed TRUE
+The is_fixed attribute must be assigned to the cell. Otherwise, the tool ignores the
+location specification. To assign the location to the physical-only cell, read the Tcl
+floorplan file into DC Explorer by using the read_floorplan command.
+•
+Assign a location using the set_cell_location command.
+You can define the location of physical-only cells by using the set_cell_location
+command in DC Explorer.
+For example,
+de_shell> set_cell_location -coordinates {3100.00 700.00} \
+   -orientation N -fixed MY_U_PO_CELL
+See Also
+•
+Extracting Physical-Only Cells From a DEF File
+•
+Reporting Physical-Only Cells
+Extracting Physical-Only Cells From a DEF File
+To extract physical-only cells from a DEF file, use the -allow_physical_cells option
+with the extract_physical_constraints command. The physical-only cell definition in
+the DEF file must contain the +fixed attribute. Otherwise, the tool ignores the location
+specification.
+For example, if you want to extract the filler cells in the my_design.def file shown in
+Example 36, use the following command:
+de_shell> extract_physical_constraints \
+   -allow_physical_cells my_design.def
+Example 36
+DEF Definitions for Two Filler Cells
+COMPONENTS 2 ;
+- fill_1 FILL_CELL + FIXED ( 3100000 700000 ) N ;
+- fill_2 FILL_CELL + FIXED ( 3000000 600000 ) N ;
+END COMPONENTS
+
+Including Physical-Only Cells
+The following types of cells are considered physical-only cells. DC Explorer
+marks these cells with the is_physical_only attribute when you run the
+extract_physical_constraints command with the -allow_physical_cells option:
+•
+Standard cell fillers
+•
+Pad filler cells
+•
+Corner cells
+•
+Chip cells
+•
+Cover cells
+•
+Tap cells
+•
+Cells containing only power and ground ports
+In addition to extracting physical-only cells from the DEF file, the
+extract_physical_constraints -allow_physical_cells command also extracts
+some cells in the DEF file that are not identified as physical-only cells. These cells could
+be logic cells such as ROM or RAM cells. The tool updates the current design with these
+new logic cells and they are included in your Verilog netlist.
+Note:
+The physical-only cell definitions in the DEF file must include cell locations. DC
+Explorer does not assign locations to physical-only cells during synthesis.
+See Also
+•
+Specifying Physical-Only Cells
+•
+Reporting Physical-Only Cells
+Reporting Physical-Only Cells
+By default, the tool sets the is_physical_only attribute on all physical-only cells. To
+check if a cell is a physical-only cell, enter
+de_shell> get_attribute [get_cells -all $cell_name] is_physical_only
+
+Relative Placement
+You can use the following ways to report physical-only cells:
+•
+To report physical-only cells for the current design, specify the -only_physical option
+with the report_cell command. For example,
+de_shell> report_cell -only_physical
+•
+To report the floorplan information, which includes physical-only cell information, use
+the report_physical_constraints command.
+•
+To return a collection of all physical-only cells in the design, use the
+all_physical_only_cells command.
+Saving Physical-Only Cells
+To save physical-only cell information, use the write_floorplan command. The
+command writes out floorplan information, including the physical-only cell information. To
+read the physical-only cell information, use the read_floorplan command.
+The physical-only cell information and other constraints, such as timing, are saved in
+the .ddc file and can be read back into DC Explorer.
+Note:
+Similar to all other floorplan information, the physical-only cell information is not
+written out in the ASCII netlist or the MilkyWay interface. It cannot be passed to
+IC Compiler through the .ddc file. The only way to pass floorplan information to
+IC Compiler is to use floorplan exploration in DC Explorer.
+Relative Placement
+The relative placement capability in DC Explorer allows you to create structures in which
+you specify the relative column and row positions of instances. These structures are called
+relative placement structures, which are placement constraints.
+During placement and legalization, these structures are preserved and the cells in each
+structure are placed as a single entity. Relative placement is also called physical datapath
+and structured placement. The following topics describe the relative placement flow in DC
+Explorer and how to perform relative placement:
+•
+Relative Placement Overview
+•
+Running the Relative Placement Flow
+•
+Specifying Relative Placement Constraints
+•
+Creating Relative Placement Using HDL Compiler Directives
+
+Relative Placement
+Relative Placement Overview
+Relative placement is often applied to datapaths and registers, but you can apply it to any
+cells to control the exact relative placement topology of gate-level logic groups and define
+the circuit layout. You can use relative placement to explore QoR benefits, such as shorter
+wire lengths, reduced congestion, better timing, skew control, fewer vias, better yield, and
+lower dynamic and leakage power.
+Relative Placement Constraints
+You specify relative placement constraints in either of the following ways:
+•
+Specifying Relative Placement Constraints
+Use a dedicated set of Tcl commands similar to the commands in the IC Compiler tool.
+•
+Creating Relative Placement Using HDL Compiler Directives
+Use HDL compiler directives in an RTL design, a GTECH netlist, or a mapped gate-
+level netlist.
+You create and annotate relative placement constraints to generate a matrix structure
+of instances and control their placement. You use the annotated netlist for physical
+optimization, during which the tool preserves the structure and places it as a single entity
+or group, as shown in Figure 43.
+
+Relative Placement
+Figure 43
+Relative Placement in a Floorplan
+Benefits of Relative Placement
+Relative placement provides the following benefits:
+•
+Provides a method for maintaining structured placement for legacy or intellectual
+property (IP) designs
+•
+Reduces the placement search space in critical areas of the design to yield greater
+predictability of QoR (wire length, timing, and power)
+•
+Correlates better with the IC Compiler tool
+•
+Can minimize congestion and improve routability
+Considerations for Relative Placement
+Keep the following points in mind when you perform relative placement:
+•
+Relative placement constraints are preserved by the uniquify and ungroup
+commands.
+•
+DC Explorer automatically places the size_only attribute on each relative placement
+cell to preserve the relative placement structure.
+
+Relative Placement
+•
+Ensure that relative placement is applicable to your design. A design can contain both
+structured and unstructured elements. Some designs such as datapaths and pipelined
+designs are more appropriate for structured placement. Specifying relative placement
+constraints for cells that would be placed better by the tool can produce poor results.
+•
+Relative placement constraints are kept in the .ddc file and are not automatically
+transferred to the IC Compiler tool.
+You can use the write_rp_groups command to write out the relative placement
+constraints to a Tcl script that can be read into the IC Compiler tool. Also, see the IC
+Compiler Implementation User Guide.
+See Also
+•
+Specifying Relative Placement Constraints
+Running the Relative Placement Flow
+Figure 44 shows an overview of the relative placement flow in DC Explorer.
+
+Relative Placement
+Figure 44
+Overview of the Relative Placement Flow
+To run the relative placement flow, follow these steps:
+1. Read one or more of the following files in DC Explorer:
+•
+An RTL design, a GTECH netlist, or a mapped gate-level netlist with relative
+placement constraints specified by HDL compiler directives.
+•
+A mapped gate-level netlist without relative placement constraints; you specify the
+constraints with Tcl commands in step 2.
+2. For a mapped gate-level netlist without relative placement constraints, define the
+relative placement constraints using Tcl commands.
+a. Create the relative placement groups by using the create_rp_group command.
+b. Add relative placement objects to the groups by using the add_to_rp_group
+command.
+
+Relative Placement
+The tool annotates the netlist with the relative placement constraints and places an
+implicit size_only constraint on these cells.
+3. Read the floorplan information. For example,
+de_shell> extract_physical_constraints floorplan.def
+4. Check the relative placement by using the check_rp_groups command.
+The command reports only the relative placement constraints defined in step 2. The
+command does not report relative placement data specified by HDL compiler directives
+until after the compile_exploration step.
+5. Compile and optimize the design by using the compile_exploration command.
+6. Visually verify the placement in the Design Vision layout view.
+Use the Design Vision layout window to examine the floorplan according to your
+expectations. The layout view displays floorplan constraints read in with the
+extract_physical_constraints command or other Tcl commands. You need to link
+all applicable designs and libraries to obtain an accurate floorplan.
+Note:
+You must set the de_enable_physical_flow variable to true to enable the
+physical flow capability.
+7. Write out the relative placement constraints and data to a file by using the
+write_rp_groups command.
+To import the constraints and data into the IC Compiler tool, source the file or use the
+import_designs command with the -rp_constraint option.
+For more information, see also
+•
+The HDL Compiler for SystemVerilog User Guide
+•
+The HDL Compiler for VHDL User Guide
+•
+The Viewing the Floorplan topic in the Design Vision User Guide
+See Also
+•
+Specifying Relative Placement Constraints
+Specifying Relative Placement Constraints
+Relative placement provides a way for you to create structures in which you specify the
+relative column and row positions of instances. During placement and optimization, these
+structures are preserved and the cells in each structure are placed as a single entity.
+
+Relative Placement
+To learn how to specify relative placement constraints, see
+•
+Summary of Relative Placement Commands
+•
+Creating Relative Placement Groups
+•
+Anchoring Relative Placement Groups
+•
+Adding Objects to a Group
+•
+Aligning Leaf Cells Within a Column
+•
+Querying Relative Placement Groups
+•
+Checking Relative Placement Constraints
+•
+Saving Relative Placement Information
+•
+Removing Relative Placement Groups, Objects, and Attributes
+Summary of Relative Placement Commands
+You can specify relative placement constraints by using a dedicated set of commands
+similar to the commands in the IC Compiler tool. This table summarizes the commands
+available in DC Explorer for relative placement.
+Table 19
+Relative Placement Commands
+Command
+Description
+create_rp_group
+Creates new relative placement groups.
+add_to_rp_group
+Adds items to relative placement groups.
+set_rp_group_options
+Sets relative placement group attributes.
+report_rp_group_options
+Reports attributes for relative placement groups.
+get_rp_groups
+Creates a collection of relative placement groups that match certain
+criteria.
+write_rp_groups
+Writes out relative placement information for specified groups.
+all_rp_groups
+Returns a collection of specified relative placement groups and all
+subgroups in their hierarchy.
+all_rp_hierarchicals
+Returns a collection of hierarchical relative placement groups that are
+ancestors of specified groups.
+all_rp_inclusions
+Returns a collection of hierarchical relative placement groups that
+include specified groups.
+
+Relative Placement
+Table 19
+Relative Placement Commands (Continued)
+Command
+Description
+all_rp_instantiations
+Returns a collection of hierarchical relative placement groups that
+instantiate specified groups.
+all_rp_references
+Returns a collection of relative placement groups that contain specified
+cells (either leaf cells or hierarchical cells that contain instantiated
+relative placement groups).
+check_rp_groups
+Checks relative placement constraints and reports failures.
+remove_rp_groups
+Removes a list of relative placement groups.
+remove_rp_group_options
+Reports attributes for the specified relative placement groups.
+remove_from_rp_group
+Removes a cell, relative placement group, or keepout from the specified
+relative placement groups.
+rp_group_inclusions
+Returns collections for directly included groups (added to a group by
+using the add_to_rp_group -hierarchy command) in all or specified
+groups.
+rp_group_instantiations
+Returns collections for directly instantiated groups (added to a group by
+using the add_to_rp_group -hierarchy -instance command) in all
+or specified groups.
+rp_group_references
+Returns collections for directly embedded leaf cells (added to a group by
+using the add_to_rp_group -leaf command), directly included cells
+that contain hierarchically instantiated cells (added to the included group
+by using the add_to_rp_group -hierarchy -instance command), or
+both in all or specified relative placement groups.
+Creating Relative Placement Groups
+A relative placement group is an association of cells, groups, and keepouts. A group is
+defined by the number of rows and columns it uses. To create a relative placement group,
+use the create_rp_group command.
+The create_rp_group command creates a relative placement group named
+design_name::group_name, where design_name is the design specified by the -design
+option. To refer to this group in other relative placement commands, you must use
+this name or a collection of relative placement groups. If you do not use the -design
+option, the default is the current design. If you do not specify any option, the command
+creates a relative placement group that has one column and one row without objects.
+To add objects, such as leaf cells, relative placement groups, and keepouts, to a relative
+placement group, use the add_to_rp_group command as described in Adding Objects to
+a Group.
+
+Relative Placement
+For example, to create a group named designA::rp1 that has six columns and six rows,
+enter
+de_shell> create_rp_group rp1 -design designA -columns 6 -rows 6
+Figure 45 shows the column and row positions in a relative placement group.
+Figure 45
+Relative Placement Column and Row Positions
+In this figure,
+•
+Columns count from column 0 (the leftmost column).
+•
+Rows count from row 0 (the bottom row).
+•
+The width of a column is determined by the width of the widest cell in that column.
+•
+The height of a row is determined by the height of the tallest cell in that row.
+•
+You do not need to use all positions in the structure. For example, positions 0 3
+(column 0, row 3) and 4 1 (column 4, row 1) are not used.
+Anchoring Relative Placement Groups
+By default, the tool can place a relative placement group anywhere within the core area.
+You can control the placement of a top-level relative placement group by anchoring it.
+To anchor a relative placement group, use the -x_offset and -y_offset options with
+the create_rp_group or set_rp_group_options command. The offset values are float
+values in microns relative to the chip’s origin. If you specify both the x- and y-coordinates,
+the group is anchored at that location. If you specify only one coordinate, the tool can
+determine the placement by sliding the group along the unspecified coordinate.
+
+Relative Placement
+The following example specifies a relative placement group anchored at (100, 100):
+de_shell> create_rp_group misc1 -design block1 \
+   -columns 3 -rows 10 -x_offset 100 -y_offset 100
+Adding Objects to a Group
+You can add leaf cells, other relative placement groups, and keepouts to a relative
+placement group that was created with the create_rp_group command. You use the
+add_to_rp_group command to add objects.
+When you add an object to a relative placement group, ensure that
+•
+The relative placement group to which you are adding the object exists
+•
+The object must be added to an empty location in the relative placement group
+To learn how to add objects to a group, see
+•
+Adding Leaf Cells
+•
+Adding Relative Placement Groups
+•
+Adding Keepouts
+Adding Leaf Cells
+To add leaf cells to a relative placement group, use the add_to_rp_group command. In a
+relative placement group, a leaf cell occupying multiple column positions or multiple row
+positions is called leaf cell straddling. You can create a more compact relative placement
+group by specifying leaf cell straddling. To do this, specify multiple column or row positions
+by using the -num_columns or -num_rows options respectively with the add_to_rp_group
+command. The default is one column and one row.
+For example, to create a leaf cell of two columns and one row, enter
+de_shell> add_to_rp_group rp_group_name -leaf cell_name \
+   -column 0 -num_columns 2 -row 0 -num_rows 1
+The following restrictions apply when you specify cell straddling:
+•
+You should not place a relative placement keepout at the same location of a straddling
+leaf cell. Straddling is for leaf cells only, but not for hierarchical groups or keepouts.
+•
+You should not apply compression to a straddling leaf cell that has multiple column
+positions, multiple row positions, or both. You can apply right alignment or pin
+alignment to a straddling leaf cell with multiple row positions, but not to a cell with
+multiple column positions.
+
+Relative Placement
+To specify the placement orientation of a leaf cell, use the -orientation option.
+To specify the alignment method of the cells in a column, use the -alignment or
+-pin_align_name option.
+See Also
+•
+Aligning Leaf Cells Within a Column
+Adding Relative Placement Groups
+Hierarchical relative placement allows relative placement groups to be embedded in other
+relative placement groups. You can use hierarchical relative placement to simplify relative
+placement constraints.
+Using hierarchical relative placement, you do not need to provide relative placement
+information multiple times for a recurring pattern. You handle the embedded groups just
+like leaf cells. You add a relative placement group to a hierarchical group by using either of
+the following methods with the add_to_rp_group command:
+•
+Including the relative placement group
+If the group is in the same design as its parent group, it is an included group. You
+can include groups in either flat or hierarchical designs. When you include a relative
+placement group in a hierarchical group, it is as if the included group is directly
+embedded within its parent group. An included group can be used only one time in a
+group of the same design. However, a group that contains an included group can be
+further included in another group of the same design or can be instantiated in a group
+of a different design.
+•
+Instantiating the relative placement group
+If the group to be added is in a subdesign instance of its parent group, it is an
+instantiated group. You can instantiate groups only in hierarchical designs.
+To specify a group using the -hierarchy option, you must use the group in the reference
+design instance specified by the -instance option with the add_to_rp_group command.
+In addition, the specified instance must be in the same design as the hierarchical group in
+which you are instantiating the specified group. Using an instantiated group can replicate
+relative placement information across multiple instances of a design and create relative
+placement relationships between those instances.
+Example 37 creates a hierarchical group named rp2 that contains three instances of group
+rp1. Group rp1 is in the pair_design design and contains leaf cells U1 and U2. Group rp2
+is a hierarchical group in the mid_design design that instantiates group rp1 three times
+(mid_design must contain at least three instances of pair_design). Group rp2 is treated
+as a leaf cell. You can instantiate group rp2 as many times as the mid_design design is
+instantiated in the netlist. The resulting hierarchical relative placement group is shown in
+Figure 46.
+
+Relative Placement
+Example 37
+Instantiating Groups in a Hierarchical Group
+create_rp_group rp1 -design pair_design -columns 2 -rows 1
+   add_to_rp_group pair_design::rp1 -leaf U1 -column 0 -row 0
+   add_to_rp_group pair_design::rp1 -leaf U2 -column 1 -row 0
+create_rp_group rp2 -design mid_design -columns 1 -rows 3
+    add_to_rp_group mid_design::rp2 \
+   -hierarchy pair_design::rp1 -instance I1 -column 0 -row 0
+    add_to_rp_group mid_design::rp2 \
+   -hierarchy pair_design::rp1 -instance I2 -column 0 -row 1
+    add_to_rp_group mid_design::rp2 \
+   -hierarchy pair_design::rp1 -instance I3 -column 0 -row 2
+Figure 46
+Instantiating Groups in a Hierarchical Group
+Adding Keepouts
+To add a keepout to a relative placement group, use the add_to_rp_group command. The
+following example creates a keepout named gap1 containing the TOP:misc group list:
+de_shell> add_to_rp_group TOP::misc -keepout gap1 \
+   -column 0 -row 2 -width 15 -height 1
+Aligning Leaf Cells Within a Column
+Controlling cell alignment can improve the timing and routability of the design. You can
+align leaf cells in a column of a relative placement group by using the following alignment
+methods:
+•
+Aligning to the Bottom-Left Corner
+•
+Aligning to the Bottom-Right Corner
+
+Relative Placement
+•
+Aligning to a Pin Location
+•
+Overriding Pin Alignment
+Aligning to the Bottom-Left Corner
+To align leaf cells to the bottom-left corner, use the -alignment bottom-left option with
+the create_rp_group or set_rp_group_options command. This is the default if you do
+not specify any alignment method. For example,
+de_shell> set_rp_group_options -alignment bottom-left [get_rp_groups *]
+The following script defines a relative placement group that is bottom-left aligned. The
+resulting structure is shown in Figure 47.
+create_rp_group rp1 -design pair_design -columns 1 -rows 4
+ add_to_rp_group pair_design::rp1 -leaf U1 -column 0 -row 0
+add_to_rp_group pair_design::rp1 -leaf U2 -column 0 -row 1
+add_to_rp_group pair_design::rp1 -leaf U3 -column 0 -row 2
+add_to_rp_group pair_design::rp1 -leaf U4 -column 0 -row 3
+Figure 47
+Bottom-Left Aligned Relative Placement Group
+Aligning to the Bottom-Right Corner
+To align leaf cells to the bottom-right corner, use the -alignment bottom-right option
+with the create_rp_group or set_rp_group_options command. For example,
+de_shell> set_rp_group_options -alignment bottom-right \
+   [get_rp_groups *]
+
+Relative Placement
+Note:
+For hierarchical relative placement groups, the bottom-right alignment does not
+propagate through the hierarchy.
+The following script defines a relative placement group that is bottom-right aligned. The
+resulting structure is shown in Figure 48.
+create_rp_group rp1 -design pair_design -columns 1 -rows 4 \
+   -alignment bottom-right
+      add_to_rp_group pair_design::rp1 -leaf U1 -column 0 -row 0
+      add_to_rp_group pair_design::rp1 -leaf U2 -column 0 -row 1
+      add_to_rp_group pair_design::rp1 -leaf U3 -column 0 -row 2
+      add_to_rp_group pair_design::rp1 -leaf U4 -column 0 -row 3
+Figure 48
+Bottom-Right Aligned Relative Placement Group
+Aligning to a Pin Location
+To align leaf cells to a pin location, use the -alignment bottom-pin and
+-pin_align_name options with the create_rp_group or set_rp_group_options
+command. For example,
+de_shell> set_rp_group_options -alignment bottom-pin \
+   -pin_align_name align_pin
+The tool looks for the specified alignment pin in each cell within the column. If the pin is
+•
+Found in the cell, the tool aligns the cell to the pin location
+•
+Not found in the cell, the tool aligns the cell to the bottom-left corner and issues an
+information message
+•
+Not found in any cell, the tool issues a warning message
+
+Relative Placement
+If you specify both pin alignment and cell orientation, the tool resolves potential conflicts as
+follows:
+•
+User specifications for cell orientation take precedence over the pin alignment done by
+DC Explorer.
+•
+Pin alignment done by DC Explorer takes precedence over the cell orientation
+optimization done by DC Explorer.
+The following script defines a relative placement group that is aligned by pin A. The
+resulting structure is shown in Figure 49.
+create_rp_group rp1 -design pair_design -columns 1 -rows 4 \
+   -pin_align_name A
+      add_to_rp_group pair_design::rp1 -leaf U1 -column 0 -row 0
+      add_to_rp_group pair_design::rp1 -leaf U2 -column 0 -row 1
+      add_to_rp_group pair_design::rp1 -leaf U3 -column 0 -row 2
+      add_to_rp_group pair_design::rp1 -leaf U4 -column 0 -row 3
+Figure 49
+Relative Placement Group Aligned by Pin A
+Overriding Pin Alignment
+When you specify an alignment pin for a group, the pin alignment method applies to all
+cells in the column. To override the pin alignment for specific cells in the group, specify
+another pin by using the -pin_align_name option with the add_to_rp_group command.
+Note:
+You cannot specify a cell-specific alignment pin when you add a leaf cell from
+the relative placement hierarchy browser.
+
+Relative Placement
+The following script defines relative placement group misc1, which uses pin A as the
+group alignment pin, but instances I5 and I6 use pin B as the alignment pin. The resulting
+structure is shown in Figure 50.
+create_rp_group misc1 -design block1 -columns 3 -rows 10 \
+   -pin_align_name A
+      add_to_rp_group block1::misc1 -leaf I3 -column 0 -row 0
+      add_to_rp_group block1::misc1 -leaf I4 -column 0 -row 1
+      add_to_rp_group block1::misc1 -leaf I5 -column 0 -row 2 \
+         -pin_align_name B
+      add_to_rp_group block1::misc1 -leaf I6 -column 0 -row 3 \
+         -pin_align_name B
+      add_to_rp_group block1::misc1 -leaf I7 -column 0 -row 4
+      add_to_rp_group block1::misc1 -leaf I8 -column 0 -row 5
+Figure 50
+Relative Placement Group Aligned by Pins
+Querying Relative Placement Groups
+Table 20 lists the commands for querying relative placement groups to annotate, edit, and
+view.
+Table 20
+Commands for Querying Relative Placement Groups
+To return a collection of
+Use this command
+The relative placement groups that match certain criteria
+get_rp_groups
+All or specified relative placement groups and their included and
+instantiated groups in their hierarchies
+all_rp_groups
+
+Relative Placement
+Table 20
+Commands for Querying Relative Placement Groups (Continued)
+To return a collection of
+Use this command
+All or specified relative placement groups that contain included or
+instantiated groups
+all_rp_hierarchicals
+All or specified relative placement groups that contain included groups
+all_rp_inclusions
+All or specified relative placement groups that contain instantiated
+groups
+all_rp_instantiations
+All or specified relative placement groups that directly embed leaf cells
+(added to a group by add_to_rp_group -leaf) or instantiated groups
+(added to a group by add_to_rp_group-hierarchy -instance) in
+all or specified relative placement groups in a specified design or the
+current design
+all_rp_references
+For example, to create a collection of relative placement groups that start with the letter g
+in a design that starts with the letter r, enter
+de_shell> get_rp_groups r*::g*
+{ripple::grp_ripple}
+To set the utilization to 95 percent for all relative placement groups, enter
+de_shell> set_rp_group_options [all_rp_groups] -utilization 0.95
+Checking Relative Placement Constraints
+To check relative placement constraints, run the check_rp_groups command. The
+command reports relative placement failures.
+The check_rp_groups command checks for the following failures:
+•
+The relative placement group cannot be placed as a single entity.
+•
+The height or width of the relative placement group is greater than the height or width
+of the core area.
+•
+The user-specified orientation cannot be met.
+The check_rp_groups command does not check for failures when keepouts in a relative
+placement group are not created correctly.
+The generated report contains separate sections for critical and noncritical failures. If a
+failure prevents the group from being placed as a single entity as defined by the relative
+placement constraints, the failure is critical. If a failure does not prevent placement but
+causes the relative placement constraint violations, the failure is noncritical.
+
+Relative Placement
+You can check all relative placement groups by specifying the -all option. To check
+specific groups, specify the group names. By default, the command displays the report to
+the screen. To save the report to a file, specify a file name by using the -output option.
+For example, the following command checks the relative placement constraints for
+groups compare17::seg7 and compare17::rp_group3 and saves the output in a file called
+rp_failures.log:
+de_shell> check_rp_groups "compare17::seg7 compare17::rp_group3" \
+    -output rp_failures.log
+To show a detailed report, use the -verbose option as shown in the following example:
+de_shell> check_rp_groups -all -verbose
+Saving Relative Placement Information
+To write out relative placement constraints, use the write_rp_groups command.
+The following example saves all the relative placement groups, removes the information
+from the design, and re-creates the information about the design:
+de_shell> get_rp_groups
+{mul::grp_mul ripple::grp_ripple example3::top_group}
+de_shell> write_rp_groups -all -output my_groups.tcl
+1
+de_shell> remove_rp_groups -all -quiet
+1
+de_shell> get_rp_groups
+Error: Can’t find objects matching ’*’. (UID-109)
+de_shell> source my_groups.tcl
+{example3::top_group}
+de_shell> get_rp_groups
+{example3::top_group ripple::grp_ripple mul::grp_mul}
+By default, the write_rp_groups command writes out commands for creating the
+specified relative placement groups and for adding leaf cells, hierarchical groups, and
+keepouts to these groups, but not commands for generating subgroups within hierarchical
+groups. The command writes out updated relative placement constraints and includes
+name changes from uniquification or ungrouping.
+If you specify multiple column positions or multiple row positions for a cell using
+the -num_columns or -num_rows option with the add_to_rp_group command, the
+write_rp_groups command writes out the multiple-location cell.
+Removing Relative Placement Groups, Objects, and Attributes
+You can remove relative placement groups, objects from a relative placement group, or
+relative placement group attributes.
+
+Relative Placement
+Removing Relative Placement Groups
+To remove all or specific relative placement groups, specify the -all option or the relative
+placement groups with the remove_rp_groups command. When you specify a list of
+relative placement groups to be removed, the tool removes only the specified groups but
+not the groups included or instantiated within the specified group. To remove the included
+and instantiated groups of the specified groups, you must specify the -hierarchy option.
+The following example removes the grp_ripple relative placement group and confirms the
+removal:
+de_shell> get_rp_groups
+{mul::grp_mul ripple::grp_ripple example3::top_group}
+de_shell> remove_rp_groups ripple::grp_ripple
+Removing rp group ’ripple::grp_ripple’
+1
+de_shell> get_rp_groups *grp_ripple
+Error: Can’t find object ’grp_ripple’. (UID-109)
+de_shell> remove_rp_groups -all
+Removing rp group ’mul::grp_mul’
+Removing rp group ’example3::top_group’
+1
+Removing Objects From a Relative Placement Group
+To remove objects from a relative placement group, use the remove_from_rp_group
+command. You can remove leaf cells (-leaf), included groups (-hierarchy), instantiated
+groups (-hierarchy-instance), and keepouts (-keepout).
+The following command removes leaf cell carry_in_1 from group grp_ripple:
+de_shell> remove_from_rp_group ripple::grp_ripple -leaf carry_in_1
+If you specify multiple column positions or multiple row positions for a cell using
+the -num_columns or -num_rows option with the add_to_rp_group command, the
+remove_from_rp_group command removes the cell from all its locations.
+Removing Relative Placement Group Attributes
+To remove relative placement group attributes, use the remove_rp_group_options
+command. You must specify the group name and at least one option; otherwise, this
+command has no effect.
+The following example removes the x_offset attribute from the block1::misc1 group:
+de_shell> remove_rp_group_options block1::misc1 -x_offset
+{block1::misc1}
+The command returns a collection of relative placement groups for which attributes were
+changed. If no attributes were changed, the command returns an empty string.
+
+Relative Placement
+Creating Relative Placement Using HDL Compiler Directives
+DC Explorer supports relative placement information embedded within the Verilog or
+VHDL description. This capability is enabled by HDL compiler directives that can specify
+and modify relative placement information. Using these compiler directives to specify
+relative placement increases design flexibility and simplifies relative placement because
+you no longer need to update the location of many cells in the design.
+Using the embedded HDL compiler directives, you can place relative placement
+constraints in an RTL design, a GTECH netlist, or a mapped netlist. For information
+about specifying relative placement in Verilog and VHDL using HDL compiler directives,
+including guidelines and restrictions, see the HDL Compiler documentation.
+For more information, see also
+•
+The HDL Compiler for SystemVerilog User Guide
+•
+The HDL Compiler for VHDL User Guide

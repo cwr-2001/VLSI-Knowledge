@@ -1,0 +1,601 @@
+﻿% 第 5 章 Dynamic Voltage Drop Analysis（原书 5-79 … 5-101）
+\bichapter{动态压降分析}{Dynamic Voltage Drop Analysis}
+\label{chap:dvd}
+
+\section{引言}
+\subsection*{Introduction}
+
+本章说明如何使用 RedHawk-EV 运行动态压降（dynamic voltage drop，DvD）分析。如第~\ref{chap:ui}~章所述，关键输入包括：
+\begin{itemize}
+  \item 标准单元、存储器、I/O 的 LEF
+  \item 平坦或层次 DEF
+  \item Synopsys \texttt{.lib}
+  \item RedHawk \texttt{.tech}（导体/via R、介质厚度与 $\varepsilon\_r$、EM 电流密度限）
+  \item pad 实例/单元/位置文件
+  \item GSR（翻转率、频率、时钟根、默认 slew、块功耗等）
+  \item STA timing window 与 slew（推荐）
+  \item SPEF/DSPF 提取寄生（推荐）
+  \item pad/wirebond/bump/封装 RLC（推荐）
+  \item VCD 向量（若有则推荐）
+  \item 存储器/I/O/IP 的 SPICE subcircuit（可选）
+  \item 存储器/I/O/IP 的 GDSII（可选）
+\end{itemize}
+
+假定已按第~\ref{chap:ui}~章准备数据并完成第~\ref{chap:static}~章静态 IR 分析。以下介绍动态压降方法学与流程。
+
+\section{动态压降分析准备}
+\subsection*{Preparing for Dynamic Voltage Drop Analysis}
+
+\begin{enumerate}
+  \item \textbf{单元表征：}
+  \begin{enumerate}
+    \item 用 APL 为设计中单元创建动态电流 profile、有效电源电阻与去耦电容（第 9 章）
+    \item GUI 中 \textbf{APL $\rightarrow$ Import} 导入 APL 表征生成的 \texttt{<cell>.current}；同一表单导入 \texttt{<cell>.cdev} 去耦电容数据
+  \end{enumerate}
+  \item \textbf{功耗计算：}
+  \begin{enumerate}
+    \item 若已计算功耗（如静态分析前），可用 \textbf{Dynamic $\rightarrow$ Power $\rightarrow$ Import} 导入
+    \item 否则见第~\ref{chap:static}~章，设置 GSR 关键字并运行功耗计算
+  \end{enumerate}
+  \item \textbf{网络提取：}\textbf{Dynamic $\rightarrow$ Network Extraction}，可选 R/L/C 任意组合，签核建议三者全开。若 ECO 修改了 decap、via 或 pin 且须重提取，\gsr{EXTRACTION_INC 1}（默认）时仅在 ECO 区域增量重提取；导线变更则始终全设计重提取
+  \item \textbf{Pad 与封装：}\textbf{Dynamic $\rightarrow$ Pad, Wirebond and Package Constraints}（详见第 12 章封装与板级分析）
+\end{enumerate}
+
+\begin{seeAlsoBox}
+Vectorless 功耗与翻转率 GSR 设置详见第~\ref{chap:static}~章；APL 表征详见第~\ref{chap:apl}~章；封装与板级建模详见第~\ref{chap:pkg}~章。
+\end{seeAlsoBox}
+
+\section{动态压降分析方法}
+\subsection*{Methods of Dynamic Voltage Drop Analysis}
+
+RedHawk 提供多种 vectorless 与 VCD 驱动动态分析，选择取决于是否有 VCD 及其质量——目标是用最佳开关信息构造现实最坏场景（图~\ref{fig:dvd-methods}）。
+
+\figplaceholder{Figure 5-1}{RedHawk 动态分析类型}
+\label{fig:dvd-methods}
+
+可用图~\ref{fig:dvd-methods} 中各类分析的关键特性选择动态分析类型。
+
+\subsection{各类动态分析方法特性}
+\subsubsection*{Characteristics of Dynamic Analysis Methods}
+
+\textbf{Vectorless 动态分析特性：}
+\begin{itemize}
+  \item 设计无 VCD 文件
+  \item 覆盖现实最坏开关场景
+  \item 用时序文件与 GSR 关键字定义现实翻转率与开关时刻（见第~\ref{chap:static}~章「Vectorless 功耗计算设置」）
+  \item 开关场景由统计方法推导，依赖结构设计弱点、实例 timing window、逻辑/功耗/翻转率等因素
+  \item 若在 SIM2IPROF 或 AVM 中定义了布尔多状态，须在 GSC 中按实例指定状态名，RedHawk 功耗计算与动态分析将自动采用；若无 GSC 定义：功耗计算用所有状态的平均电荷；仿真随机选一个客户状态翻转（除非翻转率极低）
+\end{itemize}
+
+\textbf{VCD 驱动 Vectorless 动态分析特性：}
+\begin{itemize}
+  \item 有 VCD 但可能不代表最坏情况；辅助驱动 vectorless 开关场景
+  \item \textbf{RTL VCD}：设计早期可用；须 RTL 到 DEF 映射（Conformal/Formality 等可生成映射文件；实例级映射格式 \texttt{adsInst <RTL\_inst> <DEF\_inst>}）；在 PI、FF、latch 等状态点传播开关活动；天然支持时钟门控；缺 VCD 覆盖处可用约束文件指定翻转率；提供现实翻转率分布以驱动 vectorless 场景
+  \item \textbf{门级 VCD}：可直接映射到设计；扫描全 VCD 识别峰值功耗周期；从 VCD 推导全网翻转率以指导 vectorless 场景
+\end{itemize}
+
+\textbf{Event-driven VCD 动态分析特性：}
+\begin{itemize}
+  \item 使用时序反标的门级 VCD 做纯 VCD 分析
+  \item VCD 用于表示最坏情况及测量/相关性验证
+  \item 扫描全 VCD 识别峰值功耗周期
+  \item 特定周期分析，开关事件与延时来自 VCD
+\end{itemize}
+
+以下各节描述各类动态分析的操作步骤。
+
+\subsection{Vectorless 动态分析}
+\subsubsection*{Vectorless Dynamic Analysis}
+
+\paragraph{概述}
+无 VCD 时可用 vectorless 分析显著 DvD 区域：
+\begin{itemize}
+  \item \textbf{Accelerated Dynamic（AD）}：早期快速原型，非签核；约 5--6$\times$ 加速，DvD 精度降约 10--15\%，热点趋势不变
+  \item \textbf{标准 vectorless}：高精度签核
+\end{itemize}
+两者输入与设置相同。
+\subsubsection{Accelerated Dynamic（AD）分析}
+\paragraph*{Accelerated Dynamic (AD) Analysis}
+
+\textbf{Accelerated Dynamic（AD）} 适用于设计早期、信息尚不完整时的快速原型，\textbf{不能}替代签核用标准 vectorless 分析：
+\begin{itemize}
+  \item 仿真加速约 5--6 倍
+  \item DvD 精度平均降低约 10--15\%
+  \item 热点位置与趋势不变
+\end{itemize}
+AD 与标准 vectorless 的输入数据与 GSR 设置相同。
+
+
+\paragraph{输入与假设}
+须 STA 文件（通常 \texttt{<design>.timing}）：
+\begin{itemize}
+  \item 时钟频率与域；时钟 buffer 每周期正负沿各翻转一次。\gsr{EVA_PG_AWARE 1} 与 \gsr{TOGGLE_RATE 0} 可分析 P/G 薄弱区预期开关
+  \item 各输出 pin 的 min/max rise/fall timing window；时钟实例有时钟索引
+  \item 各 pin 的 slew（输入 pin slew 亦用于 APL 表征）
+  \item GSC 中可定义布尔多状态（见附录 C GSC）
+\end{itemize}
+
+\paragraph{\gsr{EVA_PG_AWARE}}
+设 \gsr{EVA_PG_AWARE 1} 且 \gsr{TOGGLE_RATE 0} 时，可分析 P/G 薄弱区域内实例的预期开关行为（见附录 C「\gsr{EVA_PG_AWARE}」）。
+
+开关假设：首周期 timing window 内会开关的实例在仿真首周期开关，次周期反向；存储器首周期 write 则次周期 read。
+
+\paragraph{标准 vectorless 流程}
+\begin{enumerate}
+  \item 在 GSR 中输入最佳翻转率（优先级见第~\ref{chap:static}~章「翻转率设置」）
+  \item 用 GSC 控制开关状态，\gsr{GSC_FILE} 引用 GSC 文件
+  \item \textbf{Dynamic $\rightarrow$ Vectorless Dynamic Voltage Drop Analysis} 启动分析
+  \item RedHawk 由翻转率推导时序网最坏开关场景，并约束于 GSR 平均总功耗
+  \item 用 LIB 或（更准确）APL 电流 profile 仿真峰值电流
+  \item SIM2IPROF/AVM 多状态 + GSC 状态名时自动采用对应 profile
+  \item 由时变节点电流计算各节点 DvD 波形
+\end{enumerate}
+
+\paragraph{翻转率优先级（动态 vectorless）}
+与第~\ref{chap:static}~章功耗计算相同，从高到低依次为：\gsr{INSTANCE_POWER_FILE}、\gsr{BLOCK_POWER_FOR_SCALING(_FILE)}、\gsr{GSC_FILE}、\gsr{INSTANCE_TOGGLE_RATE(_FILE)}、\gsr{NET_TOGGLE_RATE(_FILE)}/\gsr{SAIF_FILE}、\gsr{VCD_FILE}、\gsr{BLOCK_TOGGLE_RATE(_FILE)}/\gsr{CELL_TOGGLE_RATE}、\gsr{STATE_PROPAGATION}、STA \texttt{CONST}、\gsr{CLOCK_DOMAIN_TOGGLE_RATE}/\gsr{POWER_DOMAIN_TOGGLE_RATE}、\gsr{TOGGLE_RATE_RATIO_COMB_FF}、\gsr{TOGGLE_RATE}。具体交互见附录 C。
+
+\begin{noteBox}
+可用 \cmd{import sta} 在分析中/后导入不同 STA 以改变场景。
+\end{noteBox}
+
+\subsection{RTL VCD 驱动 Vectorless 分析}
+\subsubsection*{RTL VCD-Driven Vectorless Dynamic Analysis}
+
+门级 VCD 有完整向量；RTL VCD 须估计实例级开关。RedHawk 状态传播引擎在无门级仿真时统计评估复杂时钟门控下的功耗。
+
+RTL-VCD 流：从 RTL VCD 计算 PI 与 flop/latch 输出翻转率，再 State Propagation——介于 RTL 事件传播与纯概率传播之间，适合长 VCD 时段（事件传播耗时长）。由 \gsr{STATE_PROPAGATION} 控制。
+
+\paragraph{数据要求}
+\begin{itemize}
+  \item \textbf{VCD/FSDB}：块级或顶层；可设时间窗；缺省节点用约束文件或默认翻转率
+  \item \textbf{映射文件}：RTL 名（左）到 DEF 名（右），可由 Conformal/Formality 导出；实例级：\texttt{adsInst <RTL\_inst> <DEF\_inst>}
+  \item \textbf{反相映射}：\texttt{<RTL\_path> <Gate\_pin\_path> -inverted}，如 \texttt{top/block/count top/block/count\_reg/QN -inverted}
+\end{itemize}
+
+\paragraph{GSR 关键字}
+\gsr{VCD_FILE}、\gsr{BLOCK_VCD_FILE}；\gsr{FILE_TYPE RTL_VCD|RTL_FSDB}，\gsr{VCD_DRIVEN 1} 激活 RTL 模式。约束文件：\gsr{STATE_PROPAGATION} 的 \gsr{CONSTRAINT_FILE}；模板：\cmd{dump sptemplate} $\rightarrow$ \texttt{adsRpt/state\_propagation.template}。
+
+约束示例（最大翻转率 2.0，满时钟为 2）：
+\begin{lstlisting}
+# analysis mode: static
+# Format: <port/pin> <toggle_rate (2.0-based)>
+clk_A 0
+clk_B 1.8
+scan_mode 0.05
+i_pram_00/mem3/do[11] 0.15
+\end{lstlisting}
+
+\gsr{SP_CLKMUX_AUTO 1} 可向 MUX 传播翻转率 2 而无需单独设置 Select pin。
+\paragraph{约束文件补充说明}
+最大翻转率为 2.0（每周期 0$\rightarrow$1 与 1$\rightarrow$0 各一次）；满活动时钟为 2。\gsr{SP_CLKMUX_AUTO 1} 可向 MUX 传播翻转率 2 而无需单独设置 Select pin。
+
+无 VCD 时，\gsr{STATE_PROPAGATION} 仍可根据约束文件或默认翻转率传播；约束文件可指定时钟根、主输入与寄存器输出的翻转率。存储器须同时包含输入与输出翻转计数。设置完成后，静/动态分析无需额外命令。
+
+\paragraph{RTL VCD 报告文件说明}
+\begin{itemize}
+  \item \texttt{adsRpt/vcd\_uncovered\_syms}：VCD 中存在但设计中不存在的符号
+  \item \texttt{adsRpt/vcd\_uncovered\_mems}：VCD 未覆盖的存储器实例
+  \item \texttt{adsRpt/vcd\_uncovered\_ffs}：未覆盖且不在时钟网中的 FF/latch
+  \item \texttt{adsRpt/vcd\_uncovered\_clk\_ffs}：未覆盖且在时钟网中的 FF/latch
+\end{itemize}
+\gsr{PS_RTL_EP_REPORT} 开启时还生成：
+\begin{itemize}
+  \item \texttt{vcd\_covered\_ffs}：VCD/FSDB 中至少一个输出被覆盖的 FF/latch
+  \item \texttt{vcd\_covered\_nets}：被覆盖的网络
+  \item \texttt{propagated\_insts} / \texttt{propagated\_nets}：经传播得到活动的实例/网络
+\end{itemize}
+
+
+\paragraph{RTL VCD 报告}
+\begin{itemize}
+  \item \texttt{adsRpt/vcd\_uncovered\_syms}、\texttt{vcd\_uncovered\_mems}、\texttt{vcd\_uncovered\_ffs}、\texttt{vcd\_uncovered\_clk\_ffs}
+  \item \gsr{PS_RTL_EP_REPORT} 开启时还有 \texttt{vcd\_covered\_ffs}、\texttt{vcd\_covered\_nets}、\texttt{propagated\_insts}、\texttt{propagated\_nets}
+\end{itemize}
+
+\subsection{门级 VCD 驱动 Vectorless 分析}
+\subsubsection*{Gate Level VCD-Driven Vectorless Dynamic Analysis}
+
+层次设计在 GSR 中指定 VCD、层次前缀与起止时间，例如：
+\begin{lstlisting}
+BLOCK_VCD_FILE {
+    VCD_FILE {
+        <Hier_path/DEF_inst> <VCD file>
+        FILE_TYPE <VCD|FSDB|RTL_VCD|RTL_FSDB>
+        FRONT_PATH <redundant_path>
+        SUBSTITUTE_PATH <substitute_path>
+        FRAME_SIZE <cycle_time_ps>
+        START_TIME <ps>
+        TRUE_TIME [0|1]
+        MAPPING <file>
+    }
+    ...
+}
+\end{lstlisting}
+
+\textbf{分析步骤：}
+\begin{enumerate}
+  \item 配置 \gsr{VCD_FILE} 后 \textbf{Dynamic $\rightarrow$ Vectorless Dynamic Voltage Drop Analysis}，或 \cmd{perform analysis -vectorless}
+  \item 开关与转换时间来自 STA；场景由 VCD 翻转率驱动
+  \item LIB/APL 电流 profile 仿真
+  \item 计算节点 DvD
+  \item 编译最差节点电压有序列表
+\end{enumerate}
+
+\subsection{VCD 动态分析}
+\paragraph{BLOCK\_VCD\_FILE 参数说明}
+\begin{itemize}
+  \item \texttt{<Hierarch\_path/DEF\_instance\_name> <VCD file>}：与 DEF 一致的层次块名及 VCD/FSDB 路径
+  \item \texttt{FILE_TYPE}：\texttt{VCD|FSDB|RTL\_VCD|RTL\_FSDB}
+  \item \texttt{FRONT_PATH} / \texttt{SUBSTITUTE_PATH}：路径替换以匹配 DEF 层次
+  \item \texttt{FRAME_SIZE}：逐周期功耗每帧时长（ps），默认 5000\,ps（$1/\text{FREQ}$）
+  \item \texttt{START_TIME}：分析起始时间（ps）；默认 0，结束默认为 VCD/FSDB 末尾
+  \item \texttt{TRUE_TIME}：0 用 STA、无 glitch；1 用 VCD 开关与时序
+  \item \texttt{MAPPING}：RTL VCD 实例名到 DEF 名的映射文件
+\end{itemize}
+
+\subsubsection*{VCD Dynamic Analysis}
+
+全芯片/块级 VCD 且时序准确（SDF 反标仿真）时可用纯 VCD 动态分析。
+
+\textbf{假设：}
+\begin{enumerate}
+  \item \textbf{开关场景：}完全由 VCD 决定；VCD 未列网视为不活动；每个活动网应在 VCD 中描述
+  \item \textbf{实例开关：}时刻由 VCD 定义，不用 STA timing window（GSC 可覆盖 VCD 网规格）
+  \item \textbf{转换时间：}优先用 STA；无 STA 则用 \gsr{INPUT_TRANSITION}
+  \item \textbf{周期选择：}\gsr{VCD_FILE} 中 \gsr{SELECT_RANGE <start> <end>}；\texttt{-1 -1} 表示全 VCD 参与周期选择
+  \item \textbf{全 VCD 仿真：}\gsr{DYNAMIC_SIMULATION_TIME 0} 且无 START/END 时用整个 VCD
+  \item \textbf{多状态：}VCD 与 AVM/SIM2IPROF 定义匹配时触发对应 profile
+\end{enumerate}
+
+\paragraph{VCD 动态 GUI 与 vcdscan}
+在 GUI 中 \textbf{Dynamic $\rightarrow$ VCD-based Dynamic Voltage Drop Analysis}，勾选 \textbf{Use VCD Timing}；起止时间可为 VCD 内任意区间。实用程序 \texttt{vcdscan}（附录 E）可自动推荐仿真起止时间。
+
+\textbf{VCD 关键周期选择：}逐周期算功耗找最高功耗周期；跨度由 \gsr{DYNAMIC_SIMULATION_TIME} 决定；报告 \texttt{adsRpt/worst\_power\_cycle.rpt}。支持 True-time 与非 True-time 门级/RTL VCD。
+
+\paragraph{PRUNE 特性（RTL VCD）}
+在 \gsr{VCD_FILE} 中设 \texttt{PRUNE 1} 可加速 RTL\_VCD 周期选择：
+\begin{itemize}
+  \item 无事件传播——直接从设计提取网权重，翻转网决定周期功耗
+  \item 无延时计算——假定网翻转立即引起下游翻转
+  \item 仅 VCD 覆盖网——适合 RTL-VCD 覆盖率常 $<$10\% 的情形
+  \item 分块 pruning（多块 RTL-VCD 时按块分别处理）
+  \item RTL-VCD 文件复用（重复块复用 pruning 结果）
+  \item 支持 \gsr{WORST_DPDT_CYCLE}、\gsr{STA_VCD_FREQ_RATIO}、\gsr{POWER_VCD_NUM_PROCESS}
+\end{itemize}
+最有效条件：VCD 数据量大、功耗渐进变化、偶发脉冲式高峰。示例：
+\begin{lstlisting}
+VCD_FILE {
+    core_top top.vcd
+    FILE_TYPE RTL_VCD
+    PRUNE 1
+    SELECT_RANGE 10000 100000
+}
+\end{lstlisting}
+
+\paragraph{混合模式时间示例说明}
+上节 GSR 示例中 \texttt{ABCD10\_SEL}：presim 90--100\,ns，仿真 100--120\,ns；\texttt{ABCD20\_TEG}：presim 590--600\,ns，仿真 600--620\,ns；其余设计按 vectorless 处理。
+设 \gsr{PRUNE 1} 加速周期选择——无事件传播、无延时、仅 VCD 覆盖网、支持块级与 \gsr{WORST_DPDT_CYCLE}、\gsr{STA_VCD_FREQ_RATIO}、\gsr{POWER_VCD_NUM_PROCESS}。适合 VCD 数据量大、功耗渐进变化、偶发脉冲式高峰。
+
+\textbf{Multi-bit 时序单元：}sim2iprof 配置 \gsr{COMPOSITE_STATE} 定义的边沿触发事件。
+
+\textbf{混合 VCD + Vectorless：}块级 VCD + 顶层 vectorless；\gsr{BLOCK_VCD_FILE} 多块；可混 True/Non-True time；支持 S 参数封装、CPM、\gsr{STA_VCD_FREQ_RATIO}（块级仅混合模式）、\gsr{DYNAMIC_SIMULATION_TIME}/\gsr{DYNAMIC_PRESIM_TIME}（\texttt{End\_Time} 不用；\texttt{Start\_Time}  honored；Auto Presim 默认或 -1）；低功耗混合模式见第 13 章。
+
+非 VCD 块可用：\gsr{GSC_FILE}、\gsr{BLOCK_POWER_FOR_SCALING(_FILE)}、\gsr{STATE_PROPAGATION}、\gsr{STA_FILE CONST}、\gsr{TOGGLE_RATE_RATIO_COMB_FF}、\gsr{INSTANCE_TOGGLE_RATE(_FILE)}、\gsr{BLOCK_TOGGLE_RATE(_FILE)}、\gsr{TOGGLE_RATE}。
+
+块 VCD 未覆盖的子块实例默认 Off（除非 GSC）；仿真时间为 FREQ 整数倍时对未覆盖实例用多周期 vectorless。
+
+\textbf{混合模式 GSR 示例：}
+\begin{lstlisting}
+FREQ 200e6
+TOGGLE_RATE 0.2
+BLOCK_VCD_FILE {
+    VCD_FILE {
+        ABCD10_SEL user_data/vcd.1
+        front_path "TOP/CHIP/"
+        substitute_path ""
+        start_time 100000
+        true_time 1
+    }
+    VCD_FILE {
+        ABCD20_TEG user_data/vcd.2
+        front_path "TOP/CHIP/"
+        substitute_path ""
+        start_time 600000
+        true_time 1
+    }
+}
+DYNAMIC_PRESIM_TIME 10n
+DYNAMIC_SIMULATION_TIME 20n
+\end{lstlisting}
+
+\textbf{VCD 动态流程：}
+\begin{enumerate}
+  \item 在 \gsr{VCD_FILE} 定义约束
+  \item \textbf{Dynamic $\rightarrow$ VCD-based Dynamic Voltage Drop Analysis}，勾选 \textbf{Use VCD Timing}；或用 \texttt{vcdscan} 确定起止时间
+  \item 最差 DvD 周期：
+\begin{lstlisting}
+setup design
+perform pwrcalc
+perform extraction
+setup package
+perform analysis -vcd
+\end{lstlisting}
+\end{enumerate}
+
+\section{统一时钟门控处理}
+\subsection*{Unified Clock Gate Handling and Analysis}
+
+时钟门控有两种思路：Gated On Percentage（GOP）与自动时钟门控处理，由 \gsr{STATE_PROPAGATION} 统一；未定义则状态传播关闭，用默认翻转率。动态部分由 \gsr{FLOP_ON_PERCENTAGE}（原 GOP 更名）控制。
+
+\subsection{自动时钟门控（默认）}
+\subsubsection*{Automatic Clock Gate Handling (default)}
+
+\begin{lstlisting}
+STATE_PROPAGATION {
+      PROPAGATION_MODE probability
+}
+\end{lstlisting}
+
+enable ratio（时钟门开启概率）由上游翻转率传播；\gsr{SP} 选项 \gsr{AUTO_CLOCK_TRACING} 默认开启，设 0 关闭。
+
+\textbf{两类流程（图~\ref{fig:cg-flows}）：}
+\begin{itemize}
+  \item \textbf{Ratio-Based}：缩放时钟门输出翻转率；静/动态均可用
+  \item \textbf{ON/OFF-Based}：每门开或关；控制动态开关场景
+\end{itemize}
+
+\figplaceholder{Figure 5-2}{两类时钟门控处理}
+\label{fig:cg-flows}
+
+\textbf{Ratio-Based 语法：}
+\begin{lstlisting}
+STATE_PROPAGATION {
+      PROPAGATION_MODE probability
+      CLOCK_GATE_ENABLE_RATIO <ratio>
+      INFERRED_CLOCK_GATE_ENABLE_RATIO <ratio>  # 可选，1 则推断门不影响时钟翻转
+      ENABLE_CASCADED_CLOCK_GATING 1          # 级联，默认非级联
+      CLOCK_GATE_ENABLE_RATIO_FILE <cg_ratio.file>
+}
+\end{lstlisting}
+
+与 \cmd{setup analysis_mode static} + GOP 等效但 GOP 已过时。
+\paragraph{推断时钟门与级联模式}
+\gsr{CLOCK_GATE_ENABLE_RATIO} 默认同时影响实例化时钟门（lib 定义）与推断时钟门（如用作时钟门的 AND 门）。若不希望推断门影响时钟翻转率，可单独设置：
+\begin{lstlisting}
+STATE_PROPAGATION {
+    PROPAGATION_MODE probability
+    CLOCK_GATE_ENABLE_RATIO <ratio>
+    INFERRED_CLOCK_GATE_ENABLE_RATIO <ratio>
+}
+\end{lstlisting}
+设 \gsr{INFERRED_CLOCK_GATE_ENABLE_RATIO 1} 表示推断门不影响时钟翻转率。
+
+\textbf{级联与非级联：}默认非级联（与传统 GOP 一致）——各门使用统一 enable ratio。级联模式下，任一门处的 gating ratio 取决于上游门及其开关概率，更贴近实际。启用级联：
+\begin{lstlisting}
+STATE_PROPAGATION {
+    PROPAGATION_MODE probability
+    CLOCK_GATE_ENABLE_RATIO <ratio>
+    ENABLE_CASCADED_CLOCK_GATING 1
+}
+\end{lstlisting}
+
+可用 \gsr{CLOCK_GATE_ENABLE_RATIO_FILE} 为指定时钟门指定自定义 enable ratio；文件格式：
+\begin{lstlisting}
+#<clock_gate_name> <enable_ratio>
+...
+\end{lstlisting}
+
+\paragraph{ON/OFF 方法详解}
+\gsr{FLOP_ON_PERCENTAGE <FOP>}（原 GOP 更名）控制\textbf{触发器开启比例}，而非时钟门数量。FOP=0.5 表示约 50\% 的 flop 处于 ON，由 PowerStream 根据各时钟门控制的 flop 数量决定哪些门必须 ON。\gsr{FOP_CONTROL_FILE} 格式：
+\begin{lstlisting}
+#<clock_gate_name> <ON/OFF>
+...
+\end{lstlisting}
+若同时使用 GOP（已过时）与上述设置，将显示警告。
+
+
+\textbf{ON/OFF-Based：}\gsr{FLOP_ON_PERCENTAGE <FOP>} 控制 flop 开启比例（非门数量）；\gsr{FOP_CONTROL_FILE} 格式 \texttt{\#<clock\_gate> <ON/OFF>}。
+
+\section{门控时钟动态分析}
+\subsection*{Gated Clock Dynamic Analysis}
+
+无 VCD 时门控时钟活动由 \gsr{STATE_PROPAGATION} 与 \gsr{GATED_ON_PERCENTAGE}（或 \gsr{FLOP_ON_PERCENTAGE}）控制，经状态传播到下游时钟与数据路径。
+
+\textbf{输入：}tech、宏 LEF、顶层 DEF、PLOC/DEF 电压源、\texttt{.lib}、含时钟树 timing window 的 STA/TIMING、SPEF（可选）。
+
+\textbf{GSR：}\gsr{GATED_ON_PERCENTAGE}、\gsr{GATED_CONTROL_FILE}、\gsr{SP_CLOCK_GATING_RATIO}、\gsr{PS_SP_GATED_CLOCK_LOGIC}（设 0 禁用自动 duty cycle 传播）、\gsr{POWER_TRANSIENT_ANALYSIS}（多时间帧门控活动）。
+
+状态传播语法示例：
+\begin{lstlisting}
+STATE_PROPAGATION {
+     GATED_ON_PERCENTAGE <On_fraction>
+     PROPAGATION_MODE PROBABILITY
+     ? CONSTRAINT_FILE <file> ?
+     ? GATED_CLOCK_COVERAGE [0|1] ?   # 需 POWER_TRANSIENT_ANALYSIS
+     ? GATED_CONTROL_FILE <file> ?
+}
+\end{lstlisting}
+
+\texttt{GATED\_ON\_PERCENTAGE 1} 全开门控；\texttt{0} 全关；增大 GOP 只增开门控，不关闭已开门。\gsr{GATED_CONTROL_FILE}：\texttt{<gated\_clock\_instance> [On|Off]}。
+
+\textbf{约束导出：}\cmd{dump sp_constraints} $\rightarrow$ \texttt{adsRpt/state\_propagation.cg}（\texttt{<cg\_inst> <ratio> <level>}）与 \texttt{state\_propagation.pi}（\texttt{<net> <toggle> <duty>}）。分别用 \gsr{SP_CG_CONSTRAINT_FILE}、\gsr{NET_TOGGLE_RATE_FILE}（追加到已有文件）。
+
+\textbf{GCControls：}\texttt{adsRpt/state\_propagation.GCControls} 列出各门控单元 On/Off；格式 \texttt{<gc\_inst> <cell\_type> [On|Off] <user\_setting> <On\_fraction>}。
+
+\textbf{排障文件：}\texttt{state\_propagation.template}、\texttt{GCControls}、\texttt{.apache/apache.tr}、\texttt{apache.tr.i}。检查：时钟树 \texttt{.lib}/LEF 完整；
+\paragraph{门控比自动推导与 \gsr{PS\_SP\_GATED\_CLOCK\_LOGIC}}
+状态传播可根据各 enable 网 duty cycle 自动推导每级时钟门的 gating ratio；RTL\_VCD 流有利于时序逻辑功耗精度，vectorless 流有利于芯片总功耗估计。\gsr{PS_SP_GATED_CLOCK_LOGIC 0} 可禁用该自动 duty cycle 传播。
+
+\gsr{SP_CLOCK_GATING_RATIO <ratio>}（0--1）可为全设计时钟门设全局 gating ratio。\gsr{GATED_ON_PERCENTAGE} 在叶级统计 flop/latch/存储器（含常开叶单元）；例如 0.5 表示随机约 50\% 门控控制单元为 ON，但动态分析中时钟网功耗未必精确缩至 50\%，取决于门控粒度。\gsr{GATED_CONTROL_FILE} 可逐实例覆盖全局 ON 设置。
+
+\gsr{POWER_TRANSIENT_ANALYSIS} 可为各时间帧定义不同门控活动；多时间帧表示不同周期组上的时钟活动。\gsr{GATED_CLOCK_COVERAGE 1} 在使用 \gsr{GATED_ON_PERCENTAGE} 时提高覆盖率，并为每帧选择不同开门场景；须同时开启 \gsr{POWER_TRANSIENT_ANALYSIS}。
+
+\paragraph{GCControls 文件字段}
+\texttt{adsRpt/state\_propagation.GCControls} 每行：
+\texttt{<gc\_instance\_name> <cell\_type> [On|Off] <user\_setting> <On\_fraction>}。其中 \texttt{user\_setting}：0=无用户设置，1=用户设为 On，2=用户设为 Off；\texttt{On\_fraction} 为静态分析时该门的 On 百分比/100，动态分析为到该门为止的累积 On 百分比（升序）。
+\texttt{adsRpt/apache.refCell.*}；\texttt{apache.tw0} 缺 timing window 列表。
+
+\section{Scan 模式动态分析}
+\subsection*{Scan Mode Dynamic Analysis}
+
+SoC scan 链激活常产生极大峰值电流（可为功能模式 10--100 倍），时钟边沿几乎同时翻转（图~\ref{fig:scan-current}）。
+
+\figplaceholder{Figure 5-3}{Scan 模式开关电流}
+
+\textbf{早期 vectorless scan：}由约束文件生成场景；非 true-time，开关顺序由 PowerStream 决定、时刻由 STA 标注；按 scan 输出驱动数据 pin，行为来自 LIB。\gsr{DYNAMIC_SIMULATION_TIME}、\gsr{PRESIM_TIME} 有效。
+
+特性：scan FF 翻转由输入 pattern 推导并传播到组合逻辑；pattern 可简单（``1010''）或 ATPG；全网活动确定性。
+
+\textbf{输入：}\gsr{SCAN_CONSTRAINT_FILES}
+\begin{lstlisting}
+SCAN_CONSTRAINT_FILES {
+       <scan_chain_file_1> <pattern_1>
+       ...
+}
+\end{lstlisting}
+
+约束文件每行：\texttt{<inst>/<pin>}，如 \texttt{FF\_inst/Q}。
+
+示例：默认 pattern ``01''；\texttt{scan.spc 0011}；多链不同 pattern；可用 scan chain order 文件（\texttt{reg\_1/Q} 驱动链）。
+
+pattern 短于链长则重复；未指定 pattern 默认 ``0101…''。仿真中 pattern 移位决定 FF 与数据路径活动。
+
+\textbf{自动追踪：}
+\begin{lstlisting}
+SCAN_CONSTRAINT_FILES { AUTO_TRACING [<pattern>] }
+\end{lstlisting}
+
+\textbf{运行：}
+\begin{lstlisting}
+setup design <design>.gsr
+perform pwrcalc
+perform extraction -power -ground -c
+perform analysis -vcd    # 必须 -vcd 以采用 scan 场景
+\end{lstlisting}
+
+\textbf{门级 VCD scan：}
+\paragraph{Scan 模式关键特性（早期 vectorless）}
+\begin{itemize}
+  \item Scan FF 翻转由输入 pattern 推导并传播到组合逻辑
+  \item Pattern 可简单（如 ``1010'' 压力 pattern）或由 ATPG 生成
+  \item 全网活动确定性（非随机）
+  \item 非 true-time：开关顺序由 PowerStream 决定，时刻由 STA 标注
+  \item 按 scan 输出驱动数据 pin，行为来自 LIB
+  \item \gsr{DYNAMIC_SIMULATION_TIME}、\gsr{PRESIM_TIME} 有效
+\end{itemize}
+
+\paragraph{Pattern 与链长}
+Pattern 短于链长则重复；未指定 pattern 默认 ``0101…''。Pattern 文件可为每行一位：
+\begin{lstlisting}
+0
+1
+1
+0
+...
+\end{lstlisting}
+或单行：\texttt{0110...}。
+
+\paragraph{Pattern 移位示例}
+10 级 scan 链、pattern ``1001'' 重复为 ``1001100110''。仿真初态与各时钟沿后寄存器值示例：
+\begin{verbatim}
+0 1 1 0 0 1 1 0 0 1  - 仿真开始
+0 0 1 1 0 0 1 1 0 0  - 第一时钟沿后
+1 0 0 1 1 0 0 1 1 0  - 第二时钟沿后
+\end{verbatim}
+
+\paragraph{门级 VCD scan 模式}
+与功能模式门级 VCD 动态分析相同（见「VCD 动态分析」）；可选最差功耗或最差 DvD 周期；活动来自所选周期的 VCD，动态分析复现 VCD 场景。关键特性：自动识别最差功耗/DvD 周期；所选周期活动完全来自 VCD；动态仿真复现 VCD 开关场景。
+
+\section{评估 DvD 分析结果}
+\subsection*{Evaluating DvD Analysis Results}
+
+\subsection{结果类型}
+\subsubsection*{Types of DvD Results}
+
+完成后点 IR 按钮。RedHawk-EV 输出包括：
+\begin{itemize}
+  \item 动态压降等高线图（contour maps）
+  \item 功耗密度与电流密度图
+  \item 电容/decap 效应图
+  \item 报告文件（第~\ref{chap:reports}~章）：动态压降摘要、功耗、EM、pad 电流、Error/Warning、命令日志等
+\end{itemize}
+日志与数据位于 \texttt{adsRpt/Dynamic/}；\texttt{<design>.ipwr} 为实例总需求电流；\texttt{<design>.ivdd} 为 pad 供电电流。长时间运行可用 \cmd{xgraph} 查看中间波形。
+
+\textbf{Results $\rightarrow$ List of Worst DVD Instances for Dynamic Simulation} 按 DvD 排序，含：
+\begin{itemize}
+  \item \textbf{Ave DV}：timing window 内平均动态电压
+  \item \textbf{Max DV} / \textbf{Min DV}：TW 内最大/最小
+  \item \textbf{Min DV WC}：整周期最小
+  \item 实例位置与名称
+\end{itemize}
+
+还可排序 \textbf{Max/Min VDD-VSS}、TW 内/整周期 Min VDD-VSS 等（图~\ref{fig:dvd-criteria}）。
+
+\figplaceholder{Figure 5-4}{实例 DvD 判据}
+\label{fig:dvd-criteria}
+
+\textbf{View $\rightarrow$ Dynamic Instance Result}：线基/实例基压降图；DD 看 decap；PD 看动态功耗密度。
+
+日志与数据在 \texttt{adsRpt}；动态专用子目录 \texttt{Dynamic/}。\texttt{<design>.ipwr} 为实例总需求电流时域；\texttt{<design>.ivdd} 为 pad 供电电流。
+
+绘制波形：
+\begin{lstlisting}
+plot current [-vdd|-gnd|-pwr|-net ?-name <nets>?|
+     -pad ?-name <pads>?] ?-o <output>? ?-sv? ?-xgr?
+\end{lstlisting}
+默认 Ansys \texttt{sv} 格式；\texttt{-xgr} 用 Xgraph。
+\paragraph{最差 DvD 实例列表排序}
+\textbf{Results $\rightarrow$ List of Worst DVD Instances for Dynamic Simulation} 可按以下任一判据排序：
+\begin{itemize}
+  \item Ave DV / Max DV / Min DV / Min DV WC
+  \item Max VDD-VSS、Min VDD-VSS（整周期）
+  \item Min VDD-VSS over timing window、Avg VDD-VSS over timing window
+\end{itemize}
+
+\paragraph{动态实例结果视图}
+\textbf{View $\rightarrow$ Dynamic Instance Result} 可选：线基压降图、实例基压降图、decap（DD）、动态功耗密度（PD）。注意各视图差异。
+
+\paragraph{plot current 命令}
+\begin{lstlisting}
+plot current [-vdd|-gnd|-pwr|-net ?-name <nets>?|
+     -pad ?-name <pads>?] ?-o <output>? ?-sv? ?-xgr?
+\end{lstlisting}
+\texttt{-vdd|-gnd|-pwr|-pad} 绘制对应电流波形；\texttt{-net}/\texttt{-pad} 未给名单时显示全部网或 pad。默认 Ansys \texttt{sv} 格式；\texttt{-xgr} 使用 Xgraph。
+
+\subsection{最小 DvD 滤波}
+\subsubsection*{Filtering Minimum DvD Results}
+
+\gsr{DVD_GLITCH_FILTER} 可按电压电平与 glitch 宽度 \texttt{WminW} 过滤 timing window 最小 DvD（minTW），全局或按实例；报告 \texttt{adsRpt/Dynamic/<design>.minTW\_filtered}（图~\ref{fig:glitch-filter}）。详见附录 C「\gsr{DVD_GLITCH_FILTER}」。
+
+\figplaceholder{Figure 5-5}{DvD Glitch 宽度滤波}
+
+\begin{noteBox}
+scan 模式或功耗周期选择时不要使用 glitch 滤波。
+\end{noteBox}
+
+\section{回放先前 RedHawk 会话}
+\subsection*{Replaying a Previous RedHawk Session}
+
+\textbf{File $\rightarrow$ Playback} 选择先前运行的命令日志 \texttt{cmd.log.<date-time>}，须知道会话日期时间。
+
+\section{运行动态压降的 TCL 命令}
+\subsection*{TCL Commands to Run Dynamic Voltage Drop Analysis}
+
+
+\begin{table}[htbp]
+\centering
+\caption{动态 DvD 分析 TCL 命令（详）}
+\small
+\begin{tabularx}{\textwidth}{@{}lX@{}}
+\toprule
+TCL & 用途 \\
+\midrule
+\cmd{setup vcd} \texttt{?<vcd\_cycle\_time>? ?-a <start>?<end>? ?-w <logical\_path> <physical\_path>? ?-d <adsPower>? ?-o <out>? ?-msg ?-cmd ?-tt <presim\_ps>?} &
+当 GSR 含 \gsr{VCD_FILE} 时配置全 VCD 动态 DvD：周期时间、起止仿真时间、逻辑/物理路径映射、adsPower 目录、输出/消息/命令文件、presim 时间（ps）等 \\
+\cmd{perform analysis [-lowpower | -vcd | -vectorless]} &
+运行动态 DvD；\texttt{-vcd} 用于 VCD/scan 场景；\texttt{-vectorless} 用于 vectorless；\texttt{-lowpower} 用于低功耗流（见第 13 章） \\
+\cmd{import sta <sta\_file>} &
+分析中或之后导入不同 STA 文件以改变开关场景（批处理或 TCL 均可） \\
+\bottomrule
+\end{tabularx}
+\end{table}

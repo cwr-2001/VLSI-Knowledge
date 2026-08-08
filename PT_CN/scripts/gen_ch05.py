@@ -1,0 +1,680 @@
+# -*- coding: utf-8 -*-
+"""Generate 05_design_data.tex with proper UTF-8 encoding."""
+from pathlib import Path
+
+text = r"""% 第 5 章 Working With Design Data
+\bichapter{处理设计数据}{Working With Design Data}
+\label{chap:data}
+
+在执行时序分析之前，需要读取并链接设计及其关联的逻辑库。有关处理设计数据的说明，请参阅以下主题：
+\begin{itemize}
+  \item 逻辑库（Logic Libraries）
+  \item 读取与链接设计（Reading and Linking the Design）
+  \item 处理设计对象（Working With Design Objects）
+  \item 设置当前设计与当前实例（Setting the Current Design and Current Instance）
+  \item 处理属性（Working With Attributes）
+  \item 保存属性（Saving Attributes）
+  \item 保存与恢复会话（Saving and Restoring Sessions）
+  \item 创建测试用例（Creating Test Cases）
+\end{itemize}
+
+% ============================================================
+\section{逻辑库}
+\subsection*{Logic Libraries}
+
+逻辑库使用 Library Compiler 工具描述 ASIC 工艺中宏单元（macro cell）的时序与功能。其他 Synopsys 工具（如 Design Compiler 综合工具与 IC Compiler 布局布线工具）也使用这些逻辑库。
+
+逻辑库包含库单元描述，其中包括：
+\begin{itemize}
+  \item 描述各单元与外部连接关系的单元、总线与引脚结构
+  \item 单元输出引脚的逻辑功能
+  \item 时序分析与设计优化信息，例如引脚到引脚的时序关系、延时参数，以及时序单元的时序约束
+  \item 描述面积、功耗与设计规则约束的其他参数
+\end{itemize}
+
+PrimeTime 可读取 \texttt{.db} 与 \texttt{.lib} 格式的逻辑库。这些库可以具有不同的时间、电容与电压单位。
+
+有关逻辑库的更多信息，请参阅 Library Compiler 文档。
+
+% ============================================================
+\section{读取与链接设计}
+\subsection*{Reading and Linking the Design}
+
+在执行时序分析之前，需要读取并链接设计与逻辑库。PrimeTime 可读取以下文件格式：
+
+\begin{table}[htbp]
+\centering
+\caption{PrimeTime 支持的输入数据格式}
+\begin{tabular}{@{}ll@{}}
+\toprule
+输入数据 & 支持的文件格式 \\
+\midrule
+设计数据 & 二进制数据库（\texttt{.db}）\\
+         & Milkyway\\
+         & Synopsys 逻辑数据库（\texttt{.ddc}）\\
+         & Verilog\\
+         & VHDL \\
+\midrule
+逻辑库   & 二进制数据库（\texttt{.db}）\\
+         & Synopsys Library Compiler 格式（\texttt{.lib}）\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+要读取并链接设计数据，请按以下步骤操作：
+\begin{enumerate}
+  \item 指定 PrimeTime 搜索设计、逻辑库及其他设计数据（如时序模型）的目录。为此，设置 \cmd{search\_path} 变量。例如：
+\begin{lstlisting}
+pt_shell> set_app_var search_path ". /abc/design /abc/libs"
+\end{lstlisting}
+        PrimeTime 按您指定的顺序搜索这些目录。
+  \item 通过设置 \cmd{link\_path} 变量，指定 PrimeTime 在设计层次结构中查找单元的库。例如：
+\begin{lstlisting}
+pt_shell> set_app_var link_path "* STDLIB.db"
+\end{lstlisting}
+        该变量可包含星号（\texttt{*}）、库名与文件名。星号指示 PrimeTime 在内存中搜索设计。PrimeTime 按您指定的顺序搜索库。主库（main library）是链接路径中的第一个库。
+  \item 将设计读入内存：
+\begin{lstlisting}
+pt_shell> read_verilog TOP.v
+\end{lstlisting}
+        若搜索路径包含子设计文件，则只需读取顶层设计。搜索路径条目必须包含子设计文件的完整路径，而不仅仅是包含该文件的目录。
+  \item 链接设计以解析对库单元与子设计的引用：
+\begin{lstlisting}
+pt_shell> link_design TOP
+\end{lstlisting}
+        在设计链接期间，若子设计名称与文件名匹配，工具会自动加载子设计。
+  \item 使用 \cmd{list\_designs} 与 \cmd{list\_libs} 命令验证已加载的设计与库。
+\end{enumerate}
+
+\subsection{识别与验证所需设计文件}
+\subsubsection*{Identifying and Verifying the Required Design Files}
+
+在运行完整时序分析之前，快速识别脚本所需的全部设计文件并验证其存在，通常很有用。
+
+为此，在运行脚本之前设置以下变量：
+\begin{lstlisting}
+pt_shell> set_app_var sh_program_mode file_identification
+\end{lstlisting}
+
+在此模式下，工具会打开并立即关闭任何被访问的文件，但不读取设计数据。工具命令采用表~\ref{tab:file-id-mode} 所述的修改后行为，使脚本能够在没有设计数据的情况下运行完成。
+
+\begin{longtable}{@{}p{0.28\textwidth} p{0.62\textwidth}@{}}
+\caption{文件识别模式下的修改后命令行为}\label{tab:file-id-mode}\\
+\toprule
+命令类型 & 修改后行为 \\
+\midrule
+\endfirsthead
+\multicolumn{2}{c}{\tablename\ \thetable{}（续）}\\
+\toprule
+命令类型 & 修改后行为 \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+显式或隐式读取库的命令 &
+打开库以确认读访问权限，然后立即关闭。库按常规方式从配置设置（\cmd{link\_path} 变量、缩放组等）收集。 \\
+\midrule
+读取文件的命令 &
+打开文件以确认读访问权限，然后立即关闭。\cmd{search\_path} 变量按常规方式使用。 \\
+\midrule
+返回集合（collection）的命令 &
+返回特殊的 \texttt{=mock\_collection=} 集合句柄。 \\
+\midrule
+\cmd{get\_attribute} 命令 &
+对于 \texttt{=mock\_collection=} 对象，返回字符串值 \texttt{=mock\_collection=attr=}。 \\
+\midrule
+\cmd{sizeof\_collection} 命令 &
+对于 \texttt{=mock\_collection=} 对象，返回值 1。 \\
+\midrule
+条件与迭代（循环）命令 &
+若条件或迭代列表包含特殊的 \texttt{=mock\_collection=} 集合句柄，则命令体执行一次；否则按常规方式求值循环或条件。 \\
+\midrule
+\cmd{restore\_session} 命令 &
+打开会话目录中的所有文件，然后立即关闭。不读取或恢复任何数据。 \\
+\midrule
+\cmd{echo} 命令 &
+按常规方式打印输出。 \\
+\midrule
+所有其他命令 &
+返回值 1。 \\
+\end{longtable}
+
+可使用 \cmd{pt\_shell} 调用命令的 \opt{-x} 选项在脚本运行前设置该变量。用法示例如下：
+\begin{itemize}
+  \item 运行本地脚本：
+\begin{lstlisting}
+% $PT_PATH/pt_shell \
+    -x 'set sh_program_mode file_identification' \
+    -f my_script.pt
+\end{lstlisting}
+  \item 使用 Synopsys Testcase Packager（STP）实用程序：
+\begin{lstlisting}
+% stp -r \
+    "$PT_PATH/pt_shell \
+      -x 'set sh_program_mode file_identification' \
+      -f my_script.pt"
+\end{lstlisting}
+  \item 使用 Synopsys Cloud Transfer Packager（SCTP）实用程序：
+\begin{lstlisting}
+% sctp -r \
+    "$PT_PATH/pt_shell \
+      -x 'set sh_program_mode file_identification' \
+      -f my_script.pt"
+\end{lstlisting}
+\end{itemize}
+
+要识别脚本使用的完整文件列表，可使用 Synopsys Cloud Transfer Packager。该实用程序会生成所需文件列表供审阅；无需打包测试用例即可生成此列表。
+
+请注意以下限制：
+\begin{itemize}
+  \item 不支持 DMSA 分析。
+  \item 不支持分布式分析。
+  \item 不支持从设计对象名称派生文件名的脚本（例如根据设计名称创建 SDC 文件名）。
+\end{itemize}
+
+\subsection{按实例链接库路径}
+\subsubsection*{Per-Instance Link Library Paths}
+
+\cmd{link\_path} 变量提供用于整个设计的链接路径规范。
+
+如有需要，可将链接路径规范应用于各个单元实例。这些按实例的链接路径优先于全局 \cmd{link\_path} 规范。
+
+按实例链接规范可用于建模工艺与版图效应，例如体偏置（body bias）与邻近相互作用（proximity interactions）。也可用于为设计块分配电压相关库（不过对此更推荐使用缩放库组）。
+
+有两种方式指定按实例链接路径：
+\begin{itemize}
+  \item \cmd{link\_path\_per\_instance} 变量，设置为所有按实例链接路径的列表
+  \item \cmd{set\_link\_lib\_map} 命令，指定包含按实例链接路径的文件
+\end{itemize}
+
+两种方法在功能上完全相同。\cmd{link\_path\_per\_instance} 变量无需额外文件，但规范存储在内存中，适用于较小的链接路径列表。\cmd{set\_link\_lib\_map} 命令需要一个或多个文件，仅在链接时读取，适用于较大的链接路径列表。两者不能同时使用。
+
+\subsubsection{\texttt{link\_path\_per\_instance}}
+\paragraph*{\texttt{link\_path\_per\_instance}}
+
+\cmd{link\_path\_per\_instance} 变量格式为列表的列表。每个子列表由一对元素组成：一组实例，以及用于这些实例的 \cmd{link\_path} 规范。该变量必须在设计链接之前设置。例如：
+\begin{lstlisting}
+set_app_var link_path {* lib1.db}
+set_app_var link_path_per_instance [list \
+    [list {ucore1 ucore2}         {* lib2.db}] \
+    [list {ucore1/usubblk}        {* lib3.db}] \
+    [list {ucore1/U12 ucore1/U34} {* lib4.db}]]
+
+read_verilog my_design.v
+link_design MY_DESIGN
+\end{lstlisting}
+
+所列实例可以是层次单元（块）或叶单元。所有实例路径均相对于顶层设计。优先级规则如下：
+\begin{itemize}
+  \item 规范向下传播到层次结构中。
+  \item 较低层级规范优先于较高层级规范。
+  \item 叶单元规范优先于块规范。
+\end{itemize}
+
+\subsubsection{\texttt{set\_link\_lib\_map}}
+\paragraph*{\texttt{set\_link\_lib\_map}}
+
+\cmd{set\_link\_lib\_map} 命令以文件作为输入。文件中每行包含一组实例、两侧带空格的冒号分隔符（\texttt{:}），以及用于这些实例的 \cmd{link\_path} 规范。例如：
+\begin{lstlisting}
+% cat ./link_paths.txt
+ucore1 ucore2          : * lib2.db
+ucore1/usubblk         : * lib3.db
+ucore1/U12 ucore1/U34 : * lib4.db
+\end{lstlisting}
+
+\cmd{set\_link\_lib\_map} 在设计链接之前将该文件作为输入。例如：
+\begin{lstlisting}
+set_app_var link_path {* lib1.db}
+set_link_lib_map ./link_paths.txt
+
+read_verilog my_design.v
+link_design MY_DESIGN
+\end{lstlisting}
+
+所列实例可以是层次单元（块）或叶单元。默认情况下，实例路径相对于顶层设计。不过，\cmd{set\_link\_lib\_map} 命令提供两个选项，允许文件相对于单元实例与设计引用应用：
+\begin{lstlisting}
+set_link_lib_map -instance {ucore1/usubblk1} ./link_paths_subcore.txt
+set_link_lib_map -reference {subblk}         ./link_paths_subcore.txt
+\end{lstlisting}
+
+\opt{-instance} 选项将文件相对于指定单元实例应用。\opt{-reference} 选项将文件相对于指定设计名称的所有单元实例应用。这些选项允许在输入文件中缩短较长的实例名称。两个选项均只接受单个名称。
+
+优先级规则如下：
+\begin{itemize}
+  \item 规范向下传播到层次结构中。
+  \item 较低层级规范优先于较高层级规范。
+  \item 叶单元规范优先于块规范。
+  \item \opt{-instance} 规范优先于 \opt{-reference} 规范。
+\end{itemize}
+
+% ============================================================
+\section{处理设计对象}
+\subsection*{Working With Design Objects}
+
+设计是由单元、端口与网络等对象组成的层次实体。
+
+\figplaceholder{Figure 22: Typical design objects}{典型设计对象}{fig:design-objects}
+
+在 PrimeTime 工具中，设计包含下表所列对象。
+
+\begin{longtable}{@{}p{0.18\textwidth} p{0.42\textwidth} p{0.30\textwidth}@{}}
+\caption{PrimeTime 中的设计对象}\label{tab:design-objects}\\
+\toprule
+对象类 & 说明 & 创建对象集合的命令 \\
+\midrule
+\endfirsthead
+\multicolumn{3}{c}{\tablename\ \thetable{}（续）}\\
+\toprule
+对象类 & 说明 & 创建对象集合的命令 \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\cmd{cell} &
+设计中的实例；可以是层次块或原始库单元 &
+\cmd{get\_cells} \\
+\midrule
+\cmd{clock} & 时钟 & \cmd{get\_clocks} \\
+\midrule
+\cmd{design} & 设计 & \cmd{get\_designs} \\
+\midrule
+\cmd{lib} & 库 & \cmd{get\_libs} \\
+\midrule
+\cmd{lib\_cell} & 逻辑库中的单元 & \cmd{get\_lib\_cells} \\
+\midrule
+\cmd{lib\_pin} & 库单元上的引脚 & \cmd{get\_lib\_pins} \\
+\midrule
+\cmd{lib\_timing\_arc} & 库单元上的时序弧 & \cmd{get\_lib\_timing\_arcs} \\
+\midrule
+\cmd{net} & 当前设计中的网络 & \cmd{get\_nets} \\
+\midrule
+\cmd{path\_group} &
+用于代价函数计算与时序报告的路径组 &
+\cmd{get\_path\_groups} \\
+\midrule
+\cmd{pin} &
+设计中较低层级单元的引脚；可以是输入、输出或双向（inout） &
+\cmd{get\_pins} \\
+\midrule
+\cmd{port} &
+当前设计的端口；可以是输入、输出或双向（inout） &
+\cmd{get\_ports} \\
+\midrule
+\cmd{timing\_arc} & 时序弧 & \cmd{get\_timing\_arcs} \\
+\midrule
+\cmd{timing\_path} & 时序路径 & \cmd{get\_timing\_paths} \\
+\end{longtable}
+
+要对设计施加约束、执行详细时序分析并定位时序问题来源，需要访问设计对象。可通过相应的 ``get'' 命令创建对象集合来实现。例如，\cmd{get\_ports} 命令创建端口集合。
+
+您可以将 ``get'' 命令的结果嵌套在操作这些对象的另一命令中。例如：
+\begin{lstlisting}
+pt_shell> set_input_delay 2.3 [get_ports IN*]
+\end{lstlisting}
+
+更多信息请参阅 SolvNetPlus 上的 \textit{Using Tcl With Synopsys Tools} 中「Searching for Design Objects」一节。
+
+% ============================================================
+\section{设置当前设计与当前实例}
+\subsection*{Setting the Current Design and Current Instance}
+
+当前设计与当前实例定义了许多 PrimeTime 命令的焦点。要设置或返回当前设计或实例，请使用以下命令。
+
+\begin{table}[htbp]
+\centering
+\caption{当前设计对象}\label{tab:current-design}
+\begin{tabular}{@{}p{0.14\textwidth} p{0.42\textwidth} p{0.32\textwidth}@{}}
+\toprule
+对象 & 说明 & 设置或返回当前对象的命令 \\
+\midrule
+当前设计（current design） &
+当前设计的顶层；大多数对象相对于当前设计引用 &
+\cmd{current\_design} \\
+\midrule
+当前实例（current instance） &
+作为当前设计范围内当前作用域的实例（层次单元）；通过更改当前实例遍历层次结构 &
+\cmd{current\_instance} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ============================================================
+\section{处理属性}
+\subsection*{Working With Attributes}
+
+属性是与对象关联的字符串或值，携带有关该对象的信息。您可以用 Tcl 编写程序，从设计数据库获取属性信息并生成自定义设计报告。
+
+PrimeTime 提供以下命令用于设置、报告、列出与创建属性。
+
+\begin{table}[htbp]
+\centering
+\caption{处理属性的命令}\label{tab:attribute-cmds}
+\begin{tabular}{@{}p{0.28\textwidth} p{0.62\textwidth}@{}}
+\toprule
+属性命令 & 说明 \\
+\midrule
+\cmd{define\_user\_attribute} & 为一个或多个对象类创建新属性 \\
+\cmd{get\_attribute} & 从单个对象检索任意属性的值 \\
+\cmd{list\_attributes} & 显示每个对象类或指定对象类已定义的属性；可选显示应用属性 \\
+\cmd{remove\_user\_attribute} & 从一个或多个对象移除用户定义属性 \\
+\cmd{report\_attribute} & 显示一个或多个对象上所有属性的值；可选显示应用属性 \\
+\cmd{set\_user\_attribute} & 在一个或多个对象上设置用户定义属性 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+有关各对象类预定义应用属性的说明，请参阅 man 页。例如，要查看库单元属性的说明，使用以下命令：
+\begin{lstlisting}
+pt_shell> man lib_cell_attributes
+\end{lstlisting}
+
+% ============================================================
+\section{保存属性}
+\subsection*{Saving Attributes}
+
+\cmd{save\_session} 命令不保存属性。要保存在会话期间应用的属性，请使用 \cmd{write\_script} 命令以 \cmd{pt\_shell}、\cmd{dc\_shell} 或 \cmd{dctcl} 格式创建脚本。恢复 PrimeTime 会话时，可使用该脚本在设计上重新创建属性。
+
+% ============================================================
+\section{保存与恢复会话}
+\subsection*{Saving and Restoring Sessions}
+
+可使用 \cmd{save\_session} 与 \cmd{restore\_session} 命令保存一个会话中的设计数据，然后在后续会话中恢复以供继续使用。
+
+会话是工具创建的目录，包含以下信息：
+\begin{itemize}
+  \item 已链接的设计与已加载的库
+  \item 时钟、时序例外与其他约束
+  \item 工作条件
+  \item 反标 SDF 延时与寄生参数
+  \item 变量设置
+  \item 网表编辑（\cmd{insert\_buffer}、\cmd{size\_cell}、\cmd{swap\_cell}）
+  \item 分析数据
+  \item 耦合延时数据与噪声数据
+\end{itemize}
+
+保存与恢复功能仅用作 PrimeTime 会话工具，而非设计数据库归档工具。工具不保存或恢复以下信息：
+\begin{itemize}
+  \item 派生数据类型的集合
+  \item Tcl 过程与命令历史
+  \item GUI 状态（时序路径表、原理图、直方图等）
+  \item 快速时序模型生成状态（\cmd{create\_qtm\_model} 与 \cmd{save\_qtm\_model} 命令之间）
+  \item 上下文表征状态（\cmd{characterize\_context} 与 \cmd{write\_context} 命令之间）
+\end{itemize}
+
+\subsection{保存会话}
+\subsubsection*{Saving Sessions}
+
+要保存会话，使用 \cmd{save\_session} 命令并指定会话目录名（必需）：
+\begin{lstlisting}
+pt_shell> save_session my_session
+Saving environmental constraints.....
+Saving netlist information.....
+Saving miscellaneous application information.....
+Saving timing information.....
+Saving variable information.....
+Information: Executed with 4 workers
+Information: At least 6 MB of free disk space in pt_tmp_dir will be
+ required to restore this session. (SR-044)
+\end{lstlisting}
+
+若目录已存在，工具会发出信息消息并覆盖目录内容：
+\begin{lstlisting}
+pt_shell> save_session my_session
+Information: Cleaning and overwriting all data in the existing directory
+ '/remote/cae1180/chrispy/hist/my'. (SR-002)
+Saving environmental constraints.....
+...
+\end{lstlisting}
+
+\subsection{保存版本兼容会话}
+\subsubsection*{Saving Version-Compatible Sessions}
+
+默认情况下，\cmd{save\_session} 命令保存仅可恢复到相同工具版本的版本特定会话。
+
+不过，\opt{-version} 选项允许您保存版本特定（默认）、版本兼容或两者兼有：
+\begin{itemize}
+  \item \cmd{save\_session -version compatible}
+
+        保存可恢复到相同或更高版本 PrimeTime 工具的版本兼容会话。恢复会话后始终需要时序更新。
+  \item \cmd{save\_session -version specific}
+
+        保存版本特定会话。恢复会话时不需要时序更新。虽然这是默认行为，但该关键字提供显式指定默认的方式。
+  \item \cmd{save\_session -version both}
+
+        保存组合的版本兼容与版本特定会话。仅当恢复到不同版本时才需要时序更新。
+\end{itemize}
+
+要将已保存会话标识为版本兼容，工具会在会话目录内的 README 文件中包含以下说明：
+\begin{lstlisting}
+******** This session is saved in version compatible mode and
+         it can be restored in newer versions of PrimeTime ******
+\end{lstlisting}
+
+此会话格式无法存储时序更新后的内存数据；因此恢复会话后需要时序更新才能执行分析。恢复到较新版本工具时，这可能导致 QoR 出现轻微差异。
+
+同样，用于 ECO 修复的内存物理数据不会存储，将在运行 \cmd{check\_eco} 命令或 \cmd{fix\_eco\_*} 命令时重新加载。
+
+典型的版本兼容会话恢复方式如下：
+\begin{lstlisting}
+# restore the session
+restore_session session_name
+
+# (optional) apply any new settings not stored in the session
+set_app_var ...
+set_app_var ...
+
+# recompute timing
+update_timing
+
+# perform any additional analysis operations here (reporting, etc.)
+...
+\end{lstlisting}
+
+在 ECO 流程中，上述脚本继续如下：
+\begin{lstlisting}
+# (optional) apply any new settings not stored in the session
+set_eco_options ...
+
+# ensure everything is ready to go
+check_eco
+
+# perform ECO fixing
+fix_eco_*
+
+# perform any additional ECO operations here
+\end{lstlisting}
+
+\subsection{在保存的会话中包含 ECO 物理数据}
+\subsubsection*{Including ECO Physical Data in Saved Sessions}
+
+在物理感知 ECO 流程中保存版本兼容会话时，可使用 \opt{-include} 选项的 \texttt{physical\_data} 关键字包含物理数据文件的副本：
+\begin{lstlisting}
+pt_shell> save_session my_session \
+            -version compatible \
+            -include {physical_data}
+\end{lstlisting}
+
+如「物理感知 ECO」（Physically Aware ECO）所述，物理数据文件由 \cmd{set\_eco\_options} 命令配置。这包括：
+\begin{itemize}
+  \item LEF 工艺与单元定义文件
+  \item DEF 设计数据文件
+  \item 物理库约束与规则
+  \item Via ladder 定义与关联
+\end{itemize}
+
+使用此功能在保存的会话文件中包含物理数据时，ECO 物理数据目录会被复制到已保存的会话目录中。（默认情况下，仍存储 ECO 配置数据，但其指向会话目录外的文件。）
+
+\begin{noteBox}
+通过 \cmd{set\_eco\_option -physical\_icc2\_lib} 选项指定的 IC Compiler II 参考库不会复制到会话目录。其原始位置存储在 \texttt{session\_dir/eco\_config} 文件中。如有需要，可在恢复会话前编辑这些路径。
+\end{noteBox}
+
+此功能仅支持版本兼容会话。
+
+\subsection{恢复会话}
+\subsubsection*{Restoring Sessions}
+
+\cmd{restore\_session} 命令读取由 \cmd{save\_session} 命令写入的目录，将 PrimeTime 会话恢复到发出 \cmd{save\_session} 命令时会话的状态。
+
+默认情况下，PrimeTime 要求恢复到与原始会话相同的 PrimeTime 版本。从会话目录中的 README 文件可找到用于保存会话的版本。
+
+若使用「保存版本兼容会话」所述功能，则会话可恢复到相同或更高版本的 PrimeTime。此时，恢复会话时工具会报告原始工具版本：
+\begin{lstlisting}
+pt_shell> restore_session my_vc_session
+...
+Information: Restoring the version compatible session saved with version
+'Q-2019.12-SP4'. (SR-048)
+\end{lstlisting}
+
+若内存中已有设计或库数据，会在恢复会话之前将其移除。
+
+该命令首先尝试获取 \cmd{save\_session} 命令发出时存在的所有许可证。若失败，则恢复会话失败。
+
+恢复目录包含名为 \texttt{lib\_map} 的 ASCII 文件。该文件包含恢复会话所需的每个逻辑库的路径与叶名称。如有必要，可编辑路径名，为 \cmd{restore\_session} 命令提供所需逻辑库文件的更新位置。这些文件的叶名称不能更改。假定逻辑库与发出 \cmd{save\_session} 命令时使用的相同。
+
+\subsection{恢复版本兼容会话}
+\subsubsection*{Restoring Version-Compatible Sessions}
+
+PrimeTime 在会话中保存两类设置：
+\begin{itemize}
+  \item 应用变量（application variables）——由 \cmd{report\_app\_var} 命令报告的默认与用户指定设置
+  \item 程序选项（program options）——影响分析且有时在不同版本间会变化的内部程序设置，但不由 \cmd{report\_app\_var} 命令报告
+\end{itemize}
+
+将版本兼容会话恢复到不同版本时，\cmd{restore\_session} 命令允许您控制内部程序选项的处理方式：
+\begin{itemize}
+  \item \cmd{restore\_session -program\_options save\_version}
+
+        此设置使用已保存会话中存储的程序选项，有助于新版本中的分析与原始会话匹配。这是默认行为。
+  \item \cmd{restore\_session -program\_options restore\_version}
+
+        此选项使用当前（恢复）版本的程序选项默认值，允许使用当前版本中的更新程序选项。
+\end{itemize}
+
+% ============================================================
+\section{创建测试用例}
+\subsection*{Creating Test Cases}
+
+在某些情况下，您可能希望将部分设计逻辑提取为可独立运行的测试用例。例如，您可能希望试验设置或约束以观察分析如何受影响；或者需要将测试用例发送给 Synopsys 技术支持以作进一步调查。
+
+可使用 \cmd{create\_testcase} 命令完成此操作。它会创建一个目录，其中包含指定部分的设计、适用于该部分的约束文件、所使用的详细寄生参数，以及测试用例的运行脚本。
+
+\cmd{create\_testcase} 命令的语法如下：
+\begin{lstlisting}
+Usage:
+ create_testcase       # Create a testcase for specified design objects
+   [-paths list]           (create testcase for the given paths)
+   [-ports list]           (create testcase for the given ports)
+   [-endpoints list]       (create testcase for the given endpoints)
+   [-cells list]           (create testcase for the given cells)
+   [-directory string]     (Output directory name)
+   [-include_libs]         (Include libraries)
+   [-mim]                  (Include multi-instance modules)
+\end{lstlisting}
+
+以下各节说明这些选项。
+
+\subsection{控制保留哪些设计逻辑}
+\subsubsection*{Controlling What Design Logic to Keep}
+
+\cmd{create\_testcase} 命令仅保留您指定的设计逻辑。表~\ref{tab:create-testcase-keep} 列出指定保留内容的不同方式。
+
+\begin{longtable}{@{}p{0.16\textwidth} p{0.48\textwidth} p{0.24\textwidth}@{}}
+\caption{指定 \texttt{create\_testcase} 保留的设计逻辑}\label{tab:create-testcase-keep}\\
+\toprule
+选项名 & 保留的设计逻辑 & 是否包含到时序单元的时钟路径？ \\
+\midrule
+\endfirsthead
+\multicolumn{3}{c}{\tablename\ \thetable{}（续）}\\
+\toprule
+选项名 & 保留的设计逻辑 & 是否包含到时序单元的时钟路径？ \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\opt{-paths} \texttt{path\_collection} &
+时序路径上的所有单元，包括起点与终点 &
+是 \\
+\midrule
+\opt{-ports} \texttt{port\_list} &
+从输入端口扇出的逻辑，包括终点\\
+到输出端口扇入的逻辑，包括起点 &
+是 \\
+\midrule
+\opt{-endpoints} \texttt{pin\_port\_list} &
+到终点引脚/端口的扇入逻辑，包括起点 &
+是 \\
+\midrule
+\opt{-cells} \texttt{cell\_list} &
+指定的叶单元\\
+这些单元驱动的网络\\
+连接到被驱动网络的叶单元与端口 &
+否 \\
+\end{longtable}
+
+必须指定且只能指定一个设计逻辑选项（\opt{-paths}、\opt{-ports}、\opt{-endpoints} 或 \opt{-cells}）。不能组合多个选项。
+
+在 PrimeTime SI 分析中，会包含带有反标 aggressor 时序窗口的 aggressor 级。
+
+使用 \opt{-ports} 或 \opt{-endpoints} 选项时不需要已完成时序更新的设计。此时，aggressor 使用零输入引脚转换时间与无限窗口。这对于复现初始时序更新中的崩溃很有用。
+
+\subsection{包含逻辑库}
+\subsubsection*{Including the Logic Libraries}
+
+默认情况下，\cmd{create\_testcase} 命令创建的测试用例在其当前位置引用所需的逻辑库。这可避免为在当前设计环境中使用的测试用例占用不必要的磁盘空间。
+
+若测试用例必须在另一设计环境中运行，请指定 \opt{-include\_libs} 选项以将所需逻辑库复制到测试用例目录：
+\begin{lstlisting}
+pt_shell> create_testcase ... -include_libs
+\end{lstlisting}
+
+\subsection{指定输出目录}
+\subsubsection*{Specifying the Output Directory}
+
+默认情况下，测试用例创建在以当前设计命名的目录中：
+\begin{lstlisting}
+pt_shell> create_testcase ...
+...
+Testcase is generated in the TOP directory.
+1
+\end{lstlisting}
+
+要指定特定的测试用例输出目录，使用 \opt{-directory} 选项：
+\begin{lstlisting}
+pt_shell> create_testcase ... -directory ./my_testcase_FLAT
+...
+Testcase is generated in the my_testcase_FLAT directory.
+1
+\end{lstlisting}
+
+\subsection{创建多实例模块测试用例}
+\subsubsection*{Creating a Multiple-Instance Module Test Case}
+
+对于具有多实例模块（MIM）的设计，\cmd{create\_testcase} 命令提供一项功能，可在 MIM 实例之间并行保留相同逻辑。
+
+当保留到 MIM 块内终点的逻辑时，可指定 \opt{-mim} 选项以在该 MIM 块的所有实例中保留相同的终点扇入逻辑：
+\begin{lstlisting}
+pt_shell> create_testcase \
+           -endpoints $endpoint_in_one_MIM \
+           -mim
+\end{lstlisting}
+
+此功能要求必须使用 \opt{-endpoints} 选项。
+
+\subsection{限制}
+\subsubsection*{Limitations}
+
+\cmd{create\_testcase} 命令不支持以下工具功能：
+\begin{itemize}
+  \item HyperScale 数据（块模型或上下文数据）
+  \item SMVA/DVFS 分析
+\end{itemize}
+"""
+
+out = Path(__file__).resolve().parent.parent / "chapters" / "05_design_data.tex"
+out.write_text(text, encoding="utf-8")
+print(f"Wrote {out}")
+print(f"Size: {out.stat().st_size} bytes")
+
+import re
+cjk = len(re.findall(r"[\u4e00-\u9fff]", text))
+print(f"CJK characters: {cjk}")

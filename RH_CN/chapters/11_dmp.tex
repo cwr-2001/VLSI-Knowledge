@@ -1,0 +1,437 @@
+﻿% 第 11 章 分布式机器处理（原书 11-298 … 11-323）
+\bichapter{分布式机器处理}{Distributed Machine Processing}
+\label{chap:dmp}
+
+\section{引言}
+\subsection*{Introduction}
+
+RedHawk 分布式机器处理（DMP）通过将设计划分为多个分区并并行处理，相比平坦（flat）运行可显著降低内存占用并缩短运行时间。该技术特别适用于最初需要极高内存与很长运行时间的超大规模设计。DMP 默认将主要 RedHawk 引擎任务分布到多台并行机器，也可仅针对仿真阶段优化运行时间与内存。
+
+每个分区与其他分区通信并为设计其余部分创建缩减视图，从而保持精度。该技术利用多台计算资源实现性能与容量提升。主要特性包括：
+\begin{itemize}
+  \item 支持 LSF/SSH/SGE/RTDA 等网格类型
+  \item 典型整片运行可获得约 2$\sim$3 倍的运行时间改善与内存降低（取决于设计风格与机器数量）
+  \item 压降与 EM 结果与传统流程一致
+\end{itemize}
+
+DMP 在以下场景体现优势：
+\begin{itemize}
+  \item 实例数量大、节点数极高的设计
+  \item RedHawk 仿真性能成为瓶颈的设计
+\end{itemize}
+
+\figplaceholder{Figure 11-1}{DMP 方法学（步骤 1：分布式 Setup Design；步骤 2：分布式功耗计算与提取；步骤 3：分布式仿真；步骤 4：统一结果分析）}
+
+\section{DMP 流程}
+\subsection*{DMP Flow}
+
+启动时 DMP 将设计划分为若干分区，粒度可由用户指定。分区通过网络发送到不同工作机器处理，每台机器所需内存与运行时间仅为单机构建整片运行的一部分。
+
+\subsection{准备数据}
+\subsubsection*{Prepare Data}
+
+DMP 垂直划分设计并使用分布式计算并行处理。根据作业数设置，DMP 向负载均衡农场请求等量计算资源。负载均衡器提供资源后，DMP 取一台主机作为 master 进程，其余作为 worker 进程。直至「执行提取」的步骤属于准备数据阶段。
+
+\figplaceholder{Figure 11-2}{单 master 与 3 个 worker 的资源分配}
+
+\textbf{Master 机器：} master 进程监控 worker 进程，维护 GUI 并控制 worker 间同步。master 上的统一 GUI 显示所有分区结果，所有 GUI 与 Tcl 命令仅能通过 master 解析到 worker。分析完成后，各 worker 结果拼接后出现在 master 的 \texttt{adsRpt} 目录。master 内存消耗通常远小于 worker。
+
+\textbf{Worker 机器：} 每个 worker 处理各自区域的 Import DB、Setup DB、PowerStream 与 Extraction。各输入文件的读取行为如下：
+
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabular}{ll}
+\toprule
+\textbf{输入} & \textbf{读取行为} \\
+\midrule
+LEF & 所有分区读取全部 LEF \\
+LIB & 所有分区读取全部 LIB \\
+DEF & \texttt{FAST\_DEF\_READ <num>}：每分区每次读 \texttt{<num>} 个 DEF（默认 4）；\\
+    & \texttt{FAST\_DEF\_READ 0}：所有分区读全部 DEF（多线程） \\
+Pkg/Ploc & 所有分区读取完整 pkg/ploc \\
+STA & 默认并行：每分区读取 STA 的一部分 \\
+SPEF & 每分区读取各自的 SPEF \\
+APL & 每分区读取全部 APL 文件 \\
+VCD & 每分区读取各自的 VCD \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+每个分区在运行区有各自的 \texttt{adsRpt} 目录——\texttt{adsRpt.1}、\texttt{adsRpt.2} 等，最终拼接后可在 master \texttt{adsRpt} 目录获得。
+
+\subsection{缩减}
+\subsubsection*{Reduction}
+
+各分区数据准备完成后，worker 进入缩减阶段：设计划分为更小块，为每小块创建缩减模型（仅用于仿真）。仿真时读取这些缩减模型。
+
+\figplaceholder{Figure 11-3}{缩减阶段}
+
+\subsection{仿真}
+\subsubsection*{Simulation}
+
+缩减作业完成后，缩减块发送到各 worker 以形成对应的整片表示。每个 worker 的整片表示由未缩减区域（来自自身提取）与缩减区域（来自其他 worker）组成。各 worker 随后仿真各自的整片表示。
+
+\section{支持的设计与特性}
+\subsection*{Supported Design and Features}
+
+\begin{itemize}
+  \item 静态与动态：Gridcheck/res\_calc/SPT、无向量 IR/DvD、全局翻转率、\texttt{BLOCK\_POWER\_FOR\_SCALING}、\texttt{BLOCK\_TOGGLE\_RATE}、状态传播、无向量 Scan、整片、块 RTL/Gate VCD（事件与状态传播）、真混合模式（Gate+RTL VCD+无向量）、EM（电源与信号）
+  \item 封装：WBS、Spice 模型、CPA、S 参数封装
+  \item FAO：Missing Via 检查
+  \item CPM、CTM、SAIF 输入、MBFF 支持
+  \item CMM（Raw Model）、基于 pin 的 MMX BPA from CMM、Explorer
+\end{itemize}
+
+\section{第三方分布式系统}
+\subsection*{Third Party Distributed Systems}
+
+DMP 支持第三方分布式系统，提供负载均衡能力，避免单机资源耗尽导致结果不完整。可安装 LSF/SGE/RTDA 之一以启用 DMP；若无分布式系统，可通过 SSH 免密访问在网络间运行 DMP。
+
+\subsection{IBM Platform LSF}
+需要 LSF 7.0 及以上。此外须在 LSF 中安装以下脚本/二进制并具有执行权限：\texttt{mpirun.lsf}、\texttt{openmpi\_wrapper}、\texttt{Pam}。
+
+示例配置文件：
+\begin{lstlisting}
+NUMBER_OF_JOBS 16
+GRID_TYPE LSF
+QUEUE_NAME dmp_queue
+SEQUENTIAL_LAUNCH True
+ARGUMENTS_FOR_LARGE_JOBS "-q dmp_queue -R \"rusage[mem=130000]\""
+\end{lstlisting}
+
+\begin{itemize}
+  \item 可用 \texttt{ARGUMENTS\_FOR\_LARGE\_JOBS} 指定队列相关设置（内存预留、队列名、作业名、密码等）。
+  \item 可用 \texttt{ARGUMENTS\_FOR\_MASTER\_JOB} 为 master 指定预留大小、队列名等。
+  \item 默认每台 worker 选择唯一机器。在 \texttt{ARGUMENTS\_FOR\_LARGE\_JOBS} 中使用 \texttt{-R "span[ptile=<num>]"} 控制每台机器上的分区数（DMP 默认 =1）。
+  \item LSF 输出与错误保存在 \texttt{.dmp/lsf.out} 与 \texttt{.dmp/lsf.err}。
+\end{itemize}
+
+\subsubsection{LSF 中的 SEQUENTIAL\_LAUNCH}
+\texttt{SEQUENTIAL\_LAUNCH} 帮助控制 LSF 上的作业预留与内存限制。
+
+\texttt{SEQUENTIAL\_LAUNCH 0/False}：在 LSF 上启动单个作业，为 4 个进程预留唯一机器；依 LSF 设置，作业内存预留可能为 4 个进程的累计；\texttt{ptile} 影响预留（所有作业关联）。
+
+\texttt{SEQUENTIAL\_LAUNCH 1/True}（默认）：启动 4 个独立作业，每进程一个；内存按作业预留；\texttt{ptile} 无效，作业纯粹依 LSF 对空闲内存的判断启动，内存足够时多台作业可落在同一机器。
+
+\subsection{Oracle Grid Engine（原 Sun Grid Engine）}
+需要 Sun Grid Engine 6.2 update 5 及以上。还须定义并行环境（PE）以提交 RedHawk 并行作业，需 Grid Engine 管理员权限。定义名为 \texttt{rh\_pe} 的 PE 示例：
+\begin{lstlisting}
+% qconf -ap rh_pe
+pe_name                        rh_pe
+slots                          99999
+allocation_rule                $round_robin
+control_slaves                 TRUE
+...
+\end{lstlisting}
+然后将 PE 配置 \texttt{rh\_pe} 加入队列的 \texttt{pe\_list}（\texttt{qconf -mq all.q}）。
+
+可用 \texttt{qconf -sp rh\_pe} 检查 PE。SGE 示例 \texttt{dmp.cfg}：
+\begin{lstlisting}
+GRID_TYPE SGE <PE_name>
+NUMBER_OF_JOBS 4
+QUEUE_NAME large
+ARGUMENTS_FOR_LARGE_JOBS -l mfree=100G
+\end{lstlisting}
+
+\begin{itemize}
+  \item \texttt{PE\_name} 为并行环境名。若使用 \texttt{SEQUENTIAL\_LAUNCH true}（18.0 起默认），无需显式指定 PE 名；若为 false，则 PE 名必填。
+  \item 机器从 SGE 队列按可用内存选取。
+  \item \texttt{-l mfree=xG} 为作业预留 x\,GB 内存。
+\end{itemize}
+
+\subsection{RTDA NetworkComputer}
+需要 RTDA NC 2013.03 及以上及 RedHawk 补丁。检查 \texttt{<nc\_installation>/common/eda/Ansys/redhawk/nc\_redhawk} 是否可用；IT 须添加 RedHawk 环境，检查 \texttt{<nc\_installation>/common/local/environments/REDHAWK.start.csh} 是否存在。
+
+\section{常用分布式系统命令}
+\subsection*{Useful Distribution System Commands}
+
+\textbf{IBM Platform LSF：}\texttt{bsub}（提交作业）、\texttt{bkill}（终止）、\texttt{bjobs}（查看运行作业）、\texttt{bhosts}（主机可用性）、\texttt{bqueues}（队列信息）。
+
+\textbf{Oracle Grid Engine：}\texttt{qsub}、\texttt{qdel}、\texttt{qstat}、\texttt{qhost}、\texttt{qconf}、\texttt{qmon}（GUI）。
+
+\textbf{RTDA NetworkComputer：}\texttt{nc run}、\texttt{nc stop}、\texttt{nc forget}、\texttt{nc list}、\texttt{nc gui}、\texttt{nc mon}。
+
+\section{DMP 自定义启动器}
+\subsection*{DMP Custom Launcher}
+
+部分网格（如 UGE）在各账户有定制，标准 SGE 启动器可能不适用。DMP 可读取围绕客户网格构建的自定义启动器。
+
+\begin{lstlisting}
+NUMBER_OF_JOBS <num>
+GRID_TYPE CUSTOM
+CUSTOM_SCRIPT <path_to_script>
+<other arguments like ARGUMENTS_FOR_LARGE_JOBS>
+\end{lstlisting}
+
+所有 MPI 启动命令须在脚本内。\texttt{redhawk.dmp} 仅 source 该脚本并期望启动 \texttt{redhawk.exe}。请参考 \texttt{\$APACHEROOT/bin/redhawk.dmp}。
+
+\section{SSH 免密访问}
+\subsection*{SSH Password-Less Access}
+
+DMP 可不借助第三方分布式系统运行，适合安全私有网络测试，但负载均衡由用户负责，须谨慎规划计算资源。
+
+在此流程中，用户须对指定机器获得 SSH 免密访问。典型步骤：
+\begin{enumerate}
+  \item 在 master 机器上生成 SSH 密钥对：\texttt{ssh-keygen -t rsa}
+  \item 将公钥复制到各 worker：\texttt{ssh-copy-id user@worker\_host}
+  \item 在 \texttt{CANDIDATE\_HOST\_LIST} 中列出所有主机（首台为 master）
+  \item 用 \texttt{ssh user@worker\_host} 验证无需密码即可登录
+\end{enumerate}
+
+\section{运行 DMP}
+\subsection*{Running DMP}
+
+RedHawk DMP 提供无缝接口，通过配置文件启动带分布式系统的 RedHawk：
+\begin{lstlisting}
+redhawk -lmwait -dmp <dmp_config_file> run.tcl
+\end{lstlisting}
+其中 \texttt{<dmp\_config\_file>} 为 DMP 配置文件，提供分区数、网格类型、启动约束等信息。
+
+示例 DMP 配置：
+\begin{lstlisting}
+NUMBER_OF_JOBS 16
+GRID_TYPE LSF/SSH/RTDA/SGE
+QUEUE_NAME dmp_queue
+ARGUMENTS_FOR_LARGE_JOBS " -q dmp_queue -R \"rusage[mem=130000]\""
+ARGUMENTS_FOR_SMALL_JOBS " -q dmp_queue -R \"rusage[mem=130]\""
+ARGUMENTS_FOR_MASTER_JOB " -q dmp_queue -R \"rusage[mem=1300]\""
+\end{lstlisting}
+
+DMP-EM 分析中可用 \texttt{-semnetfilter} 启用信号网过滤：
+\begin{lstlisting}
+redhawk -dmp <cfg> -semnetfilter
+\end{lstlisting}
+
+\section{DMP 配置文件关键字}
+\subsection*{DMP Configuration File Keywords}
+
+\subsection{NUMBER\_OF\_JOBS}
+指定运行设计所需作业总数，包括全部分区数加一个 Master。默认：4。
+
+\begin{noteBox}
+8 个分区时，数值须为 8（分区）+ 1（master）= 9，即 \texttt{NUMBER\_OF\_JOBS 9}。
+\end{noteBox}
+
+\subsection{GRID\_TYPE}
+指定分布式系统。SGE 时在 \texttt{SEQUENTIAL\_LAUNCH} 为 false 须指定并行环境名。可选，默认 LSF。
+\begin{lstlisting}
+GRID_TYPE [LSF|RTDA|SGE] <parallel environment>
+\end{lstlisting}
+
+\subsection{QUEUE\_NAME}
+定义运行队列名，也可在 \texttt{ARGUMENTS\_FOR\_SMALL/LARGE\_JOBS} 中定义。可选，默认 None。
+
+\subsection{CANDIDATE\_HOST\_LIST}
+指定启动作业的机器列表，适用于 LSF/SSH。SSH 时必填。列表机器数小于 \texttt{NUMBER\_OF\_JOBS} 时，列表中机器将复用于额外分区。列表第一台为 master。
+
+SSH 示例（2 个并行作业在 worker\_1）：
+\begin{lstlisting}
+GRID_TYPE SSH
+NUMBER_OF_JOBS 4
+CANDIDATE_HOST_LIST {
+    master
+    worker_1
+    worker_1
+    worker_2
+}
+\end{lstlisting}
+
+\subsection{ARGUMENTS\_FOR\_LARGE\_JOBS}
+指定分布式系统的附加选项。LSF 示例（选内存 $>$100\,g 的机器）：
+\begin{lstlisting}
+NUMBER_OF_JOBS 4
+ARGUMENTS_FOR_LARGE_JOBS -R rusage[mem=100000]
+\end{lstlisting}
+SGE 示例：
+\begin{lstlisting}
+GRID_TYPE SGE rh_pe
+NUMBER_OF_JOBS 4
+QUEUE_NAME large
+ARGUMENTS_FOR_LARGE_JOBS -l mem_free=100G
+\end{lstlisting}
+
+\begin{noteBox}
+\texttt{mem\_free} 仅确认有 100\,G 空闲内存，并不预留。要预留指定内存，使用 \texttt{mfree} 选项。
+\end{noteBox}
+
+\subsection{ARGUMENTS\_FOR\_SMALL\_JOBS}
+指定将缩减作业派发到另一队列或资源的选项。未指定时，依 \texttt{ARGUMENTS\_FOR\_LARGE\_JOBS} 在现有机器上启动。示例：大作业队列与小作业队列分离。
+
+\subsection{ARGUMENTS\_FOR\_MASTER\_JOB}
+为 master 作业定义不同队列（内存需求较小），主要用于 LSF/SGE/RTDA。
+
+\subsection{ARGUMENTS\_FOR\_GSIM\_JOBS}
+为 gsim 作业在 worker 以外资源上启动并指定不同内存使用。
+
+\subsection{ARGUMENTS\_FOR\_RH\_JOBS}
+为各分区指定不同预留条件，覆盖 \texttt{ARGUMENTS\_FOR\_LARGE\_JOBS} 与 \texttt{ARGUMENTS\_FOR\_MASTER\_JOB}。分区号用 \texttt{-rh\_dmp\_job\_id} 指定（0=Master，1=worker1，…）。首行可为默认参数；未列出分区使用默认值。
+
+\subsection{WORKING\_DIR\_LIST / WORKING\_DIR\_NAME}
+\texttt{WORKING\_DIR\_LIST} 指定文件，列出各机器本地工作目录（存放仿真文件），可改善速度或在运行区磁盘不足时使用。通配符 \texttt{*} 为默认工作目录。\texttt{WORKING\_DIR\_NAME} 指定目录名，默认 \texttt{<user\_name>.nwopt*}。
+
+\subsection{GLOBAL\_DIR\_LIST / GLOBAL\_DIR\_NAME}
+指定保存各分区全部 \texttt{.apache} 文件的目录列表（运行区空间不足时使用）。
+
+\subsection{CONFIG\_LOCAL\_DIR\_AS\_RH\_MM\_CACHE}
+设为 1 时，worker 的 \texttt{.MM} 目录创建在 \texttt{working\_dir/<username>\_nwopt*} 内。使用 \texttt{WORKING\_DIR\_LIST} 时默认 ON。
+
+\subsection{SEQUENTIAL\_LAUNCH}
+设为 TRUE 时为每个 worker 选取唯一机器，更快获得机器。LSF 与 SGE 默认 TRUE。
+
+\subsection{HEARTBEAT\_CONFIG}
+调用不同的 DMP 作业监控与终止算法。默认用 MPI 与现有 Grid 监控；网格负载过高或不稳定时可使用此算法。某 worker 在指定时间内无响应则终止所有作业。可选，默认 60 秒。
+
+\subsection{DMP\_ASIM\_RESTART}
+设为 1 时，\texttt{network\_opt} 可从仿真阶段对失败 worker 重新触发独立运行。默认 0。失败分区详情与签名文件名报告在 \texttt{adsRpt.*/nwopt\_apache\_dynamic.log}。用户可 \texttt{touch <run\_dir>/rerun\_asim3d\_<date>} 从仿真重跑，或 \texttt{touch <run\_dir>/abort\_asim3d\_<date>} 中止。此特性比常规仿真需要更多磁盘空间。
+
+\subsection{MCA\_BTL\_TCP\_IF\_EXCLUDE}
+指定 master-worker 通信须排除的网络接口。
+
+\subsection{RTDA\_DPWAIT}
+定义 RTDA 作业队列超时。默认 15m。
+
+\subsection{RED\_L\_MODE}
+修改缩减过程中电感处理：0=改进低频匹配法；1=原方法。
+
+\subsection{RED\_MIN\_AVG\_SAFE\_GUARD}
+设为 1 时，在 \texttt{DMP\_SIM\_ERRCTRL} 已设前提下，以增加 guard-region 方式使最窄分区的 guard-region 距离与所有分区等宽时相同，从而加宽相对较窄分区的 guard-region。
+
+\section{DMP GSR 关键字}
+\subsection*{DMP GSR Keywords}
+
+详见附录 C「DMP Keywords」（原书 C-720 页）。
+
+\section{报告生成}
+\subsection*{Report Generation}
+
+生成功耗报告（\texttt{power\_summary.rpt} 与 \texttt{<design>.power.rpt}）：
+\begin{lstlisting}
+report power -all ?-dmp_merge?
+\end{lstlisting}
+\texttt{-dmp\_merge} 为可选开关，生成 \texttt{adsPower/*power}。
+
+当 GSR 使用 \texttt{REPORT REDUCTION max} 时，默认不生成逐实例 DvD 报告。可用：
+\begin{lstlisting}
+report dvd -instance ?-o <output_file>? ?-limit <number>?
+\end{lstlisting}
+
+\texttt{*.inst}、\texttt{*.inst.arc}、\texttt{*.inst.pin}、\texttt{layer\_drop.rpt}、\texttt{*power.unused}、\texttt{ir.out}、\texttt{via.ir} 等可按需通过以下命令在 \texttt{adsRpt/} 或 \texttt{.apache/} 生成：
+\begin{lstlisting}
+dmp_collect_result -static ?-inst ?-instPin ?-instArc ?-layerDrop ?-unusedPower ?-irOut ?-viaIR ?-all
+dmp_collect_result -dynamic ?-layerDrop ?-unusedPower ?-irOut ?-viaIR ?-all
+\end{lstlisting}
+
+\subsection{日志文件}
+完整高级 DMP 日志为 \texttt{adsRpt/nwopt\_apache.log}，记录运行统计与错误（含缩减、仿真与后处理数据收集）。
+
+DMP 根据分析类型创建：\texttt{nwopt\_apache.static}（静态）、\texttt{nwopt\_apache.dynamic}（动态），内含 \texttt{nwopt.log}（缩减与仿真的运行时间与内存详情）。
+
+\subsection{合并的 redhawk.log}
+Master 日志按段拼接各 worker 的 \texttt{redhawk.log}。可用 \texttt{\$APACHEROOT/bin/dafconvert} 剥离 worker 内容恢复 master 原日志：
+\begin{lstlisting}
+dafconvert d
+# 或
+dafconvert d -i <combined.log> -o <reduced.log>
+\end{lstlisting}
+
+\subsection{重要文件}
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabular}{ll}
+\toprule
+\textbf{文件/目录} & \textbf{说明} \\
+\midrule
+\texttt{.run.<lsf|sge|rtda>} & DMP 启动命令 \\
+\texttt{.apache*/dmp.partition} & DMP 分区位置 \\
+\texttt{./adsRpt/nwopt\_apache*.log} & DMP 仿真日志 \\
+\texttt{.apache/.debug.<lsf|sge|rtda>} & 调度器输出 \\
+\texttt{./nwopt\_apache*/apache.nwoptRunInfo} & 整体运行状态 \\
+\texttt{./nwopt\_apache*/apache.nwoptTmpFileInfo\_*} & 远程机器磁盘空间跟踪 \\
+\texttt{./.nwopt\_apache*/apache.sim\_cmd} & 仅重跑 DMP 仿真的命令 \\
+\texttt{./nwopt\_apache*/p\_*/*done} & 缩减状态 \\
+\texttt{./nwopt\_apache*/sp\_*/*done} & 仿真状态 \\
+\texttt{./nwopt\_apache*/sp\_*/.log} & 仿真日志 \\
+\texttt{./nwopt\_apache*/sp\_*/.debug*} & 仿真调试信息 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{导出/导入 DB}
+\subsection*{Export/Import DB}
+
+DMP 中可在任意阶段像平坦运行一样调用「Export db」保存数据库。导入 DB 须使用与导出时相同数量的机器。DB 目录保存了 DMP 配置文件，导入时可复用。支持通过 GUI（\texttt{redhawk -dmp <config file>} 启动空 GUI）或 Tcl 文件导入。
+
+\subsection{导入 DB 单许可证（-view\_only 模式）}
+无论分区数多少，仅检出单个许可证即可导入 DMP 保存的 DB。启动时设置 \texttt{-view\_only}：
+\begin{lstlisting}
+redhawk -view_only -dmp <config> <args>
+\end{lstlisting}
+此模式下可：导入 DB、查看结果、查看热图与曲线、用 TCL 查询设计、启动已有 Explorer DB（不能启动新 Explorer 会话）。
+
+\section{DMPstat——DMP 监控工具}
+\subsection*{DMPstat- DMP Monitoring Utility}
+
+\texttt{dmpstat} 对 DMP 运行进行实时监控、跟踪与调试。运行中可能因机器、网络、配置等因素出现问题，需要持续监控。
+
+\texttt{dmpstat} 将信息分为：
+\begin{enumerate}
+  \item \textbf{Live Tracker}：各分区当前命令、内存与磁盘占用、CPU、持续时间、各子进程内存等。
+  \item \textbf{Performance}：各阶段运行时间（Wall/CPU）分解及内存、节点数、实例数等。
+  \item \textbf{Log Viewer}：各分区日志，可生成合并日志。
+  \item \textbf{Partition Diagram}：设计版图快照并高亮分区边界。
+\end{enumerate}
+
+启动方式：
+\begin{itemize}
+  \item 启动 RedHawk 时：\texttt{redhawk -dmp <config> -f <tcl\_file> -dmpstat}
+  \item 运行中或运行后从运行区：\texttt{<path\_to\_redhawk>/bin/dmpstat}
+  \item 任意目录：\texttt{<path\_to\_redhawk>/bin/dmpstat <path\_to\_runarea>}
+\end{itemize}
+
+从运行区 \texttt{.dmp} 与 \texttt{.apache*} 目录读取信息；可导出 DB 供后续参考。默认每 60 秒更新运行时间、内存、磁盘等数据。\texttt{dmpstat -kill} 可终止工作目录中所有 RedHawk DMP 运行。
+
+\section{使用 dmpstat 监控与调试}
+\subsection*{Monitoring and Debugging Using dmpstat}
+
+\subsection{Live Tracker——各分区内存、磁盘与进程跟踪}
+\textbf{Command 窗口}：实时列出正在执行的命令，用于检查当前阶段。\textbf{Memory 窗口}：实时跟踪各分区已用与可用内存，可缩放、统一刻度，含 Cache 内存跟踪；标签指示是否因 OOM 失败。\textbf{Disk 窗口}：跟踪各分区所用驱动器可用磁盘，含 \texttt{CACHE\_DIR} 与 \texttt{WORKING\_DIR\_LIST}。\textbf{Process 窗口}：列出 master 与各 worker 启动的子进程及起止时间、持续时间、峰值内存等。
+
+\figplaceholder{Figure 11-4}{Command 窗口}
+\figplaceholder{Figure 11-5}{Memory 窗口}
+\figplaceholder{Figure 11-6}{Memory 标签附加选项}
+\figplaceholder{Figure 11-7}{Disk 窗口}
+\figplaceholder{Figure 11-8}{Process 窗口}
+
+\subsection{Performance 窗口}
+报告各分区阶段级 Wall 时间、内存、节点数等分解；提供图形与表格视图。Wall Time、Memory（选 RES 查看实际 RAM）、Design Object Numbers（可汇总各分区节点数）、Load Avg、Machines（OS 版本、线程数、CPU 类型等）。
+
+\figplaceholder{Figure 11-9}{Wall 时间图形与表格视图}
+\figplaceholder{Figure 11-10}{内存使用图形与表格视图}
+\figplaceholder{Figure 11-11}{设计对象数量表格视图}
+\figplaceholder{Figure 11-12}{Machines 窗口}
+
+\begin{noteBox}
+「Help」按钮提供各视图更多信息；右键显示各视图的附加选项。
+\end{noteBox}
+
+\subsection{File 菜单}
+\textbf{DMP Check}：开/关作业状态监控；\texttt{dmpstat} 自动检测作业存活或完成（较新功能，某些情况可能失败），也可手动设置。设为 alive 可启用对挂起或无响应作业的自动检测。
+
+\textbf{DMP Abort}：终止 DMP 作业，发送网格特定 kill 命令。对无响应网格或 SSH，可选「Let RedHawk DMP terminate itself during its heartbeat cycle」，在下次分区 check-in 时强制终止。
+
+\textbf{Save}：将 \texttt{dmpstat} 会话保存到目录供后续参考，打包 \texttt{redhawk.log}、\texttt{.nx.log}、\texttt{.statistic} 等文件，可收集各 worker \texttt{redhawk\_main} 进程的 pstack 输出。
+
+\section{Heartbeat 监控}
+\subsection*{Heartbeat Monitoring}
+
+工具每 60 秒查询所有进程状态；任一进程死亡则其余自动退出。启用步骤：
+\begin{enumerate}
+  \item 创建配置文件（如 \texttt{heartbeat.cfg}）：\texttt{timeout <value\_in\_seconds>}，例：\texttt{timeout 60}
+  \item 启动 RedHawk：
+\begin{lstlisting}
+redhawk -heartbeat <heartbeat_config_file> -dmp <conf_file>
+\end{lstlisting}
+  \texttt{-heartbeat} 控制 worker ping 与自动 kill（默认 OFF）。若指定 \texttt{-heartbeat <config>} 但配置未定义 timeout，默认 60 秒。
+\end{enumerate}

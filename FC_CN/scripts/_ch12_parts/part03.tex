@@ -1,0 +1,513 @@
+% ============================================================
+\section{缺失 Via 与未连接 Pin 检查}
+\subsection*{Missing Via and Unconnected Pin Checking}
+
+\begin{noteBox}
+缺失 via 与未连接 pin 检查在 RedHawk Fusion 与 RedHawk-SC Fusion 分析流程中均受支持。
+\end{noteBox}
+
+在检查缺失 via 与未连接 pin 之前，确保已按「为轨分析准备设计与输入数据」具备所需输入文件。
+
+可在压降分析期间或单独运行中检查 block 内的缺失 via 或未连接 pin。例如，可在完成电源结构之后、运行 \cmd{place\_opt} 之前执行检查，以便在轨分析前发现电源网络错误。
+
+默认情况下，RedHawk/RedHawk-SC Fusion 检测下列类型的电源网络错误：
+\begin{itemize}
+  \item \textbf{未连接 pin 形状}：未与理想电压源连续物理连接的 pin 形状。
+  \item \textbf{缺失 via}：若两个重叠金属形状在其重叠区域内不含 via，则视为潜在缺失 via 错误。
+\end{itemize}
+
+要检查并修复缺失 via 或未连接 pin：
+\begin{enumerate}
+  \item 使用 \cmd{set\_missing\_via\_check\_options} 定义配置选项，见「设置检查选项」。
+  \item 使用 \cmd{save\_block} 保存 block。
+  \item 使用 \cmd{analyze\_rail} \opt{-check\_missing\_via} 执行检查，见「检查缺失 Via 与未连接 Pin」。在 RedHawk-SC Fusion 流程中，必须将 \opt{-check\_missing\_via} 与 \opt{-voltage\_drop} 一起指定。
+  \item 通过在错误浏览器中打开生成的错误文件，或将检查结果写出到输出文件，检查结果见「查看错误数据」与「写出分析与检查报告」。
+  \item 插入 PG via 以修复报告的缺失 via，见「修复缺失 Via」。
+\end{enumerate}
+
+\subsection{设置检查选项}
+\subsubsection*{Setting Checking Options}
+
+在检查设计中的缺失 via 或未连接 pin 之前，使用 \cmd{set\_missing\_via\_check\_options} 指定必要选项。
+
+要检查或移除选项设置，分别使用 \cmd{report\_missing\_via\_check\_options} 或 \cmd{remove\_missing\_via\_check\_options}。
+
+表~\ref{tab:missing-via-opts} 列出 \cmd{set\_missing\_via\_check\_options} 的常用选项。各选项详细说明见 man page。
+
+\begin{table}[htbp]
+\centering
+\caption{\texttt{set\_missing\_via\_check\_options} 常用选项（原书 Table 68）}
+\label{tab:missing-via-opts}
+\small
+\begin{tabularx}{\textwidth}{@{}l X@{}}
+\toprule
+\textbf{选项} & \textbf{说明} \\
+\midrule
+\opt{-redhawk\_script\_file} & 使用已有 RedHawk 脚本文件进行缺失 via 检查。 \\
+\opt{-exclude\_stack\_via} & 从缺失 via 检查中排除堆叠 via。默认在分析中包含堆叠 via。 \\
+\opt{-check\_valid\_vias} & 报告金属重叠是否能容纳有效 via 模型。 \\
+\opt{-exclude\_cell} / \opt{-exclude\_instance} & 排除指定单元的所有实例所覆盖区域，或排除单元实例列表。默认在全芯片级执行检查。 \\
+\opt{-exclude\_regions} & 指定要从缺失 via 检查中排除的矩形区域。 \\
+\opt{-sort\_by\_hot\_inst} & 按压降值对缺失 via 排序。默认按所定义层之间的平均 delta 电压排序。 \\
+\opt{-threshold} & 设置触发缺失 via 检查的电压阈值。设为 \texttt{-1} 禁用电压检查过滤。默认为 1~V。仅在压降分析期间运行检查时有效。 \\
+\opt{-min\_width} & 忽略小于指定宽度的线段。 \\
+\opt{-pitch} & 指定平行线跨越或触及 GDSII block 时缺失 via 的 pitch。 \\
+\opt{-gds} & 标记位于 GDSII block 区域内以及跨越 GDSII block 的布线中的缺失 via。默认忽略位于或重叠已由 GDS2DEF 或 GDSMMX 实用程序处理的 block 的项。 \\
+\opt{-ignore\_inter\_met}、\opt{-toplayer}、\opt{-bottomlayer} & 忽略指定顶层与底层之间所有层上的导线。 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{检查缺失 Via 与未连接 Pin}
+\subsubsection*{Checking Missing Vias and Unconnected Pins}
+
+使用 \cmd{analyze\_rail} \opt{-check\_missing\_via}，根据 \cmd{set\_missing\_via\_check\_options} 指定的设置检查 block 中的缺失 via 与未连接 pin。
+
+若希望与压降分析一起运行缺失 via 与未连接 pin 检查，使用 \opt{-voltage\_drop}。工具随后在缺失 via 报告中报告几何中找到的所有缺失 via 及其电压值。要设置跨层电压阈值以过滤报告，使用 \cmd{set\_missing\_via\_check\_options} 的 \opt{-threshold}。可在一次缺失 via 检查中设置多个阈值。
+
+\begin{noteBox}
+在 RedHawk-SC Fusion 流程中，必须将 \opt{-check\_missing\_via} 与 \opt{-voltage\_drop} 一起指定。
+\end{noteBox}
+
+若要在一次 \cmd{analyze\_rail} 运行中同时报告带与不带电压阈值的缺失 via，先设置期望阈值（例如 0.001），再将值重置为 \texttt{-1}。将 \opt{-threshold} 设为 \texttt{-1} 禁用电压检查。
+
+缺失 via 检查完成后，打开生成的错误数据以在错误浏览器中检查错误。详见「查看错误数据」。
+
+\textbf{示例 48}
+\begin{lstlisting}
+fc_shell> set_missing_via_check_options -exclude_stack_via \
+   -threshold 0.0001
+fc_shell> analyze_rail -voltage_drop static -check_missing_via \
+   -nets {VDD VSS}
+\end{lstlisting}
+上例将阈值设为 0.0001，并比较 via 两端电压（排除堆叠 via），然后在静态轨分析期间运行缺失 via 检查。
+
+RedHawk 脚本文件包含：
+\begin{lstlisting}
+perform extraction -power -ground
+perform analysis -static
+mesh vias -report_missing -exclude_stack_via -threshold 0.0001 \
+  -o apache.missingVias1
+\end{lstlisting}
+
+\textbf{示例 49}
+\begin{lstlisting}
+fc_shell> set_missing_via_check_options -exclude_stack_via \
+   -threshold -1
+fc_shell> analyze_rail -voltage_drop -check_missing_via \
+   -nets {VDD VSS}
+\end{lstlisting}
+上例将阈值设为 \texttt{-1} 以禁用电压检查，并运行缺失 via 检查。
+
+\textbf{示例 50}
+\begin{lstlisting}
+fc_shell> set_missing_via_check_options -exclude_stack_via \
+   -threshold 0.001
+fc_shell> set_missing_via_check_options -exclude_stack_via \
+   -threshold 0.002
+fc_shell> set_missing_via_check_options -exclude_stack_via \
+   -threshold -1
+fc_shell> analyze_rail -voltage_drop static -check_missing_via \
+   -nets {VDD VSS}
+fc_shell> report_rail_result -type missing_vias -supply_nets \
+   {VDD VSS} rpt.missing_vias
+  Information: writing rpt.missing_vias.no_threshold done
+  Information: writing rpt.missing_vias done
+\end{lstlisting}
+上例为缺失 via 检查设置三个不同阈值。工具生成两份报告：\texttt{rpt.missing\_vias.no\_threshold} 包含几何中找到的全部缺失 via；\texttt{rpt.missing\_vias} 包含两端电压差小于 0.001 与 0.002 的 via。
+
+\subsection{查看错误数据}
+\subsubsection*{Viewing Error Data}
+
+RedHawk 或 RedHawk-SC Fusion 将检查错误数据文件（名为 \texttt{missing\_via.supplyNetName.err}）保存在工作目录中。每个电源 net 生成一个错误数据文件。退出当前会话前，务必保存 block 以在 block 中保留生成的错误数据。
+
+要在错误浏览器中打开错误数据文件，从 Error Browser 对话框选择 File $>$ Open \ldots，然后在 Open Error Data 对话框中选择要打开的错误数据文件（见图~\ref{fig:err-browser-open}）。
+
+关于错误浏览器的更多信息，见 \textit{Fusion Compiler Graphical User Interface User Guide} 中的 ``Using the Error Browser''。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 202：Opening Error Data from the Error Browser）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{从错误浏览器打开错误数据}
+\label{fig:err-browser-open}
+\end{figure}
+
+\begin{seeAlsoBox}
+指定 RedHawk 与 RedHawk-SC 工作目录
+\end{seeAlsoBox}
+
+\subsection{修复缺失 Via}
+\subsubsection*{Fixing Missing Vias}
+
+要根据 \cmd{analyze\_rail} 写出的指定 DRC 错误对象插入 PG via 以修复缺失 via，使用 \cmd{fix\_pg\_missing\_vias}。
+
+当工具为缺失 via 错误对象插入 PG via 时，会在错误浏览器中将该错误对象状态设为 \texttt{fixed}（见图~\ref{fig:fix-via-status}），从而可快速检查是否所有缺失 via 均已修复。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 203：Error Status After Inserting PG Vias for Missing Vias）}\\[0.3em]
+\small 工具将错误对象标记为 fixed。请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{为缺失 Via 插入 PG Via 后的错误状态}
+\label{fig:fix-via-status}
+\end{figure}
+
+下例为 \cmd{analyze\_rail} \opt{-check\_missing\_via} 报告的 VDD net 的全部错误对象插入 PG via：
+\begin{lstlisting}
+fc_shell> set errdm [open_drc_error_data rail_miss_via.VDD.err]
+fc_shell> set errs [get_drc_errors -error_data $errdm]
+fc_shell> fix_pg_missing_vias -error_data $errdm $errs
+\end{lstlisting}
+
+% ============================================================
+\section{使用多个轨场景运行轨分析}
+\subsection*{Running Rail Analysis with Multiple Rail Scenarios}
+
+要控制 RedHawk Fusion 或 RedHawk-SC Fusion 轨分析的场景：
+\begin{itemize}
+  \item 使用 \appopt{rail.scenario\_name} 为轨分析指定不同的设计场景。详见「为轨分析指定设计场景」。
+  \item 可创建轨场景并将其与当前设计中的设计场景关联。从而可对一个或多个轨场景运行优化与轨分析，以识别可能的电源完整性问题。详见「创建并指定用于轨分析的轨场景」。
+\end{itemize}
+
+\subsection{为轨分析指定设计场景}
+\subsubsection*{Specifying a Design Scenario for Rail Analysis}
+
+默认情况下，对于多角多模设计，RedHawk 或 RedHawk-SC Fusion 仅分析当前设计场景。要为轨分析指定不同设计场景，使用 \appopt{rail.scenario\_name}。工具在电源完整性流程的 IR 驱动功能中遵从所指定的设计场景，例如 IR 驱动布局、IR 驱动并发时钟与数据优化以及 IR 驱动优化。
+
+脚本示例：
+\begin{lstlisting}
+open_lib
+open_block
+
+set_app_option -name rail.technology -value 7
+set_app_options -name rail.tech_file -value  ./Apache.tech
+set_app_options -name rail.lib_files -value {\
+   A.lib \
+   B.lib }
+set_app_options -name rail.switch_model_files -value
+ {./switch_cells.txt }
+source ./test_taps.tcl
+
+current_scenario func_max
+set_app_options -name rail.scenario_name -value func_typ
+
+analyze_rail -voltage_drop
+\end{lstlisting}
+
+\subsection{创建并指定用于轨分析的轨场景}
+\subsubsection*{Creating and Specifying Rail Scenarios for Rail Analysis}
+
+可创建多个轨场景，并将其与当前设计中的设计场景关联。所创建的轨场景保存在设计库中。
+
+要对多个轨场景运行轨分析：
+\begin{enumerate}
+  \item 指定下列应用选项以启用多轨场景轨分析：
+\begin{lstlisting}
+fc_shell> set_app_options -list {
+    rail.enable_new_rail_scenario true
+    rail.enable_parallel_run_rail_scenario true
+}
+\end{lstlisting}
+  \item 运行 \cmd{set\_scenario\_status} \opt{-ir\_drop}，为指定设计场景启用轨分析：
+\begin{lstlisting}
+fc_shell> set_scenario_status func_cbest -ir_drop true
+\end{lstlisting}
+  \item 创建轨场景并将其与已有设计场景关联。用 \cmd{set\_rail\_scenario} 为所创建的轨场景指定轨属性。可为不同目的创建多个轨场景并与同一设计场景关联。
+\begin{lstlisting}
+fc_shell> create_rail_scenario -name T_low \
+   -scenario func_cbest
+fc_shell> set_rail_scenario -name T_low \
+   -voltage_drop dynamic -extra_gsr_option_file extra.gsr \
+   -nets {VDD VSS}
+fc_shell> create_rail_scenario -name T_high \
+   -scenario func_cbest
+fc_shell> set_rail_scenario -name T_high \
+   -voltage_drop dynamic -extra_gsr_option_file extra2.gsr \
+   -nets {VDD VSS}
+\end{lstlisting}
+  \item 用 \cmd{set\_host\_options} 指定多核处理设置。例如，在本地主机上运行：
+\begin{lstlisting}
+fc_shell> set_host_options -submit_command {local}
+\end{lstlisting}
+在网格系统上运行：
+\begin{lstlisting}
+fc_shell> set_host_options -submit_protocol sge \
+   -submit_command {qsub -V -b y -cwd -P bnormal -l mfree=16G}
+\end{lstlisting}
+  \item 用 \cmd{analyze\_rail} 运行轨分析：
+\begin{lstlisting}
+fc_shell> analyze_rail -rail_scenario {T_high T_low} \
+   -submit_to_other_machines
+\end{lstlisting}
+\end{enumerate}
+
+\begin{noteBox}
+要对 IR 驱动布局或 IR 驱动并发时钟与数据优化使用多轨场景轨分析能力，必须在 \cmd{clock\_opt} \opt{-from} \texttt{final\_opto} 或 \cmd{route\_opt} 之前设置：
+\begin{lstlisting}
+fc_shell> set_app_options \
+   -name opt.common.power_integrity -value true
+\end{lstlisting}
+关于电源完整性分析的更多信息，见 Enabling the Power Integrity Features 一节。
+\end{noteBox}
+
+\subsection{示例}
+\subsubsection*{Examples}
+
+对多个轨场景运行轨分析：
+\begin{lstlisting}
+# Specify options for multi-rail-scenario rail analysis
+set_app_options -list {
+    rail.enable_new_rail_scenario true
+    rail.enable_parallel_run_rail_scenario true
+}
+
+set_host_options -submit_protocol sge \
+    -submit_command {qsub -V -notify -b y -cwd -j y \
+    -P bnormal -l mfree=16G}
+
+# Custom RedHawk-SC Fusion python script to specify user-defined
+# toggle rate for scenario T_custom
+create_rail_scenario -name T_custom -scenario func_cbest
+set_rail_scenario -name T_custom -custom_script_file custom_sc.py
+
+# Default RedHawk-SC Fusion toggle rate for scenario T_def
+create_rail_scenario -name T_def -scenario func_cbest
+set_rail_scenario -name T_def -voltage_drop dynamic -nets {VDD VSS}
+
+# Run RedHawk-SC Fusion rail analysis on the specified rail scenario
+analyze_rail -rail_scenario {T_custom T_def} -submit_to_other_machines
+
+# (Optional) Open and examine the generated rail results
+open_rail_result {T_custom T_def}
+\end{lstlisting}
+
+在电源完整性流程中运行多轨场景轨分析：
+\begin{lstlisting}
+## Specify RedHawk/RedHawk-SC based options
+set_app_options -name rail.enable_redhawk -value true
+set_app_options -name rail.enable_redhawk_sc -value false
+set_app_options -name rail.redhawk_path -value /test/bin
+set_app_options -name rail.tech_file -value design_data/tech/rh.tech
+set_app_options -name rail.lib_files -value {
+inputs/test/CCSP_test.lib
+}
+set_host_options -submit_protocol sge -submit_command {qsub -V \
+   -notify -b y -cwd -j y -P bnormal -l mfree=16G}
+
+## Specify options for running optimization on multiple rail scenarios
+set_app_options -list {
+    rail.enable_new_rail_scenario true
+    rail.enable_parallel_run_rail_scenario true
+}
+## Enable IR drop flag for a given scenario
+set_scenario_status [current_scenario] -ir_drop true
+## Create a rail scenario and specify associated options
+create_rail_scenario -name T_low -scenario func_cbest
+set_rail_scenario -name T_low -voltage_drop dynamic \
+   -extra_gsr_option_file extra.gsr -nets {VDD VSS}
+
+create_rail_scenario -name T_high -scenario func_cbest
+set_rail_scenario -name T_high -voltage_drop dynamic \
+   -extra_gsr_option_file extra2.gsr -nets {VDD VSS}
+
+## Enable power integrity flow
+set_app_options -name opt.common.power_integrity -value true
+\end{lstlisting}
+
+% ============================================================
+\section{执行压降分析}
+\subsection*{Performing Voltage Drop Analysis}
+
+\begin{noteBox}
+在运行 \cmd{analyze\_rail} 计算压降与电流违例之前，确保已为各分析模式提供所需输入文件。关于准备输入文件，见「为轨分析准备设计与输入数据」。
+
+压降分析在 RedHawk Fusion 与 RedHawk-SC Fusion 分析流程中均受支持。
+\end{noteBox}
+
+要调用 RedHawk/RedHawk-SC 工具计算指定电源与地网络的压降，使用带下列选项的 \cmd{analyze\_rail}：
+
+\begin{itemize}
+  \item 使用 \opt{-voltage\_drop} 指定分析模式：
+    \begin{itemize}
+      \item \texttt{static}：执行静态压降分析。
+      \item \texttt{dynamic}：执行动态压降分析。
+      \item \texttt{dynamic\_vectorless}：执行无 Verilog Change Dump（VCD）输入的动态压降分析。
+      \item \texttt{dynamic\_vcd}：使用 VCD 输入执行动态压降分析。启用时，使用 \opt{-switching\_activity} 指定翻转活动文件。
+    \end{itemize}
+  \item 使用 \opt{-nets} 指定要分析的电源与地电源 net。工具在分析中考虑指定电源 net 的全部开关或内部电源 net，无需显式指定内部电源 net。
+  \item （可选）使用 \opt{-switching\_activity} 指定翻转活动文件。支持的文件格式：VCD、SAIF 与 ICC\_ACTIVITY。未指定时，默认使用翻转率进行轨分析。
+
+\begin{noteBox}
+若使用动态无向量（vector-free）模式，无需提供翻转活动信息。
+\end{noteBox}
+
+语法：
+\begin{lstlisting}
+-switching_activity {type file_name  [strip_path] [start_time
+   end_time]}
+\end{lstlisting}
+    \begin{itemize}
+      \item \texttt{VCD}：指定门级仿真生成的 VCD 文件。默认轨分析读取并使用 VCD 文件中的全部时间值。要指定从 VCD 读取的时间窗，使用可选的 \texttt{start\_time} 与 \texttt{end\_time}。指定后，工具读取 VCD 中全部时间值，但仅使用指定时间窗进行轨分析。
+      \item \texttt{SAIF}：指定一个或多个门级仿真生成的 SAIF 文件。
+      \item \texttt{icc\_activity}：运行 Fusion Compiler \cmd{write\_saif}，生成包含用户标注与仿真翻转活动（含状态相关与路径相关信息）的 SAIF 文件，覆盖完整设计且不运行传播引擎。
+    \end{itemize}
+    \texttt{strip\_path} 参数从对象名开头移除指定字符串，使 VCD 或 SAIF 中的对象名与 block 中的对象名兼容。该参数区分大小写。
+
+  \item （可选）默认工具使用 RedHawk/RedHawk-SC 功耗分析功能计算指定电源与地网络的功耗。若希望由 Fusion Compiler 生成轨分析所需功耗数据，将 \opt{-power\_analysis} 设为 \texttt{icc2}。关于使用 Fusion Compiler \cmd{report\_power} 运行功耗分析的详细说明见相关文档。
+  \item （可选）默认 \cmd{analyze\_rail} 自动生成用于运行 RedHawk 轨分析的 GSR 文件。要指定附加到当前运行所生成 GSR 文件的外部 GSR 文件，使用 \opt{-extra\_gsr\_option\_file}。
+  \item （可选）使用 \opt{-redhawk\_script\_file} 指定先前 \cmd{analyze\_rail} 运行生成的已有 RedHawk 脚本文件。使用已有脚本文件时，工具遵从该文件中的设置并忽略所有其它当前启用的选项。例如，运行 \cmd{analyze\_rail} \opt{-voltage\_drop} \texttt{static} \opt{-redhawk\_script\_file} \texttt{myscript.tcl} 时，工具忽略 \opt{-voltage\_drop} 设置。未指定 \opt{-redhawk\_script\_file} 时，必须用 \opt{-nets} 指定要分析的 net。
+\end{itemize}
+
+下例对 VDD 与 VSS net 执行静态压降分析，并使用 GSR 配置文件中定义的可选设置：
+\begin{lstlisting}
+fc_shell> analyze_rail -voltage_drop static -nets {VDD VSS} \
+   -extra_gsr_option_file add_opt.gsr
+\end{lstlisting}
+
+\subsection{查看压降分析结果}
+\subsubsection*{Viewing Voltage Drop Analysis Results}
+
+分析完成后，工具将分析结果与日志保存在工作目录中。关于工作目录，见「指定 RedHawk 与 RedHawk-SC 工作目录」。
+
+\cmd{analyze\_rail} 生成下列文件以调用 RedHawk 工具运行轨分析：
+\begin{itemize}
+  \item RedHawk 运行脚本（\texttt{analyze\_rail.tcl}）
+  \item RedHawk GSR 配置文件（\texttt{*.gsr}）
+\end{itemize}
+
+\cmd{analyze\_rail} 生成下列文件以调用 RedHawk-SC 工具：
+\begin{itemize}
+  \item RedHawk-SC Python 脚本（\texttt{analyze\_rail.py}）
+\end{itemize}
+
+轨分析完成时，RedHawk 或 RedHawk-SC 在 \texttt{in-design.redhawk/design\_name.result}（或 RedHawk-SC 流程中的 \texttt{in-design.redhawk\_sc/design\_name.result}）目录中生成：
+\begin{itemize}
+  \item RedHawk 分析日志（\texttt{analyze\_rail.log.*}）
+  \item 时序窗文件（\texttt{*.sta}）
+  \item 信号 SPEF 文件（\texttt{*.spef}）
+  \item 全芯片分析的 DEF/LEF 文件（\texttt{*.def}、\texttt{*.lef}）
+\end{itemize}
+
+压降分析完成后，工具将分析结果（\texttt{*.result}）保存在工作目录下的 \texttt{design\_name} 目录中。这些轨分析结果用于显示地图并查询属性，以确定大压降问题区域。
+
+\begin{itemize}
+  \item 要重新加载轨结果以便在 GUI 中显示地图，使用 \cmd{open\_rail\_result}：
+\begin{lstlisting}
+fc_shell> open_rail_result
+REDHAWK_RESULT
+\end{lstlisting}
+详见「在 GUI 中显示地图」。
+  \item 要写出轨分析结果，使用 \cmd{report\_rail\_result}。必须用 \opt{-type} 指定结果类型。例如，要写出当前 block 的压降值，将 \opt{-type} 设为 \texttt{voltage\_drop\_or\_rise}。详见「写出分析与检查报告」。
+  \item 要查询当前轨结果缓存中存储的结果，使用 \cmd{get\_attribute}。详见「查询属性」。
+\end{itemize}
+
+\begin{noteBox}
+RedHawk Fusion 不支持在 Fusion Compiler 环境之外由 RedHawk 工具生成的结果。\texttt{RedHawk dump icc2\_result} 命令仅在 Fusion Compiler 会话内有效。
+\end{noteBox}
+
+% ============================================================
+\section{执行 PG 电迁移分析}
+\subsection*{Performing PG Electromigration Analysis}
+
+\begin{noteBox}
+PG 电迁移分析在 RedHawk Fusion 与 RedHawk-SC Fusion 分析流程中均受支持。
+\end{noteBox}
+
+要分析 PG net 上的电流密度并识别存在潜在电迁移问题的线段，运行 \cmd{analyze\_rail} \opt{-electromigration}。分析结果保存在工作目录中。
+
+要执行电迁移分析：
+\begin{enumerate}
+  \item 设置 \appopt{rail.tech\_file}，指定定义逐层电流密度限值的 Apache 技术文件（\texttt{*.tech}）。例如：
+\begin{lstlisting}
+fc_shell> set_app_options -name rail.tech_file \
+   -value design_data/tech/test.tech
+\end{lstlisting}
+  \item 运行带下列选项的 \cmd{analyze\_rail}：
+    \begin{itemize}
+      \item 使用 \opt{-voltage\_drop} 与 \opt{-electromigration} 启用电迁移分析。
+      \item 使用 \opt{-nets} 指定要分析的电源与地电源 net。工具考虑指定电源 net 的全部开关或内部电源 net。
+      \item （可选）使用 \opt{-extra\_gsr\_option\_file} 指定附加到当前运行所生成 GSR 的外部 GSR 文件。
+      \item （可选）使用 \opt{-redhawk\_script\_file} 指定先前运行生成的已有 RedHawk 脚本。使用已有脚本时，工具遵从脚本设置并忽略其它当前启用选项。未指定 \opt{-redhawk\_script\_file} 时，必须用 \opt{-nets} 指定 net。
+    \end{itemize}
+  \item 检查分析结果，见「查看 PG 电迁移分析结果」。
+\end{enumerate}
+
+\subsection{查看 PG 电迁移分析结果}
+\subsubsection*{Viewing PG Electromigration Analysis Results}
+
+PG 电迁移分析完成后，可通过显示 PG 电迁移地图或在错误浏览器中检查生成的错误来检查电流违例。
+
+\subsubsection{显示 PG 电迁移地图}
+\subsubsection*{Displaying the PG Electromigration Map}
+
+PG 电迁移地图是叠加在物理电源 net 上的彩色编码电迁移值可视化显示。
+
+对于静态分析，地图显示平均电迁移值。对于动态分析，地图显示平均、峰值或均方根电迁移值。
+
+图~\ref{fig:em-map} 示出以不同颜色突出问题区域的电迁移地图示例。使用选项选择要显示的层或 net 以调查问题区域。例如，要检查某一特定 net 的电流值，取消选择全部 net，再从列表中选择要显示的 net。要仅分析某层上的形状，从列表中选择该层。
+
+关于显示电迁移地图的详细步骤，见「在 GUI 中显示地图」。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 204：Displaying a PG Electromigration Map）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{显示 PG 电迁移地图}
+\label{fig:em-map}
+\end{figure}
+
+\subsubsection{检查 PG 电迁移违例}
+\subsubsection*{Checking PG Electromigration Violations}
+
+PG 电迁移分析完成后，可在错误浏览器中检查生成的错误文件，或将生成的错误写出到输出文件。
+
+工具不会将生成的错误写入工作目录，这意味着若退出工具而不保存 block，错误数据会被删除。若希望在另一会话中检查错误，请确保保存 block 以保留生成的错误数据。
+
+可在错误浏览器中检查生成的错误文件，或将错误写出到 ASCII 文件。
+
+\begin{itemize}
+  \item 要在错误浏览器中检查生成的错误：
+    \begin{enumerate}
+      \item 在 GUI 中选择 View $>$ Error Browser。
+      \item 在 Open Error Data 对话框中选择要检查的错误并单击 Open Selected。
+      \item 在 Error Browser 中检查错误详情（见图~\ref{fig:em-err}）。
+    \end{enumerate}
+  \item 要将错误写出到 ASCII 文件，使用下列脚本：
+\begin{lstlisting}
+set fileName "errors.txt"
+set fd [open $fileName w]
+set dm [open_drc_error_data rail_pg_em.VDD.err]
+set all_errs [get_drc_errors -error_data $dm *]
+foreach_in_collection err $all_errs {
+   set info [ get_attribute $err error_info];
+   puts $fd $info }
+close $fd
+\end{lstlisting}
+\end{itemize}
+
+错误文件输出示例：
+\begin{lstlisting}
+M1 (414.000,546.584 414.344,546.584) em ratio 23585.9% width 0.06
+ blech
+ length 0.000 um current 0.0024963
+M1 (414.344,546.584 416.168,546.584) em ratio 23401.3% width 0.06
+ blech
+ length 0.000 um current 0.0024768
+...
+\end{lstlisting}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 205：Opening Generated Errors in the Error Browser）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{在错误浏览器中打开生成的错误}
+\label{fig:em-err}
+\end{figure}

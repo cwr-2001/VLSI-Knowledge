@@ -1,0 +1,677 @@
+% 第 4 章 Tolerance for Incomplete or Mismatched Data
+\bichapter{对不完整或不匹配数据的容错}{Tolerance for Incomplete or Mismatched Data}
+\label{chap:tolerance}
+
+即使 RTL 网表与库之间、逻辑库与物理库之间，或顶层 RTL 例化与 RTL 子块接口引脚定义之间存在不完整或不匹配数据，DC Explorer 仍可继续链接过程。
+工具为这些数据不一致所发出的链接错误与警告消息提供摘要列表与详细报告。
+当工具遇到不可行路径（infeasible paths）时，会推断路径假设，并继续优化其他关键路径。
+
+对不完整或不匹配数据的容错默认启用。在 DC Explorer 读入设计并链接设计之前，您可更改控制特定容错的部分设置，例如 bit 与 bit-blasted 命名风格。
+
+要进一步了解对不完整或不匹配数据的容错，请参阅：
+\begin{itemize}
+  \item 容错类别
+  \item 默认容错设置
+  \item 调整总线引脚命名风格的容错设置
+  \item 解析总线与 bit-blasted 命名风格
+  \item 允许引脚名同义词
+  \item 允许未连接的接口引脚
+  \item 在网表中包含锚点单元（anchor cells）
+  \item 创建报告与缺失约束
+\end{itemize}
+
+% ============================================================
+\section{容错类别}
+\subsection*{Tolerance Categories}
+
+表~\ref{tab:tol-cats} 列出 DC Explorer 支持的对不完整或不匹配数据的容错类别。
+勾选（X）表示该容错类别适用且受支持。
+
+\begin{table}[htbp]
+\centering
+\caption{对不完整或不匹配数据的容错类别}
+\label{tab:tol-cats}
+\small
+\begin{tabularx}{\textwidth}{@{}X ccc@{}}
+\toprule
+\textbf{容错类别} &
+\textbf{库定义 vs 例化} &
+\textbf{顶层 RTL vs RTL 块} &
+\textbf{逻辑库 vs 物理库} \\
+\midrule
+不匹配的总线引脚命名风格 & X & X & X \\
+总线 vs bit-blasted & X & X & X \\
+引脚名大小写不匹配 & X & X & X \\
+逻辑库中缺失单元 & X & & \\
+物理库中缺失单元 & & & X \\
+逻辑库中缺失引脚 & X & & X \\
+物理库中缺失引脚 & & & X \\
+RTL 模块中缺失引脚 & & X & \\
+缺失 RTL 模块 & & X & \\
+引脚方向不匹配 & & & X \\
+引脚名同义词（引脚映射） & X & X & X \\
+端口宽度不匹配 & X & X & \\
+未连接的接口引脚 & X & X & \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 默认容错设置
+  \item 调整总线引脚命名风格的容错设置
+  \item 解析总线与 bit-blasted 命名风格
+  \item 允许引脚名同义词
+  \item 允许未连接的接口引脚
+  \item 报告不完整或不匹配数据
+\end{itemize}
+\end{seeAlsoBox}
+
+\subsection{限制}
+\subsubsection*{Limitations}
+
+DC Explorer 支持 Verilog 文件中全部容错类别的不匹配；但不支持 VHDL 文件中子块例化与顶层 component 例化之间的不匹配。
+例如，对下列 VHDL 代码使用「RTL 模块中缺失引脚」这一容错类别。
+代码显示两个例化 SUB1 与 TOP 之间不匹配：SUB1 例化缺少 MSGPIN 引脚。
+分析设计时，工具对此类不匹配发出错误消息。
+\begin{lstlisting}
+entity SUB1 is
+   port (AA, BB: in bit; CC: out bit);
+end entity SUB1;
+
+architecture RTL of SUB1 is
+begin
+   CC <= AA and BB;
+end architecture RTL;
+
+library WORK;
+use WORK.all;
+
+entity TOP is
+   port (a, b, e: in bit; c: out bit);
+end entity TOP;
+
+architecture RTL of TOP is
+begin
+   U1 : entity WORK.SUB1(RTL)
+   port map (AA=>a, BB =>b, MSGPIN=>e, CC=>c);
+end architecture RTL;
+\end{lstlisting}
+
+\begin{seeAlsoBox}
+容错类别（上文）。
+\end{seeAlsoBox}
+
+% ============================================================
+\section{默认容错设置}
+\subsection*{Default Tolerance Setup}
+
+默认情况下，DC Explorer 已为下列容错类别做好设置；除总线引脚命名风格的容错外，您无法配置这些设置。
+要了解 DC Explorer 的默认行为，请参阅各类容错说明：
+\begin{itemize}
+  \item 总线引脚命名风格
+  \item 引脚名大小写不匹配
+  \item 逻辑库中缺失单元
+  \item 物理库中缺失单元
+  \item 逻辑库中缺失引脚
+  \item FRAM 视图中缺失引脚
+  \item 逻辑库与物理库之间的引脚方向不匹配
+  \item 端口宽度不匹配
+\end{itemize}
+
+\subsection{总线引脚命名风格}
+\subsubsection*{Bus Pin Naming Styles}
+
+默认情况下，DC Explorer 可根据 \varname{bit\_blasted\_bus\_linking\_naming\_styles} 变量定义的命名约定，将 RTL 块与逻辑库中的对应块进行匹配。
+要为不同总线命名风格调整该变量的默认设置，见「调整总线引脚命名风格的容错设置」。
+表~\ref{tab:bus-match-default} 给出基于该变量默认设置的匹配示例。
+
+\begin{table}[htbp]
+\centering
+\caption{默认总线名匹配示例}
+\label{tab:bus-match-default}
+\begin{tabularx}{\textwidth}{@{}X X@{}}
+\toprule
+\textbf{RTL} & \textbf{逻辑库文件} \\
+\midrule
+\texttt{OPRNDA\_0\_} & \texttt{OPRNDA[0]} \\
+\texttt{OPRNDA\_1\_} & \texttt{OPRNDA[1]} \\
+\texttt{OPRNDB(0)} & \texttt{OPRNDB\_0\_} \\
+\texttt{OPRNDB(1)} & \texttt{OPRNDB\_1\_} \\
+\texttt{OPRNDC[0]} & \texttt{OPRNDC(0)} \\
+\texttt{OPRNDC[1]} & \texttt{OPRNDC(1)} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{seeAlsoBox}
+调整总线引脚命名风格的容错设置。
+\end{seeAlsoBox}
+
+\subsection{引脚名大小写不匹配}
+\subsubsection*{Case Mismatches Between Pin Names}
+
+默认情况下，DC Explorer 允许下列对象之间引脚名的大小写不匹配：
+\begin{itemize}
+  \item 顶层例化与 RTL 块
+  \item 逻辑库与 RTL 例化
+  \item 逻辑库与物理库（FRAM 视图）
+\end{itemize}
+
+图~\ref{fig:case-mismatch} 给出顶层例化与 RTL 块之间引脚名大小写不匹配的示例。加载到内存中的设计显示这些不匹配已被解析。
+
+\figplaceholder{Figure 4: Example of Case Mismatches Between Pin Name}{引脚名大小写不匹配示例}{fig:case-mismatch}
+
+\subsection{逻辑库中缺失单元}
+\subsubsection*{Missing Cells in Logic Libraries}
+
+在链接过程中，DC Explorer 可链接逻辑库中缺少引用的单元，如图~\ref{fig:miss-cell-logic} 所示。
+在此类情况下，DC Explorer 不发出错误消息，但已解析的库单元、宏或模块不含时序弧。
+
+\figplaceholder{Figure 5: Tolerance for Missing Cells in Logic Libraries}{对逻辑库中缺失单元的容错}{fig:miss-cell-logic}
+
+\subsection{物理库中缺失单元}
+\subsubsection*{Missing Cells in Physical Libraries}
+
+当物理库缺少某单元时，DC Explorer 执行下列任务以解析不匹配：
+\begin{itemize}
+  \item 在本地 Milkyway 设计库中为缺失单元创建 FRAM 视图，使用一个单位 tile 的边界框
+  \item 从逻辑库推导缺失单元的引脚方向
+  \item 在 FRAM 视图原点添加物理引脚
+\end{itemize}
+
+对物理库中较大的缺失宏，应按黑盒流程中所述步骤解析不匹配。
+有关黑盒流程的更多信息，见 \textit{IC Compiler Design Planning User Guide} 与 \textit{IC Compiler User Guide}。
+图~\ref{fig:miss-cell-phys} 给出为子逻辑单元创建的 FRAM 视图。
+
+\figplaceholder{Figure 6: Examples of Missing Cells in Physical Libraries}{物理库中缺失单元的示例}{fig:miss-cell-phys}
+
+\subsection{逻辑库中缺失引脚}
+\subsubsection*{Missing Pins in Logic Libraries}
+
+当逻辑库单元或 RTL 引用存在缺失引脚时，DC Explorer 通过下列方式允许不匹配：
+\begin{itemize}
+  \item 创建锚点单元（anchor cell）以保留连接并防止移除每个缺失引脚
+  \item 忽略缺失引脚上的时序约束
+  \item 写出设计时，自动从 ASCII 网表中移除锚点单元并恢复缺失引脚连接
+\end{itemize}
+
+如图~\ref{fig:miss-pin-logic} 所示，为缺失的 \texttt{wr} 与 \texttt{ovf} 引脚创建了两个锚点单元。
+
+\figplaceholder{Figure 7: Example of Missing Pins in Logic Libraries}{逻辑库中缺失引脚的示例}{fig:miss-pin-logic}
+
+\begin{seeAlsoBox}
+在网表中包含锚点单元。
+\end{seeAlsoBox}
+
+\subsection{FRAM 视图中缺失引脚}
+\subsubsection*{Missing Pins in FRAM Views}
+
+当逻辑库单元的引脚比 FRAM 视图更多时，DC Explorer 为每个额外引脚创建新的物理引脚。
+新物理引脚添加在单元边界框的左下角，并放置在最低允许布线层上。
+
+如图~\ref{fig:miss-pin-fram} 所示，为 FRAM 视图中缺失的 \texttt{wr} 引脚创建了虚设物理引脚，并放置在子块的左下角。
+
+\figplaceholder{Figure 8: Example of a Missing Pin in the FRAM View}{FRAM 视图中缺失引脚的示例}{fig:miss-pin-fram}
+
+\subsection{逻辑库与物理库之间的引脚方向不匹配}
+\subsubsection*{Pin Direction Mismatches Between Logic and Physical Libraries}
+
+DC Explorer 允许端口方向不匹配。例如，当逻辑库中指定的引脚方向与 FRAM 视图不同时，DC Explorer 使用逻辑库中指定的方向为逻辑库单元创建物理链接。
+图~\ref{fig:pin-dir-mismatch} 说明 DC Explorer 如何自动解析 \texttt{di} 与 \texttt{ovf} 引脚方向不匹配。
+
+\figplaceholder{Figure 9: Example of Pin Direction Mismatches}{引脚方向不匹配示例}{fig:pin-dir-mismatch}
+
+\subsection{端口宽度不匹配}
+\subsubsection*{Port Width Mismatches}
+
+DC Explorer 允许端口宽度不匹配。例如，当顶层设计例化包含不匹配端口宽度的 RTL 块时，DC Explorer 截断或零扩展总线，并添加锚点单元以在顶层保留额外信号连接，如图~\ref{fig:port-width} 所示。
+
+\figplaceholder{Figure 10: Example of Port Width Mismatches}{端口宽度不匹配示例}{fig:port-width}
+
+% ============================================================
+\section{调整总线引脚命名风格的容错设置}
+\subsection*{Adjusting the Tolerance Setting for Bus Pin Naming Styles}
+
+DC Explorer 默认可匹配某些总线引脚命名风格。
+通过设置 \varname{bit\_blasted\_bus\_linking\_naming\_styles} 变量，可使 DC Explorer 匹配其他总线引脚命名风格。
+该变量默认为：
+\begin{lstlisting}
+"%s\[%d\] %s(%d) %s_%d_"
+\end{lstlisting}
+要允许 DC Explorer 匹配表~\ref{tab:bus-styles} 所示的总线引脚命名风格，输入：
+\begin{lstlisting}
+de_shell> set_app_var enable_bit_blasted_bus_linking true
+de_shell> set_app_var bit_blasted_bus_linking_naming_styles \
+   "%s_%d %s\[%d\] %s<%d>"
+\end{lstlisting}
+
+在此示例中，\verb|%s_%d| 表示以一个下划线与一个数字结尾的字符串。
+该形式的名称可匹配由相同字符串后跟方括号中相同数字（\verb|%s\[%d\]|）或相同字符串后跟尖括号中相同数字（\verb|%s<%d>|）组成的任意名称。
+三种指定形式中任意一对名称在匹配时都被视为等价名。
+表~\ref{tab:bus-styles} 给出此示例的若干匹配名称。
+
+\begin{table}[htbp]
+\centering
+\caption{RTL 与逻辑库文件之间不匹配的总线引脚命名风格}
+\label{tab:bus-styles}
+\begin{tabularx}{\textwidth}{@{}X X@{}}
+\toprule
+\textbf{RTL} & \textbf{逻辑库文件} \\
+\midrule
+\texttt{OPRNDA\_0} & \texttt{OPRNDA[0]} \\
+\texttt{OPRNDA\_1} & \texttt{OPRNDA[1]} \\
+\texttt{OPRNDB<0>} & \texttt{OPRNDB\_0} \\
+\texttt{OPRNDB<1>} & \texttt{OPRNDB\_1} \\
+\texttt{OPRNDC<0>} & \texttt{OPRNDC[0]} \\
+\texttt{OPRNDA\_0} & \texttt{OPRNDA[0]} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{seeAlsoBox}
+总线引脚命名风格。
+\end{seeAlsoBox}
+
+% ============================================================
+\section{解析总线与 bit-blasted 命名风格}
+\subsection*{Resolving Bus and Bit-Blasted Naming Styles}
+
+要使 DC Explorer 匹配不同的总线与 bit-blasted 命名风格：
+\begin{enumerate}
+  \item 将 \varname{enable\_bit\_blasted\_bus\_linking} 变量设为 \texttt{true}（默认值）。
+  \item 将 \varname{bit\_blasted\_bus\_linking\_naming\_styles} 变量设为具体命名风格。
+\end{enumerate}
+
+如图~\ref{fig:bus-blasted} 所示，子 RTL 块的 \verb|\sel[1]| 与 \verb|\sel[0]| bit-blasted 信号不匹配。可设置下列变量以解析不匹配：
+\begin{lstlisting}
+de_shell> set_app_var enable_bit_blasted_bus_linking true
+de_shell> set_app_var bit_blasted_bus_linking_naming_styles \
+   "%s\[%d\] %s(%d) %s_%d_"
+\end{lstlisting}
+
+\figplaceholder{Figure 11: Example of Bus and Bus-Blasted Naming Styles}{总线与 bit-blasted 命名风格示例}{fig:bus-blasted}
+
+使用与上一示例相同的两个变量设置，DC Explorer 可匹配多维总线，例如下列 RTL 示例中 \texttt{sub1} RTL 块的 \texttt{a} 总线与 \texttt{b} 总线：
+\begin{lstlisting}
+module sub1 (input \a[1][1], \a[1][0], \a[0][1], \a[0][0],
+             input [1:0][1:0]b,
+             output [1:0][1:0] c);
+
+module top (input [1:0][1:0] ain,
+            input [1:0][1:0] bin,
+            output [1:0][1:0] cout);
+
+sub1 U1 (.a(ain),
+         .\b[1][1](bin[1][1]), .\b[1][0]),
+         .\b[0][1](bin[0][1]), .\b[0][0]),
+         .c(cout));
+endmodule
+\end{lstlisting}
+
+% ============================================================
+\section{允许引脚名同义词}
+\subsection*{Allowing Pin Name Synonyms}
+
+可在链接过程中基于指定的同义词启用引脚映射能力。该能力可解析下列各类不匹配：
+\begin{itemize}
+  \item 顶层例化与 RTL 块
+  \item 逻辑库与 RTL 例化
+  \item 逻辑库与物理库（FRAM 视图）
+\end{itemize}
+
+要启用引脚名同义词匹配：
+\begin{enumerate}
+  \item 确保 \varname{link\_allow\_pin\_name\_synonym} 变量设为 \texttt{true}（默认值）。
+  \item 用 \cmd{set\_pin\_name\_synonym} 命令为 RTL、逻辑库与物理库引脚名指定同义词。
+\end{enumerate}
+
+要移除引脚名同义词，使用 \cmd{remove\_pin\_name\_synonym} 命令。
+应在链接过程之后移除全部引脚名同义词，并在加载 SDC 文件之前重新施加它们。
+要报告引脚名同义词，使用 \cmd{report\_pin\_name\_synonym} 命令。
+
+\subsection{示例 1}
+\subsubsection*{Example 1}
+
+下列示例在顶层例化 \texttt{top} 与 RTL 块 \texttt{sub} 之间启用引脚映射。
+\cmd{set\_pin\_name\_synonym} 命令允许用 \texttt{s} 作为 \texttt{sel} 引脚的同义词，用 \texttt{do} 作为 \texttt{DOUT} 引脚的同义词。
+\begin{lstlisting}
+de_shell> set_app_var link_allow_pin_name_synonym true
+de_shell> set_pin_name_synonym s sel
+de_shell> set_pin_name_synonym do DOUT
+\end{lstlisting}
+
+\figplaceholder{Figure 12: Pin Mapping Between Top-Level Instantiations and RTL Blocks}{顶层例化与 RTL 块之间的引脚映射}{fig:pin-map-rtl}
+
+\subsection{示例 2}
+\subsubsection*{Example 2}
+
+要在逻辑库与物理库之间启用引脚映射（如下例所示），\cmd{set\_pin\_name\_synonym} 命令：
+\begin{enumerate}
+  \item 创建 FRAM 视图，并保存在 Milkyway 设计库中。
+  \item 根据指定的引脚名同义词，自动更正 FRAM 视图的引脚名以匹配逻辑库引脚名。
+\end{enumerate}
+
+该示例对 \texttt{do} 引脚使用同义词 \texttt{Dout}，对 \texttt{di} 引脚使用同义词 \texttt{Din}。
+\begin{lstlisting}
+de_shell> set link_allow_pin_name_synonym true
+de_shell> set_pin_name_synonym Dout do
+de_shell> set_pin_name_synonym Din di
+\end{lstlisting}
+
+\figplaceholder{Figure 13: Example of Pin Mapping Between Logic Library and Physical Library}{逻辑库与物理库之间引脚映射示例}{fig:pin-map-phys}
+
+% ============================================================
+\section{允许未连接的接口引脚}
+\subsection*{Allowing Unconnected Interface Pins}
+
+为防止未连接的接口引脚：
+\begin{itemize}
+  \item 连接到恒高或恒低
+  \item 跨未连接接口引脚传播常量值
+\end{itemize}
+可将 \varname{link\_preserve\_dangling\_pins} 变量设为 \texttt{true}（默认值为 \texttt{false}）。
+将该变量设为 \texttt{true} 时，允许 DC Explorer 为每个悬空接口引脚添加锚点单元。
+如图~\ref{fig:unconn-pins} 所示，DC Explorer 为未连接的 \texttt{wr} 信号添加了 \texttt{SNPS\_ANCHOR\_O} 锚点单元。
+
+\figplaceholder{Figure 14: Example of Unconnected Interface Pins}{未连接接口引脚示例}{fig:unconn-pins}
+
+% ============================================================
+\section{在网表中包含锚点单元}
+\subsection*{Including Anchor Cells in Netlists}
+
+默认情况下，DC Explorer 创建锚点单元，以防止移除逻辑库或 RTL 中的每个缺失引脚并保留连接。
+保存设计时，锚点单元会自动从网表中移除。
+要在 Verilog 格式网表中包含锚点单元，对 \cmd{write\_file} 命令使用 \opt{-include\_anchor\_cells} 选项。
+
+例如，下列命令以 Verilog 格式保存带锚点单元的层次设计：
+\begin{lstlisting}
+de_shell> write_file -hierarchy -format verilog \
+   -output mapped.vg -include_anchor_cells
+\end{lstlisting}
+
+图~\ref{fig:anchor-netlist} 说明网表如何包含锚点单元。
+
+\figplaceholder{Figure 15: Anchor Cells Support in Netlist}{网表中的锚点单元支持}{fig:anchor-netlist}
+
+% ============================================================
+\section{创建报告与缺失约束}
+\subsection*{Creating Reports and Missing Constraints}
+
+您的设计可能包含不完整或不匹配数据，例如引脚名大小写不匹配、逻辑库中缺失单元、缺失 RTL 模块以及缺失约束。
+不完整或缺失的时序约束可能导致不可行路径。
+要报告不完整数据与不可行路径，并创建时序例外与缺失约束，请参阅：
+\begin{itemize}
+  \item 报告不完整或不匹配数据
+  \item 报告缺失约束
+  \item 报告不可行路径
+  \item 使用分类时序报告创建约束
+  \item 为不可行路径创建例外
+\end{itemize}
+
+\begin{seeAlsoBox}
+容错类别。
+\end{seeAlsoBox}
+
+\subsection{报告不完整或不匹配数据}
+\subsubsection*{Reporting Incomplete or Mismatched Data}
+
+要报告不完整或不匹配数据，可任选下列方法之一：
+\begin{itemize}
+  \item 使用 \cmd{link} 命令显示所发现并已解析的不匹配警告列表。例如：
+\begin{lstlisting}
+Warning: Automatically reconstructed 'sel' bus with width of 2 from
+{sel[0] ... sel[1]} bit-blasted bus pins in 't1' reference.
+(LINK-912)
+
+Warning: Automatically reconstructed 'd2' bus with width of 4 from
+{ d2[0] d2[1] ... d2[3] } bit-blasted bus pins in 'U1' cell.
+(LINK-912)
+
+Warning: 'wr' pin on 'inst1' cell in 'top' design is missing from the
+'SliceInit' reference. (LINK-902)
+
+Warning: Unable to connect 'wr' net to the 'wr' pin of 'inst1' cell
+in 'top' design. (LINK-903) . . . .
+
+Warning: Design mismatches were detected by the linker and resolved
+to link the current design. You can use report_design_mismatch
+and check_design commands explicitly to see warning messages about
+the design mismatches. (DESH-017)
+\end{lstlisting}
+
+  \item 使用 \cmd{check\_design} 命令显示工具遇到并解析的全部设计不匹配的摘要。例如：
+\begin{lstlisting}
+Design Mismatches                               Logical  Physical
+------------------------------------------------------------------
+Missing pin on logical library part (LINK-902)      1
+Can't connect net to missing pin (LINK-903)         2
+Missing physical pin (LINK-905)                              1
+Presence of linker anchor cells (LINK-911)          2
+Reconstructed bus (LINK-912)                        1
+------------------------------------------------------------------
+Total netlist elements                              6        1
+\end{lstlisting}
+
+  \item 使用 \cmd{report\_design\_mismatch} 命令显示设计不匹配的详细信息。例如：
+\begin{lstlisting}
+****************************************
+Report:      design mismatches
+Design:      mydesign
+...
+****************************************
+Number of missing pins on logical library cells : 1
+
+Design Object  Type    Mismatch
+----------------------------------------------------------------
+top    inst1   cell    'wr' pin on 'inst1' cell in 'top' design
+                       is missing from the 'SliceInit' reference.
+
+Number of unconnectable nets due to missing pins : 1
+
+Design Object  Type    Mismatch
+----------------------------------------------------------------
+top    wr      net     Unable to connect 'wr' net to the
+                       '*cell*6/wr' pin of 'inst1' cell in 'top'
+                       design.
+
+Number of linker anchor cells : 1
+
+Design Object  Type    Mismatch
+---------------------------------------------------------------
+top    DCLINKER cell   Linker anchor cell inserted for missing
+                       pin on 'inst1' cell.
+
+Number of reconstructed bus : 1
+
+Design Object  Type    Mismatch
+---------------------------------------------------------------
+top    U1      cell    Automatically reconstructed 'sel' bus
+                       with width of 2 from { sel[0] ... sel[1]}
+                       bit-blasted bus pins in 'my_design' reference.
+\end{lstlisting}
+\end{itemize}
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 报告缺失约束
+  \item 报告不可行路径
+  \item 使用分类时序报告创建约束
+\end{itemize}
+\end{seeAlsoBox}
+
+\subsection{报告缺失约束}
+\subsubsection*{Reporting Missing Constraints}
+
+要报告当前设计中缺失的约束（例如缺失时钟、I/O latency、驱动单元与输出负载），使用 \cmd{report\_missing\_constraints} 命令。例如：
+\begin{lstlisting}
+de_shell> report_missing_constraints
+Information: Checking out the license 'DesignWare'. (SEC-104)
+**************************************************
+Report : Missing Constraints
+Design : des_top
+...
+**************************************************
+Missing Clock
+----------------------------------------------------------------------
+        clk_hi_1
+----------------------------------------------------------------------
+Total Missing Clock Definition found: 2.
+
+Missing Input Delay
+----------------------------------------
+        combi_hi[3]
+        comb1_hi[2]
+----------------------------------------
+The total number of missing input delay found is 2.
+
+Missing Output Delay
+----------------------------------------
+        out_filter_i1
+----------------------------------------
+The total number of missing output delay found is 1.
+\end{lstlisting}
+
+默认情况下，DC Explorer 对缺失驱动与输出负载使用零 I/O 延时，并从逻辑库中选择 inverter。
+您可为缺失约束指定数值，而不是让工具假定约束值。
+要用带适当选项的 \cmd{create\_missing\_constraints} 命令在当前设计中创建缺失约束。
+
+例如：
+\begin{lstlisting}
+de_shell> create_missing_constraints -period 0.75 \
+   -input_delay 0.02 -output_delay 0.1 -output new1.sdc
+\end{lstlisting}
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 报告不可行路径
+  \item 使用分类时序报告创建约束
+  \item 为不可行路径创建例外
+\end{itemize}
+\end{seeAlsoBox}
+
+\subsection{报告不可行路径}
+\subsubsection*{Reporting Infeasible Paths}
+
+不可行时序路径可能因下列原因存在：
+\begin{itemize}
+  \item 缺失边界条件
+  \item 输入延时的不现实时序目标
+  \item 输出延时的不现实时序目标
+\end{itemize}
+
+在优化期间，\cmd{compile\_exploration} 命令自动检测设计中的不可行路径。
+为将优化工作聚焦于其他路径，该命令暂时将这些不可行路径设为 false path。
+优化结束时，这些 false path 设置会被移除。
+
+运行 \cmd{compile\_exploration} 之后，可报告暂时被设为 false path 的不可行路径。
+为此，对 \cmd{create\_qor\_snapshot} 与 \cmd{query\_qor\_snapshot} 命令指定 \opt{-infeasible\_paths} 选项，然后生成 HTML 格式的分类时序报告，如下列命令序列所示。
+要设置要报告的不可行路径最大数量，对 \cmd{create\_qor\_snapshot} 指定 \opt{-max\_paths} 选项。
+\begin{lstlisting}
+de_shell> compile_exploration
+de_shell> create_qor_snapshot -max_paths 30 -infeasible_paths -name snap1
+de_shell> query_qor_snapshot -name snap1 -infeasible_paths \
+-columns {path_group infeasible_paths startpoint endpoint wns zero_path}\
+-output_file snap1.htm
+de_shell> sh firefox snap1.htm
+\end{lstlisting}
+
+图~\ref{fig:infeas-html} 给出由该命令序列生成的 HTML 格式分类时序报告。
+优化期间检测到的每条不可行路径在 Infeasible Path 列下以 YES 标示。
+
+\figplaceholder{Figure 16: Categorized Timing Report in HTML Format}{HTML 格式的分类时序报告}{fig:infeas-html}
+
+也可通过对 \cmd{report\_timing} 使用 \opt{-attributes} 选项生成时序报告来查看不可行路径。
+报告显示起点与终点标有 \texttt{inf} 属性的每条不可行路径。
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 为不可行路径创建例外
+  \item 使用分类时序报告创建约束
+  \item 分析结果质量
+\end{itemize}
+\end{seeAlsoBox}
+
+\subsection{使用分类时序报告创建约束}
+\subsubsection*{Creating Constraints Using Categorized Timing Reports}
+
+可用 HTML 格式的分类时序报告创建下列约束：
+\begin{itemize}
+  \item False paths
+  \item Multicycle paths
+  \item Maximum delays
+  \item Input delays
+  \item Output delays
+\end{itemize}
+
+\begin{noteBox}
+必须先用类似下列命令序列生成分类时序报告：
+\begin{lstlisting}
+de_shell> compile_exploration -scan
+de_shell> create_qor_snapshot -nworst 3 -name my_snapshot
+de_shell> query_qor_snapshot -name my_snapshot -output_file qor_report
+de_shell> sh firefox qor_report.html
+\end{lstlisting}
+\end{noteBox}
+
+\figplaceholder{Figure 17: Categorized Timing Report in HTML Format}{HTML 格式的分类时序报告}{fig:qor-html-create}
+
+从图~\ref{fig:qor-html-create} 所示的分类时序 HTML 报告中，可按下列步骤创建缺失约束与例外：
+\begin{enumerate}
+  \item 单击 Append 按钮。
+  \item 单击相应参数按钮，例如 Multicycle Paths。
+  \item 为该参数输入数值。
+  \item 单击 Create Exceptions 按钮。\\
+        随即出现新的浏览器窗口，其中包含基于您所指定约束的一组命令。
+  \item 用这些命令更新您的 SDC 文件。
+\end{enumerate}
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 度量结果质量
+  \item 报告不可行路径
+\end{itemize}
+\end{seeAlsoBox}
+
+\subsection{为不可行路径创建例外}
+\subsubsection*{Creating Exceptions for Infeasible Paths}
+
+可用 HTML 格式的分类时序报告为不可行路径创建例外。
+必须先用类似下列命令序列生成包含设计中不可行路径的分类时序报告：
+\begin{lstlisting}
+de_shell> compile_exploration
+de_shell> create_qor_snapshot -max_paths 30 -infeasible_paths -name snap1
+de_shell> query_qor_snapshot -infeasible_paths -name snap1 \
+-columns {path_group infeasible_paths startpoint endpoint wns zero_path}\
+-output_file snap1.html
+de_shell> sh firefox snap1.html
+\end{lstlisting}
+
+图~\ref{fig:infeas-exc} 给出由该命令序列生成的 HTML 格式分类时序报告。
+
+\figplaceholder{Figure 18: Categorized Timing Report in HTML Format}{HTML 格式的分类时序报告}{fig:infeas-exc}
+
+从分类时序 HTML 报告中，可按下列步骤创建缺失约束与例外：
+\begin{enumerate}
+  \item 单击 Append 按钮。
+  \item 单击 False Paths 按钮。
+  \item 在要为其创建例外的每条不可行路径的 Exceptions 列下勾选复选框。
+  \item 单击 Create Exceptions 按钮。\\
+        随即出现新的浏览器窗口，其中包含基于您所指定例外的一组命令。
+        例如，当选择前五条不可行路径时，弹出窗口中显示下列命令：
+\begin{lstlisting}
+set_false_path -from u_clk2/X_out_reg/CLK -to out3;
+set_false_path -from in1 -to u_in1/A_out_reg/D;
+set_false_path -from in1 -to u_in2/A_out_reg/D;
+set_false_path -from in3 -to u_clk2/A_out_reg/D;
+set_false_path -from u_out3/X_out_reg/CLK -to out1;
+\end{lstlisting}
+  \item 用这些命令更新您的 SDC 文件。
+\end{enumerate}
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 报告不可行路径
+  \item 报告结果质量
+\end{itemize}
+\end{seeAlsoBox}

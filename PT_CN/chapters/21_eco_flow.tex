@@ -1,0 +1,578 @@
+% 第 21 章 ECO Flow
+\bichapter{ECO 流程}{ECO Flow}
+\label{chap:eco}
+
+若设计存在时序、设计规则或噪声违例，或需优化面积/功耗，可使用工程变更指令（ECO）流程修复违例、实现更改并重新运行时序分析。
+\begin{itemize}
+  \item ECO 修复概述
+  \item 设置 ECO 选项
+  \item 物理感知 ECO
+  \item ECO 修复方法
+  \item 报告不可修复违例与不可用单元
+  \item HyperTrace ECO 修复
+  \item 写入变更列表
+  \item 在 Synopsys 布局工具中实现 ECO 更改
+  \item 使用 Synopsys 工具的增量 ECO 流程
+  \item 使用缩减资源的 ECO 流程
+  \item Freeze Silicon ECO 流程
+  \item 在较少主机上运行 ECO 场景
+  \item 手动网表编辑
+\end{itemize}
+
+\section{ECO 修复概述}
+\subsection*{ECO Fixing Overview}
+
+在 PrimeTime 中，工程变更指令（ECO）是对芯片设计的增量更改，用于修复时序违例或设计规则约束（DRC）违例，或降低功耗。PrimeTime 发现这些问题并通过调整单元尺寸、替换单元或插入缓冲器进行纠正，并以脚本格式写出更改，以便在其他工具中实现。
+
+执行 ECO 修复的命令：
+\begin{itemize}
+  \item \cmd{fix\_eco\_drc}
+  \item \cmd{fix\_eco\_timing}
+  \item \cmd{fix\_eco\_power}
+\end{itemize}
+
+ECO 修复完成后，使用 \cmd{write\_changes} 写出更改，在 IC Compiler II 等物理实现工具中运行脚本。实现更改后应重新进行寄生提取并在 PrimeTime 中再次分析。
+
+PrimeTime 可在有或没有物理布局数据的情况下执行 ECO 修复：
+\begin{itemize}
+  \item 仅逻辑模式 — 仅使用设计网表与详细寄生数据，不考虑物理布局。
+  \item 物理感知模式 — 使用网表、寄生数据与物理布局；仅在有余量处替换单元/插入缓冲器；\cmd{write\_changes} 写出每个更改的位置以实现快速准确物理实现。
+\end{itemize}
+
+ECO 修复流程兼容单核、多核与分布式多场景分析（DMSA）。为降低内存、运行时间与周转时间，可使用：
+\begin{itemize}
+  \item 缩减资源 ECO 流程 — 在全设计上做时序分析，但在较小“缩减”设计上做 ECO。
+  \item Synopsys 增量 ECO 流程 — 用 Synopsys 工具实现更改，每步仅写出/分析变更部分。
+\end{itemize}
+
+\begin{noteBox}
+尝试 ECO 修复前，确保设计已完全布局布线并生成时钟树；使用物理感知 ECO 以获得最佳结果质量。
+\end{noteBox}
+
+\subsection{DRC、串扰与单元电迁移违例修复}
+\subsubsection*{DRC, Crosstalk, and Cell Electromigration Violation Fixing}
+
+修复 DRC、噪声、串扰延迟或单元电迁移违例，使用 \cmd{fix\_eco\_drc}。它修复以下命令报告的违例：
+\begin{lstlisting}
+report_constraint -max_capacitance ...
+report_constraint -max_transition ...
+report_constraint -max_fanout ...
+report_noise ...
+report_cell_em_violation ...
+\end{lstlisting}
+
+修复机制包括缓冲器插入、单元尺寸调整、负载屏蔽（load shielding）等。
+
+\subsubsection{串扰 Delta 延迟修复}
+\paragraph*{Crosstalk Delta Delay Fixing}
+
+\cmd{fix\_eco\_drc} 可修复由串扰引起的 delta delay 违例，与 SI 分析结果协同工作。
+
+\subsubsection{SI 瓶颈优化与报告}
+\paragraph*{SI Bottleneck Optimization and Reporting}
+
+可识别并优化导致串扰问题的瓶颈网络，使用相关报告命令分析修复前后 SI 影响。
+
+\subsection{时序违例修复}
+\subsubsection*{Timing Violation Fixing}
+
+使用 \cmd{fix\_eco\_timing} 修复 setup 与 hold 违例。支持按违例类型（setup/hold）、目标（WNS/TNS）、修复方法（insert_buffer、size_cell、remove_buffer 等）配置。
+
+\subsection{功耗回收修复}
+\subsubsection*{Power Recovery Fixing}
+
+使用 \cmd{fix\_eco\_power} 在不引入新时序或 DRC 违例的前提下回收漏电功耗，通过单元尺寸调整、阈值电压交换等方式。
+
+功耗回收后，用 \cmd{write\_changes} 写出设计更改。
+
+\subsection{ECO 修复步骤顺序}
+\subsubsection*{Order of ECO Fixing Steps}
+
+推荐 ECO 修复顺序：
+\begin{table}[htbp]
+\centering
+\caption{ECO 修复步骤、命令与优先级}
+\small
+\begin{tabularx}{\textwidth}{@{}l l X X@{}}
+\toprule
+步骤 & 命令 & 修复机制 & 优先级规则 \\
+\midrule
+Step 1: 功耗回收 & \texttt{fix\_eco\_power} & 单元尺寸、缓冲器 & 不引入新时序/DRC \\
+Step 2: DRC 修复 & \texttt{fix\_eco\_drc} & 缓冲器插入、单元尺寸 & 会改变 setup/hold slack \\
+Step 3: 时序修复 & \texttt{fix\_eco\_timing} & 缓冲器插入、单元尺寸 & setup 修复遵守 DRC \\
+Step 4: 最终漏电 & \texttt{fix\_eco\_power} & 阈值电压 & 不引入新时序/DRC \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{设置 ECO 选项}
+\subsection*{Setting the ECO Options}
+
+使用 \cmd{set\_eco\_options} 配置 ECO 行为，包括物理数据路径、可用单元库、修复策略、并行度等。
+
+使用 \cmd{report\_eco\_options} 查看当前设置；\cmd{reset\_eco\_options} 恢复默认。
+
+\subsection{多库配置}
+\subsubsection*{Configuring the ECO for Multiple Libraries}
+
+若工具须区分多个逻辑等效库，可指定库优先级与排除规则。用 \cmd{set\_eco\_options} 的库相关选项配置。
+用 \opt{-exclude} 相关变量从设计特定部分排除库单元。
+
+\subsection{电源管理单元尺寸调整}
+\subsubsection*{Resizing Power Management Cells}
+
+默认 ECO 可能不调整电源管理单元；可通过 \cmd{set\_eco\_options} 允许在功耗回收期间考虑这些单元。
+
+\begin{table}[htbp]
+\centering
+\caption{常用 ECO 相关命令}
+\begin{tabular}{@{}ll@{}}
+\toprule
+命令 & 说明 \\
+\midrule
+\texttt{set\_eco\_options} & 设置 ECO 选项（物理路径、单元列表等） \\
+\texttt{report\_eco\_options} & 报告当前 ECO 选项 \\
+\texttt{check\_eco} & 检查物理数据是否可用于 ECO \\
+\texttt{fix\_eco\_timing} & 修复时序违例 \\
+\texttt{fix\_eco\_drc} & 修复 DRC/SI/EM 违例 \\
+\texttt{fix\_eco\_power} & 功耗回收 \\
+\texttt{write\_changes} & 写出 ECO 变更列表 \\
+\texttt{estimate\_eco} & 估算 ECO 更改的时序影响 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{物理感知 ECO}
+\subsection*{Physically Aware ECO}
+
+物理感知 ECO 流程整合静态时序、SI 分析、ECO 变更列表、寄生数据与 StarRC 寄生提取，在考虑物理布局约束的情况下生成可实现的 ECO。
+
+\figplaceholder{Figure 358}{Synopsys 物理感知 ECO 流程}{fig:phys-eco-flow}
+
+\subsection{执行物理感知 ECO}
+\subsubsection*{Performing Physically Aware ECO}
+
+物理 ECO 所需设计数据文件：
+\begin{longtable}{@{}p{0.28\textwidth} p{0.65\textwidth}@{}}
+\toprule
+数据类型 & 说明 \\
+\midrule
+SPEF/GPD 寄生 & 须含位置信息；可用 StarRC 从 ICC II 生成 \\
+块级 LEF 库 & 来自 ICC II 数据库或 Milkyway \\
+DEF / ICC II 数据库 & 布局与布线信息 \\
+物理约束文件 & 含高级间距标签与规则 \\
+StarRC 寄生文件 & 与物理布局一致的寄生 \\
+\bottomrule
+\end{longtable}
+
+配置示例：
+\begin{lstlisting}
+set_eco_options -physical_design_path design.def \
+  -physical_tech_lib_path tech.lef \
+  -physical_lib_path stdcells.lef
+\end{lstlisting}
+
+\subsection{站点感知物理 ECO 修复}
+\subsubsection*{Site-Aware Physical ECO Fixing}
+
+PrimeTime 物理感知 ECO 可识别单高度与双高度 site row，在合法 site 上放置 ECO 单元。
+
+\figplaceholder{Figure 360}{常规单高度与双高度 site row}{fig:site-rows}
+
+\figplaceholder{Figure 361}{偏移单高度与双高度 site row}{fig:offset-site-rows}
+
+\subsection{多电压物理约束}
+\subsubsection*{Multivoltage Physical Constraints}
+
+物理 ECO 可处理多电压域的电压岛、电平转换器与隔离单元约束。
+
+\figplaceholder{Figure 359}{多电压物理约束示例}{fig:mv-phys-constraint}
+
+\section{ECO 修复方法}
+\subsection*{ECO Fixing Methods}
+
+\subsection{负载缓冲与负载屏蔽}
+\subsubsection*{Load Buffering and Load Shielding}
+
+负载缓冲（load buffering）在关键负载前插入缓冲器以加速网络；负载屏蔽在受害网络附近插入缓冲器隔离串扰 aggressor。
+
+\figplaceholder{Figure 362}{负载缓冲示例}{fig:load-buffering}
+
+\figplaceholder{Figure 363}{负载屏蔽示例}{fig:load-shielding}
+
+\subsection{时钟网络 ECO 修复}
+\subsubsection*{Clock Network ECO Fixing}
+
+在时钟网络中插入缓冲器修复 hold 违例时，\cmd{fix\_eco\_timing} 支持 \opt{-cell\_type clock\_network} 与 \opt{-methods {insert\_buffer}}。
+
+需注意 setup/hold 权衡：时钟网络缓冲可能改善部分路径 hold 但恶化其他路径 setup。
+
+\subsection{TNS 驱动的时钟网络时序 ECO}
+\subsubsection*{TNS-Driven Clock Network Timing ECO}
+
+使用 \opt{-target\_violation\_type tns} 以 TNS 为目标修复；\opt{-wns\_limit} 限制 WNS 恶化程度。
+
+图 365--367 示例说明：默认不允许因修复而恶化其他路径 hold；TNS 模式可在 WNS 限制内权衡多条路径。
+
+\figplaceholder{Figure 365}{负 hold slack 示例}{fig:hold-neg}
+
+\figplaceholder{Figure 366}{TNS 驱动 hold 修复（默认 WNS 限制）}{fig:tns-hold-default}
+
+\figplaceholder{Figure 367}{TNS 驱动 hold 修复（显式 WNS 限制）}{fig:tns-hold-explicit}
+
+\subsection{使用负载电容单元进行 Hold 修复}
+\subsubsection*{ECO Hold Fixing Using Load Capacitance Cells}
+
+\cmd{fix\_eco\_timing} \opt{-type hold} 可在数据路径插入负载电容单元。对小 hold 违例（约 5 ps 以内）比最小缓冲器更精确，避免 over-fix。
+
+专用负载单元属性：function_id=unknown、is_black_box=true、number_of_pins=1。
+
+\figplaceholder{Figure 368}{缓冲器插入与负载单元插入进行 hold 修复}{fig:load-cell-hold}
+
+\subsection{基于库单元名的功耗回收}
+\subsubsection*{Power Recovery Based on Library Cell Names}
+
+可指定高漏电与低漏电单元对进行阈值电压或尺寸交换。
+
+\subsection{基于库单元字符串属性的功耗回收}
+\subsubsection*{Power Recovery Based on a Library Cell String Attribute}
+
+通过用户定义属性标记可交换单元组，\cmd{fix\_eco\_power} 按属性匹配进行功耗优化。
+
+\subsection{用户脚本 ECO 机器学习}
+\subsubsection*{User-Scripted ECO Machine Learning}
+
+支持基于机器学习的功耗回收加速，训练单元替换模型以在保持时序前提下降低漏电。
+
+\subsection{MIM 的 ECO}
+\subsubsection*{ECOs With Multiply Instantiated Modules (MIMs)}
+
+对多重实例化模块，ECO 更改须在所有实例间一致应用；使用 HyperScale MIM 流程与相应 \cmd{write\_changes} 选项。
+
+\section{报告不可修复违例与不可用单元}
+\subsection*{Reporting Unfixable Violations and Unusable Cells}
+
+ECO 完成后使用 \cmd{report\_eco\_summary} 查看修复统计。\cmd{report\_eco\_unfixed} 列出无法修复的违例及原因代码：
+\begin{itemize}
+  \item T — 时序裕量过紧无法修复
+  \item U — UPF 限制修复
+  \item W — 修复可能恶化 DRC
+  \item X — 单元对 ECO 不可用
+  \item Z — 单元已被调整尺寸
+\end{itemize}
+
+\section{HyperTrace ECO 修复}
+\subsection*{HyperTrace ECO Fixing}
+
+HyperTrace 加速 ECO 路径分析，在大型设计上缩短 \cmd{fix\_eco\_timing} 与 \cmd{fix\_eco\_power} 运行时间。
+
+配置 HyperTrace ECO 相关应用变量以启用路径追踪优化。
+
+\section{写入变更列表}
+\subsection*{Writing Change Lists}
+
+使用 \cmd{write\_changes} 将 ECO 更改写出为脚本，供 ICC II 或其他 P\&R 工具读入。
+
+常用格式：\opt{-format icctcl}、\opt{-format verilog}、第三方格式等。
+
+\subsubsection{在 PrimeTime 中回放 ECO 变更列表}
+\paragraph*{Replaying an ECO Change List in PrimeTime}
+
+可用 \cmd{source} 读入变更列表验证或增量更新时序。
+
+\subsubsection{在顶层运行中回放块级 ECO 更改}
+\paragraph*{Replaying Block-Level ECO Changes in a Top-Level Run}
+
+HyperScale 流程中，块级 ECO 可在顶层会话中回放并验证接口时序。
+
+\subsubsection{为第三方 P\&R 工具写入 ECO 变更列表}
+\paragraph*{Writing ECO Change Lists for Third-Party Place-and-Route Tools}
+
+支持 pseudo-Tcl 语法描述 insert_buffer、size_cell、create_cell、connect_net 等操作。
+
+变更列表文件头含版本字符串（当前为 1.0），解析脚本应检查版本。
+
+\begin{lstlisting}
+insert_buffer -on_route BUFFD4 \
+  -new_net_names {net1} -new_cell_names {BUF1} \
+  -location {x1 y1} -route_cut_location {x1' y1'} \
+  {sink1/I sink2/I sink3/I sink4/I}
+\end{lstlisting}
+
+\section{在 Synopsys 布局工具中实现 ECO 更改}
+\subsection*{Implementing ECO Changes in Synopsys Layout Tools}
+
+\begin{noteBox}
+若有 PrimeECO 许可证，可在单 shell 环境中完成 ECO 物理实现、寄生提取与 signoff 时序分析。详见 PrimeECO User Guide。
+\end{noteBox}
+
+使用独立 Synopsys 工具的步骤：
+1. PrimeTime：
+\begin{lstlisting}
+write_changes -format icctcl new_change_list_file
+\end{lstlisting}
+
+2. IC Compiler II：source 变更列表，\cmd{place\_eco\_cells}、\cmd{create\_stdcell\_fillers}、\cmd{route\_eco}。
+3. StarRC：寄生提取。
+4. PrimeTime：读入更新网表与寄生，重新分析。
+5. 验证 QoR，按需迭代。
+
+\section{使用 Synopsys 工具的增量 ECO 流程}
+\subsection*{Incremental ECO Flow Using Synopsys Tools}
+
+与全网表/全寄生 ECO 流程相比，增量 ECO 流程中：
+\begin{itemize}
+  \item IC Compiler II 实现 ECO 并仅写出增量更改。
+  \item StarRC 仅提取增量物理更改并写出增量寄生文件。
+  \item PrimeTime 将增量寄生应用于恢复的会话并验证修改后设计时序。
+\end{itemize}
+
+\figplaceholder{Figure 372}{Synopsys 增量 ECO 流程}{fig:incr-eco-flow}
+
+\figplaceholder{Figure 373}{Synopsys 增量 ECO 流程步骤}{fig:incr-eco-steps}
+
+\subsection{初始化增量 ECO 流程}
+\subsubsection*{Initialize the Incremental ECO Flow}
+
+1. ICC II：打开库、复制块、初始化 ECO 数据库：
+\begin{lstlisting}
+icc2_shell> open_lib Design.nlib
+icc2_shell> copy_block -from_block Block -to_block Block_pre_eco
+icc2_shell> open_block Block_pre_eco
+icc2_shell> record_signoff_eco_changes -init -def
+\end{lstlisting}
+
+2. StarRC：ECO 模式与增量网表模式寄生提取。
+3. PrimeTime：全设计基线时序更新、save_session、执行初始 ECO。
+
+\subsection{增量 ECO 迭代}
+\subsubsection*{Incremental ECO Iteration}
+
+初始化后每轮迭代：ICC II 实现 PrimeTime 写出的更改并跟踪增量；StarRC 增量提取；PrimeTime restore_session 并应用增量寄生。
+
+\subsection{层次化增量 ECO 流程}
+\subsubsection*{Hierarchical Incremental ECO Flow}
+
+HyperScale 块级与顶层可分别进行增量 ECO，通过 record_signoff_eco_changes 协调跨层次更改。
+
+\section{使用缩减资源的 ECO 流程}
+\subsection*{ECO Flow Using Reduced Resources}
+
+在全设计时序分析后，创建仅含违例相关逻辑的缩减设计进行 ECO，降低内存与运行时间。支持 DMSA 与非 DMSA 模式。
+
+\subsection{缩减资源非 DMSA ECO 流程}
+\subsubsection*{Reduced Resource Non-DMSA ECO Flow}
+
+使用 \cmd{create\_eco\_scenario} 与相关命令创建缩减场景，在缩减设计上执行 fix_eco_* 命令。
+
+\section{Freeze Silicon ECO 流程}
+\subsection*{Freeze Silicon ECO Flow}
+
+Freeze silicon ECO 在已流片硅片上通过备用单元（spare cell）实现逻辑更改。需特殊物理规则、导出规则与技术约束。
+
+\subsection{准备 Freeze Silicon ECO 流程}
+\subsubsection*{Preparing for the Freeze Silicon ECO Flow}
+
+ICC II 中准备 spare cell、填充单元与 ECO 合法化规则；PrimeTime 中配置 freeze silicon 相关 ECO 选项。
+
+\subsection{PrimeTime 中的 Freeze Silicon ECO}
+\subsubsection*{Freeze Silicon ECO in PrimeTime}
+
+使用专用 \cmd{fix\_eco\_*} 选项与 \cmd{write\_changes} 格式，将逻辑映射到 spare cell 并实现金属层 ECO。
+
+\section{在较少主机上运行 ECO 场景}
+\subsection*{Running ECO Scenarios on Fewer Hosts}
+
+优化 DMSA ECO 脚本以在有限主机上更快完成：合并场景、调整并行度、使用场景优先级。
+
+\subsection{优化 DMSA ECO 脚本以加快周转}
+\subsubsection*{Optimizing DMSA ECO Scripts for Faster Turnaround}
+
+减少场景镜像交换、批量 fix_eco 命令、复用物理数据路径等最佳实践。
+
+\section{手动网表编辑}
+\subsection*{Manual Netlist Editing}
+
+除自动 ECO 外，可手动编辑网表：
+\begin{table}[htbp]
+\centering
+\caption{手动网表编辑任务与命令}
+\begin{tabular}{@{}ll@{}}
+\toprule
+对象 & 任务 / 命令 \\
+\midrule
+单元 & 尺寸调整：\texttt{size\_cell}；创建：\texttt{create\_cell} \\
+网络 & 连接：\texttt{connect\_pin} / \texttt{disconnect\_pin} \\
+缓冲器 & 插入：\texttt{insert\_buffer}；删除：\texttt{remove\_buffer} \\
+负载 & 插入负载电容单元：\texttt{create\_cell} + \texttt{connect\_net} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{GUI 中的单元尺寸调整与缓冲器插入}
+\subsubsection*{Sizing Cells and Inserting Buffers in the GUI}
+
+在布局视图中可通过 ECO 菜单交互式 size cell 与 insert buffer，支持 on-route 放置引导与即时增量时序更新（见第~\ref{chap:gui}~章）。
+
+\subsection{fix_eco_timing 选项详解}
+\subsubsection*{fix_eco_timing Option Details}
+
+\cmd{fix\_eco\_timing} 主要选项：
+\begin{longtable}{@{}p{0.32\textwidth} p{0.6\textwidth}@{}}
+\toprule
+选项 & 说明 \\
+\midrule
+-type setup|hold & 修复类型 \\
+-methods \{insert\_buffer size\_cell remove\_buffer\} & 修复方法 \\
+-cell\_type data\_path|clock\_network & 目标单元类型 \\
+-buffer\_list \{...\} & 可用缓冲器列表 \\
+-target\_violation\_type wns|tns & 优化目标 \\
+-wns\_limit value & WNS 恶化限制 \\
+-max\_cells\_per\_path N & 每条路径最大 ECO 单元数 \\
+-effort low|medium|high & 修复力度 \\
+\bottomrule
+\end{longtable}
+
+\subsection{fix_eco_drc 选项详解}
+\subsubsection*{fix_eco_drc Option Details}
+
+修复 max_transition、max_capacitance、max_fanout、噪声与电迁移违例。支持 load shielding、buffer insertion、cell sizing 等方法。
+
+\subsection{fix_eco_power 选项详解}
+\subsubsection*{fix_eco_power Option Details}
+
+功耗回收在不恶化时序/DRC 前提下降低漏电。支持按库单元名、用户属性、机器学习模型选择替换单元。
+
+\subsection{set_eco_options 物理选项}
+\subsubsection*{set_eco_options Physical Options}
+
+\begin{lstlisting}
+set_eco_options \
+  -physical_design_path design.def \
+  -physical_tech_lib_path tech.lef \
+  -physical_lib_path stdcells.lef \
+  -physical_constraint_file phys_constraints.tcl \
+  -target_directories {./eco_cells}
+\end{lstlisting}
+
+\subsection{物理 ECO 条件变量}
+\subsubsection*{Physical ECO Condition Variables}
+
+\begin{table}[htbp]
+\centering
+\caption{物理 ECO 相关条件与变量}
+\small
+\begin{tabular}{@{}p{0.4\textwidth} p{0.5\textwidth}@{}}
+\toprule
+条件 & 相关变量 \\
+\midrule
+单元可用性 & eco\_allow\_footprint\_change \\
+缓冲器选择 & eco\_buffer\_list\_for\_reference \\
+最大扇出 & eco\_max\_fanout \\
+物理合法化 & eco\_physical\_mode \\
+Site 规则 & eco\_respect\_sites \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{DEF 到 LEF Site 名称转换}
+\subsubsection*{DEF to LEF Site Name Conversion}
+
+当 DEF 中 SITE 名称与 LEF 不一致时，PrimeTime 提供映射规则（如 SITE CORE2T 映射到 LEF SITE）。
+
+\begin{lstlisting}
+SITE CORE2T
+END CORE2T
+\end{lstlisting}
+
+\subsection{层次块缺失 LEF 文件}
+\subsubsection*{Missing LEF Files for Hierarchical Blocks}
+
+即使层次块 DEF 组件缺少完整 LEF，仍可读入 LEF/DEF 格式物理数据；工具对黑盒块使用占位物理信息。
+
+\subsection{高级间距标签与规则}
+\subsubsection*{Advanced Spacing Labels and Rules}
+
+物理感知 ECO 可考虑先进间距规则（advanced spacing rules），通过物理约束文件指定。
+
+\subsection{StarRC 寄生数据文件}
+\subsubsection*{Parasitic Data Files From StarRC}
+
+物理 ECO 需要带位置信息的 SPEF/GPD 寄生；StarRC 从 ICC II 数据库提取时须启用相应选项以保留位置。
+
+\subsection{单场景与多场景功耗回收示例}
+\subsubsection*{Single and Multi-Scenario Power Recovery Examples}
+
+单场景：fix_eco_power 后直接 write_changes。多场景 DMSA：对各场景分别 fix_eco_power 或合并违例后统一修复。
+
+\subsection{功耗回收操作统计}
+\subsubsection*{Power Recovery Operation Statistics}
+
+report_eco_summary 显示可参与功耗回收的单元数、已训练/已调整/未训练单元数及面积变化。
+
+\subsection{estimate_eco 命令}
+\subsubsection*{The estimate_eco Command}
+
+\cmd{estimate\_eco} 在不实际修改网表的情况下估算 ECO 更改的时序影响，用于 GUI 手动 ECO 或脚本预评估。
+
+\subsection{write_changes 格式选项}
+\subsubsection*{write_changes Format Options}
+
+\begin{itemize}
+  \item \opt{-format icctcl} — IC Compiler II Tcl 脚本
+  \item \opt{-format verilog} — Verilog 网表增量
+  \item \opt{-format ptsh} — PrimeTime Tcl 脚本
+  \item 第三方 P\&R 伪 Tcl 格式
+\end{itemize}
+
+\subsection{ECO 变更列表版本与解析}
+\subsubsection*{Change List Version and Parsing}
+
+\begin{noteBox}
+变更列表头版本字符串当前为 1.0；解析脚本应检查版本以避免未来格式升级导致意外行为。
+\end{noteBox}
+
+\subsection{层次化增量 ECO}
+\subsubsection*{Hierarchical Incremental ECO Flow Details}
+
+HyperScale 块级与顶层分别 record_signoff_eco_changes；增量寄生与增量网表在各自层次应用后验证接口时序。
+
+\subsection{缩减资源 DMSA ECO}
+\subsubsection*{Reduced Resource DMSA ECO}
+
+DMSA 模式下可为各场景创建缩减 ECO 设计，在场景子集上并行 fix_eco_* 以降低总内存。
+
+\figplaceholder{Figure 374}{缩减资源 ECO 流程}{fig:reduced-eco-flow}
+
+\subsection{Freeze Silicon 技术规则}
+\subsubsection*{Freeze Silicon Technology Rules}
+
+Freeze silicon 须遵守金属层 ECO 设计规则、spare cell 映射规则与导出规则（export rules）。
+
+\subsection{ICC II Freeze Silicon 准备}
+\subsubsection*{IC Compiler II ECO Preparation for Freeze Silicon}
+
+在 ICC II 中标记 spare cell、定义 filler 与 ECO 合法化约束，导出供 PrimeTime freeze silicon ECO 使用。
+
+\subsection{手动插入缓冲器示例}
+\subsubsection*{Manual Buffer Insertion Example}
+
+\begin{lstlisting}
+insert_buffer -new_cell_names {eco_buf1} -new_net_names {eco_net1} \
+  {driver_pin load_pin1 load_pin2}
+size_cell cell_instance new_lib_cell
+remove_buffer buffer_instance
+\end{lstlisting}
+
+\subsection{ECO 与 UPF}
+\subsubsection*{ECO and UPF}
+
+多电压设计中 ECO 须遵守电源域与电平转换规则；不可修复原因 U 表示 UPF 限制阻止修复。
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 第~\ref{chap:gui}~章 Layout View 与 GUI ECO
+  \item PrimeECO User Guide
+\end{itemize}
+\end{seeAlsoBox}
+

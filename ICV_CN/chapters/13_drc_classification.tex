@@ -1,0 +1,1002 @@
+% 第 13 章 DRC Error Classification
+\bichapter{DRC 错误分类}{DRC Error Classification}
+\label{chap:drclass}
+
+本章介绍 IC Validator 工具的 DRC 错误分类能力及其用法。
+
+DRC 错误分类能力分以下各节说明：
+\begin{itemize}
+  \item 使用 DRC 错误分类
+  \item DRC 错误分类流程
+  \item 使用 PERC 错误分类
+\end{itemize}
+
+% ============================================================
+\section{使用 DRC 错误分类}
+\subsection*{Using DRC Error Classification}
+
+DRC 错误分类允许你对 IC Validator 运行中发现的错误进行分类与标注，并将错误导出到数据库，供后续 IC Validator 运行使用。
+错误可单独分类、在 VUE 中按组分类，或使用 \cmd{pydb\_report} 实用程序批量分类。
+
+通过使用持久化错误分类数据库（cPYDB），错误分类与用户注释可在多次 IC Validator 运行之间保留。
+后续运行的错误数据以及分类数据均存储在 SQLite 数据库中。
+
+此流程使用 \cmd{error\_options()} 函数。该函数有若干专用于 DRC 错误分类的参数：
+\begin{itemize}
+  \item \cmd{match\_errors}：指定要在 IC Validator 运行中导入以进行匹配的错误分类数据库列表。
+    对列表中每个错误分类数据库，可控制是否抑制已匹配错误，以及是否报告未匹配错误。
+    （未匹配错误指：存在于已导入的错误分类数据库中、但当前 IC Validator 运行未产生的错误。）
+  \item \cmd{mustfix\_errors}：将某些违例注释与单元指定为必须修复（must-fix）。
+    不能将这些注释与单元分类为 Ignore 或 Waive。此设置仅作用于当前运行，不会保留在错误分类数据库中。
+  \item \cmd{comment\_match\_delimiter}：指定在已导入错误分类数据库中进行违例注释匹配时的分隔符字符串。
+  \item \cmd{match\_errors\_processing\_mode}：指定 IC Validator 工具使用单元级（cell level）还是层次化处理来匹配错误分类数据库中的已分类违例。默认为 \cmd{CELL\_LEVEL}。
+  \item \cmd{violation\_options}：允许按规则覆盖某些全局错误选项。
+    例如，若大多数规则以 \cmd{HIERARCHICAL} 模式匹配，但少数规则需要以 \cmd{CELL\_LEVEL} 模式运行，可用此参数实现。
+\end{itemize}
+
+使用 \cmd{pydb\_report} 与 \cmd{pydb\_export} 实用程序对错误分类，并复用分类数据。
+更多信息见 \cmd{pydb\_report} Utility 与 \cmd{pydb\_export} Utility。
+这些实用程序位于 IC Validator 安装目录的 \cmd{bin} 下。也可使用 VUE 对错误分类并导出。见 \textit{IC Validator VUE User Guide}。
+
+\subsection{CELL\_LEVEL 模式下的层次考虑}
+\subsubsection*{Hierarchy Considerations in CELL\_LEVEL Mode}
+
+预处理期间，IC Validator 函数会进行层次优化。
+因此，在 \cmd{CELL\_LEVEL} 模式下做错误匹配时，各次运行之间的错误可能不一致。
+为帮助防止运行间层次不一致，导入错误分类数据库时，数据库中定义的任何单元会在预处理期间自动受保护而不被展开（explosion）。
+然而，某些优化会创建层次，或对单元的个别实例展开/展平，因而仍可能造成一致性问题。
+
+在 \cmd{CELL\_LEVEL} 模式下运行 DRC 错误分类流程时，务必在 \cmd{hierarchy\_auto\_options()} 函数中将 \cmd{flow} 参数设为 \cmd{ERROR\_CLASSIFICATION} 选项。
+
+见 \cmd{hierarchy\_auto\_options()} 函数。
+
+\subsection{层次化 DRC 错误分类}
+\subsubsection*{Hierarchical DRC Error Classification}
+
+IC Validator 工具为错误分类匹配提供 \cmd{HIERARCHICAL} 模式，比 \cmd{CELL\_LEVEL} 模式更稳健，对层次变化也更不敏感。
+该模式对层次优化不加限制。错误分类数据库（cPYDB）中含有已分类错误的单元允许被展开。
+
+若 IC Validator 工具产生的错误之完整层次合成形状，与 cPYDB 中具有相同分类的错误之完整层次合成形状完全重叠，则视为与 cPYDB 中已分类错误匹配。
+若工具所发现错误与 cPYDB 中错误的完整形状有任何部分不同，则不是层次匹配。
+
+不过，在此模式下，只要可能，错误也可单独匹配。
+也就是说，当单个错误（而非由多个错误组成的完整层次合成形状）与 cPYDB 中对应的单个错误完全重叠时，即使二者处于不同层次级别，也视为匹配。
+
+\begin{noteBox}
+建议对所有使用层次错误分类的 IC Validator 运行（尤其是用于生成 cPYDB 的首次运行），将 \cmd{error\_options()} 的 \cmd{partially\_exploded\_cells} 参数设为 \cmd{EXPLODE}，或使用命令行选项 \cmd{-pec EXPLODE}。
+该参数确保错误报告在 IC Validator 工具保留了原始设计层次中全部实例的单元内，并降低实例特有错误导致分类无法匹配的可能性。
+\end{noteBox}
+
+\subsection{错误分类最佳实践}
+\subsubsection*{Error Classification Best Practices}
+
+必须区分：错误分类数据库（cPYDB）中按规则或违例注释引用的已分类错误，与 IC Validator 工具由某条命令产生的错误。
+为确保正确匹配，推荐最佳实践是：用单条 IC Validator 命令输出某规则的全部违例。
+这样可避免同一规则内不同命令产生的错误在 cPYDB 中相互干扰，从而在后续运行按单条命令考虑时妨碍层次匹配。
+违例注释应对命令唯一，以确保这种对应关系。
+
+清理无效的 cPYDB 数据也很重要。
+例如，若错误形状已改变，但新形状仍被视为有效且拟予 waiver，则应清除该违例与单元的 cPYDB 条目，并用新错误形状重新创建。
+在 cPYDB 中保留旧的无效形状会妨碍 IC Validator 工具找到层次匹配。
+
+当前，错误分类最适用于 DRC 违例。
+对其他类型违例（包括 ERC、器件提取与密度）的先前已分类错误匹配尚不支持。
+
+\subsection{数据库命名约定}
+\subsubsection*{Database Naming Conventions}
+
+引用数据库时需指定数据库名与数据库路径。
+IC Validator 运行生成的错误数据库（PYDB）默认命名为 \cmd{PYDB\_top-cell}，除非在 \cmd{error\_options()} 的 \cmd{db\_path} 参数中另行指定路径，否则位于 \cmd{run\_details/pydb}。
+
+例如，对设计 \cmd{TOP} 运行 IC Validator。目录 \cmd{run\_details/pydb/PYDB\_TOP} 包含错误数据库的数据文件。数据库路径为 \cmd{run\_details/pydb}，数据库名为 \cmd{PYDB\_TOP}。
+
+SQLite 允许数据库名由字母数字字符与下划线（\cmd{\_}）组成。数据库名按如下变换：
+\begin{itemize}
+  \item 所有非字母数字字符替换为下划线（\cmd{\_}）。例如，\cmd{PYDB\_A.1.2} 变为 \cmd{PYDB\_A\_1\_2}。
+  \item 若数据库名仅含数字，则在首尾添加下划线。例如，\cmd{123} 变为 \cmd{\_123\_}。
+\end{itemize}
+
+可在 runset、VUE 以及 \cmd{pydb\_report} 与 \cmd{pydb\_export} 实用程序中继续使用原始数据库名，但磁盘上以修改后的名称存储。
+
+% ============================================================
+\section{DRC 错误分类流程}
+\subsection*{DRC Error Classification Flow}
+
+图~\ref{fig:drc-err-class-flow} 展示 DRC 错误分类流程。
+
+\figplaceholder{Figure 93: DRC Error Classification Flow}{DRC 错误分类流程}{fig:drc-err-class-flow}
+
+\begin{enumerate}
+  \item 对设计运行 IC Validator 工具。随后可用 VUE 或 \cmd{pydb\_report} 实用程序对所得 DRC 错误分类。\\
+    为在后续运行中复用分类数据，使用 VUE 或 \cmd{pydb\_export} 实用程序将已分类错误导出到错误分类数据库。
+  \item 再次运行 IC Validator 时，在 \cmd{error\_options()} 的 \cmd{match\_errors} 参数中指定错误分类数据库。
+    若指定多个错误分类数据库，则按指定顺序搜索匹配错误。错误以最先匹配到的错误分类数据库中的数据预分类，并写入当前运行的错误数据库。该错误在 \cmd{LAYOUT\_ERRORS} 文件与 VUE 中显示为已分类。\\
+    使用 \cmd{error\_options()} 的 \cmd{match\_errors} 参数并设为 \cmd{suppress\_matched\_errors} 选项时，可指定不写入错误数据库的错误。
+\begin{noteBox}
+\cmd{error\_options()} 的 \cmd{error\_limit\_per\_check} 参数仅适用于新错误。本运行产生的全部错误都会对照已导入的错误分类数据库列表检查，所有匹配错误均写入错误数据库。未匹配任何错误分类数据库的错误则写入，直至达到指定的 \cmd{error\_limit\_per\_check} 限制。
+\end{noteBox}
+  \item 最后，可将当前运行或其他运行中的新分类合并到现有错误分类数据库。新分类的错误追加到数据库；已有错误若有变化则更新。
+\end{enumerate}
+
+\subsection{DRC 错误分类流程示例}
+\subsubsection*{DRC Error Classification Flow Example}
+
+本节以 AD4FUL 设计为例走通 DRC 错误分类流程。使用 \cmd{pydb\_report} 与 \cmd{pydb\_export} 实用程序进行分类与数据库管理。（见 \cmd{pydb\_report} Utility 与 \cmd{pydb\_export} Utility。）
+
+基本步骤为：
+\begin{enumerate}
+  \item 首次运行 IC Validator 工具
+  \item 创建错误分类数据库
+  \item 再次运行 IC Validator 工具
+  \item 更新现有错误分类数据库
+\end{enumerate}
+
+\subsubsection{首次运行 IC Validator 工具}
+\paragraph*{Running the IC Validator Tool Initially}
+
+首先对设计运行 IC Validator，产生 DRC 错误，并写出标准 \cmd{LAYOUT\_ERRORS} 文件。
+
+接着分类：
+\begin{itemize}
+  \item 单元 \cmd{INVH} 中的全部错误为 Ignore。
+  \item 违例 ``Met1 Spacing must be >= 3'' 中的全部错误为 Waive。
+  \item 单元 \cmd{TGATE} 中某坐标窗口内的错误为 Watch。
+\end{itemize}
+
+使用 \cmd{pydb\_report} 实用程序完成该分类：
+\begin{lstlisting}[style=shell]
+pydb_report -pydb_name PYDB_AD4FUL \
+   -pydb_path ./run_details/pydb -classify classify.csv
+\end{lstlisting}
+
+\cmd{pydb\_report} 的输入文件为标准逗号分隔格式。更多信息见 \cmd{pydb\_report} Utility。本例所用文件为：
+\begin{lstlisting}[style=shell]
+INVH,,Ignore,INVH is a known good cell,,,,
+,Met1 Spacing must be >= 3,Waive,Done to fit tight routing,,,,
+TGATE,,Watch,These need to be fixed,0,0,10,10
+\end{lstlisting}
+
+图~\ref{fig:classify-excel} 展示 Microsoft Excel 中的逗号分隔格式。
+
+\figplaceholder{Figure 94: Example Classify File in Microsoft Excel}{Microsoft Excel 中的分类文件示例}{fig:classify-excel}
+
+\cmd{pydb\_report} 实用程序将日志文件 \cmd{pydbreport.log} 写到当前工作目录。相同信息也显示在屏幕上。本例输出见示例~\ref{ex:pydb-report-init}。
+
+\begin{lstlisting}[style=shell,caption={初始 pydb\_report 实用程序 pydbreport.log},label={ex:pydb-report-init}]
+Connecting to DB: PYDB_AD4FUL
+            path: ./run_details/pydb
+Connected to DB PYDB_AD4FUL
+
+Error database PYDB_AD4FUL summary
+    Number of commands:               12
+    Number of commands w/ errors:     12
+    Number of dynamic tables:         5
+    Total error polygons:             48
+    DBU:                              0.00050
+    Number of unique cells w/ errors: 6
+
+Classifying Errors from classify.csv...
+  Classifying all errors in violation/cell...
+    Violation: ALL
+    Cell:      INVH
+    Class:     Ignore
+    Comment:   INVH is a known good cell
+   6 new errors classified.
+   Classify time = 0:00:00 User=0.00 Sys=0.01 Mem=0.000 GB
+  Classifying all errors in violation/cell...
+    Violation: Met1 Spacing must be >= 3
+    Cell:      ALL
+    Class:     Waive
+    Comment:   Done to fit tight routing
+   3 new errors classified.
+   3 existing errors reclassified.
+   Classify time = 0:00:00 User=0.00 Sys=0.00 Mem=0.491 GB
+  Classifying all errors in window...
+    Violation: ALL
+    Cell:      TGATE
+    Window:    (0.0000, 0.0000) (10.0000, 10.0000)
+    Class:     Watch
+    Comment:   These need to be fixed
+   12 new errors classified.
+   Classify time = 0:00:00 User=0.01 Sys=0.00 Mem=0.000 GB
+Overall Classify time = 0:00:00 User=0.01 Sys=0.01 Mem=0.000 GB
+Done.
+\end{lstlisting}
+
+可用 \cmd{pydb\_report} 获取当前运行错误数据库中已分类错误的报告：
+\begin{lstlisting}[style=shell]
+pydb_report -pydb_name PYDB_AD4FUL \
+   -pydb_path ./run_details/pydb \
+   -show_classified file=classified.txt
+\end{lstlisting}
+
+示例~\ref{ex:classified-err-rec} 给出本例已分类错误报告（\cmd{classified.txt}）中的首条错误记录。
+
+\begin{lstlisting}[style=shell,caption={已分类错误报告中的错误记录},label={ex:classified-err-rec}]
+--------------------------------------------------------------------
+                    Classified Error Report
+--------------------------------------------------------------------
+Report Violation: ALL
+Report Cell:      ALL
+Report Class:     ALL
+===================================================================
+Violation: " toxcont must be enclosed by met1 by more than 1.0
+ without touching or overlapping"
+-------------------------------------------------------------------
+Cell: TGATE
+
+Class Summary:
+                     Class         Errors
+                     ------------- ------
+                     Watch         6
+
+Command: runset.rs:101:enclose
+ - - - - - - - - - - - - - - - - - - - - - - - -
+  ( lower left x, y ) ( upper right x, y) Distance
+ - - - - - - - - - - - - - - - - - - - - - - - -
+ (3.0000, 4.0000)    (4.0000, 5.1180)     1.0000
+   * Class:            Watch
+   * Created by:       juser on 2008-10-21 08:36:19
+   * Last Modified by: juser on 2008-10-21 08:36:19
+   * Comment by:       juser on 2008-10-21 08:36:19
+       These need to be fixed
+\end{lstlisting}
+
+\subsubsection{创建错误分类数据库}
+\paragraph*{Creating an Error Classification Database}
+
+要在后续运行中使用分类数据，运行 \cmd{pydb\_export} 创建错误分类数据库（cPYDB）。例如：
+\begin{lstlisting}[style=shell]
+pydb_export -pydb_name PYDB_AD4FUL \
+   -pydb_path ./run_details/pydb \
+   -cpydb_name CPYDB_AD4FUL -cpydb_path ./cpydb -create
+\end{lstlisting}
+
+本例在 \cmd{./cpydb} 目录创建名为 \cmd{CPYDB\_AD4FUL} 的新错误分类数据库。该数据库可用于后续 IC Validator 运行以保留错误分类数据。
+\cmd{pydb\_export} 在当前目录产生日志文件 \cmd{pydbexport.log}。本例运行输出见示例~\ref{ex:init-cpydb}。
+
+\begin{lstlisting}[style=shell,caption={初始错误分类数据库},label={ex:init-cpydb}]
+Called as: pydb_export -pydb_name PYDB_AD4FUL -pydb_path
+./run_details/pydb -cpydb_name CPYDB_AD4FUL -cpydb_path ./cpydb
+-create
+
+Operation ..................... Create New Database
+Input PYDB Path ............... ./run_details/pydb
+Input PYDB Name ............... PYDB_AD4FUL
+Output cPYDB Path ............. ./cpydb
+Output cPYDB Name ............. CPYDB_AD4FUL
+Export Matched Errors ......... FALSE
+
+Loading global database info
+ Loading database time = 0:00:00 User=0.00 Sys=0.01 Mem=0.000 GB
+Exporting classified error data
+  Exporting violation " toxcont must be enclosed by met1 by more
+  than 1.0 without touching or overlapping"
+   6 new errors exported
+  Exporting time = 0:00:00 User=0.00 Sys=0.00 Mem=0.000 GB
+  Exporting violation " toxcont must be enclosed by tox by more
+  than 1.5"
+   6 new errors exported
+  Exporting time = 0:00:00 User=0.01 Sys=0.00 Mem=0.000 GB
+  Exporting violation "Met1 Spacing must be >= 3"
+   6 new errors exported
+  Exporting time = 0:00:00 User=0.00 Sys=0.00 Mem=0.000 GB
+  Exporting violation "ngate must be exactly 2.0 by 6.0 rectangles"
+   2 new errors exported
+  Exporting time = 0:00:01 User=0.00 Sys=0.00 Mem=0.000 GB
+  Exporting violation "pgate must be exactly 2.0 by 12.0
+  rectangles"
+   1 new error exported
+  Exporting time = 0:00:00 User=0.00 Sys=0.00 Mem=0.000 GB
+ Export time = 0:00:01 User=0.01 Sys=0.01 Mem=0.803
+Recreating indexes
+ Recreating indexes time = 0:00:00 User=0.00 Sys=0.00 Mem=0.000 GB
+Overall export time = 0:00:01 User=0.01 Sys=0.02 Mem=0.000 GB
+
+Export Successful.
+PYDB_Export is done.
+\end{lstlisting}
+
+\subsubsection{再次运行 IC Validator 工具}
+\paragraph*{Running the IC Validator Tool Again}
+
+修复部分错误后，再次运行 IC Validator，并导入上次创建的错误分类数据库。使用错误分类数据库可避免重复劳动。
+要使用错误分类数据库，在 \cmd{error\_options()} 中指定：
+\begin{lstlisting}[style=pxl]
+error_options(
+   match_errors = {
+      {db_name = "CPYDB_AD4FUL",
+       db_path = "./cpydb"}
+   }
+);
+\end{lstlisting}
+
+IC Validator 运行后，注意新的 \cmd{LAYOUT\_ERRORS} 文件中错误已用错误分类数据库中的数据预分类：
+\begin{itemize}
+  \item 错误汇总节按分类标签给出错误计数。
+  \item 错误详情节按分类标签对错误分组。
+\end{itemize}
+
+\begin{noteBox}
+可随时用 \cmd{pydb\_report} 从错误数据库重新生成 \cmd{LAYOUT\_ERRORS} 文件。也可用 \cmd{pydb\_report} 生成已分类错误报告以显示详细分类信息，如示例~\ref{ex:err-summary} 与示例~\ref{ex:err-details} 所示。
+\end{noteBox}
+
+示例~\ref{ex:err-summary} 展示错误汇总节。
+
+\begin{lstlisting}[style=shell,caption={错误汇总节},label={ex:err-summary}]
+                       ERROR SUMMARY
+
+  toxcont must be enclosed by met1 by more than 1.0 without touching or
+  overlapping
+  enclose .......................................... 9 violations found.
+    Unclassified Errors ............................ 3 violations found.
+    Errors classified as Watch ..................... 6 violations found.
+\end{lstlisting}
+
+示例~\ref{ex:err-details} 展示错误详情节。
+
+\begin{lstlisting}[style=shell,caption={错误详情节},label={ex:err-details}]
+                       ERROR DETAILS
+
+---------------------------------------------------------------------
+ toxcont must be enclosed by met1 by more than 1.0 without touching or
+ overlapping
+---------------------------------------------------------------------
+
+run2.rs:107:enclose
+Structure ( lower left x, y ) ( upper right x, y) Distance
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+TGATE     (21.5000, 23.5000) (22.0000, 24.9140) 0.5000
+TGATE     (21.5000, 19.0860) (22.0000, 20.5000) 0.5000
+TGATE     (21.5000, 20.5000) (22.0000, 23.5000) 0.5000
+
++ Errors classified as Watch
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+TGATE     (3.0000, 4.0000)    (4.0000, 5.1180)    1.0000
+TGATE     (3.0000, 0.0000)    (4.0000, 1.0000)    1.0000
+TGATE     (7.0000, 0.0000)    (8.1180, 1.0000)    1.0000
+TGATE     (3.0000, 0.0000)    (4.0000, 1.0000)    1.0000
+TGATE     (3.0000, 1.0000)    (4.0000, 4.0000)    1.0000
+TGATE     (4.0000, 0.0000)    (7.0000, 1.0000)    1.0000
+\end{lstlisting}
+
+\subsubsection{更新现有错误分类数据库}
+\paragraph*{Updating the Existing Error Classification Database}
+
+第二次运行后，可对更多错误分类并重新分类现有错误：
+\begin{lstlisting}[style=shell]
+pydb_report -pydb_name PYDB_AD4FUL \
+   -pydb_path ./run_details/pydb -classify classify2.csv
+\end{lstlisting}
+
+图~\ref{fig:classify-file2} 展示所用 classify 文件。
+
+\figplaceholder{Figure 95: Classify File}{分类文件}{fig:classify-file2}
+
+\cmd{pydb\_report} 的日志文件见示例~\ref{ex:pydb-report-log2}。
+
+\begin{lstlisting}[style=shell,caption={pydb\_report 日志文件},label={ex:pydb-report-log2}]
+Connecting to DB: PYDB_AD4FUL
+            path: ./run_details/pydb
+Connected to DB PYDB_AD4FUL
+
+Error database PYDB_AD4FUL summary
+    Number of commands:               12
+    Number of commands w/ errors:     12
+    Number of dynamic tables:         5
+    Total error polygons:             48
+    DBU:                              0.00050
+    Number of unique cells w/ errors: 6
+
+Classifying Errors from classify2.csv...
+  Classifying all errors in window...
+    Violation: ALL
+    Cell:      TGATE
+    Window:    (0.0000, 0.0000) (10.0000, 10.0000)
+    Class:     Fixed
+    Comment:   These are fixed in the layout
+   12 existing errors reclassified.
+   Classify time = 0:00:00 User=0.01 Sys=0.01 Mem=0.000 GB
+  Classifying all errors in violation/cell...
+    Violation: Met2 width must be >=4.0, convex to convex corners
+    must be >= 4.5
+    Cell:      ADFULAH
+    Class:     Watch
+    Comment:   These need to be fixed
+   3 new errors classified.
+   Classify time = 0:00:00 User=0.00 Sys=0.00 Mem=0.000 GB
+Overall Classify time = 0:00:00 User=0.01 Sys=0.01 Mem=0.000 GB
+Done.
+\end{lstlisting}
+
+使用 \cmd{pydb\_export} 将变更合并到现有错误分类数据库（cPYDB）：
+\begin{lstlisting}[style=shell]
+pydb_export -pydb_name PYDB_AD4FUL \
+   -pydb_path ./run_details/pydb -cpydb_name CPYDB_AD4FUL \
+   -cpydb_path ./cpydb -merge
+\end{lstlisting}
+
+合并步骤的 \cmd{pydb\_export} 日志见示例~\ref{ex:pydb-export-merge}。
+
+\begin{lstlisting}[style=shell,caption={pydb\_export 日志文件},label={ex:pydb-export-merge}]
+Called as: pydb_export -pydb_name PYDB_AD4FUL -pydb_path
+./run_details/pydb -cpydb_name CPYDB_AD4FUL -cpydb_path ./cpydb
+-merge
+
+Operation ..................... Merge
+Input PYDB Path ............... ./run_details/pydb
+Input PYDB Name ............... PYDB_AD4FUL
+Output cPYDB Path ............. ./cpydb
+Output cPYDB Name ............. CPYDB_AD4FUL
+Export Matched Errors ......... FALSE
+
+Loading global database info
+ Loading database time = 0:00:00          User=0.00 Sys=0.00 Mem=0.000 GB
+Merging classified error data
+  Exporting violation " toxcont must be enclosed by met1 by more
+  than 1.0 without touching or overlapping"
+   6 existing errors updated
+  Exporting time = 0:00:00 User=0.01 Sys=0.00 Mem=0.000 GB
+  Exporting violation " toxcont must be enclosed by tox by more
+  than 1.5"
+   6 existing errors updated
+  Exporting time = 0:00:00 User=0.00 Sys=0.00 Mem=0.000 GB
+  Exporting violation "Met2 width must be >=4.0, convex to convex
+  corners must be >= 4.5"
+   3 new errors exported
+  Exporting time = 0:00:01 User=0.00 Sys=0.00 Mem=0.000 GB
+ Export time = 0:00:01 User=0.01 Sys=0.01 Mem=0.000 GB
+Overall export time = 0:00:01 User=0.01 Sys=0.01 Mem=0.000 GB
+Export Successful.
+PYDB_Export is done.
+\end{lstlisting}
+
+再次运行 IC Validator 时，\cmd{LAYOUT\_ERRORS} 文件显示对数据库所做更改得以保留。
+
+通过运行 \cmd{pydb\_report} 查看详细信息：
+\begin{lstlisting}[style=shell]
+pydb_report -pydb_name PYDB_AD4FUL \
+   -pydb_path ./run_details/pydb \
+   -show_classified file=classified2.txt
+\end{lstlisting}
+
+也可使用 VUE 生成报告。
+本例已分类错误报告的新输出与首次运行的错误报告类似。
+
+\subsection{pydb\_report 实用程序}
+\subsubsection*{pydb\_report Utility}
+
+使用 \cmd{pydb\_report} 实用程序配合错误数据库可：
+\begin{itemize}
+  \item 生成已分类错误的详细报告。
+  \item 重新生成 \cmd{LAYOUT\_ERRORS} 文件。
+  \item 对错误分类。
+\end{itemize}
+
+对错误分类时，分类标签、UNIX 用户 ID、时间戳以及可能的注释会与该错误一并存储在当前运行的错误数据库中。
+
+此外，可对错误分类数据库使用 \cmd{pydb\_report}，以生成已分类错误的详细报告。
+
+\begin{noteBox}
+见``数据库命名约定''一节。
+\end{noteBox}
+
+该实用程序位于 IC Validator 安装目录的 \cmd{bin} 下。表~\ref{tab:pydb-report-opts} 定义命令行选项。
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash\ttfamily}p{0.32\textwidth} p{0.60\textwidth}@{}}
+\caption{pydb\_report 实用程序命令行选项}\label{tab:pydb-report-opts}\\
+\toprule
+\textbf{\textrm{命令行选项}} & \textbf{\textrm{定义}} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{\textrm{命令行选项}} & \textbf{\textrm{定义}} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+-64 &
+  以 64 位坐标支持运行该实用程序。若错误数据库中的坐标超出 32 位有符号整数容量（即 IC Validator 以 \cmd{-64} 命令行选项运行），可能需要此选项。 \\
+-classify \textit{input\_file} &
+  根据给定输入文件对错误数据库中的错误分类。见下一节``分类文件格式''。 \\
+-classify\_by\_window {[}interacting \textbar{} enclosed{]} &
+  指定如何根据分类文件中的窗口坐标选择错误以进行分类。默认为 \cmd{interacting}。
+  \cmd{interacting}：与窗口坐标有任何相交的错误被选中分类。
+  \cmd{enclosed}：完全被窗口坐标包围的错误被选中分类。所选错误可触及包围窗口。 \\
+-cpydb\_name \textit{name} &
+  错误分类数据库（cPYDB）实例名。对错误分类数据库操作时必需。 \\
+-cpydb\_path \textit{path} &
+  错误分类数据库（cPYDB）路径。对错误分类数据库操作时必需。 \\
+-create\_results\_report \textit{output\_file} &
+  根据 PYDB 中的信息创建 RESULTS 风格文件。 \\
+-dlpc <limit> &
+  将所生成 \cmd{LAYOUT\_ERRORS} 或 \cmd{TOP\_LAYOUT\_ERRORS} 文件中每个检查的错误详情（坐标）限制为给定数量。 \\
+-help &
+  显示用法信息。 \\
+-le \textit{output\_file} &
+  从当前错误数据库生成 \cmd{LAYOUT\_ERRORS} 文件。 \\
+-no\_error\_details &
+  不在 \cmd{LAYOUT\_ERRORS} 或 \cmd{TOP\_LAYOUT\_ERRORS} 文件中报告错误详情（即坐标）。 \\
+-pydb\_name \textit{name} &
+  错误数据库（PYDB）实例名；通常为 \cmd{PYDB\_top\_cell}。对错误数据库操作时必需。 \\
+-pydb\_path \textit{path} &
+  错误数据库（PYDB）路径；通常为 \cmd{./run\_details/pydb}，除非在 \cmd{error\_options()} 的 \cmd{db\_path} 参数中另行指定。对错误数据库操作时必需。 \\
+-show\_classified {[}cell=\textit{cell}{]} {[}violation=\textit{comment}{]} {[}class=\textit{class1,...,classn}{]} {[}file=\textit{file}{]} &
+  为错误数据库与错误分类数据库生成详细的已分类错误报告。指定参数可按违例、单元与类别限制报告。若未指定输出文件，则输出到屏幕。 \\
+suppress\_classified\_errors &
+  若指定，则 \cmd{LAYOUT\_ERRORS} 或 \cmd{TOP\_LAYOUT\_ERRORS} 文件中不报告已分类错误。所有已分类错误均被抑制，无论其来自错误分类数据库、以编程方式分类错误的 IC Validator 选项，还是在 IC Validator 运行后由 VUE 或错误数据库分类。 \\
+-tle \textit{output\_file} &
+  从 PYDB 数据库生成 \cmd{TOP\_LAYOUT\_ERRORS} 文件。 \\
+-V &
+  打印实用程序版本。 \\
+-verbose\_results\_file &
+  控制使用 \cmd{pydb\_report -create\_results\_report} 时的输出。 \\
+\end{longtable}
+
+\subsubsection{分类文件格式}
+\paragraph*{Classify File Format}
+
+\cmd{-classify} 命令行选项输入文件的格式为逗号分隔文件，列依次为：Cell、Violation、Class、Comment、x1、y1、x2、y2。见图~\ref{fig:classify-excel}。
+\begin{itemize}
+  \item 若给出单元但未给出违例，则对该单元内全部错误分类。
+  \item 若给出违例但未给出单元，则对该违例内全部错误分类。
+  \item 若给出窗口坐标，则必须给出单元，并对与该窗口相交的错误分类。默认为任意相交；可用 \cmd{-classify\_by\_window} 命令行选项更改此行为。
+\end{itemize}
+
+文件中记录的格式应遵循 RFC4180 推荐的 CSV 指南，且无列标题。Microsoft Excel 及其他电子表格工具支持此格式。
+
+可选分类见表~\ref{tab:classify-format}。
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash\ttfamily}p{0.22\textwidth} p{0.70\textwidth}@{}}
+\caption{分类文件格式}\label{tab:classify-format}\\
+\toprule
+\textbf{\textrm{分类}} & \textbf{\textrm{说明}} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{\textrm{分类}} & \textbf{\textrm{说明}} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+Error & 未分类错误（默认分类） \\
+Ignore & 设计者暂不关心的错误：拟在流程后续修复 \\
+Waive & 有意保留的设计错误。签收时仍将存在。 \\
+Watch & 需在下一设计周期修复的错误。 \\
+Fixed & 已在版图中修复的错误 \\
+Unmatched & 存在于已导入错误分类数据库中、但当前运行未产生的错误 \\
+\end{longtable}
+
+\subsubsection{使用正则表达式匹配}
+\paragraph*{Using Regular Expression Matching}
+
+在 \cmd{-classify} 命令行选项指定的输入文件中，现可用正则表达式匹配错误数据库中的违例注释与单元名。
+通过在首尾使用正斜杠（\cmd{/}），并在尾部斜杠后可选地加修饰字符来启用匹配。修饰字符见表~\ref{tab:classify-mod}。
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash\ttfamily}p{0.22\textwidth} p{0.70\textwidth}@{}}
+\caption{分类文件中可用的修饰字符}\label{tab:classify-mod}\\
+\toprule
+\textbf{\textrm{修饰字符}} & \textbf{\textrm{说明}} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{\textrm{修饰字符}} & \textbf{\textrm{说明}} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+m & 区分大小写匹配。此为默认。 \\
+i & 忽略大小写。 \\
+\end{longtable}
+
+例如，分类文件中的下列行将单元 \cmd{Cell1} 中所有以 M1、M2、M3 或 M4 开头的违例注释分类为 ignore：
+\begin{lstlisting}[style=shell]
+Cell1,"/^M[1-4].*/",Ignore,"comment"
+\end{lstlisting}
+
+下列行将含 ``sram''（忽略大小写）的所有单元中的违例予以 waive：
+\begin{lstlisting}[style=shell]
+"/.*sram.*/i","",Waive,"comment"
+\end{lstlisting}
+
+实际以斜杠开头的违例注释不能用字面字符串匹配，而必须使用 GNU 扩展正则表达式特殊字符。
+更多信息见 \textit{IC Validator Reference Manual} 中 \cmd{text\_options()} 函数关于这些特殊字符的表格。
+例如，分类文件中下列内容可匹配含 ``/M4 rule 5/'' 的违例注释：
+\begin{lstlisting}[style=shell]
+"/\/M4 rule 5\//"
+\end{lstlisting}
+
+\subsubsection{示例}
+\paragraph*{Examples}
+
+要从当前运行重新生成 \cmd{TOP.LAYOUT\_ERRORS}，使用：
+\begin{lstlisting}[style=shell]
+pydb_report -pydb_name PYDB_TOP -pydb_path ./run_details/pydb \
+   -le TOP.LAYOUT_ERRORS
+\end{lstlisting}
+
+要对当前运行的错误数据库中的错误分类，使用：
+\begin{lstlisting}[style=shell]
+pydb_report -pydb_name PYDB_TOP -pydb_path ./run_details/pydb \
+   -classify classify.csv
+\end{lstlisting}
+
+要在屏幕上显示单元 TOP 中全部 Ignore 与 Waive 错误的分类详情，使用：
+\begin{lstlisting}[style=shell]
+pydb_report -pydb_name PYDB_TOP -pydb_path ./run_details/pydb \
+   -show_classified cell=TOP class=Ignore,Waive
+\end{lstlisting}
+
+要显示错误分类数据库中全部已 waive 错误的分类详情，使用：
+\begin{lstlisting}[style=shell]
+pydb_report -cpydb_name CPYDB_TOP -cpydb_path ./cpydb \
+   -show_classified class=Waive
+\end{lstlisting}
+
+要将 \cmd{-verbose\_results\_file <value[s]>} 与 \cmd{-create\_results\_report} 一起使用，语法如下：
+\begin{lstlisting}[style=shell]
+pydb_report -i run_details/pydb/PYDB_TOP -verbose_results_file
+ERRORS,PRE_WAIVED_ERRORS,FLAT_VIOLATION_COUNT,TOTAL_VIOLATION_COUNT,ASSIGNS
+-create_results_report TOP.report
+\end{lstlisting}
+
+\begin{noteBox}
+若 \texttt{<value[s]>} 含空白字符，需用双引号括起。
+\end{noteBox}
+
+\cmd{verbose\_results\_file} 参数最多可有五个值，用于控制 IC Validator 生成的结果文件的详细程度。默认为 \cmd{ERRORS}。这些值为：
+\begin{itemize}
+  \item \cmd{ERRORS}：报告每条规则名及其违例总数。
+\begin{noteBox}
+使用错误分类时，已 waive 的违例数会从 \cmd{cell.RESULTS} 文件中报告的违例数中排除。
+例如，工具检测到 100 个违例，其中 60 个被 waive，因此报告的违例数为 40。
+\end{noteBox}
+  \item \cmd{PRE\_WAIVED\_ERRORS}：在当前（waiver 后）违例计数表之后的单独表中报告 pre-waiver 违例计数。
+  \item \cmd{FLAT\_VIOLATION\_COUNT}：在错误详情节报告每条规则的平坦违例计数，在错误汇总节报告总平坦违例计数。
+  \item \cmd{TOTAL\_VIOLATION\_COUNT}：在错误详情节规则表顶部报告层次与平坦违例计数合计。
+  \item \cmd{ASSIGNS}：报告每个 assign 层名、该层的层次与平坦多边形计数（若该层被剪枝则为 ``Pruned''），以及 runset 中 assign 函数对该层的附加赋值信息。
+\end{itemize}
+
+这些枚举值可与 \cmd{pydb\_report} 的 \cmd{verbose\_results\_file} 参数一起使用，以定制结果文件输出。
+
+以下为小型 PYDB 的 \cmd{TOP.report} 文件片段（在手动 waive ``MyRule'' 所属两个违例之一后）。
+\begin{noteBox}
+已 waive 的违例计数不在此报告中显示。
+\end{noteBox}
+\begin{lstlisting}[style=shell]
+...
+...
+
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+Rule                          Violations Found
+TOTAL                         v = 2 (2)
+MyRule                        v = 1 (1)
+Violation                     v = 1 (1)
+  text_net:text_short           v = 1 (1)
+
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+Rule                          Pre-Waived Violations Found
+TOTAL                         v_all = 3 (3)
+MyRule                        v_all = 2 (2)
+Violation                     v_all = 1 (1)
+  text_net:text_short           v_all = 1 (1)
+\end{lstlisting}
+
+\subsection{pydb\_export 实用程序}
+\subsubsection*{pydb\_export Utility}
+
+使用 \cmd{pydb\_export} 实用程序从错误数据库导出错误分类数据，以便：
+\begin{itemize}
+  \item 创建新的错误分类数据库（cPYDB）。见``错误分类数据库格式''。
+  \item 合并到现有错误分类数据库：追加新错误并更新已有错误。
+\end{itemize}
+
+此外，\cmd{pydb\_export} 可用于管理错误分类数据库：将多个错误分类数据库合并在一起，或从违例与单元中清除分类数据。
+
+要使错误在各次运行间视为等价，违例注释必须完全匹配，或匹配到指定注释分隔符的首次出现为止，且错误多边形必须在单元级匹配。
+
+\begin{noteBox}
+见``数据库命名约定''一节。
+\end{noteBox}
+
+该实用程序位于 IC Validator 安装目录的 \cmd{bin} 下。表~\ref{tab:pydb-export-opts} 定义命令行选项。
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash\ttfamily}p{0.34\textwidth} p{0.58\textwidth}@{}}
+\caption{pydb\_export 实用程序命令行选项}\label{tab:pydb-export-opts}\\
+\toprule
+\textbf{\textrm{命令行选项}} & \textbf{\textrm{定义}} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{\textrm{命令行选项}} & \textbf{\textrm{定义}} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+-64 &
+  以 64 位坐标支持运行该实用程序。若错误数据库中的坐标超出 32 位有符号整数容量（即 IC Validator 以 \cmd{-64} 运行），可能需要此选项。 \\
+-cell \textit{cell} &
+  将导出限制为给定单元的错误。可多次给出以指定多个。支持正则表达式。 \\
+-class \textit{class} &
+  将导出限制为给定分类的错误。可多次给出以指定多个类别。支持正则表达式。 \\
+-comment\_match\_delimiter \textit{delim} &
+  匹配违例注释直至指定分隔符。导出错误数据库时，分隔符默认取 runset 中 \cmd{error\_options()} 的 \cmd{comment\_match\_delimiter} 参数所指定者。合并多个错误分类数据库时，则应指定此命令行分隔符以使用部分违例注释匹配。 \\
+-convert\_to\_64 &
+  将 32 位或可变宽度坐标的错误分类数据库（cPYDB）转换为 64 位坐标错误分类数据库。与 \cmd{-copy\_cpydb} 或 \cmd{-create} 一起使用时，在创建时转换为 64 位；否则就地转换现有数据库。 \\
+-convert\_to\_32 &
+  将 64 位或可变宽度坐标的错误分类数据库（cPYDB）转换为 32 位坐标错误分类数据库。与 \cmd{-copy\_cpydb} 或 \cmd{-create} 一起使用时，在创建时转换为 32 位；否则就地转换现有数据库。
+  注意：若错误分类数据库含有无法用 32 位整数表示的过大坐标，此操作会失败。 \\
+-convert\_to\_variable &
+  将 64 位或 32 位坐标的错误分类数据库（cPYDB）转换为可变宽度坐标错误分类数据库。与 \cmd{-copy\_cpydb} 或 \cmd{-create} 一起使用时，在创建时转换为可变宽度坐标；否则就地转换现有数据库。 \\
+-copy\_cpydb name=\textit{db\_name} path=\textit{db\_path} &
+  将错误分类数据库复制到目标错误分类数据库，创建新数据库或覆盖现有数据库。 \\
+-cpydb\_name \textit{name} &
+  输出错误分类数据库（cPYDB）实例名。必需。 \\
+-cpydb\_path \textit{path} &
+  输出错误分类数据库（cPYDB）路径。必需。 \\
+-create &
+  导出错误数据库，创建新错误分类数据库或覆盖现有错误分类数据库。或者，合并多个错误分类数据库，创建新错误分类数据库或覆盖现有错误分类数据库。 \\
+-exclude\_cell \textit{cell} &
+  从导出中排除给定单元的错误。可多次给出。支持正则表达式。\cmd{-exclude\_cell} 优先于 \cmd{-cell}。 \\
+-exclude\_class \textit{class} &
+  排除给定分类的错误。可多次给出。支持正则表达式。\cmd{-exclude\_class} 优先于 \cmd{-class}。 \\
+-exclude\_violation \textit{violation} &
+  从导出中排除给定违例注释的错误。可多次给出。支持正则表达式。\cmd{-exclude\_violation} 优先于 \cmd{-violation}。 \\
+-export\_matched &
+  包含已匹配错误。默认仅导出新分类的错误。合并到现有错误分类数据库时，此选项指定是否包含来自目标以外其他错误分类数据库的已匹配错误。 \\
+-help &
+  显示用法信息。 \\
+-host\_init &
+  指定分布式操作的主机配置选项。当前，此选项的分布式处理仅支持 \cmd{-flatten}。更多信息见第~1~章 IC Validator 基础中的 \cmd{-host\_init} IC Validator 命令行选项。 \\
+-flatten layout=\textit{layout} cell=\textit{cell} &
+  使用给定版图将输出错误分类数据库展平到给定顶层单元。应给出创建正在被展平的错误分类所用的版图与顶层单元作为 \cmd{layout} 与 \cmd{cell} 参数。版图格式自动检测，路径约定与 LVL 实用程序的 \cmd{library1}、\cmd{library2} 命令行选项相同。仅输出给定单元内及其层次下方的违例。对原始单元的版图网格与 drawn 检查不会被展平。更多信息见``展平错误分类数据库''。 \\
+-format CPYDB \textbar{} OASIS \textbar{} PERC &
+  指定输出 waiver 数据库的格式。默认为 \cmd{CPYDB}。 \\
+-i \textit{input db} &
+  输入 PYDB 数据库、cPYDB 或 OASIS waiver 文件。 \\
+-layer \textit{layer number} &
+  指定 OASIS 格式 waiver 形状的层。Waiver 形状创建在指定层号上，datatype 基于规则的违例注释。默认为 87654。 \\
+-merge &
+  将指定错误数据库合并到指定错误分类数据库，更新现有错误的分类或向数据库添加新错误。 \\
+-merge\_cpydb name=\textit{db\_name} path=\textit{db\_path} &
+  将错误分类数据库合并到目标错误分类数据库。可在命令行使用多个选项以合并多个错误分类数据库。 \\
+-merge\_layout \textit{main\_library\_path} &
+  将通过 \cmd{-i} 指定的错误分类数据库中的 waivers 与本参数指定的设计版图合并到由 \cmd{-o} 指定的 OASIS 文件。这样单个 OASIS 文件可同时包含版图与 waivers。此参数需要 \cmd{-format OASIS}。 \\
+-o \textit{output db} &
+  指定输出数据库路径。可用于指定 cPYDB 或 OASIS 格式输出数据库。 \\
+-password \textit{password} &
+  对现有错误分类数据库写访问的口令。指定 \cmd{prompt} 可从命令行读取口令。 \\
+-perc\_hierarchical\_delimiter \textit{delimiter} &
+  导出 PERC waivers 时使用的层次分隔符。默认为 ``/''。 \\
+-perc\_holding\_cell \textit{cell\_name} &
+  导出 PERC waiver 文件时，将给定单元名设为导出 waivers 的 holding cell。 \\
+-perc\_output\_comment true\textbar{}false &
+  导出 PERC waiver 文件时，选择是否输出作为错误一部分的信息性注释。默认为 \cmd{true}。 \\
+-purge \textit{purge\_file} &
+  根据给定输入文件清除违例与单元的全部分类数据。文件格式见``清除文件格式''。若有错误数据库引用目标错误分类数据库，且错误匹配了正在清除的违例与单元，则这些错误将不再可查看。 \\
+-pydb\_name \textit{name} &
+  输入错误数据库（PYDB）实例名；通常为 \cmd{PYDB\_top\_cell}。导出时必需。 \\
+-pydb\_path \textit{path} &
+  输入错误数据库（PYDB）路径；通常为 \cmd{./run\_details/pydb}，除非在 \cmd{error\_options()} 的 \cmd{db\_path} 中另行指定。导出时必需。 \\
+-read\_only &
+  指定输出错误分类数据库（cPYDB）应为只读。与 \cmd{-create} 或 \cmd{-copy\_cpydb} 一起使用时，创建后将 cPYDB 改为只读模式；否则将现有数据库改为只读。只读数据库不得以任何方式修改。每个连接到只读 cPYDB 的 IC Validator 组件有自己的数据库服务器进程。其他用户已连接时，不可将可写数据库转为只读。 \\
+-rule\_name\_delimiter \textit{regular expression} &
+  指定用于在创建 OASIS waiver 文件中的规则 waiver 单元名时，将规则名与违例注释其余部分分开的规则名分隔符正则表达式。默认使用 runset 中 \cmd{error\_options(rule\_name\_delimiter)} 指定的规则名分隔符。runset 规则名分隔符默认为 \cmd{/[[:space:]]+:|[[:space:]]*:[[:space:]]/}。 \\
+-rule\_name\_length \textit{integer} &
+  指定用于创建 OASIS waiver 文件中规则 waiver 单元名的规则名最大长度。超过此值的规则名会被截断，若截断后冲突则添加后缀以保持唯一。默认为 15。 \\
+-set\_password \textit{password} &
+  为给定错误分类数据库设置口令。指定 \cmd{prompt} 可从命令行读取口令。 \\
+-set\_waiver\_properties \textit{user\_property\_file.json} &
+  从给定 JSON waiver 属性文件设置 waiver 用户属性。 \\
+-select\_waiver\_properties \textit{select\_properties\_file.json} &
+  仅包含与给定 JSON 属性选择文件中指定的 waiver 用户属性匹配的 waivers。 \\
+-V &
+  打印实用程序版本。 \\
+-violation \textit{violation} &
+  将导出限制为给定违例注释。可多次给出。支持正则表达式。 \\
+-waiver\_property\_definition\_file \textit{property\_definition\_file.json} &
+  指定用于验证 waiver 用户属性的 JSON 文件。此文件覆盖环境变量 \cmd{ICV\_WAIVER\_PROPERTY\_DEFINITION\_FILE}。 \\
+\end{longtable}
+
+\subsubsection{错误分类数据库格式}
+\paragraph*{Error Classification Database Format}
+
+错误分类数据库包含已分类错误的分类标签、用户 ID、时间戳、注释与错误多边形。
+在后续运行中使用错误分类数据库时，匹配的错误在数据库中用对错误分类数据库的引用加以标注。这些错误的实际分类数据仍留在错误分类数据库中。
+因此，要查看当前运行的错误，错误分类数据库需位于运行 IC Validator 时所指定的位置。
+此外，若从错误分类数据库清除数据或覆盖数据，则无法查看当前运行中的已匹配错误。
+
+\subsubsection{清除文件格式}
+\paragraph*{Purge File Format}
+
+\cmd{-purge} 命令行选项输入文件的格式为逗号分隔文件，两列：Cell 与 Violation。
+\begin{itemize}
+  \item 若指定单元但未指定违例，则清除该单元内全部错误。
+  \item 若指定违例但未指定单元，则清除该违例内全部错误。
+\end{itemize}
+
+按 RFC4180 推荐指南格式化文件中的记录，且无列标题。Microsoft Excel 及其他电子表格工具支持此格式。
+
+\subsubsection{示例}
+\paragraph*{Examples}
+
+要从当前运行的分类数据创建新错误分类数据库（cPYDB），使用：
+\begin{lstlisting}[style=shell]
+pydb_export -pydb_name PYDB_AD4FUL \
+   -pydb_path ./run_details/pydb \
+   -cpydb_name CPYDB_AD4FUL -cpydb_path ./cpydb \
+   -create
+\end{lstlisting}
+
+要为错误分类数据库设置口令，使用：
+\begin{lstlisting}[style=shell]
+pydb_export -cpydb_name CPYDB_AD4FUL -cpydb_path ./cpydb \
+   -password oldpassword -set_password newpassword
+\end{lstlisting}
+
+要将分类数据合并到受口令保护的现有错误分类数据库，使用：
+\begin{lstlisting}[style=shell]
+pydb_export -pydb_name PYDB_AD4FUL \
+   -pydb_path ./run_details/pydb \
+   -cpydb_name CPYDB_AD4FUL -cpydb_path ./cpydb \
+   -merge -password password
+\end{lstlisting}
+
+要合并多个错误分类数据库并创建新错误分类数据库，使用：
+\begin{lstlisting}[style=shell]
+pydb_export -cpydb_name CPYDB_MY_DESIGN -cpydb_path ./cpydb \
+   -merge_cpydb name=CPYDB_CELLA path=./cpydb \
+   -merge_cpydb name=CPYDB_CELLB path=./cpydb \
+   -merge_cpydb name=CPYDB_TOP path=./cpydb \
+   -create
+\end{lstlisting}
+
+要就地将 32 位坐标的错误分类数据库转换为 64 位坐标，使用下列语法。使用 \cmd{-convert\_to\_64} 时，需要对该数据库的独占访问；即数据库不能被 VUE、任何其他脚本或 IC Validator 作业打开。
+\begin{lstlisting}[style=shell]
+pydb_export -cpydb_name db_name -cpydb_path db_path -convert_to_64
+\end{lstlisting}
+
+要复制错误分类数据库并转换为 64 位而不修改原数据库，使用：
+\begin{lstlisting}[style=shell]
+pydb_export -cpydb_name db_name -cpydb_path db_path \
+   -copy_cpydb name=input_db_name path=input_db_path \
+   -convert_to_64
+\end{lstlisting}
+
+\cmd{pydb\_report} 可提供现有错误分类数据库的坐标宽度信息：
+\begin{lstlisting}[style=shell]
+pydb_report -cpydb_name CPYDB_AD4FUL64 -cpydb_path ./cpydb
+...
+
+(C) Copyright 2008-2014.
+Synopsys, Inc. All rights reserved.
+
+cPYDB Name ............ CPYDB_AD4FUL64
+cPYDB Path ............ ./cpydb
+Coordinate Width ...... 64 bit
+\end{lstlisting}
+
+要仅导出不以 ``W'' 开头的所有单元中以 ``W'' 开头的类别，使用：
+\begin{lstlisting}[style=shell]
+pydb_export -class "/^W.*/" -exclude_cell "/^W.*/" ...
+\end{lstlisting}
+
+要导出除 ``Ignore'' 与 ``Waive'' 外的全部类别，使用：
+\begin{lstlisting}[style=shell]
+pydb_export -exclude_class Ignore -exclude_class Waive ...
+\end{lstlisting}
+
+要仅导出顶层单元，使用：
+\begin{lstlisting}[style=shell]
+pydb_export -cell TOP ...
+\end{lstlisting}
+
+\subsubsection{展平错误分类数据库}
+\paragraph*{Flattening an Error Classification Database}
+
+当使用 block 级 IC Validator 结果生成错误分类数据库，并计划在 block 被放置后用于芯片级层次错误分类时，若当前 block 与顶层设计中其他已放置 block 之间存在任何共享子单元，建议展平 block 级结果。
+作为层次 DRC 检查的一部分，IC Validator 工具可能将错误下推到子单元。
+若 block 级错误分类数据库未展平，它可能在共享子单元中包含仅在该 block 上下文中适用的 waivers，但在该 block 放入含有该共享子单元其他实例的更大设计后则无效。展平 block 级错误分类数据库可避免此情况。
+
+\cmd{pydb\_export} 实用程序展平错误分类数据库时，使用与创建违例的原始 IC Validator 运行相同的版图与顶层单元。必须提供版图以给出展平过程所需的层次信息。错误分类数据库中的违例被展平到所提供的顶层单元。仅输出所提供顶层单元内或其层次下方的违例。
+
+版图以路径指定，约定与 LVL 实用程序的 \cmd{library1}、\cmd{library2} 命令行选项相同：
+\begin{itemize}
+  \item GDSII：\cmd{/path/to/file.gds}
+  \item OASIS：\cmd{/path/to/file.oas}
+  \item Milkyway：\cmd{/library/path/LIBRARY\_NAME}
+  \item OpenAccess：\cmd{/path/to/lib.defs/LIBRARY\_NAME}
+  \item NDM：\cmd{/library/path/LIBRARY\_NAME}
+\end{itemize}
+
+展平过程可用 \cmd{pydb\_export} 的 \cmd{-host\_init} 命令行选项进行分布式处理。支持下列用例。
+
+从 PYDB 导出时展平：
+\begin{lstlisting}[style=shell]
+pydb_export \
+  -pydb_path path -pydb_name name \
+  -cpydb_path output_path -cpydb_name output_name \
+  -create \
+  -flatten layout=layout cell=topcell \
+  [-host_init number]
+\end{lstlisting}
+
+复制 cPYDB 并展平目标 cPYDB：
+\begin{lstlisting}[style=shell]
+pydb_export \
+  -copy_cpydb path=path name=name \
+  -cpydb_path output_path -cpydb_name output_name \
+  -flatten layout=layout cell=topcell \
+  [-host_init number]
+\end{lstlisting}
+
+就地展平 cPYDB：
+\begin{lstlisting}[style=shell]
+pydb_export \
+  -cpydb_path path -cpydb_name name \
+  -flatten layout=layout cell=topcell \
+  [-host_init number]
+\end{lstlisting}
+
+% ============================================================
+\section{使用 PERC 错误分类}
+\subsection*{Using PERC Error Classification}
+
+对基于网表的 PERC 器件与网络错误支持错误分类。总体流程与 DRC 错误分类流程相同。
+首次 IC Validator 运行的错误使用 VUE 或某一 PYDB 实用程序分类，然后导出到错误分类数据库（cPYDB），以便在后续 IC Validator 运行中应用分类。
+应与 DRC 错误分类一样，在 \cmd{error\_options(match\_errors)} 参数中指定 cPYDB。
+
+\begin{noteBox}
+分类仅支持基于网表的 PERC 流程，不适用于基于版图的流程。仅支持器件与网络错误。
+\end{noteBox}
+
+\subsection{匹配已分类错误}
+\subsubsection*{Matching Classified Errors}
+
+基于网表的错误与 DRC 错误不同：没有可用于唯一标识特定错误实例的形状或坐标。此外，基于网表的错误关联更多元数据。以下为器件错误示例。
+
+\figplaceholder{Figure: Example Device Error}{器件错误示例}{fig:perc-device-err}
+
+除单元名与器件实例及模型名外，错误实例还有可对每个错误实例唯一的 Comment 字段、其全部引脚名与关联网络、可能的一组参考对象（单元实例、器件实例、网络）、器件是否由合并产生、标签等。网络错误有类似的元数据集合。错误在单元级按下列准则匹配：
+
+器件错误：
+\begin{itemize}
+  \item 违例注释 / 规则
+  \item 单元名
+  \item 器件名
+  \item 器件类型
+  \item 注释
+\end{itemize}
+
+网络错误：
+\begin{itemize}
+  \item 违例注释 / 规则
+  \item 单元名
+  \item 网络名
+  \item 注释
+\end{itemize}
+
+若新错误的上述全部准则与 cPYDB 中已分类错误匹配，IC Validator 将该分类应用于新错误。
+
+\subsection{层次化 PERC 错误分类}
+\subsubsection*{Hierarchical PERC Error Classification}
+
+IC Validator 提供层次模式：若错误在后续 IC Validator 运行中报告于更高层次，则可将原先在较低层次报告的错误分类应用于该错误。
+
+在层次模式下检查器件错误的分类时，若器件具有实例路径（如上例），只要原始实例名与单元位于新实例路径底部，在更高层次发出的该器件错误仍应被分类。网络必须以相同方式匹配：原始实例名与单元应位于新实例路径底部。
+
+分类匹配首先在单元级尝试。若未找到单元级匹配，IC Validator 沿层次向下搜索与实例路径某一部分匹配的已分类错误。错误可能匹配多个已分类错误。IC Validator 沿层次向下查找时应用找到的第一个匹配，忽略其他潜在匹配。
+
+\subsubsection{层次示例}
+\paragraph*{Hierarchical Example}
+
+本例参考上例的器件错误。它在单元 \cmd{dwc\_eusb2} 中报告并予以 waive，器件名为 \cmd{Xu\_eusb/XI206/M7}。若对同一 block 重新运行 IC Validator，很可能会找到精确的单元级匹配。
+
+若对更高层 block \cmd{dwc\_top} 运行 IC Validator，且错误以器件名 \cmd{X1/X2/Xu\_eusb/XI206/M7} 报告，则 IC Validator 按如下方式搜索匹配的已分类错误：
+\begin{itemize}
+  \item IC Validator 在 \cmd{dwc\_top} 中搜索单元级匹配，未找到匹配的已分类错误。
+  \item \cmd{dwc\_top} 中的 \cmd{X1} 是单元 \cmd{dwc\_mid} 的实例。IC Validator 在单元 \cmd{dwc\_mid} 中搜索器件名为 \cmd{X2/Xu\_eusb/XI206/M7} 的已分类错误，未找到匹配。
+  \item \cmd{dwc\_mid} 中的 \cmd{X2} 是单元 \cmd{dwc\_eusb2} 的实例。IC Validator 在单元 \cmd{dwc\_eusb2} 中搜索器件名为 \cmd{Xu\_eusb/XI206/M7} 的 waiver。这与上例错误匹配，因此将该分类应用于在 \cmd{dwc\_top} 中报告的错误。
+\end{itemize}
+
+对网络错误的网络名层次匹配使用相同方法。

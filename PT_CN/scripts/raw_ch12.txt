@@ -1,0 +1,979 @@
+                                                                                           Feedback
+
+
+
+
+12
+Case and Mode Analysis
+     To restrict the scope of the timing analysis, you can place the design into specific
+     operating modes by using the following techniques:
+     •   Case Analysis
+     •   Mode Analysis
+     •   Mode Merging for Scenario Reduction
+
+
+Case Analysis
+     Case analysis performs timing analysis using logic constants or logic transitions on ports
+     or pins to limit the signals propagated through the design. Setting a case analysis with a
+     logic constant propagates the constant forward through the design and disables paths on
+     which the constant is propagated. Case analysis does not propagate backward through
+     the design.
+     Setting a case analysis with a logic transition (rising or falling) eliminates certain paths by
+     limiting the transitions considered during analysis. For example, the following figure shows
+     a multiplexer. Setting the select signal to logic 0 blocks the data from B to Z and therefore
+     disables the timing arc from B to Z.
+
+Figure 126       Constant propagation disables timing arcs
+
+                                                               select = 0, then Z = A
+             A
+                                                               select = 1, then Z = B
+                                                Z
+             B
+                                     (select = 0)
+             select                                                = disabled arc due to constant propagation
+
+
+
+     If case analysis propagates a constant to a sequential element’s asynchronous preset or
+     clear pin, the sequential cell outputs also propagate the constant 1 or 0, as shown in the
+     following figure.
+
+
+
+
+PrimeTime® User Guide                                                                               421
+T-2022.03
+                                                                                        Feedback
+Chapter 12: Case and Mode Analysis
+Case Analysis
+
+
+Figure 127        Constant propagation through an asynchronous input
+
+             0
+
+
+                            PRE
+
+                                    Q       1
+                      D
+
+                                    QN      0
+
+
+                       CP
+
+
+
+     To learn more about case analysis, see
+     •   Propagation of Constants that Control Logic Values
+     •   Configuring Case Analysis and Constant Propagation
+     •   Setting and Removing Case Analysis Values
+     •   Enabling Case Analysis Propagation Through Sequential Cells
+     •   Evaluating Conditional Arcs Using Case Analysis
+     •   Disabling Scan Chains With Case Analysis
+     •   Performing Case Analysis
+     •   Reporting Disabled Arcs and Tracing Constant Propagation
+
+
+     Propagation of Constants that Control Logic Values
+     If there are logic constants and case analysis set on the inputs of a cell, and the logic
+     constants are set to a controlling logic value of that cell, then the logic constant is
+     propagated from the output; otherwise case analysis is propagated.
+     Example 1: AND Gate With Constant Logic 0 on Input A
+
+                                        A
+                 logic constant 0               Z
+                                        B            0
+                               1
+
+
+     The logic 0 is propagated from the output pin Z, irrespective of the value on B.
+
+
+
+
+PrimeTime® User Guide                                                                            422
+T-2022.03
+                                                                                              Feedback
+Chapter 12: Case and Mode Analysis
+Case Analysis
+
+
+     Example 2: An AND Gate With Constant Logic 1 on Input A
+
+                                A
+            logic constant 1                Z
+                                B                    0 or 1
+                      0 or 1
+
+
+
+     The logic constant 1 on pin A is not a controlling logic value. Therefore, the logic constant
+     does not propagate to output pin Z.
+     Example 3: An AND Gate With Constant Logic 1 on Inputs A and B
+
+                                A
+            logic constant 1                Z
+                                B                    1
+            logic constant 1
+
+
+     The logic constant 1 is propagated from output pin Z.
+
+
+     Configuring Case Analysis and Constant Propagation
+     To configure case analysis and how the tool propagates constants, set the following
+     variables.
+
+Variable                                    Description
+
+case_analysis_sequential_propagation        Controls the propagation of logic constants through
+                                            sequential cells.
+
+case_analysis_propagate_through_icg         Controls the propagation of logic constants through
+                                            integrated clock-gating cells.
+
+disable_case_analysis                       Disables the propagation of both user-specified case
+                                            analysis logic values and logic constants from the
+                                            netlist; this variable setting overrides the setting of the
+                                            disable_case_analysis_ti_hi_lo variable.
+
+disable_case_analysis_ti_hi_lo              Disables the propagation of logic constants from the
+                                            netlist.
+
+
+
+
+PrimeTime® User Guide                                                                                     423
+T-2022.03
+                                                                                       Feedback
+Chapter 12: Case and Mode Analysis
+Case Analysis
+
+
+
+     Setting and Removing Case Analysis Values
+     To set case analysis values on specified pins or ports, run the set_case_analysis
+     command. When setting case analysis, you can specify either of the following:
+     •   Constant logic 0, 1, or static
+         This command sets case analysis for the test port to constant logic 0:
+         pt_shell> set_case_analysis 0 [get_ports test]
+
+         The logic value static means constant 0 or 1, without any transitions, so that the
+         connected net cannot act as a crosstalk aggressor or experience a change in delay as
+         a crosstalk victim.
+     •   Rising or falling transition
+         This command sets case analysis for the RESET port to a rising transition:
+         pt_shell> set_case_analysis rising [get_ports RESET]
+
+   Figure 128    Setting Case Analysis With a Rising Transition
+
+                                                Design A
+
+
+
+
+                RESET
+
+
+
+     Note:
+         PrimePower calculation ignores the rising and falling transition values.
+     In case of conflict, the following rules apply:
+     •   A set_case_analysis setting has priority over a built-in constant value (for example,
+         in the Verilog netlist).
+     •   A newer set_case_analysis setting has priority over an older setting on the same
+         port or pin.
+     •   A set_case_analysis value set directly on a port or pin has priority over a conflicting
+         case analysis value propagated to that port or pin.
+     •   Where propagated case analysis values are in conflict, logic 0 has the highest priority,
+         then the static case setting, then logic 1.
+
+
+
+PrimeTime® User Guide                                                                          424
+T-2022.03
+                                                                                       Feedback
+Chapter 12: Case and Mode Analysis
+Case Analysis
+
+
+     You can use case analysis in combination with mode analysis. For example, use case
+     analysis to specify that certain internal logic is a constant value because the RAM block is
+     in read mode:
+     pt_shell> set_case_analysis 1 U1/U2/select_read
+
+     Removing Case Analysis Values
+     To remove case analysis values, run the remove_case_analysis command:
+     pt_shell> remove_case_analysis test
+
+     To suppress the propagation of all logic constants (including those set with case analysis
+     and pins tied to logic high or low), set the disable_case_analysis variable to true. You
+     can use this feature to write scripts that Design Compiler can synthesize correctly.
+
+
+     Enabling Case Analysis Propagation Through Sequential Cells
+     By default, PrimeTime does not propagate case analysis values through sequential cells.
+     You can override the default behavior in the following ways:
+     •   To propagate case analysis values through all sequential cells, set the
+         case_analysis_sequential_propagation variable to always.
+
+     •   To propagate case analysis values through specific sequential cells:
+         1. Ensure that the case_analysis_sequential_propagation variable is set to
+            never (the default).
+
+         2. Specify the cells through which to propagate case analysis values by running the
+            set_case_sequential_propagation command:
+            pt_shell> set_case_sequential_propagation cell_or_libcell_list
+
+         3. Verify the sequential cells enabled for case analysis propagation with one of these
+            methods:
+            ▪   Run the report_case_analysis command with the
+                -sequential_propagation option.
+
+            ▪   Query the is_case_sequential_propagation attribute, which returns true for
+                sequential cells and library cells that are enabled for case analysis propagation.
+     To disable case analysis propagation through specific sequential cells, run the
+     remove_case_sequential_propagation command.
+
+
+
+
+PrimeTime® User Guide                                                                          425
+T-2022.03
+                                                                                        Feedback
+Chapter 12: Case and Mode Analysis
+Case Analysis
+
+
+
+     Evaluating Conditional Arcs Using Case Analysis
+     You can enable or disable conditional arcs from Liberty models by performing case
+     analysis. Liberty is a modeling language that describes the static timing characteristics of
+     large blocks for which there is no corresponding gate-level netlist. If an arc has a condition
+     associated with it, PrimeTime evaluates the condition. If the design does not meet the
+     condition for the arc, PrimeTime disables the conditional arc. Note that conditional testing
+     cannot enable an arc that has been disabled by case analysis.
+     In the following example, a delay arc exists from A to X with condition COND(C&&C1).
+     PrimeTime disables the arc when the Boolean expression (C&&C1) evaluates to false. A
+     setup arc also exists from CLK to B with condition COND(C||C1). PrimeTime disables the
+     setup arc when the Boolean expression (C||C1) evaluates to false. The arc from CLK to Y
+     is a nonconditional arc.
+
+Figure 129   Conditional and nonconditional arcs in a Liberty Model
+
+
+                A           COND(C&&C1)
+                                                X
+                B
+                          COND(C||C1)
+                C
+               C1                               Y
+
+              CLK
+
+
+
+     These commands disable the delay arc from A to X because case analysis evaluates the
+     condition to be false:
+     pt_shell> set_case_analysis 0 C
+     pt_shell> set_case_analysis 1 C1
+
+     To enable the delay arc from A to X and the setup arc from CLK to B:
+     pt_shell> set_case_analysis 1 {C C1}
+
+     For more information about specifying conditional arcs in the Liberty modeling language,
+     see the Library Compiler User Guide.
+
+
+     Disabling Scan Chains With Case Analysis
+     By using case analysis, you can disable a scan chain and therefore omit the scan chain
+     from timing analysis.
+
+
+
+PrimeTime® User Guide                                                                           426
+T-2022.03
+                                                                                      Feedback
+Chapter 12: Case and Mode Analysis
+Case Analysis
+
+
+Figure 130     Scan chain that starts at SCAN_IN and ends at SCAN_OUT
+
+     SCAN_IN                                                                             = disabled arc
+
+
+
+
+                                    FF1                                        FF2
+     SCAN_MODE
+                               TI                                        TI
+
+                               TE         Q                              TE          Q
+
+                               D          QN                             D           QN
+
+
+                               CP                                         CP
+                                                      Logic
+
+                                    FF3                                        FF4
+                                                                                              SCAN_OUT
+
+                               TI                                         TI
+
+                                          Q                               TE          Q
+                               TE
+                                          QN                              D          QN
+                               D
+
+                               CP                                            CP
+             CLOCK
+
+
+
+
+     To disable the preceding scan chain, set the SCAN_MODE port to logic 0:
+     pt_shell> set_case_analysis 0 [get_ports "SCAN_MODE"]
+
+     PrimeTime propagates the constant value to the TE pin of each scan flip-flop. The
+     sequential case analysis on the FF1, FF2, FF3, and FF4 cells disables the setup and hold
+     arcs from CP to TI.
+
+
+     Performing Case Analysis
+     You can perform case analysis with these methods:
+     •   Basic Case Analysis
+     •   Detailed Case Analysis
+     •   Standalone PrimeTime Constraint Consistency Checking
+
+
+
+
+PrimeTime® User Guide                                                                            427
+T-2022.03
+                                                                                      Feedback
+Chapter 12: Case and Mode Analysis
+Case Analysis
+
+
+     Basic Case Analysis
+     To generate a basic case analysis report, run the report_case_analysis command:
+     pt_shell> report_case_analysis
+     ****************************************
+     Report : case_analysis
+     ...
+     ****************************************
+
+     Pin name                         Case analysis value
+     ----------------------------------------------------
+     test_port                        0
+     U1/U2/core/WR                    1
+
+     Detailed Case Analysis
+     To perform a detailed case analysis, run the report_case_analysis command with
+     the -from or -to option and a list of pins or ports. This invokes constraint consistency
+     checking, which requires a PrimeTime SI license.
+     pt_shell> report_case_analysis -to y/Z
+     ...
+     ****************************************
+     Report : report_case_analysis
+     ...
+     ****************************************
+     Properties         Value   Pin/Port
+     ---------------------------------------------------
+     from user case     1       y/Z
+
+     Case fanin report:
+     Verbose Source Trace for pin/port y/Z:
+     Path number: 1
+     Path Ref #   Value Properties            Pin/Port
+     ---------------------------------------------------
+                  1      F()=A B & C &        y/Z
+     2            1                           y/A
+     3            1                           y/B
+     4            1                           y/C
+
+     Path number: 2
+     Path Ref #   Value Properties            Pin/Port
+     ---------------------------------------------------
+                  1                           y/A
+                  1      user case            P
+
+     Path number: 3
+     Path Ref #   Value Properties            Pin/Port
+     ---------------------------------------------------
+                  1                           y/B
+                  1      user case            T
+
+
+
+PrimeTime® User Guide                                                                           428
+T-2022.03
+                                                                                        Feedback
+Chapter 12: Case and Mode Analysis
+Case Analysis
+
+
+
+     Path number: 4
+     Path Ref #   Value Properties            Pin/Port
+     ---------------------------------------------------
+                  1                           y/C
+                  1      user case            L
+
+     Alternatively, you can view case analysis in the PrimeTime GUI by choosing Constraints >
+     View Case Debugging Results. The results are shown in a separate window in which you
+     can view the case propagation details.
+
+     Standalone PrimeTime Constraint Consistency Checking
+     To access extensive case analysis features, run the PrimeTime constraint consistency
+     shell. For details, see Starting a Constraint Consistency Session.
+
+
+     Reporting Disabled Arcs and Tracing Constant Propagation
+     When PrimeTime performs constant propagation, it disables timing arcs at the boundary of
+     the domain where a constant propagates. To trace the cause of a disabled timing arc due
+     to constant propagation:
+     1. Enable the generation of log file that lists nets and pins that propagate constants; to do
+        this, set the case_analysis_log_file variable to a file name.
+     2. View the timing arcs disabled after constant propagation by running the
+        report_disable_timing command.
+
+     In the following example, the tool disables the arc from U5/A to U5/Z because U5/A is at
+     constant value 0, and no constant is propagated to U5/Z.
+
+Figure 131    Arc From U5/A to U5/Z is Disabled
+
+                    U1        U2         U3
+                                                   U4                            = Disabled arc
+                0        1           0        1 A
+          A                                       1        0         U5
+                1                               B 1 Z          A 0
+          B                                                               Z
+                                                                                    Z
+          C                                                    B
+
+
+     These commands set the case analysis, generate a constant propagation log file, and
+     report the disabled timing arcs:
+     pt_shell> set_case_analysis 0 {get_ports "A"}
+     pt_shell> set_case_analysis 1 {get_ports "B"}
+     pt_shell> set_app_var case_analysis_log_file my_design_cnst.log
+
+
+
+PrimeTime® User Guide                                                                             429
+T-2022.03
+                                                                                    Feedback
+Chapter 12: Case and Mode Analysis
+Case Analysis
+
+
+     pt_shell> report_disable_timing
+
+     Cell or Port     From     To     Flag Reason
+     -------------------------------------------------
+     U5               A        Z      c     A = 0
+
+     The constant propagation log file my_design_cnst.log shows this information:
+     ****************************************
+     Report : case_analysis propagation
+     ...
+     ****************************************
+
+     1.1 Forward propagation on NET pins (level 1)
+     -----------------------------------------------
+       Propagating logic constant ‘0’ from pin ‘A’ on net ‘A’:
+         > pin ‘U1/A’ is at logic ‘0’
+       Propagation of logic constant ‘1’ from pin ‘B’ on net ‘B’:
+         > pin ‘U4/B’ is at logic ‘1’
+
+
+     1.2 Forward propagation through CELLS (level 1)
+     -------------------------------------------------
+       Cell ‘U1’ (libcell ‘IV’) :
+         input pin U1/A is at logic ‘0’
+         > output pin ‘U1/Z’ is at logic ‘1’
+
+     2.1 Forward propagation on NET pins (level 2)
+     -----------------------------------------------
+       Propagating logic constant ‘1’ from pin ‘U1/Z’ on net
+     ‘w1’:
+         > pin ‘U2/A’ is at logic ‘1’
+     ...
+
+     4.2 Forward propagation through CELLS (level 4)
+     -------------------------------------------------
+       Cell ‘U4’ (libcell ‘ND2’) :
+         input pin U4/A is at logic ‘1’
+         input pin U4/B is at logic ‘1’
+         > output pin ‘U4/Z’ is at logic ‘0’
+
+     5.1 Forward propagation on NET pins (level 5)
+     -----------------------------------------------
+       Propagating logic constant ‘0’ from pin ‘U4/Z’ on net
+     ‘w4’:
+         > pin ‘U5/A’ is at logic ‘0’
+
+     5.2 Forward propagation through CELLS (level 5)
+     -------------------------------------------------
+
+     6. End of Logic Constant Propagation
+     ------------------------------
+
+
+
+PrimeTime® User Guide                                                                     430
+T-2022.03
+                                                                                      Feedback
+Chapter 12: Case and Mode Analysis
+Mode Analysis
+
+
+
+Mode Analysis
+     Library cells and timing models can have operating modes defined in them, such as read
+     and write modes for a RAM cell. Each mode has an associated set of timing arcs that
+     PrimeTime analyzes when that mode is active. The timing arcs associated with inactive
+     modes are not analyzed. In the absence of any mode settings, all modes are active and all
+     timing arcs are analyzed.
+     There are two types of modes:
+     •   Cell modes
+         Cell modes are defined in a timing model or library cell, such as the read and write
+         modes for a RAM cell. Design modes are user-defined modes that exist at the design
+         level, such as normal and test modes.
+     •   Design modes
+         You can map a design mode to a set of cell modes in cell instances or to a set of
+         paths. When a design mode is active, all cell modes mapped to that design mode are
+         activated and all paths mapped to that design modes are enabled. When a design
+         mode is inactive (due to selection of a different design mode), all cell modes mapped to
+         that design mode are made inactive and all paths mapped to that design mode are set
+         to false paths.
+     Mode Groups
+     Modes are organized into groups. Within each group, there are two possible states: all
+     modes enabled (the default), or one mode enabled and all other modes disabled. Often
+     there is only one mode group.
+     A library cell with modes can have one or more mode groups. Each cell mode group has a
+     number of cell modes. Each cell mode is mapped to a number of timing arcs in the library
+     cell. Every instance of that library cell has these cell mode groups together with the cell
+     modes. For example, a typical RAM block can have read, write, latched, and transparent
+     modes. You can group the read and write modes, then group the latched and transparent
+     modes in a different mode group. The advantage of grouping modes is that when you set a
+     cell mode, PrimeTime makes the corresponding mutually exclusive modes inactive.
+     For example, specifying the RAM block for the read mode implicitly specifies that the
+     write mode is inactive, irrespective of any setting for the transparent and latched modes.
+     Similarly, specifying the RAM block for the latched mode implies that transparent mode is
+     inactive, irrespective of the read and write mode setting. The two mode groups (read/write
+     and transparent/latched) are independent.
+
+
+
+
+PrimeTime® User Guide                                                                         431
+T-2022.03
+                                                                                      Feedback
+Chapter 12: Case and Mode Analysis
+Mode Analysis
+
+
+     To learn about working with modes, see
+     •   Setting Cell Modes
+     •   Reporting Modes
+
+
+     Setting Cell Modes
+     To set a cell operating mode, use one of these methods (shown in order of highest to
+     lowest precedence):
+     •   Setting Modes Directly on Cell Instances
+     •   Setting Cell Modes Indirectly Using Design Modes
+     •   Placing Cells Into Modes by Using Case Analysis
+
+
+     Setting Modes Directly on Cell Instances
+     By default, all cell modes are enabled in each cell instance. You can enable only one cell
+     mode and disable all other modes. When a mode is disabled, all timing arcs in that cell
+     mapped to that mode are disabled (not analyzed for timing).
+     To enable a cell mode on cell instances, use the set_mode -type cell command:
+     pt_shell> set_mode -type cell READ U1/U2/core
+
+     This enables the read mode and disables all other modes in the mode group for the
+     U1/U2/core cell.
+     To cancel the mode selection and make all modes active for the U1/U2/core cell:
+     pt_shell> reset_mode U1/U2/core
+
+
+     Setting Cell Modes Indirectly Using Design Modes
+     Design modes are user-defined modes that exist at the design level, such as normal and
+     test modes for a chip design. You create design modes in PrimeTime at the design level
+     and map them to cell instance design modes or to paths in the design. When you set
+     a design mode, the associated cell instances are set to the mapped cell modes, or the
+     associated paths are enabled and paths associated with other design modes are set to
+     false paths.
+
+
+
+
+PrimeTime® User Guide                                                                        432
+T-2022.03
+                                                                                           Feedback
+Chapter 12: Case and Mode Analysis
+Mode Analysis
+
+
+     To set cell modes indirectly using design modes:
+     1. Create a group of modes for the current design with the define_design_mode_group
+        command. To create more than one design mode group, use multiple
+        define_design_mode_group commands.
+
+     2. Map each design mode to the associated cell modes or paths with the
+        map_design_mode command.
+
+     3. Set the current design mode with the set_mode -type design command. Setting a
+        design mode makes that mode active and makes the other design modes in the same
+        design mode group inactive.
+
+Figure 132    Defining, mapping, and setting design modes
+               define_design_mode_group \
+                 [-group_name name] mode_list
+
+               Create
+               design
+                                            Design Modes
+               modes
+
+
+        Map design mode to cell                                   Map design mode to
+        modes and cell instances                                  paths in the design
+
+                map_design_mode \                                  map_design_mode \
+                  design_mode_name \                                 design_mode_name \
+                  cell_mode_list \                                   -from/-through/-to pin_list
+                  instance_list
+
+
+
+                                     Set active design mode
+                                     set_mode -type design \
+                                       design_mode_name
+
+
+        Sets cell modes of mapped                  Enables paths of active design modes,
+        cell instances                             sets paths of inactive modes to false paths
+
+
+      Mode selection enables or disables
+      cell timing arcs
+
+
+
+
+PrimeTime® User Guide                                                                            433
+T-2022.03
+                                                                                    Feedback
+Chapter 12: Case and Mode Analysis
+Mode Analysis
+
+
+
+     Mapping Design Modes
+     After you create design modes with the define_design_mode_group command, you need
+     to specify what each design mode does. This process is called mapping. You can map a
+     design mode with these methods:
+     •   Mapping a Design Mode to Cell Modes and Instances
+     •   Mapping a Design Mode to a Set of Paths
+     Mapping a Design Mode to Cell Modes and Instances
+     When you map a design mode to a cell mode and cell instances, activating that design
+     mode applies the specified cell mode to the cell instances.
+     To map a design mode to a cell mode and cell instances, run the map_design_mode
+     command with this syntax:
+     map_design_mode design_mode_name \
+        cell_mode_list instance_list
+
+     For example, this command maps the execute design mode to invoke the read_ram cell
+     mode in the U1/U2/core cell instance:
+     pt_shell> map_design_mode execute read_ram U1/U2/core
+
+Figure 133    Mapping a design mode to a cell mode and cell instance
+
+             TOP
+
+               U1                                               U2
+
+                     U2 (RAM1)              U3 (RAM1)
+                        core                  core
+
+                        RAM1                  RAM1
+                        Model                 Model
+
+
+
+
+     After this mapping, setting the execute design mode makes that design mode active,
+     causing the cell mode read to be applied to the U1/U2/core instance. This also deactivates
+     the other design modes in the same design mode group as execute, causing those design
+     modes to return to their default state.
+
+
+
+
+PrimeTime® User Guide                                                                       434
+T-2022.03
+                                                                                     Feedback
+Chapter 12: Case and Mode Analysis
+Mode Analysis
+
+
+     Mapping a Design Mode to a Set of Paths
+     When you map a design mode to a set of paths, activating that design mode activates
+     those paths. Paths that are mapped to the other design modes in the same design mode
+     group are set to false paths. Therefore, these false paths are removed from the timing
+     analysis.
+     To map a design mode to a set of paths, run the map_design_mode command with this
+     syntax:
+     map_design_mode design_mode_name \
+       [-from pin_list] [-through pin_list] [-to pin_list]
+
+     For example, the following commands map the read mode to the paths through the read
+     logic and the write mode to the paths through the write logic:
+     pt_shell> map_design_mode read -from Raddr -through U1/A
+     pt_shell> map_design_mode write -from Waddr -through U1/B
+
+Figure 134     Mapping a design mode to a set of paths
+
+
+             Raddr
+                                          U1
+                          Read logic
+                                          A
+                                                 out
+                                          B
+                           Write logic
+
+             Waddr
+
+                S
+
+
+
+     Unmapping a Design Mode
+     To cancel or change the mapping of a design mode, run the remove_design_mode
+     command. Removing the mapping of a design mode reverses the effects of any cell mode
+     settings or false paths applied as a result of that mapping.
+
+
+     Placing Cells Into Modes by Using Case Analysis
+     Some library cells and timing models have conditional modes defined in them. This means
+     that a mode selection is invoked by the logical conditions at the cell inputs. For example,
+     the read mode of a RAM cell could be invoked by a logic 0 on the read/write input pin.
+
+
+
+
+PrimeTime® User Guide                                                                        435
+T-2022.03
+                                                                                       Feedback
+Chapter 12: Case and Mode Analysis
+Mode Analysis
+
+
+     When you set the controlling logic value on the input pin using case analysis (or when
+     case analysis values are propagated to that pin), the cell is implicitly placed into the
+     appropriate analysis mode.
+
+Figure 135   RAM Liberty cell can operate in read and write modes
+
+                A0
+                                           D0
+                A1                         D1
+                              RAM
+                A2                         D2
+          read_write                       D3
+
+
+
+     In the preceding example, the read_write pin of the Liberty cell controls the read/write
+     mode of the RAM. If the RAM is modeled in the Liberty modeling language with the
+     following mode and condition association, you can perform the read and write mode
+     analysis by setting logic values on the read_write input pin:
+     cell(RAM) {
+       mode_definition(read_write) {
+         mode_value(read) {
+           when : "!read_write";
+           sdf_cond : "read_write == 0";
+         }
+         mode_value(write) {
+           when : "read_write";
+           sdf_cond : "read_write == 1";
+         }
+       }
+     ...
+     }
+
+     This command enables the read mode in PrimeTime:
+     pt_shell> set_case_analysis 0 [get_ports read_write]
+
+     This command enables the write mode in PrimeTime:
+     pt_shell> set_case_analysis 1 [get_ports read_write]
+
+     Setting or propagating a logic value to the read_write pin implicitly selects the
+     corresponding mode and disables the other mode. Only the timing arcs associated with
+     the active mode are used in the timing analysis.
+     When no modes in a mode group are selected by case analysis or other mode selection
+     methods, all of the modes are enabled. The default mode is enabled if no mode is
+     selected.
+
+
+
+
+PrimeTime® User Guide                                                                           436
+T-2022.03
+                                                                                   Feedback
+Chapter 12: Case and Mode Analysis
+Mode Merging for Scenario Reduction
+
+
+
+     Reporting Modes
+     To report cell and design modes that have been defined or set, run the report_mode
+     command:
+     pt_shell> report_mode
+
+     ...
+     Cell               Mode(Group)   Status     Condition   Reason
+     --------------------------------------------------------------------
+     Core (LIB_CORE)    read(rw)      disabled   (A==1)      cond
+                        oen-on(rw)    ENABLED    (A==0)      cond
+                        write(rw)     disabled   (B==1)      cond
+     Core2 (LIB_CORE)   read(rw)      disabled   (A==1)      cell
+                        oen-on(rw)    ENABLED    (A==0)      cell
+                        write(rw)     disabled   (B==1)      cell
+     Core3 (LIB_CORE)   read(rw)      disabled   (A==1)      design - dm1
+                        oen-on(rw)    ENABLED    (A==0)      design - dm1
+                        write(rw)     disabled   (B==1)      design - dm1
+     Core4 (LIB_CORE)   read(rw)      disabled   (A==1)      default
+                        oen-on(rw)    ENABLED    (A==0)      default
+                        write(rw)     disabled   (B==1)      default
+
+
+
+Mode Merging for Scenario Reduction
+     Complex designs typically require the timing analysis of many scenarios. You can reduce
+     the number of scenarios, which is the number of modes multiplied by the number of
+     corners, by using PrimeTime constraint consistency mode merging capabilities.
+     During mode merging, the tool
+     •   Determines the input modes to be merged
+     •   Merges the timing constraints from multiple input modes
+     •   Generates a superset output mode
+
+
+
+
+PrimeTime® User Guide                                                                     437
+T-2022.03
+                                                                                      Feedback
+Chapter 12: Case and Mode Analysis
+Mode Merging for Scenario Reduction
+
+
+Figure 136 Mode merging automatically determines which input modes to merge and creates
+output modes
+
+                                                                    Individual mode (not merged)
+                 merged_1                        mode_7
+                             mode_1
+
+                mode_2
+                                                                  mode_6
+                            mode_3                 mode_4
+
+
+                                                   merged_2    mode_5
+                          Superset modes
+
+
+            Input modes                     Output mode
+
+            mode_1, mode_2, and mode_3      merged_1
+
+            mode_4, mode_5, and mode_6      merged_2
+
+            mode_7                          mode_7 (not merged)
+
+
+
+
+     Running Mode Merging
+     To run mode merging:
+     1. Invoke PrimeTime in multi-scenario mode:
+        % pt_shell -multi_scenario
+
+     2. (Optional) Specify the number of cores, processes, or hosts for distributed mode
+        merging:
+        set_host_options -max_cores numCores
+          -num_processes numProcesses
+          -submit_command submitCommand [host_name]
+
+     3. Create the scenarios for the specified modes and corners:
+        create_scenario -mode mode_name -corner corner_name
+
+
+
+
+PrimeTime® User Guide                                                                         438
+T-2022.03
+                                                                                     Feedback
+Chapter 12: Case and Mode Analysis
+Mode Merging for Scenario Reduction
+
+
+     4. Run mode merging:
+         create_merged_modes
+
+     5. Check the merged constraints and mode merging analysis report in the
+        merged_constraints directory.
+     Mode merging considers corner conditions. The merged constraints are valid only for
+     corners if the corresponding input modes are valid for those corners. The valid corners are
+     specified by the snps_corner_name DMSA host variable.
+
+
+     Debugging Mode Merging Conflicts
+     To visually debug mode merging conflicts in a GUI, run the create_merged_modes
+     command with the -interactive option. This performs mode merging with test-only
+     analysis and does not actually merge the constraints. After the mode merging test-only
+     analysis completes successfully, the tool opens the MergeModeConflict Browser.
+
+Figure 137    MergeModeConflict browser
+
+
+
+
+     The GUI shows details, schematics, debugging help, and fixing suggestions for the
+     following types of conflicts:
+     •   Clock-clock
+     •   Clock-data
+     •   Exception
+
+
+PrimeTime® User Guide                                                                         439
+T-2022.03
+                                                                                   Feedback
+Chapter 12: Case and Mode Analysis
+Mode Merging for Scenario Reduction
+
+
+     •   Group path
+     •   Reconvergence
+     •   Value
+     For more information about mode merging, see SolvNetPlus article 000024378,
+     “PrimeTime Mode Merging Application Note.”
+
+
+
+
+PrimeTime® User Guide                                                                    440
+T-2022.03
+

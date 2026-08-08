@@ -1,0 +1,1101 @@
+﻿% 第 7 章 Fixing and Optimizing Grid and Power Performance（原书 7-122 … 7-170）
+\bichapter{网格与电源性能的修复与优化}{Fixing and Optimizing Grid and Power Performance}
+\label{chap:grid}
+
+\section{引言}
+\subsection*{Introduction}
+
+RedHawk 静态（IR）或动态压降（DvD）分析识别出设计中不可接受压降区域后，RedHawk Fixing and Optimization（FAO）功能可修改电源网格和/或分配新去耦电容，以满足特定静态与动态压降目标，以及电源相关电路时序问题。修复压降问题亦可减轻地弹噪声。多 Vdd 电源 instance 的操作可透明处理。
+
+在 trial 电源网格与初始布局信息可用后，RedHawk FAO 可全局修改电源网格参数以满足特定压降目标。RedHawk 可在运行任何阶段方便地添加或删除电源/地 pad、strap 与 via，以探索其对压降与电迁移（EM）的影响。RedHawk 可在 IR drop 与 EM 分析过程中增量接纳新变更。详细布局之后、详细布线之前，RedHawk 可识别高动态压降区域或 DvD 对时序影响显著的区域，并通过电源网格导线修改与 targeted decap 布局进行修复。
+
+本章第一部分描述 RedHawk 中可用的手动网格与 decap 修改命令：
+\begin{itemize}
+  \item 修改现有层或 via 电阻率
+  \item 添加电源/地 pad
+  \item 删除电源/地 pad
+  \item 添加 via
+  \item 删除 via
+  \item 添加电源 strap
+  \item 编辑/删除电源 strap
+  \item 添加 decap 单元
+  \item 添加金属层与 via 或 via 阵列
+  \item 写出 ECO 文件
+  \item 读取 ECO 文件
+\end{itemize}
+
+设计进入最终布局与布线后，可使用 RedHawk FAO 自动修改网格参数与 decap 布局，以满足压降与电源相关电路时序目标。所有压降约束满足后，RedHawk 可导出含所需设计变更的 ECO 文件，并对设计执行最终 Spice 精度功耗分析 signoff。
+
+FAO 变更后可执行 Undo 或 Redo，便于尝试后撤销不满意的结果。可连续执行任意次数 Undo/Redo，直至命令栈耗尽。
+
+\section{手动电源网格修改}
+\subsection*{Manual Power Grid Modification}
+
+修复与优化功能见以下各节。
+
+\subsection{修改金属层或 Via 电阻率}
+\subsubsection*{Changing a Metal Layer or Via Resistivity}
+
+可在 RedHawk technology（\texttt{.tech}）文件中修改现有金属层或 via 电阻率，然后重跑 RedHawk 观察影响。Apache \texttt{.tech} 文件格式见附录 C「File Definitions」。
+
+\subsection{添加单个电源/地 Pad}
+\subsubsection*{Adding a Single Power/Ground Pad}
+
+使用 Edit $>$ Add Pad 创建新电源或地 pad（图~\ref{fig:rh-add-pad}）。弹出菜单选择 pad 所连金属层，在版图上点击目标位置。新 pad 添加到所选位置。新电源 pad 显示为橙色矩形框，新地 pad 为白色框。使用 File $>$ Export ECO 导出新增 pad，File $>$ Import ECO 导入以回注后续运行。详见本节「使用 ECO 命令保存设计变更」。
+
+\figplaceholder{Figure 7-1}{Edit $>$ Add Pad 菜单}
+\label{fig:rh-add-pad}
+
+\subsection{在指定区域添加一组电源/地 Pad}
+\subsubsection*{Adding a Set of Power/Ground Pads over a Specified Area}
+
+命令 \cmd{fao add pad} 在整个 mesh 或定义窗口内添加一组电源/地 pad。须指定窗口、金属层、网络，以及 x、y 方向 pitch，在区域内均匀分布 pad。支持 Undo/Redo。命令行语法：
+\begin{lstlisting}
+fao add pad -window {llx lly urx ury} -metal <layer>
+      -net <net_name> -pitchX <microns> -pitchY <microns>
+      -r <resistance> -l <inductance> -c <capacitance>
+\end{lstlisting}
+其中：
+\begin{itemize}
+  \item \opt{-window \{ \}}：矩形区域左下与右上坐标（默认整个 mesh）
+  \item \opt{-metal}：布线层（必需）；每层独立放置
+  \item \opt{-net}：网络名（必需）
+  \item \opt{-pitchX -pitchY}：自 \opt{-window} 左下角起 pad 间距（必需）
+  \item \opt{-r -l -c}：pad RLC 参数（单位与 PLOC 文件相同）
+\end{itemize}
+
+\subsection{删除电源/地 Pad}
+\subsubsection*{Deleting a Power/Ground Pad}
+
+使用 Edit $>$ Delete Pad 选择并删除现有电源/地 pad。
+
+\subsection{添加 Via}
+\subsubsection*{Adding a Via}
+
+使用 Edit $\rightarrow$ Add Via，在版图上点击目标位置。弹出表单定义插入 via stack 的上下金属层。添加叠层 via 时须选择正确数量的 via 与 via 层。新 via 保存后显示为蓝色框。
+
+\subsection{删除 Via}
+\subsubsection*{Deleting a Via}
+
+使用 Edit $>$ Delete Via。可能须通过 View Layers Configuration 或 View $\rightarrow$ Map Configuration $\rightarrow$ Layers Color Map 打开 via 显示。左键点击选中 via（黄色高亮），弹出菜单选择删除。
+
+\subsection{添加一条或多条电源 Strap}
+\subsubsection*{Adding One or Multiple Power Straps}
+
+\begin{enumerate}
+  \item 图形添加（推荐）：Edit $\rightarrow$ Add Power Strap，显示 Power Strap 对话框。
+  \item 取消勾选 Add strap by text input。
+  \item 显示与新 strap 相关的层。
+  \item 右键在版图上绘制 strap。若需多条相同 strap，先绘制代表一组外缘的一条，并勾选 Add multiple straps。
+  \item 在对话框中计算并输入最后一条 strap 外缘位置与 pitch。RedHawk 在约束内添加最大合法 strap 数。
+  \item 选择添加层（默认 metal1）。
+  \item 规格与绘制正确后点击 Commit adding（无 undo）。物理错误或短路将显示错误消息。成功示例如图~\ref{fig:rh-multiple-straps}。
+  \item 若需修改，使用 Edit$\rightarrow$Power Strap 选择后删除或修改 strap。
+\end{enumerate}
+
+\figplaceholder{Figure 7-2}{按文本输入添加 strap 的表单}
+
+\figplaceholder{Figure 7-3}{使用 Add multiple straps 添加多条 strap}
+\label{fig:rh-multiple-straps}
+
+添加 strap 示例见第~\ref{chap:static}~章「修复 IR Drop 问题的示例流程」。
+
+\paragraph{GUI 选项 \cmd{eco add strap}}
+勾选 Include stackvias 可在 GUI 上为布线上下两层或更多层自动添加叠层 via。
+
+\figplaceholder{Figure 7-4}{\cmd{eco add strap} 的 GUI 选项}
+
+行为：
+\begin{itemize}
+  \item 勾选 Include stackvias：\cmd{eco add strap} 为所有可能金属层添加 via。例如在 M2 添加导线 A 时，搜索除 M2 外所有金属层上与 A 重叠的导线并尽可能添加 via。
+  \item 未勾选：仅相邻层。例如在 M2 添加导线 A 时，仅搜索 M1/M3 上与 A 重叠的导线。
+\end{itemize}
+
+\subsection{编辑/删除电源 Strap}
+\subsubsection*{Editing/Deleting a Power Strap}
+
+Edit $>$ Edit Power Strap 选择并编辑现有 strap。左键点击选中（黄色高亮），弹出菜单可修改长度、宽度及 x、y 起点（图~\ref{fig:rh-edit-strap}）。亦可从设计数据库删除 strap。
+
+\begin{noteBox}
+编辑现有电源 strap \textbf{不会}自动添加新 via。
+\end{noteBox}
+
+\figplaceholder{Figure 7-5}{Edit$\rightarrow$Edit Power Strap}
+
+\subsection{添加 Decap 单元}
+\subsubsection*{Adding a Decap Cell}
+
+Edit $>$ Add Decap Cell 添加一个或多个 intentional decap。在表单上点击 Select Vdd，再在最低金属层上点击 VDD 导线位置；点击 Select Gnd 并在邻近位置点击 VSS。表单显示 GSR 中 \gsr{DECAP_CELL} 定义的可用 decap 模型；若无须在 GSR 中提供。
+
+\begin{noteBox}
+LEF 与 GSR 中须有对应 DECAP 单元定义。
+\end{noteBox}
+
+intentional decap 经 RedHawk APL 流程表征后，从 \texttt{<cell>.cdev} 获取 ESC 与 ESR。点击 Commit Adding 在版图上显示 decap（图~\ref{fig:rh-add-decap}、图~\ref{fig:rh-decap-layout}）。使用 File $\rightarrow$ Export ECO 写出新增 decap。
+
+\figplaceholder{Figure 7-6}{Edit $\rightarrow$ Add Decap Cell}
+
+\figplaceholder{Figure 7-7}{版图上已添加的 decap}
+
+\subsection{添加金属层与 Via 或 Via 阵列}
+\subsubsection*{Adding Metal Layers and Vias or Via Arrays}
+
+在现有金属层之上添加 strap 的步骤（例如现有 metal1--metal6，新增层为 metal7）：
+
+\begin{enumerate}
+  \item 在 .lef 的 LAYER 段添加层定义，例如添加 VIA67 与 METAL7（顺序与编号须正确）：
+\begin{lstlisting}
+LAYER VIA67
+   TYPE CUT ;
+END VIA67
+LAYER METAL7
+   TYPE ROUTING ;
+END METAL7
+VIA via6 DEFAULT
+RESISTANCE 2.5400e+00 ;
+LAYER METAL6 ;
+   RECT -0.240 -0.190 0.240 0.190 ;
+LAYER VIA67 ;
+   RECT -0.180 -0.180 0.180 0.180 ;
+LAYER METAL7 ;
+   RECT -0.270 -0.270 0.270 0.270 ;
+END via6
+\end{lstlisting}
+  在 \texttt{*.tech} 中添加金属层与 via 信息。
+  \item 在顶层 .def 的 VIAS 段创建所需 via 阵列（可复制 VIA56 定义并改为 VIA67 参数）。
+  \item 金属层与 via 阵列创建后，按前述步骤添加 pad 与 strap。
+\end{enumerate}
+
+\subsection{Undo 与 Redo}
+\subsubsection*{Undo and Redo}
+
+FAO 变更后可 Undo/Redo。GUI：Edit $\rightarrow$ Undo / Edit $\rightarrow$ Redo。TCL：\cmd{fao undo}、\cmd{fao redo}。
+
+\section{自动网格优化与修复流程}
+\subsection*{Automated Grid Optimization and Fixing Procedures}
+
+\subsection{静态 IR Drop 改进的修复与优化流程}
+\subsubsection*{Fixing and Optimization Flow for Static IR Drop Improvement}
+
+FAO 静态压降优化主流程见图~\ref{fig:rh-fao-static-flow}。
+
+\figplaceholder{Figure 7-8}{RedHawk 静态 IR drop 分析流程}
+\label{fig:rh-fao-static-flow}
+
+\subsection{多 Vdd 设计的 FAO 流程}
+\subsubsection*{FAO Procedure for Multiple Vdd Designs}
+
+多 Vdd 域设计中，FAO 每次仅分析并修改一个电源域。用 GSR \gsr{FAO_NETS} 依次指定各域，例如：
+\begin{lstlisting}
+gsr set fao_nets VDD
+\end{lstlisting}
+运行 FAO 并修改 VDD 网格与 decap 后：
+\begin{lstlisting}
+gsr set fao_nets VDD_B
+\end{lstlisting}
+再对 VDD\_B 运行 FAO。
+
+若 \gsr{FAO_NETS} 中定义多于 1 个电源网络，仅考虑第一个，并返回警告：
+\begin{lstlisting}
+WARNING: *** FAO_NETS has > 1 VDD net: Only consider <VDD>
+WARNING: *** Set fao_nets for EACH power net and apply fao separately.
+\end{lstlisting}
+
+\subsection{网格优化}
+\subsubsection*{Grid Optimization}
+
+\paragraph{Mesh 命令}
+FAO 调整网格宽度的关键命令（GUI 或 TCL）：
+\begin{itemize}
+  \item \cmd{mesh optimize}——在 \gsr{fao_region} 内搜索网格宽度解；指定金属层上所有线段调整为相同宽度以解决压降（全芯片或区域内全高度）。\opt{-taper} 时仅在 \gsr{fao_region} 内调整，不横跨全芯片高度。
+  \item \cmd{mesh fix}——在包含所有热点及其 fix\_window 的矩形区域内搜索解；热点所在垂直/水平带（全芯片宽/高，由 fix\_window 尺寸定义）上调整导线宽度。\opt{-taper} 时仅在指定区域内调整。
+  \item \cmd{mesh snscalc}——计算并报告各层、各网络修改导线宽度的相对平均灵敏度（mv/$\mu$m），数值越高表示加宽导线对降低最差压降越有效。建议在网格缩放前使用。
+  \item \cmd{mesh sub_grid}——按 \gsr{fao_region}、\gsr{fao_sub_grid_nets}、\gsr{fao_sub_grid_spec} 添加子网格，目标压降由 \gsr{noise_reduction} 指定；\gsr{fao_range} 指定新网格最小/最大宽度。
+  \item \cmd{mesh set_width}——修改指定层 mesh 导线宽度；默认两侧等量扩展，可用 \texttt{expand\_dir} 仅一侧扩展或收缩。
+\end{itemize}
+
+其他命令：\cmd{mesh add}、\cmd{mesh delete}、\cmd{mesh vias}、\cmd{mesh generate}、\cmd{ring add/delete}。
+
+GSR 关键字通用 TCL 语法：\cmd{gsr set <variable name> <value>}。详细说明见附录 C「Grid Fixing and Optimization Keywords」。
+
+\paragraph{基于区域的网格宽度调整 GSR 关键字（mesh optimize）}
+\begin{enumerate}
+  \item \gsr{FAO_DYNAMIC_MODE}（默认 off）——选择 IR 或 DvD 分析
+  \item \gsr{NOISE_REDUCTION}（必需）——目标压降降低量
+  \item \gsr{FAO_NETS}（必需）——优化网络
+  \item \gsr{fao_layers}、\gsr{FAO_RANGE}（均必需）——层与宽度约束
+  \item \gsr{FAO_TURBO_MODE}（默认 on）——accurate 或 turbo 模式
+  \item \gsr{FAO_REGION}（默认全芯片）——优化区域
+  \item \gsr{NUM_HOTSPOT}（默认 1）——优化的高压降区域数
+  \item \gsr{FAO_WIDTH_CNSTR}——层/宽度关系
+  \item \gsr{MESH_SEARCH}——各层压降降低百分比分配
+\end{enumerate}
+
+\paragraph{基于热点的网格宽度修复 GSR 关键字（mesh fix）}
+上述 1--10 亦适用于 \cmd{mesh fix}。\gsr{fao_region} 定义总评估区域；每个热点周围的 fix window 内调查网格修改：
+\begin{enumerate}
+  \setcounter{enumi}{10}
+  \item \gsr{fix_window}（默认 100$\mu$m $\times$ 100$\mu$m）——以热点为中心修改网格宽度的区域尺寸
+\end{enumerate}
+
+\subsection{网格优化示例}
+\subsubsection*{Examples of Grid Optimization}
+
+\paragraph{示例 A——全芯片优化：放宽静态 IR Drop}
+条件：设计早期，可接受更高最坏压降以节省网格资源。使用 \cmd{mesh optimize} 全芯片均匀优化。目标：将静态 IR drop 目标提高 15\%。
+\begin{enumerate}
+  \item GSR 设置（初始最坏静态 IR 18\,mV on VDD）：
+\begin{lstlisting}
+gsr set fao_turbo_mode 0
+gsr set fao_nets VDD
+gsr set fao_layers { {metal6 hor <= 29.4} }
+gsr set fao_range { {metal6 8 29.4}}
+gsr set noise_reduction -15
+\end{lstlisting}
+  未定义 \gsr{fao_region} 则优化整个电网。FAO 以 accurate 模式搜索低压降区域，仅优化 VDD 上宽度 $\leq$29.4\,$\mu$m 的 METAL6 水平线，尝试将最坏静态压降放宽 15\%（须指定小于现有宽度的范围）。
+  \item \cmd{mesh optimize -eco <filename>.eco}
+  \item 根据优化参数，RedHawk 在定义区域内报告优化导线，例如：
+\begin{lstlisting}
+ECO File: fao_mesh_opt_23:15:47_022242005.eco
+Region: <0 0 6817.32 8316.08>
+FAO Mode: accurate
+Simulation Mode: static
+Net: VDD
+Noise Reduction: -15%
++++++++++++++++++++++++++++++++++++++++
+Initial Worst Static Noise: 17.578mv
+Voltage Noise Constraints: 20.2147mv
+*============================================*
+*               Searching Target Grids                         *
+*============================================*
+Net <VDD>:
+     Layer <metal6>: identified 44 wires
+*============================================*
+*                Sizing Target Grids                           *
+*============================================*
+Optimization succeed: no error
+Optimized width of layer metal6: 23.8um
+*========================================================*
+ Metal Usage Change Report
+      Net <VDD>:
+            Layer <metal6>:5.05281e+06um^2 => 4.09119e+06um^2 (-19.03%)
+      Total: 5.05281e+06um^2 => 4.09119e+06^2 (-19.03%)
+*========================================================*
+Replacing optimized grids...
+Replace <metal6> mesh grids :
+      net <VDD> : 44 wires replaced.
+DEF file for new via models: SH_VIA_VDD.def
+\end{lstlisting}
+  FAO 报告 44 条导线变更建议；放宽静态压降限后 metal6 VDD 金属用量减少，并指定匹配导线变更的新 via 模型。
+  \item 最终验证：\cmd{perform extraction}、\cmd{setup pad}、\cmd{setup wirebond}、\cmd{setup package}、\cmd{perform analysis -static}（封装 RLC 单位分别为 $\Omega$、pH、pF）。示例结果：VDD 最终静态压降 21\,mV（放宽 15\%），整片金属资源节省 19\%。
+\end{enumerate}
+
+\paragraph{示例 B——全芯片网格修复：降低静态 IR Drop}
+条件：需更低压降。目标：自现有 18\,mV 降低静态 IR drop（图~\ref{fig:rh-static-ir-map}）。
+\begin{enumerate}
+  \item 收紧压降时须增大 \gsr{fao_range}：
+\begin{lstlisting}
+gsr set fao_turbo_mode 0
+gsr set fao_nets VDD
+gsr set fao_layers {{metal6 hor <= 29.4}}
+gsr set fao_range {{metal6 10 35}}
+gsr set noise_reduction 10
+\end{lstlisting}
+  \item \cmd{mesh optimize -eco <filename>.eco}
+  \item 查看结果。
+\paragraph{示例 B 结果说明}
+收紧 \gsr{noise_reduction} 为正值 10 时，\gsr{fao_range} 须允许更宽导线（本例 metal6 水平线 10--35\,$\mu$m，相对示例 A 的 8--29.4\,$\mu$m 放宽上限）。FAO 在 accurate 模式下搜索全芯片 METAL6 水平导线，将最坏静态 IR 降低约 10\%。优化成功后 metal 用量增加，最坏压降降至约束以内。重跑 \cmd{perform analysis -static} 后对照图~\ref{fig:rh-static-ir-map} 验证整片压降分布。
+
+\paragraph{ECO 导入与回注流程}
+\begin{enumerate}
+  \item File $>$ Export ECO 写出 \texttt{apache.eco} 或自定义文件名
+  \item 在布局布线工具中应用导线/via/pad/decap 变更
+  \item 后续 RedHawk 运行：File $>$ Import Design Data 完成 setup 后，File $>$ Import ECO 读入变更
+  \item 重跑 \cmd{perform extraction} 与静/动态分析验证收敛
+\end{enumerate}
+
+\begin{noteBox}
+手动编辑 ECO 文件可能导致电容重复计数或 DRC 违规；应使用 RedHawk 自动生成的 ECO。
+\end{noteBox}
+
+\end{enumerate}
+
+\figplaceholder{Figure 7-9}{静态 IR drop 地图}
+\label{fig:rh-static-ir-map}
+
+\paragraph{示例 C——局部芯片优化：放宽静态 IR Drop}
+条件：设计后期，可接受高于 18\,mV 的压降，但不想修改整片网格；指定 fix window 尺寸，使用 \cmd{mesh fix}。目标：在选定电源网格区域将静态 IR drop 放宽 15\%。
+\begin{enumerate}
+  \item GSR 设置：
+\begin{lstlisting}
+gsr set fao_region {2600 2677 6487 5304}
+gsr set fao_turbo_mode 0
+gsr set fao_nets VDD
+gsr set fao_layers { {metal hor <= 29.4} }
+gsr set fao_range { {metal6 8 29.4} }
+gsr set noise_reduction -15
+gsr set fix_window {600 600}
+gsr set num_hotspot 1
+\end{lstlisting}
+  定义角点 (2600,2677) 与 (6487,5304) 的边界区域；FAO 在区域内搜索热点（本例 1 个），以 accurate 模式分析并仅修复 VDD。修改在以热点为中心的 \gsr{fix_window} 内进行，但按金属层约束横跨整片宽/高。搜索宽度 $\leq$29.4\,$\mu$m 的水平 METAL6 线，放宽 15\%；因减少金属用量，宽度范围须小于现有宽度（8--29.4\,$\mu$m）。
+  \item \cmd{mesh fix -eco <filename>.eco}
+  \item 日志示例：
+\begin{lstlisting}
+ECO File: fao.static.eco
+Region: <2600 2677 6487 5304>
+FAO Mode: accurate
+Simulation Mode: static
+Net: VDD
+Noise Reduction: -15%
+Mesh Style: uniform
+Hot-spots Number: 1
+Fix-Window Size: 600x600
+Initial Worst Static Noise: 17.578mv
+Voltage Noise Constraints: 20.2147mv
+Identified 1 hots-spots: (3123.26, 3058.42)
+Fixing Window: <2823.26 2758.42 3423.26 3358.42>
+Net <VDD>: Layer <metal6>: identified 11 wires
+Optimization succeed: no error
+Optimized width of layer metal6: 17.9um
+Metal Usage Change: metal6 -9.64%
+Replace <metal6> mesh grids : net <VDD> : 11 wires replaced.
+\end{lstlisting}
+  建议修改 11 条 metal6 导线；允许压降升高后金属用量减少。
+  \item 重跑静态 IR 分析验证：最终 VDD 静态压降 21\,mV（放宽 15\%），金属资源节省 10\%。
+\end{enumerate}
+
+\paragraph{示例 D——局部芯片修复：降低静态 IR Drop}
+条件：需要低于 18\,mV 的压降，但仅修改局部区域；使用 \cmd{mesh fix} 与 \gsr{fix_window}。目标：在选定区域将最坏静态 IR drop 降低 10\%。
+\begin{enumerate}
+  \item 收紧 \gsr{noise_reduction} 时须增大 \gsr{fao_range}：
+\begin{lstlisting}
+gsr set fao_region {2600 2677 6487 5304}
+gsr set fao_turbo_mode 0
+gsr set fao_nets VDD
+gsr set fao_layers { {metal hor <= 29.4} }
+gsr set fao_range { {metal6 10 40} }
+gsr set noise_reduction 10
+gsr set fix_window {1200 1200}
+gsr set num_hotspot 1
+\end{lstlisting}
+  指定 1200$\times$1200\,$\mu$m 的 fix window；加宽导线范围 10--40\,$\mu$m。
+  \item \cmd{mesh fix -eco drop_improv_15.eco}
+  \item 日志摘要（图~\ref{fig:rh-static-ir-after-fao}）：
+\begin{lstlisting}
+Noise Reduction: 10%
+Fix-Window Size: 1200x1200
+Initial Worst Static Noise(mv): 17.578
+Voltage Noise Constraint(mv): 15.8202
+Identified 1 hot-spots: (3123.26, 3058.42)
+Net <VDD>: Layer <metal6>: identified 17 wires
+Optimized width of layer metal6: 37.47um
+Metal Usage Change: metal6 +10.46%
+Resulting Voltage Noise(mv): 15.8578
+\end{lstlisting}
+  通过将 17 条 metal6 导线加宽 10.46\% 达到目标压降降低。
+  \item 重跑 \cmd{perform analysis -static} 验证。
+\end{enumerate}
+
+\figplaceholder{Figure 7-10}{FAO 操作后的静态 IR drop 地图}
+\label{fig:rh-static-ir-after-fao}
+
+\paragraph{示例 E——\cmd{mesh optimize -taper} 降低区域静态 IR}
+条件：需在特定区域两层上降低压降，使用 \cmd{mesh optimize -taper}。目标：在 \gsr{FAO_REGION} 内对 METAL3、METAL4 做 5\% 静态压降降低，新导线宽度 2--5\,$\mu$m；\opt{-taper} 确保修改仅在 \gsr{fao_region} 内，不横跨整片宽/高。
+\begin{enumerate}
+  \item GSR 与命令：
+\begin{lstlisting}
+gsr set fao_nets VDD
+gsr set fao_drc 0
+gsr set fao_region {x1 y1 x2 y2}
+gsr set fao_layers { {METAL4} {METAL3} }
+gsr set fao_range { { METAL4 2 5 } { METAL3 2 5 } }
+gsr set noise_reduction 5
+mesh optimize -taper
+export eco mesh_optimize.eco
+\end{lstlisting}
+  \item FAO 在 \gsr{fao_region} 内搜索可修改的 METAL4/METAL3 导线以达到 5\% 压降降低。
+  \item ECO 变更：在区域内删除若干小段导线并以更宽导线替换。
+\end{enumerate}
+
+\paragraph{示例 F——\cmd{mesh fix -taper} 降低热点静态 IR}
+条件：特定区域两层上热点需更低压降，使用 \cmd{mesh fix -taper}。目标：\gsr{FAO_REGION} 内 5 个热点各降低 2\% 静态压降，METAL3/METAL4 新导线宽度 2--10\,$\mu$m；\opt{-taper} 确保修改仅在各热点 \gsr{fix_window} 内。
+\begin{enumerate}
+  \item GSR 与命令：
+\begin{lstlisting}
+gsr set fao_dynamic_mode 1
+gsr set fao_nets VDD
+gsr set FAO_DRC 0
+gsr set fao_region { x1 y1 x2 y2 }
+gsr set fao_layers { {METAL4} {METAL3} }
+gsr set fao_range { { METAL4 2 10} { METAL3 2 10 } }
+gsr set noise_reduction 2
+gsr set fix_window { 600 600 }
+gsr set num_hotspot 5
+mesh fix -taper
+export eco mesh_fix.eco
+\end{lstlisting}
+  \item FAO 在区域内识别 5 个热点，在各 600$\times$600\,$\mu$m fix window 内寻找至少 2\% 压降降低的网格修改。
+  \item ECO 变更：在 5 个热点周围 fix window 内删除小段导线并以更宽导线替换。
+\end{enumerate}
+
+\section{DvD 与时序的自动修复与优化（FAO）}
+\subsection*{Automated Fixing and Optimization (FAO) for DvD and Timing}
+
+\subsection{概述}
+\subsubsection*{Overview}
+
+RedHawk 修复与优化动态压降与时序问题的流程见图~\ref{fig:rh-fao-flow}。三种 FAO 运行准则：
+\begin{itemize}
+  \item 最坏动态压降（DvD）的 instance（热点 instance）
+  \item DvD 导致最高 delta slack 与 delta delay 的全部 instance
+  \item 关键路径上 DvD 导致最高 delta slack 与 delta delay 的 instance
+\end{itemize}
+
+\figplaceholder{Figure 7-11}{FAO 流程}
+\label{fig:rh-fao-flow}
+
+根据 GSR/FAO 关键字 \gsr{FAO_OBJ}，程序创建有序 instance 列表：纯 DvD 运行按最坏 DvD 排序；时序相关运行按 DvD 影响严重程度排序。
+
+\gsr{FAO_OBJ} 语法：
+\begin{lstlisting}
+FAO_OBJ [ DVD | TIMING ?<slack threshold>? |
+      PATH ?<slack threshold>? ]
+\end{lstlisting}
+\begin{itemize}
+  \item \texttt{DVD}：选择压降最高的 instance
+  \item \texttt{TIMING <slack\_threshold>}：选择 DvD 导致高 delta delay/slack 的 instance（默认 slack 阈值 0）。使用前须 \cmd{import sdf xxx.sdf}，否则 swap 候选为零。\gsr{fao_region} 仍用于过滤。
+  \item \texttt{PATH <slack\_worse\_than>}：关键时序路径上 DvD 影响显著的 instance
+\end{itemize}
+
+可用 DvD 值、instance 总数或感兴趣区域进一步过滤目标 instance。
+
+\subsection{Decap FAO 准备}
+\subsubsection*{Preparation for Decap FAO}
+
+\begin{enumerate}
+  \item 在 GSR 中用 \gsr{DECAP_CELL} 定义 decap 列表：
+\begin{lstlisting}
+DECAP_CELL
+{
+<decap_cellname> ? <width_um> <height_um> <C_pF> <R_ohm>
+<metal_layer_name> ?
+...
+}
+\end{lstlisting}
+  \item 运行 APL 表征，生成含 R、C、漏电的 \texttt{<cell>.cdev}。
+  \item 确保 LEF 中物理信息与 P/G pin 定义完整。
+\end{enumerate}
+\paragraph{DECAP\_CELL 与 LEF 物理定义示例}
+\gsr{DECAP_CELL} 通常仅需列出 decap 单元名，其余信息在 LEF 中定义。LEF 中 decap 宏须含完整 P/G pin 定义，例如：
+\begin{lstlisting}
+MACRO cell_name
+    CLASS <class_type> ;
+    ORIGIN <value> ;
+    SIZE <value> BY <value> ;
+    PIN GND
+        USE GROUND ;
+        PORT
+            LAYER <layer_name> ;
+            RECT <x1> <y1> <x2> <y2> ;
+        END
+    END GND
+    PIN VDD
+        USE POWER ;
+        PORT
+            LAYER <layer_name> ;
+            RECT <x1> <y1> <x2> <y2> ;
+        END
+    END VDD
+END cell_name
+\end{lstlisting}
+
+
+\subsection{Decap 修改操作}
+\subsubsection*{Decap Modification Operations}
+
+RedHawk FAO 可调查使用去耦电容修复动态压降与时序。
+
+\paragraph{去耦电容修改命令}
+\begin{itemize}
+  \item \cmd{decap advise}——快速评估可放置 decap 总量（\opt{-place} 生成 dpf 文件）
+  \item \cmd{decap fill}——多种方式放置 decap：targeted、hot instance area、region、prefill、uniform
+  \item \cmd{decap remove}——移除指定区域内无效 decap（默认峰值电流 $\leq$30\,$\mu$A）
+\end{itemize}
+
+\paragraph{Decap 修改约束与外部程序接口}
+\begin{itemize}
+  \item \cmd{decap advise -place}、\cmd{decap fill}、\cmd{cell swap} 遵守 DEF \texttt{+FIXED}
+  \item \gsr{FAO_DRC_PL_OBS} 为 1 时遵守 DEF placement blockage
+  \item decap 含 metal1 结构时，\gsr{FAO_DRC_OBS} 为 1 时检测与 metal1 信号布线 DRC
+  \item GSR 所列 decap 在 \cmd{cell swap} 中若指定 \opt{-fixed_inst/cell} 则不移动
+  \item tie high/low 单元默认不移动（可用 \opt{-include_thtl}；布线前可移动）
+\end{itemize}
+
+\paragraph{控制 Decap 修改的 GSR 关键字}
+\begin{enumerate}
+  \item \gsr{NOISE_REDUCTION}——目标压降降低（必需）
+  \item \gsr{NOISE_LIMIT}——压降改善百分比
+  \item \gsr{FAO_REGION}——修复区域
+  \item \gsr{FIX_WINDOW}——热点周围区域（默认 40$\times$40\,$\mu$m）
+  \item \gsr{NUM_HOTINST}——修复的最高压降区域数（默认 10）
+  \item \gsr{CAP_LIMIT}——新增 decap 总电容上限
+  \item \gsr{LEAKAGE_LIMIT}——新增 decap 总漏电上限
+  \item \gsr{FAO_DECAP_OVERLAP}——仅 \cmd{decap advise -place}
+  \item \gsr{DECAP_DENSITY}——每种合法 decap 的放置倍数
+\end{enumerate}
+
+\subsection{高压降区域的附加修复工具}
+\subsubsection*{Additional Tools for Fixing High Voltage Drop Areas}
+
+\paragraph{使用 \cmd{route fix} 的补充电源布线}
+高压降节点可通过 \cmd{route fix} 布线到邻近低压降节点，形成并联路径均衡压降：
+\begin{lstlisting}
+route fix [-from { x1 y1 x2 y2 <layer>} | -from_pt { xf yf <layer>} ]
+[-to {x1 y1 x2 y2 <layer>} | -to_pt { xt yt <layer>} ] -width <float>
+\end{lstlisting}
+查找最短 DRC 合法路由；\cmd{export eco} 定义新增导线/via。新 via 可能记录在 \texttt{adsRpt/faoVIAS.def}。用于从较强点（压降较小）改善到较弱点的电源布线（据 PG-Aware 报告识别）。
+
+\paragraph{热点 Instance 的移动或单元替换}
+可通过将「热点」instance 移至同网格上压降更好的节点，或与其他 instance 交换以均衡电流需求。
+
+\cmd{cell swap} 流程概要：
+\begin{enumerate}
+  \item 设置 \gsr{FAO_OBJ}：\texttt{DVD}、\texttt{TIMING} 或 \texttt{PATH}
+  \item 选择 \gsr{fix_window} 大小（默认 40$\times$40\,$\mu$m）
+  \item 选择 DvD 准则：\opt{-eff_vdd_tw}（默认）、\opt{-max_vdd_tw}、\opt{-min_vdd_tw}、\opt{-min_vdd_all}
+  \item 用 \opt{-fixed_cells}、\opt{-fixed_insts} 等排除不可交换单元
+  \item 调用 \cmd{cell swap}
+  \item FAO 生成候选列表，尝试移动与交换
+  \item 自动准备 ECO 报告；可用 \opt{-report}、\opt{-plot} 查看结果
+\end{enumerate}
+
+\cmd{cell swap} 详细语法：
+\begin{lstlisting}
+cell swap ?-eco <file_name>?
+      ?-decap_cells {cell1 cell2 ...}?
+      ?-fixed_cells {cell1 cell2 ...}?
+      ?-fixed_insts {inst1 inst2 ...}?
+      ?-removable_cells {cell1 cell2 ...}?
+      ?-glob|-regexp|-exact?
+      ?-include_clock ?
+      ?-inst_list {inst1 inst2 ...}?
+      ?-inst_file <file_name>?
+      ?-search_only?
+      ?-eff_vdd_tw? ?-max_vdd_tw?
+      ?-min_vdd_tw? ?-min_vdd_all?
+      ?-report? ?-plot?
+\end{lstlisting}
+
+相关 GSR 关键字：\gsr{fao_region}、\gsr{fao_nets}、\gsr{noise_limit}、\gsr{num_hotinst}、\gsr{fix_window}、\gsr{fao_verbose}。
+
+\figplaceholder{Figure 7-12}{Cell Swapping 报告示例}
+\paragraph{\cmd{cell swap} 选项详述}
+\begin{itemize}
+  \item \opt{-eco <file\_name>}：写出描述设计变更的 ECO 文件名
+  \item \opt{-decap\_cells \{cell1 ...\}}：可与热点 instance 交换的 decap master 单元；默认任意无逻辑连接单元可交换。\opt{-glob} 允许通配符；\opt{-regexp} 允许正则；\opt{-exact} 精确单元名
+  \item \opt{-fixed\_cells \{...\}}：禁止参与交换的 master 单元
+  \item \opt{-fixed\_insts \{...\}}：禁止参与交换的 instance
+  \item \opt{-removable\_cells \{...\}}：必要时可从设计中移除的 decap 单元（默认不可移除）；同样支持 \opt{-glob/-regexp/-exact}
+  \item \opt{-include\_clock}：允许交换时钟单元
+  \item \opt{-inst\_list \{...\}} / \opt{-inst\_file <file>}：仅对列出的 instance 执行交换
+  \item \opt{-search\_only}：仅生成候选 instance 列表（默认 \texttt{cell\_swap\_<time>.list}），不执行交换；可用 \opt{-inst\_file} 改名
+  \item DvD 准则：\opt{-eff\_vdd\_tw}（TW 上平均有效电压，默认）、\opt{-max\_vdd\_tw}、\opt{-min\_vdd\_tw}、\opt{-min\_vdd\_all}（整周期最小有效电压）
+  \item \opt{-report}：生成 \texttt{adsRpt/cell\_swap.rpt} 文本表；\opt{-plot}：生成 \texttt{adsRpt/cell\_swap.hist} 直方图
+\end{itemize}
+
+\paragraph{Cell Swapping 报告日志示例}
+\begin{lstlisting}
+*******************************************************************************
+**** FAO Cell Swapping Report
+*******************************************************************************
+Cell Swapping Result Summary
+   Total swapping instance number : 2182
+   Actually Moved instance number : 436
+   Actually Deleted instance number: 0
+   maximum voltage change (mv)                      : 171
+   minimum voltage change (mv)                      : -18
+**** Please see adsRpt/cell_swap.rpt for detail DvD change.
+**** To view histogram of DvD change, please execute xgraph
+adsRpt/cell_swap.hist.
+MEMORY USAGE: 2265 MBytes
+TOTAL CPU TIME: 1 hrs 17 mins 52 secs
+WALLTIME: 1 hrs 27 mins 56 secs.
+*******************************************************************************
+\end{lstlisting}
+
+\paragraph{控制 \cmd{cell swap} 的 GSR 关键字}
+\begin{itemize}
+  \item \gsr{fao\_region}：含高功耗 instance 的目标分析区域
+  \item \gsr{fao\_nets}：多 VDD 设计时指定热点 instance 关联的 VDD 网
+  \item \gsr{noise\_limit}：对最差热点列表，低于该压降百分比阈值的热点不参与交换（例：5\% 表示压降 $<$5\% 的热点忽略）
+  \item \gsr{num\_hotinst}：区域内交换的最差热点 instance 数
+  \item \gsr{fix\_window}：以各热点为中心的可移动/交换区域尺寸（默认 40$\times$40\,$\mu$m）
+  \item \gsr{fao\_verbose}（0/1）：控制输出消息量（默认 0）
+\end{itemize}
+
+
+\subsection{DvD 的 FAO 示例}
+\subsubsection*{Examples of FAO for DvD}
+
+\paragraph{示例 G——全芯片 DvD 降低：非重叠 Decap 与网格修复}
+初始最坏 DvD 306\,mV，目标降低 10\%（至 276\,mV）：
+\begin{enumerate}
+  \item \cmd{gsr set noise_reduction 10}
+  \item \cmd{decap advise -place}
+  \item 查看目标 DvD 报告（TW 上最差平均 DvD 百分比）
+  \item 重跑提取与动态分析验证；\cmd{decap report}、\cmd{export eco decap.1.eco}
+  \item 若未达目标，对剩余改善量设置 \gsr{noise_reduction} 并运行 \cmd{mesh optimize} 或 \cmd{mesh fix}
+\end{enumerate}
+
+\paragraph{示例 H——全芯片 DvD 降低：Decap 重叠}
+设置 \gsr{fao_decap_overlap 1} 允许在无合法空间处也插入 decap，示例总体 DvD 改善约 7.73\%。
+\paragraph{示例 G 详细步骤与日志}
+\begin{enumerate}
+  \setcounter{enumi}{2}
+  \item FAO 评估期间报告目标 DvD，例如：
+\begin{lstlisting}
+|Target Worst Average DvD percent over TW: 24.1895%(0.27576)(v.s. Vdd=1.14)
+\end{lstlisting}
+  表示目标 276\,mV 对应 Vdd 的 24.2\%；测量值为 TW 上最差平均 DvD（STA 给出的门可能开关时间窗）。
+  \item FAO 自动迭代放置 decap 并报告，例如首轮：
+\begin{lstlisting}
+Placed decap cells for 29 hot instances.
+Added decap 5.092 pF
+\end{lstlisting}
+  第二轮累计：
+\begin{lstlisting}
+Placed decap cells for 29 hot instances.
+Added decap 204.718 pF
+\end{lstlisting}
+  \item 重跑提取与动态分析验证：
+\begin{lstlisting}
+perform extraction -power -ground -c
+setup pad -power -r 0.005 -ground -r 0.005
+setup wirebond -power -r 0.001 -l 1000 -ground -r 0.001 -l 1000
+setup package -r 0.001 -l 250 -c 5
+perform analysis -vectorless
+\end{lstlisting}
+  本例 DvD 改善至 284\,mV（目标 276\,mV）。
+  \item \cmd{decap report} 完整报告示例：
+\begin{lstlisting}
+*************************************************************
+****   FAO Decap Report on top Hot Instances
+*************************************************************
+Inserted Decap Inst Num : 3579
+Inserted Decap Total      : 209.81 pF
+V0/V1 : Average (VDD - GND) over TW before/after decap placement.
+DvD0/DvD1 : Dynamic Voltage Drop (VDD - V0/V1) before/after decap
+placement. Improvement % : (DvD0 - DvD1)/DvD0 %.
+inst    V0    V1     DvD0     DvD1    Improvement%
+-------------------------------------------------
+INFO(FAO-75): inst194510 : 0.8343 0.8568 0.3057 0.2832 7.36017%
+INFO(FAO-75): inst117100 : 0.8346 0.8574 0.3054 0.2826 7.46563%
+INFO(FAO-75): inst76925 : 0.8395 0.8607 0.3005 0.2793 7.05491%
+--------------------------------------
+New Top Hot Instances:
+inst    &   avgVoltage_TW
+--------------------------------------
+inst194510 0.8568
+inst117100 0.8574
+inst76925 0.8607
+--------------------------------------
+Overall DvD improvement = 7.3601 % v.s. initial DvD
+\end{lstlisting}
+  \item 在 ECO 中高亮新增 decap：\cmd{select add "decap*" -glob -linewidth 3}
+  \item 将剩余改善量（本例 2.64\%）赋给网格修复：\cmd{gsr set noise\_reduction 2.64}，再运行 \cmd{mesh optimize} 或 \cmd{mesh fix}
+\end{enumerate}
+
+\paragraph{示例 H 完整 decap 重叠报告}
+\begin{lstlisting}
+**********************************************************
+****      FAO Decap Report on top Hot Instances
+**********************************************************
+Inserted Decap Inst Num : 305
+Inserted Decap Total             : 229.938 pf
+V0/V1 : Average (VDD - GND) over TW before/after decap fix.
+DvD0/DvD1:Dynamic Voltage Drop (VDD - V0/V1) before/after decap fix.
+Improvement % : (DvD0 - DvD1)/DvD0 %.
+     inst                       V0     V1 DvD0 DvD1 Improvement%
+--------------------------------------------------------
+INFO(FAO-75): inst117100 : 0.8346 0.8573 0.3054 0.2827 7.43288%
+INFO(FAO-75): inst194510 : 0.8344 0.8609 0.3056 0.2791 8.67146%
+INFO(FAO-75): inst76925 : 0.8396 0.8623 0.3004 0.2777 7.55658%
+-------------------------------------------------------
+New Top Hot Instances:
+inst       &    avgVoltage_TW
+-------------------------------
+inst117100 0.8573
+inst194510 0.8609
+inst76925 0.8623
+-------------------------------
+Overall DvD improvement = 7.73499 % v.s. initial DvD
+\end{lstlisting}
+
+
+\section{使用 ECO 命令保存设计变更}
+\subsection*{Saving Design Changes with the ECO Command}
+
+达到压降目标后，可用 GUI File $>$ Import ECO 读入 mesh 与 decap 操作生成的 ECO 文件（ASCII 文本，便于导出到布线工具）。
+
+\subsection{写出 ECO 文件}
+\subsubsection*{Writing an ECO File}
+
+File $>$ Export ECO 将近期设计变更导出到工作目录。弹出表单查询文件名，默认 \texttt{apache.eco}。TCL 见附录 D \cmd{export eco}。
+
+\subsection{读取 ECO 文件}
+\subsubsection*{Reading an ECO File}
+
+File $>$ Import Design Data 读入设计并完成 database setup 后，可用 File $>$ Import ECO。ECO 或 \texttt{apache.eco} 中的 what-if 变更将纳入 IR drop 与 EM 分析。
+
+\subsection{ECO 文件格式定义}
+\subsubsection*{ECO File Format Definition}
+
+\begin{noteBox}
+以下语法供理解 RedHawk 自动生成的 ECO 内容。\textbf{请勿}手动创建或编辑 ECO 文件。
+\end{noteBox}
+
+示例表格式 \texttt{*.eco}：
+\begin{lstlisting}
+Keyword  Obj  Obj name  P/G  Layer/via  Rotation  Coordinates  Direction
+add      pad  pvdd1     Vdd  metal1     None      x_new y_new    None
+delete   pad  pvdd2     Gnd  metal1     None      x_old y_old    None
+add      via  via67_new Vdd1 via7_1     <code>    x_new y_new    None
+add      wire wire1     Vdd2 metal7     None      x1 y1 x2 y2    horizontal|vertical
+add      wire45 wireCD  Vdd  metal7     None      x3 y3 ... x6 y6  None
+\end{lstlisting}
+
+各列含义：
+\begin{itemize}
+  \item Keyword：\texttt{add} 或 \texttt{delete}
+  \item Obj：\texttt{pad}、\texttt{via}、\texttt{wire}、\texttt{wire45}
+  \item Obj name：对象唯一名
+  \item P/G Name：pad 为 VDD/GND；导线/via 为网络名
+  \item layer/via：LEF 中金属层或 via 名
+  \item Coordinates：pad 中心；via 旋转码（-1 无旋转，0--6 RedHawk 旋转码）；导线 bounding box；wire45 为梯形四角（逆时针）
+  \item Direction：\texttt{add wire} 时为 vertical 或 horizontal
+\end{itemize}
+
+\begin{noteBox}
+ECO 添加的导线不会被 RedHawk 合并；同层同网重叠会导致电容重复计数、电阻偏小，应尽量减少重叠。
+\end{noteBox}
+
+\subsection{供布局布线工具使用的 ECO 转换}
+\subsubsection*{ECO File Translation for Use by Place and Route Tools}
+
+ECO 格式可后处理为 EDA 布局布线工具可读格式，确保 RedHawk 与 P\&R 工具间数据流顺畅。
+
+\section{修复与优化命令参考}
+\subsection*{Fixing and Optimization Command Reference}
+
+\subsection{Mesh 优化命令说明}
+\subsubsection*{Descriptions of Mesh Optimization Commands}
+
+Mesh 与 ring 命令（按字母序）：
+\begin{lstlisting}
+mesh [ add| delete| fix| generate| optimize| snscalc |
+    sub_grid | set_width | vias ] ? args ?
+ring add ? args ?
+ring delete <ring_name>
+\end{lstlisting}
+
+表~\ref{tab:mesh-commands} 汇总网格优化与修复命令（对应原书表 7-1）。各命令关联的 GSR 关键字见附录 C「Grid Fixing and Optimization Keywords」（C-724）。
+
+\begin{longtable}{@{}p{2.4cm}p{10.6cm}@{}}
+\caption{网格优化与修复命令（表 7-1）}
+\label{tab:mesh-commands}\\
+\toprule
+命令 & 说明与主要选项 \\
+\midrule
+\endfirsthead
+\multicolumn{2}{l}{\textit{（续表~\ref{tab:mesh-commands}）}}\\
+\toprule
+命令 & 说明与主要选项 \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\cmd{mesh add} &
+在电源网格上添加指定 mesh。关联 GSR：无。\\
+& \opt{-vertical|-horizontal}：方向；\opt{-window \{x1 y1 x2 y2\}}：矩形区域；\\
+& \opt{-layer <layer>}：层名；\opt{-offset <um>}：自窗口左/底边偏移；\\
+& \opt{-space <um>}：\opt{-net} 中各电源网间距；\opt{-pitch <um>}：pitch；\\
+& \opt{-width <um>}：线宽；\opt{-novia} 或 \opt{-viatop/-viabottom}：叠层 via；\\
+& \opt{-net \{net1 ...\}}：网络；\opt{-clip_cell \{macro...\}}：宏内禁布金属防短路；\\
+& \opt{-exclude_regions \{\{x1 y1 x2 y2\}...\}}：排除区域。\\
+\cmd{mesh snscalc} &
+计算所选层/网/区域内导线宽度变化的相对压降灵敏度（mv/$\mu$m）。\\
+& 关联 GSR：\gsr{fao_region}、\gsr{fao_nets}、\gsr{fao_layers}。\\
+& \opt{-taper}：仅在 \gsr{fao_region} 内调整，非整片宽/高。\\
+\cmd{mesh delete} &
+删除指定网格段。关联 GSR：无。\\
+& \opt{-vertical|-horizontal}、\opt{-window}、\opt{-layer}、\opt{-net}；\\
+& \opt{-width \{?<Oper>? <w-1> ...\}}、\opt{-length \{?<Oper>? ...\}}（Oper 为 =,>,<,$\geq$,$\leq$）；\\
+& \opt{-out_of_ratio \{n m\}}：每 m 条线删 n 条；\opt{-all}；\opt{-exclude_regions}。\\
+\cmd{mesh fix} &
+基于热点的网格宽度修复。关联 GSR：\gsr{fao_region}、\gsr{mesh_search}、\gsr{fao_layers}、\gsr{fao_turbo_mode}、\gsr{fao_dynamic_mode}、\gsr{fao_nets}、\gsr{fao_range}、\gsr{fao_width_cnstr}、\gsr{noise_reduction}、\gsr{fix_window}、\gsr{num_hotspot}。\\
+& \opt{-taper}：仅在 \gsr{FAO_REGION} 或 \gsr{fix_window} 内调整；\opt{-eco <file>}：写出 ECO。\\
+\cmd{mesh optimize} &
+均匀网格修改以调查/修复压降。关联 GSR 同 \cmd{mesh fix}（不含 \gsr{fix_window}）。\\
+& \opt{-taper}、\opt{-eco <file>}。\\
+\cmd{mesh sub_grid} &
+在 \gsr{fao_region} 内按 \gsr{fao_sub_grid_nets}、\gsr{fao_sub_grid_spec} 添加子网格，目标压降 \gsr{noise_reduction}，宽度范围 \gsr{fao_range}。\\
+& \opt{-eco <file>}。\\
+\cmd{mesh vias} &
+添加最优尺寸叠层 via 或报告/删除缺失 via。关联 GSR：\gsr{FAO_LAYERS}、\gsr{FAO_NETS}。\\
+& 添加：\opt{-toplayer/-bottomlayer}、\opt{-viarule}、\opt{-window|-inst}、\opt{-net}、\\
+& \opt{-topwidth/-bottomwidth}、\opt{-viamodel}、\opt{-replace}、\opt{-between_layer}、\opt{-eeq_net}、\opt{-pt_file}；\\
+& \opt{-vr_percent_x/y}、\opt{-vr_x/-vr_y}：via 阵列尺寸约束。\\
+& 报告缺失：\opt{-report_missing}、\opt{-exclude_stack_via}、\opt{-check_valid_vias}、\\
+& \opt{-exclude_inst_region/-exclude_cell_region}、\opt{-exclude_cell/-exclude_instance}、\\
+& \opt{-inst/-cell/-window}、\opt{-exclude_regions}、\opt{-sort_by_hot_inst}、\opt{-reverse_sort_v}、\\
+& \opt{-gds}、\opt{-threshold}（默认 1\,mV，\texttt{-1} 禁用）、\opt{-min_width}、\opt{-fao_layers}、\\
+& \opt{-marker}、\opt{-no_partial_overlap}、\opt{-pitch}、\opt{-from_edge}、\opt{-x/y_pitch}、\opt{-x/y_offset}、\opt{-adjust_offset}、\opt{-ignore_inter_met}。\\
+& 删除：\opt{-delete -window ... -viamodel ... -cut_layer}。\\
+\cmd{mesh set_width} &
+修改指定层 mesh 线宽。关联 GSR：\gsr{fao_region}、\gsr{fao_sub_grid_nets}、\gsr{fao_layers}。\\
+& 语法：\texttt{\{<layer> <new_width> ?<expand_dir>? \}}，\texttt{expand_dir} 为 left/right/top/bot。\\
+\cmd{mesh generate} &
+按设计约束文件（.dcf）生成原型网格。\\
+\cmd{ring add} &
+添加电源/地 ring。\opt{-name}、\opt{-window}；\\
+& \texttt{\{-top|bottom|left|right -layer -offset -width -space -net \{...\}\}}。\\
+\cmd{ring delete} &
+删除指定 ring：\texttt{<ring_name>}。\\
+\end{longtable}
+
+\subsection{Decap 修改命令说明}
+\subsubsection*{Descriptions of Decap Modification Commands}
+
+\begin{lstlisting}
+decap [ advise | place | fill | remove | report ] ? arg ?
+cell swap ? arg?
+\end{lstlisting}
+
+表~\ref{tab:decap-commands} 汇总 decap 与 cell swap 命令（对应原书表 7-2）。
+
+\begin{longtable}{@{}p{2.4cm}p{10.6cm}@{}}
+\caption{Decap 修改命令（表 7-2）}
+\label{tab:decap-commands}\\
+\toprule
+命令 & 说明与主要选项 \\
+\midrule
+\endfirsthead
+\multicolumn{2}{l}{\textit{（续表~\ref{tab:decap-commands}）}}\\
+\toprule
+命令 & 说明与主要选项 \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\cmd{decap report} &
+生成 decap 报告（\texttt{adsRpt/faoOverlapDecap}：总数、电容、DvD 改善）。\\
+& \opt{-overlap}：重叠 decap 统计；DvD 准则：\opt{-eff_vdd_tw}（默认）、\opt{-max_vdd_tw}、\opt{-min_vdd_tw}、\opt{-min_vdd_all}。\\
+\cmd{decap drc} &
+DRC 报告；\opt{-fix} 修复用户放置 decap 的 pin 与信号/屏蔽布线 DRC；\opt{-o <file>}。\\
+\cmd{decap advise} &
+评估可放置 decap 量；\opt{-place} 生成 \texttt{*.dpf}；\opt{-dpf}、\opt{-distribute}、DvD 准则选项、\opt{-inst_file/-inst}、\opt{-repeat [-iter n]}、\opt{-mmx}。\\
+& 关联 GSR：\gsr{fao_region}、\gsr{noise_reduction}、\gsr{noise_limit}、\gsr{num_hotinst}、\gsr{cap_limit}、\gsr{fao_decap_overlap}、\gsr{leakage_limit}、\gsr{decap_density}。\\
+\cmd{decap place} &
+按 advise 结果放置 decap。\opt{-dpf}（默认 \texttt{adsRpt/fao.dpf}）、\opt{-eco}。\\
+\cmd{decap qor} &
+评估 FAO 插入 decap 的 QoR。\opt{-i} 输入实例列表；\opt{-o} 输出目录。关联 \gsr{decap_fill}。\\
+\cmd{decap fill} &
+在可用空间填充 decap。\opt{-repeat}、\opt{-density_step}、\opt{-eco_name_pattern}、\opt{-no_adjust_fix_window}、\opt{-clone_cells}、\opt{-prefill/-prefill_only/-no_ff_move/-ignore_fixed}、\opt{-uniform <pct>}、\opt{-fao_region/-hot_area}、DvD 准则、\opt{-inst_file/-inst}、\opt{-fixed_insts/-fixed_cells}、\opt{-replace_filler}。\\
+\cmd{decap remove} &
+移除无效 decap（默认峰值电流 $\leq$30\,$\mu$A）。\opt{-imax_less_than}、\opt{-dvmax_less_than}、\opt{-fao_region/-hot_area}、\opt{-user_decap}、DvD 准则、\opt{-ignore_cap_limit/-ignore_leakage_limit}、\opt{-no_decap_report}、\opt{-clone_cells}、\opt{-all}。\\
+\cmd{cell swap} &
+移动/交换热点 instance 与 decap 或低功耗单元。\opt{-eco}、\opt{-decap_cells}（\opt{-glob/-regexp/-exact}）、\opt{-fixed_cells/-fixed_insts/-removable_cells}、\opt{-include_clock}、\opt{-inst_file/-inst}、\opt{-search_only}、DvD 准则、\opt{-report/-plot}、\opt{-swappable_cells}、\opt{-ff_only}、\opt{-pre_proc}、\opt{-to_scan_in_only}、\opt{-include_thtl}、\opt{-drc_m2}。\\
+\cmd{route fix} &
+点对点补充电源布线（表~\ref{tab:route-fix}）。\\
+\cmd{fao add pad} &
+批量添加 pad（见「在指定区域添加一组电源/地 Pad」）。\\
+\cmd{fao undo/redo} &
+撤销/重做 FAO 变更。\\
+\cmd{export eco} &
+导出 ECO 文件。\\
+\end{longtable}
+
+\subsection{补充压降修复命令}
+\subsubsection*{Supplementary Voltage Drop Fixing Commands}
+
+\begin{table}[htbp]
+\centering
+\caption{Route Fix 命令（表 7-3）}
+\label{tab:route-fix}
+\small
+\begin{tabular}{@{}p{2.5cm}p{10cm}@{}}
+\toprule
+命令 & 说明 \\
+\midrule
+\cmd{route fix} &
+查找从指定起点到终点的最短 DRC 合法电源/地布线与 via。\\
+& \opt{-from \{x1 y1 x2 y2 <layer>\}|-from_pt \{xf yf <layer>\}}：起点区域或点；\\
+& \opt{-to \{...\}|-to_pt \{xt yt <layer>\}}：终点；\opt{-width <um>}：线宽。\\
+& \cmd{export eco} 定义新增导线/via；新 via 可能记录在 \texttt{adsRpt/faoVIAS.def}。\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Mesh 命令选项补充（表 7-1 扩展）}
+\subsubsection*{Extended Mesh Command Options (Table 7-1)}
+
+\paragraph{\cmd{mesh add} 完整选项}
+\begin{itemize}
+  \item \opt{-vertical|-horizontal}：添加垂直或水平 mesh
+  \item \opt{-window \{x1 y1 x2 y2\}}：矩形区域
+  \item \opt{-layer <name>}：金属层
+  \item \opt{-offset <um>}：自窗口左/底边偏移
+  \item \opt{-space <um>}：\opt{-net} 中各电源网间距
+  \item \opt{-pitch <um>}：pitch
+  \item \opt{-width <um>}：线宽
+  \item \opt{-novia} 或 \opt{-viatop/-viabottom}：无 via 或叠层至指定层
+  \item \opt{-net \{net1 ...\}}：关联网
+  \item \opt{-clip_cell \{macro...\}}：宏边界内禁布金属防短路
+  \item \opt{-exclude_regions \{\{x1 y1 x2 y2\}...\}}：排除区域
+\end{itemize}
+
+\paragraph{\cmd{mesh delete} 宽度/长度过滤}
+\opt{-width \{?<Oper>? <w> ...\}}、\opt{-length \{?<Oper>? ...\}}，Oper 为 \texttt{=}, \texttt{>}, \texttt{<}, \texttt{$\geq$}, \texttt{$\leq$}。\opt{-out_of_ratio \{n m\}}：每 m 条线删 n 条。\opt{-all}：删除所有匹配段。
+
+\paragraph{\cmd{mesh vias} 报告缺失 via}
+\opt{-report_missing} 配合 \opt{-threshold}（默认 1\,mV，\texttt{-1} 禁用）、\opt{-sort_by_hot_inst}、\opt{-gds} 输出 GDS marker、\opt{-pitch}、\opt{-x/y_pitch}、\opt{-x/y_offset}、\opt{-adjust_offset}、\opt{-ignore_inter_met} 等控制阵列尺寸与排序。
+
+\paragraph{\cmd{ring add}}
+\opt{-name}、\opt{-window}；\texttt{\{-top|bottom|left|right -layer -offset -width -space -net \{...\}\}} 定义 ring 各边。
+
+\paragraph{FAO 流程子步骤（时序感知）}
+时序相关 FAO 在 DvD 热点基础上按 delta slack/delay 排序，可选子网格（sub-gridding）、重定线宽、via 插入、cell swapping、decap 插入等组合策略（图~\ref{fig:rh-fao-flow}）。
+
+\subsection{支持 FAO 的 GSR 关键字}
+\subsubsection*{GSR Keywords Supporting FAO Functionality}
+
+\gsr{FAO_OBJ}、\gsr{FAO_NETS}、\gsr{FAO_REGION}、\gsr{FAO_LAYERS}、\gsr{FAO_RANGE}、\gsr{NOISE_REDUCTION}、\gsr{NOISE_LIMIT}、\gsr{FIX_WINDOW}、\gsr{NUM_HOTINST}、\gsr{NUM_HOTSPOT}、\gsr{CAP_LIMIT}、\gsr{LEAKAGE_LIMIT}、\gsr{DECAP_CELL}、\gsr{DECAP_DENSITY}、\gsr{FAO_DECAP_OVERLAP}、\gsr{FAO_DRC}、\gsr{FAO_TURBO_MODE}、\gsr{FAO_DYNAMIC_MODE} 等修改 \cmd{mesh optimize}、\cmd{mesh fix}、\cmd{route fix}、\cmd{decap advise}/\cmd{place}、\cmd{cell swap} 的行为。详见附录 C「FAO General Keywords」「Grid Fixing and Optimization Keywords」「Decap Optimization Keywords」（C-722、C-724、C-728）。
+
+\subsection{命令与 GSR 关键字语法约定}
+\subsubsection*{Command and GSR Keyword Syntax Conventions}
+
+\begin{itemize}
+  \item \texttt{<x>}：须指定的变量名或值
+  \item \texttt{[ a | b | c ]}：须选 a、b、c 之一
+  \item \texttt{? x ?}：可选参数
+  \item \texttt{\{ a b c \}}：a、b、c 均须指定
+  \item \texttt{\{ x \} ...}：可重复添加 \texttt{\{x\}} 元素
+  \item \texttt{+ - * /}：加减乘除算术运算符
+\end{itemize}
+
+\begin{seeAlsoBox}
+\subsection{FAO GSR 关键字详述}
+\subsubsection*{Detailed FAO GSR Keywords}
+
+\paragraph{\gsr{FAO\_DYNAMIC\_MODE}}
+选择静态 IR 或动态 DvD 分析作为 FAO 优化依据。\texttt{[0|1]}，默认 0（静态）。
+
+\paragraph{\gsr{FAO\_TURBO\_MODE}}
+选择 accurate 或 turbo 搜索模式。默认 on（turbo）；设为 0 使用 accurate 模式，精度更高但更慢。
+
+\paragraph{\gsr{FAO\_RANGE}}
+指定各金属层允许的新导线宽度范围（$\mu$m）：
+\begin{lstlisting}
+FAO_RANGE { {metal6 8 29.4} {metal5 4 12} }
+\end{lstlisting}
+放宽压降（负 \gsr{noise\_reduction}）时范围须小于现有宽度；收紧压降时须增大上限。
+
+\paragraph{\gsr{FAO\_LAYERS}}
+指定参与优化的层与方向约束：
+\begin{lstlisting}
+FAO_LAYERS { {metal6 hor <= 29.4} {metal5 ver} }
+\end{lstlisting}
+支持 \texttt{hor/ver}、宽度比较运算符（\texttt{<=}、\texttt{>=} 等）。
+
+\paragraph{\gsr{MESH\_SEARCH}}
+指定各层压降降低百分比分配（默认各选定层均分）：
+\begin{lstlisting}
+MESH_SEARCH { {metal6 60} {metal5 40} }
+\end{lstlisting}
+
+\paragraph{\gsr{FAO\_WIDTH\_CNSTR}}
+定义层间宽度关系约束（可选）。
+
+\paragraph{\gsr{FAO\_SUB\_GRID\_NETS} / \gsr{FAO\_SUB\_GRID\_SPEC}}
+\cmd{mesh sub\_grid} 所用：子网格电源网列表及物理特性（pitch、方向等）。
+
+\paragraph{\gsr{FAO\_DRC} / \gsr{FAO\_DRC\_OBS} / \gsr{FAO\_DRC\_PL\_OBS}}
+控制 FAO 是否执行 DRC 检查：\gsr{FAO\_DRC} 总开关；\gsr{FAO\_DRC\_OBS} 为 1 时 decap 与 metal1 信号布线做 DRC；\gsr{FAO\_DRC\_PL\_OBS} 为 1 时遵守 DEF placement blockage。
+
+\paragraph{\gsr{DECAP\_FILL}}
+与 \cmd{decap qor} 配合，指定 decap 填充策略关键字（见附录 C）。
+
+各命令完整选项与 GSR 语法见附录 C「GSR File Keywords」与「Grid Fixing and Optimization Keywords」。
+\end{seeAlsoBox}
+
+
+\subsection{Decap 命令选项扩展说明}
+\subsubsection*{Extended Decap Command Reference}
+
+\paragraph{\cmd{decap advise} 完整流程}
+\begin{enumerate}
+  \item 设置 \gsr{noise_reduction}、\gsr{fao_region}、\gsr{num_hotinst} 等
+  \item \cmd{decap advise} 快速估算可放置总量
+  \item \cmd{decap advise -place} 生成 \texttt{*.dpf} 放置文件
+  \item \cmd{decap place -dpf <file>} 或 \cmd{decap fill} 执行放置
+  \item \cmd{decap report} 查看改善；\cmd{export eco} 导出变更
+\end{enumerate}
+
+\paragraph{\cmd{decap fill} 模式详解}
+\begin{itemize}
+  \item \textbf{targeted}：每个热点 instance 周围矩形区域内放置
+  \item \textbf{hot instance area}： encompass 一组热点的矩形区域
+  \item \textbf{region}：用户指定 \gsr{fao_region}
+  \item \textbf{prefill}：在热点旁腾出行空间后相邻放置
+  \item \textbf{uniform}：\opt{-uniform <pct>} 在所有标准单元行均匀填充指定行百分比
+\end{itemize}
+
+\paragraph{\cmd{decap remove}}
+默认移除峰值电流 $\le 30\,\mu$A 的无效 decap。\opt{-imax_less_than}、\opt{-dvmax_less_than} 自定义阈值。\opt{-user_decap} 仅移除用户放置 decap。\opt{-all} 移除区域内全部 decap。
+
+\paragraph{\cmd{decap qor}}
+评估 FAO 插入 decap 的 QoR：\opt{-i} 输入 instance 列表；\opt{-o} 输出目录。关联 \gsr{decap_fill}。
+
+\paragraph{\cmd{decap drc}}
+DRC 报告；\opt{-fix} 修复用户 decap 的 pin 与信号/屏蔽布线 DRC；\opt{-o <file>} 写出报告。
+
+\subsection{示例 A--F 关键日志字段说明}
+\subsubsection*{Log Field Reference for Examples A--F}
+
+公共日志字段：
+\begin{itemize}
+  \item \texttt{ECO File}：输出 ECO 路径
+  \item \texttt{Region}：\gsr{fao_region} 或全芯片边界
+  \item \texttt{FAO Mode}：accurate / turbo
+  \item \texttt{Simulation Mode}：static / dynamic
+  \item \texttt{Noise Reduction}：目标压降变化百分比（负值表示放宽）
+  \item \texttt{Initial Worst Static Noise}：优化前最坏静态噪声（mV）
+  \item \texttt{Voltage Noise Constraints}：目标约束（mV）
+  \item \texttt{Metal Usage Change Report}：各层金属面积变化百分比
+  \item \texttt{DEF file for new via models}：匹配导线变更的新 via DEF
+\end{itemize}
+
+示例 C/D 另含 \texttt{Hot-spots Number}、\texttt{Fix-Window Size}、\texttt{Identified N hot-spots: (x,y)}、\texttt{Fixing Window} 坐标。示例 E/F 使用 \opt{-taper} 时修改仅限 \gsr{fao_region} 或各热点 \gsr{fix_window} 内，不横跨整片宽/高。
+
+\subsection{手动网格修改命令速查}
+\subsubsection*{Quick Reference for Manual Grid Commands}
+
+\begin{itemize}
+  \item Edit $>$ Add/Delete Pad；TCL：\cmd{fao add pad}（\opt{-window}、\opt{-metal}、\opt{-net}、\opt{-pitchX/-pitchY}、\opt{-r/-l/-c}）
+  \item Edit $\rightarrow$ Add/Delete Via；叠层 via 显示为蓝色框
+  \item Edit $\rightarrow$ Add Power Strap / Edit Power Strap；Include stackvias 控制相邻层或全层叠孔
+  \item Edit $>$ Add Decap Cell；须 GSR \gsr{DECAP_CELL} 与 LEF 定义；APL 后从 \texttt{.cdev} 取 ESC/ESR
+  \item 新增金属层：.lef LAYER、.tech metal/via、.def VIAS 段，再按常规定义 pad/strap
+  \item Edit $\rightarrow$ Undo/Redo 或 \cmd{fao undo}/\cmd{fao redo}
+\end{itemize}
+
+\begin{seeAlsoBox}
+第~\ref{chap:static}~章「修复 IR Drop 问题的示例流程」；附录 C「Grid Fixing and Optimization Keywords」；附录 D \cmd{export eco}/\cmd{import eco}。
+\end{seeAlsoBox}
+
+\paragraph{FAO 多 Vdd 提醒}
+多 Vdd 设计中 \gsr{FAO_NETS} 每次仅处理一个电源网；须依次 \cmd{gsr set fao_nets VDD}、\cmd{gsr set fao_nets VDD_B} 分别运行 FAO，否则仅第一个网生效并产生警告。
+
+\paragraph{mesh snscalc 使用建议}
+在任意 \cmd{mesh optimize} 或 \cmd{mesh fix} 之前，建议先运行 \cmd{mesh snscalc} 查看各层灵敏度（mV/$\mu$m），优先加宽高灵敏度层导线以最有效降低最坏压降。
+

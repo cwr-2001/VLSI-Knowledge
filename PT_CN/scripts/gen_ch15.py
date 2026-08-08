@@ -1,0 +1,328 @@
+# -*- coding: utf-8 -*-
+"""Generate 15_smva.tex — Chapter 15 SMVA."""
+from pathlib import Path
+
+OUT = Path(r"d:\IC Design\VLSI\PT_CN\chapters\15_smva.tex")
+PARTS = []
+
+PARTS.append(r"""% 第 15 章 SMVA
+\bichapter{SMVA 基于图的同时多电压分析}{SMVA Graph-Based Simultaneous Multivoltage Analysis}
+\label{chap:smva}
+
+基于图的 SMVA（simultaneous multivoltage analysis）在单次分析运行中，同时考虑全设计所有路径的各路径供电电压的所有组合。关于 SMVA，参见：
+\begin{itemize}
+  \item SMVA 概述
+  \item 配置 SMVA 分析
+  \item 在 SMVA 分析中报告时序路径
+  \item DVFS 场景
+  \item 将 SMVA 与其他 PrimeTime 特性配合使用
+  \item 使用示例
+  \item 支持 DVFS 场景的命令与属性
+  \item 特性兼容性
+\end{itemize}
+
+% ============================================================
+\section{SMVA 概述}
+\subsection*{Overview of SMVA}
+
+多电压设计中时序路径可跨电源域。当各电源域可在多种供电电压下工作时，传统分析无法准确分析电压组合对每条路径的影响：每域单一电压则组合无界；每域 min/max（OCV）电压则过于悲观，因同域内单元不能同时工作于不同电压。
+
+基于图的同时多电压分析（SMVA）消除该悲观度：域内路径在该域所有电压级分析，跨域路径分析所穿越域的所有电压组合，单次运行完成。
+
+SMVA 对采用动态电压与频率缩放（DVFS）技术的设计尤其有用——芯片运行中根据任务需求调整供电电压与频率，高负载时更高功耗，其他时候更低功耗。提供 scaling 库组并指定各电源域供电电压即可获得准确时序结果。
+
+\subsection{SMVA 要求}
+\subsubsection*{SMVA Requirements}
+
+基于图 SMVA 分析要求：
+\begin{itemize}
+  \item 设计须有多电压功耗意图信息（见第~\ref{chap:mv}~章「多电压分析要求」）
+  \item SMVA 特性由 PrimeTime-ADV-PLUS 许可证启用；所需许可证数量取决于分析中使用的电压级数与 DVFS 场景数（见「SMVA 许可证」）
+\end{itemize}
+
+\subsection{SMVA 电源域分析}
+\subsubsection*{SMVA Power Domain Analysis}
+
+启用 SMVA 后，基于图分析在单次运行中同时考虑每条路径的所有供电电压组合（跨域与域内），排除各路径与路径段的不可能组合。
+
+\figplaceholder{Figure 143: Supply Combinations for Cross-Domain and Within-Domain Paths}{跨域与域内路径的供电组合}{fig:smva-supply-combo}
+
+域 A 与 B 的供电可独立设为低或高电压。从 FF2（蓝）与 FF5（紫）开始的域内路径分别在各自域的低、高供电电压下分析。从 FF1（红）开始的跨域路径在两域供电的四种可能组合下分析。
+
+给定供电条件下的每条路径作为单独路径处理，具有独立 slack 与到达时间。UPF 基础设施确定电源域成员资格；每个单元须有供电网连接信息。工具识别 Verilog PG 网表与 UPF 指定的供电网连接；Verilog PG 网表是首选方法。含无供电网信息对象的路径在 SMVA 中排除或报错。
+
+% ============================================================
+\section{配置 SMVA 分析}
+\subsection*{Configuring SMVA Analysis}
+
+在首次时序更新前：
+\begin{enumerate}
+  \item 确保多电压功耗意图与 scaling 库组已配置（第~\ref{chap:mv}~章）
+  \item 定义命名 SMVA 电压参考（named voltage references）与供电网组
+  \item 启用 SMVA：\cmd{set\_app\_var timing\_enable\_smva\_analysis true}
+  \item 用 \cmd{set\_voltage} 在供电网或供电网组上设置允许的电压级
+\end{enumerate}
+
+\subsection{定义命名 SMVA 电压参考}
+\subsubsection*{Defining Named SMVA Voltage References}
+
+用 \cmd{create\_supply\_net\_group} 与 \cmd{create\_named\_voltage\_reference} 指定各域 SMVA 分析的允许电压组合。
+
+例如顶层含下级块 B1、B2，各域可在 0.8 V 与 1.0 V 工作：
+\begin{lstlisting}
+create_supply_net_group VDD_B1 -supply_nets {VDD_B1}
+create_supply_net_group VDD_B2 -supply_nets {VDD_B2}
+create_named_voltage_reference lo -voltage 0.8
+create_named_voltage_reference hi -voltage 1.0
+set_voltage -supply_net_group VDD_B1 -reference {lo hi}
+set_voltage -supply_net_group VDD_B2 -reference {lo hi}
+set_app_var timing_enable_smva_analysis true
+update_timing
+\end{lstlisting}
+
+加粗命令与选项仅 SMVA 分析可用。
+
+\begin{noteBox}
+供电网组与命名电压参考的定义顺序不重要，但须在首次 \cmd{update\_timing} 之前完成。
+\end{noteBox}
+
+% ============================================================
+\section{在 SMVA 分析中报告时序路径}
+\subsection*{Reporting Timing Paths in an SMVA Analysis}
+
+SMVA 分析中，\cmd{report\_timing} 在每条路径报告中增加一行，显示该路径的供电条件（各供电网组上的命名电压参考）。
+
+\figplaceholder{Figure 144: Reference Voltage Conditions}{参考电压条件}{fig:smva-ref-voltage}
+
+可用 \opt{-supply\_net\_group} 查看供电网组信息。\cmd{get\_timing\_paths} 返回的 \texttt{timing\_path} 集合对象含 \texttt{dvfs\_scenario} 属性，描述路径的 DVFS 场景。
+
+如「SMVA 电源域分析」所述，给定电压条件下的每条路径作为单独路径。默认 SMVA 同时考虑域内与跨域路径；可用 \opt{-domain\_crossing} 过滤仅跨域或仅域内路径。
+
+% ============================================================
+\section{DVFS 场景}
+\subsection*{DVFS Scenarios}
+
+对使用 DVFS 的设计，可用 DVFS 场景功能在 SMVA 之上进一步指定频率缩放与其他工作条件。
+
+\begin{noteBox}
+DVFS 场景是对 SMVA 的扩展；单独 SMVA 仅变化供电电压。
+\end{noteBox}
+
+\subsection{DVFS 场景概念}
+\subsubsection*{DVFS Scenario Concepts}
+
+SMVA 允许为各供电网组定义多种供电电压。DVFS 是调整供电电压与频率以降低平均功耗的设计技术。SMVA 的 DVFS 场景特性允许在电压组合之外指定频率与其他条件，以正确分析这些设计。
+
+\subsection{DVFS 场景集合对象}
+\subsubsection*{DVFS Scenario Collection Objects}
+
+DVFS 场景表示为 \texttt{dvfs\_scenario} 集合对象，描述各供电网组上的命名电压参考组合。例如 \texttt{\{VDD1:lo VDDT:lo\}} 表示 VDD1 与 VDDT 均在低电压参考。
+
+\cmd{get\_dvfs\_scenarios} 构造 \texttt{dvfs\_scenario} 集合；\cmd{create\_dvfs\_scenario} 从供电网组条件创建单个场景。供电网组与命名电压参考的顺序不重要。
+
+\begin{noteBox}
+\texttt{dvfs\_scenario} 集合对象在查询时构造与使用；文档中简称为「DVFS 场景」。
+\end{noteBox}
+
+\subsection{传播的 DVFS 场景}
+\subsubsection*{Propagated DVFS Scenarios}
+
+每条时序路径有一组完全描述其可能电压与频率条件的 DVFS 场景。
+
+\figplaceholder{Figure 145: Fully Describing DVFS Scenarios for Individual Timing Paths}{完全描述单条时序路径的 DVFS 场景}{fig:smva-dvfs-path}
+
+\figplaceholder{Figure 146: The Propagated DVFS Scenarios for a Design}{设计的传播 DVFS 场景}{fig:smva-dvfs-design}
+
+获取设计中每条路径的完全描述场景即得到传播 DVFS 场景集合。例如三供电网组（VDDT、VDD1、VDD2）各两电压级，传播场景为所有合法组合。
+
+\subsection{用 DVFS 场景控制命令作用域}
+\subsubsection*{Using DVFS Scenarios to Control Command Scope}
+
+对约束或报告命令使用 DVFS 场景时，命令仅作用于与该场景兼容的路径。
+
+\figplaceholder{Figure 147: Applying a DVFS Scenario to a Command}{将 DVFS 场景应用于命令}{fig:smva-dvfs-cmd}
+
+示例：对 \cmd{report\_timing} 指定 \texttt{\{VDD1:lo VDDT:lo\}} 仅报告 VDD1 与 VDDT 均为低电压的路径；完全在 VDD2 内的路径不被排除——未在场景中指定的供电网组对该路径无约束。
+
+\subsection{查询 DVFS 场景}
+\subsubsection*{Querying DVFS Scenarios}
+
+DVFS 场景以集合对象引用。
+
+\subsubsection{为供电网组条件构造 DVFS 场景}
+\paragraph*{Constructing a DVFS Scenarios for Supply Group Conditions}
+
+指定每个供电网组上的一个命名电压参考，返回具有指定条件的 DVFS 场景集合，用于传递给约束或报告命令。
+
+\subsubsection{获取所有传播的 DVFS 场景}
+\paragraph*{Obtaining All Propagated DVFS Scenarios}
+
+\cmd{get\_propagated\_dvfs\_scenarios} 返回当前设计的完整传播 DVFS 场景集合，可用于设计探索。注意该集合可能很大。
+
+\subsection{将 DVFS 场景应用于命令与属性}
+\subsubsection*{Applying DVFS Scenarios to Commands and Attributes}
+
+默认情况下，支持 DVFS 场景的命令与属性考虑所有传播 DVFS 场景。
+
+\subsubsection{应用于单个命令}
+\paragraph*{Applying DVFS Scenarios to Individual Commands}
+
+带 \opt{-dvfs\_scenarios} 的命令允许显式指定 DVFS 场景；显式指定优先于脚本或上下文级设置。
+
+\subsubsection{应用于属性查询}
+\paragraph*{Applying DVFS Scenarios to Attribute Queries}
+
+查询属性时在集合中包含 \texttt{dvfs\_scenario} 对象。若集合含多个场景，返回最坏情况值；不支持的属性查询报 ATTR-3 错误。属性下标优先于脚本或上下文级 DVFS 场景设置。
+
+\subsubsection{应用于脚本}
+\paragraph*{Applying DVFS Scenarios to Scripts}
+
+用 \cmd{read\_sdc -dvfs\_scenarios} 或 \cmd{source -dvfs\_scenarios} 对整个 SDC 或脚本应用 DVFS 场景，等效于对每个命令使用 \opt{-dvfs\_scenarios}。
+
+\begin{noteBox}
+并非所有 SDC 命令支持 \opt{-dvfs\_scenarios}；不支持的命令在 DVFS 场景上下文中被忽略或报错。
+\end{noteBox}
+
+\subsubsection{为命令执行设置 DVFS 场景上下文}
+\paragraph*{Setting a DVFS Scenario Context for Command Execution}
+
+\cmd{set\_dvfs\_scenario\_context} 为后续命令设置默认 DVFS 场景上下文，直至 \cmd{reset\_dvfs\_scenario\_context}。
+""")
+
+PARTS.append(r"""
+% ============================================================
+\section{将 SMVA 与其他 PrimeTime 特性配合使用}
+\subsection*{Using SMVA Analysis With Other PrimeTime Features}
+
+\subsection{与 OCV/AOCV/POCV 配合}
+\subsubsection*{OCV, AOCV, and POCV}
+
+SMVA 与 OCV、AOCV、POCV 正交：SMVA 处理跨电压域的电压组合，OCV 族处理片上师变异。可同时启用；每条 SMVA 路径在各电压条件下应用相应 OCV/POCV 降额。
+
+\subsection{与多场景分析（DMSA）配合}
+\subsubsection*{Distributed Multi-Scenario Analysis}
+
+DMSA 场景可与 SMVA 组合：各 DMSA 场景可有独立功耗意图与 SMVA 设置。许可证需求为场景级 SMVA 需求之和（基于场景的分布式许可）。
+
+\subsection{与电平转换器、隔离与保持}
+\subsubsection*{Level Shifters, Isolation, and Retention}
+
+SMVA 尊重 UPF 指定的电平转换器、隔离单元与保持寄存器约束。跨域路径经过电平转换器时，在相应电压组合下分析转换器延时。
+
+\subsection{与 IR Drop 标注配合}
+\subsubsection*{IR Drop Annotation}
+
+单元级 IR drop 标注（\cmd{set\_voltage -cell -pg\_pin\_name}）与 SMVA 兼容。IR drop 在 SMVA 各电压参考之上叠加。
+
+\subsection{与信号完整性分析配合}
+\subsubsection*{Signal Integrity Analysis}
+
+PrimeTime SI 串扰与噪声分析可在 SMVA 电压条件下执行，考虑 aggressor 与 victim 的精确电源轨电压。
+
+\subsection{与路径分析配合}
+\subsubsection*{Path-Based Analysis}
+
+\cmd{report\_timing -pba\_mode} 可与 SMVA 配合；基于路径分析在选定 SMVA/DVFS 场景下细化关键路径。
+
+% ============================================================
+\section{使用示例}
+\subsection*{Usage Examples}
+
+\subsection{两域双电压 SMVA}
+\subsubsection*{Two Domains, Two Voltages Each}
+
+\begin{lstlisting}
+# 定义供电网组与电压参考
+create_supply_net_group VDD_CORE -supply_nets VDD_CORE
+create_supply_net_group VDD_IO -supply_nets VDD_IO
+create_named_voltage_reference 0p9 -voltage 0.9
+create_named_voltage_reference 1p0 -voltage 1.0
+set_voltage -supply_net_group VDD_CORE -reference {0p9 1p0}
+set_voltage -supply_net_group VDD_IO -reference {0p9 1p0}
+set_app_var timing_enable_smva_analysis true
+update_timing
+report_timing -max_paths 10
+\end{lstlisting}
+
+\subsection{带 DVFS 场景的报告}
+\subsubsection*{Reporting With DVFS Scenarios}
+
+\begin{lstlisting}
+set scen [create_dvfs_scenario {VDD_CORE:0p9 VDD_IO:1p0}]
+report_timing -dvfs_scenarios $scen -max_paths 5
+get_attribute [get_pins U1/ZN] slack.max $scen
+\end{lstlisting}
+
+\subsection{跨域路径过滤}
+\subsubsection*{Cross-Domain Path Filtering}
+
+\begin{lstlisting}
+report_timing -domain_crossing only -max_paths 20
+report_timing -domain_crossing none -max_paths 20
+\end{lstlisting}
+
+% ============================================================
+\section{支持 DVFS 场景的命令与属性}
+\subsection*{Commands and Attributes With DVFS Scenario Support}
+
+支持 \opt{-dvfs\_scenarios} 或 DVFS 场景下标的命令包括（非穷尽）：
+\begin{itemize}
+  \item \cmd{report\_timing}、\cmd{report\_constraint}、\cmd{get\_timing\_paths}
+  \item \cmd{set\_false\_path}、\cmd{set\_multicycle\_path}、\cmd{set\_max\_delay}、\cmd{set\_min\_delay}
+  \item \cmd{set\_clock\_uncertainty}、\cmd{set\_input\_delay}、\cmd{set\_output\_delay}
+  \item 多种 pin/path 时序属性（slack、arrival 等）
+\end{itemize}
+
+\begin{table}[htbp]
+\centering
+\caption{支持 DVFS 场景的属性（节选）}
+\label{tab:smva-attrs}
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+属性名 & 类 & 说明 \\
+\midrule
+\texttt{dvfs\_scenario} & \texttt{timing\_path} & 路径的 DVFS 场景 \\
+\texttt{slack} & \texttt{pin}, \texttt{timing\_path} & 可在 DVFS 场景下查询 \\
+\texttt{arrival} & \texttt{pin}, \texttt{timing\_point} & 可在 DVFS 场景下查询 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ============================================================
+\section{特性兼容性}
+\subsection*{Feature Compatibility}
+
+\begin{table}[htbp]
+\centering
+\caption{SMVA 特性兼容性}
+\label{tab:smva-compat}
+\small
+\begin{tabularx}{\textwidth}{@{}lX@{}}
+\toprule
+特性 & 与 SMVA 的兼容性 \\
+\midrule
+OCV / AOCV / POCV & 兼容，正交组合 \\
+DMSA / HyperGrid & 兼容，各场景独立 SMVA 设置 \\
+IR drop 标注 & 兼容 \\
+PrimeTime SI & 兼容 \\
+Case analysis / Mode & 兼容，注意场景组合爆炸 \\
+Golden UPF & 兼容 \\
+\cmd{link\_path\_per\_instance} & 兼容，与 scaling 库组二选一或配合使用 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{noteBox}
+SMVA 显著增加分析状态空间与运行时间/内存。电压级与域数较多时，应评估许可证需求与 DMSA 分区策略。
+\end{noteBox}
+
+\begin{seeAlsoBox}
+第~\ref{chap:mv}~章多电压流程；第~\ref{chap:var}~章片上师变异；PrimeTime 许可证章节中的 SMVA 许可证说明。
+\end{seeAlsoBox}
+""")
+
+text = "\n".join(PARTS)
+OUT.write_text(text, encoding="utf-8")
+cjk = sum(1 for c in text if "\u4e00" <= c <= "\u9fff")
+print(f"Wrote {OUT} bytes={OUT.stat().st_size} lines={text.count(chr(10))+1} CJK={cjk}")

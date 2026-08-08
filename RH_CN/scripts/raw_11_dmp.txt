@@ -1,0 +1,1130 @@
+CHAPTER 11 — Distributed Machine Processing                                        RedHawk User Manual     | 298
+Introduction
+
+
+                                                Chapter 11
+                            Distributed Machine Processing
+Introduction
+
+              RedHawk Distributed Machine Processing (DMP) offers significant memory reduction and
+              runtime improvement over flat runs by dividing the design into multiple partitions and
+              processing the partitions in parallel. This technology is useful especially for very large
+              designs that initially require ultra high memory and long runtime. Although DMP will by
+              default distribute all major RedHawk engine tasks to various parallel machines, it is
+              possible to target runtime and memory improvements for only the simulation stage.
+              Every partition communicates with other partitions and creates a reduced view for the rest
+              of the design-- thus accuracy is maintained. This technology leverages multiple
+              computing resources to achieve performance and capacity improvements. Key features
+              are:
+               • DMP is supported over LSF/SSH/SGE/RTDA grid types
+               • Aggressive runtime improvement and memory reduction in the typical range of 2~3X
+                 for top level runs, depending on design styles and number of machines used
+               • Voltage drop and EM results are the same as in the traditional flow
+              DMP demonstrates benefits in:
+               • Designs with large number of instances and very high node counts
+               • Designs in which RedHawk simulation performance is a bottleneck
+
+
+                    Step 1:          Step 2: (DMP‐DB)                Step 3: (DMP‐SIM)           Step 4:
+                  Distributed           Distributed                     Distributed           Unified Result
+                 Setup Design        Power Calculation                   Simulation             Analysis
+                                        & Extraction
+                 Master
+                  Host1                                                                          Master
+                                                                                                   Host1
+
+
+                       Host2
+
+
+                   Host3
+
+
+                       Host4
+
+
+                   Host5
+
+
+
+
+                                                         Host #1~5
+
+
+              Figure 11-1       DMP methodology
+
+DMP Flow
+
+              At launch, DMP splits the design into several partitions whose granularity can be specified
+              by the user. The partitions are sent to different worker machines across the network for
+
+
+
+ANSYS, Inc.
+CHAPTER 11 — Distributed Machine Processing                                  RedHawk User Manual    | 299
+DMP Flow
+
+              processing, where each individual machine requires a fraction of the memory and runtime
+              required for a single-machine full-chip run.
+
+              Prepare Data
+
+              DMP partitions the design vertically and uses distributed computing to process in parallel.
+              Based on the number of jobs setting, DMP requests an equivalent number of compute
+              resources to load balancer farm. After the load balancer provides the resources, DMP
+              takes one host as a master process and the rest of the hosts as worker processes. Steps
+              upto 'perform extraction' are part of prepare data.
+
+
+
+
+              Figure 11-2      Resource allotment with a single master and 3 worker
+                               machines.
+
+              Master machine
+              The master process is used to monitor the worker processes. It maintains the GUI and
+              controls the synchronization between workers. The unified GUI on master shows results
+              from all partitions and all GUI and Tcl commands can be parsed to the workers only
+              through the master. After the analysis, the results from every worker gets concatenated
+              and will be present at the master adsRpt directory. Usually the master memory
+              consumption is very less in comparison with workers.
+              worker machines
+              Each worker process handles its own region’s Import DB, Setup DB, PowerStream, and
+              Extraction.The read behavior for each input file is as follows:
+
+
+
+               LEF                            All partitions read all LEFs
+               LIB                            All partitions read all LIBs
+                                              If FAST_DEF_READ <num>: Each partition reads <num>
+               DEF                            number of DEFs at a time. Default 4.
+                                              If FAST_DEF_READ 0: All partitions read all DEFs. Multi-
+                                              Threaded reading
+               Pkg/Ploc                       All partitions read complete pkg/ploc
+                                              Default parallelization turned on. Each partition reads a
+               STA
+                                              portion of STA
+               SPEF                           Each partition reads its own SPEF files
+               APL                            Each partition reads all APL files
+
+
+ANSYS, Inc.
+CHAPTER 11 — Distributed Machine Processing                                RedHawk User Manual    | 300
+DMP Flow
+
+
+                  VCD File                    Each partition reads its own VCD file
+
+              Each partition has its own adsRpt directory in run area - adsRpt.1 for 1st partition,
+              adsRpt.2 for 2nd partition etc which finally gets concatenated and is available in master
+              adsRpt directory.
+
+              Reduction
+
+              Once data preparation is completed for each partition, worker process enters the
+              reduction stage where the design is divided into smaller blocks, wherein a reduced model
+              is created for each small block. Note that this is only for simulation. These reduced
+              models are read in simulation.
+
+
+
+
+              Figure 11-3     Reduction Stage
+
+
+              .
+
+
+
+
+              Simulation
+
+              Once the reduction jobs are finished, the reduced blocks are sent to each worker
+              process, in order to form corresponding full chip representations. The full chip
+              representation of each worker process consists of an unreduced region (from its own
+              extraction) and reduced regions (from other worker processes). Each worker process
+              then simulates its own full chip representation.
+
+
+
+
+ANSYS, Inc.
+CHAPTER 11 — Distributed Machine Processing                                RedHawk User Manual     | 301
+Supported Design and Features
+
+
+
+
+Supported Design and Features
+
+               • Static and Dynamic - Gridcheck/res_calc/SPT, Vectorless IR/DvD, Global Toggle
+                 Rate, Block Power For Scaling, Block Toggle Rate, State Propagation, Vectorless
+                 Scan, Fullchip, Block RTL/Gate VCD (Event and State Propagation), True Mixed
+                 Mode (Gate+RTL VCD+ Vectorless), EM (Power and Signal)
+               • Package - WBS, Spice model, CPA, S-Param package
+               • FAO - Missing Via checks
+               • CPM
+               • CTM
+               • SAIF Input
+               • MBFF support
+               • CMM (Raw Model)
+               • Pin-based MMX BPA from CMM
+               • Explorer
+
+Third Party Distributed Systems
+
+              DMP supports third party distributed systems. This gives user the load balancing
+              capability and eliminates the possibilities of exhausting single machine resources that
+              may lead to incomplete results. User can install one of the three distributed systems (LSF
+              / SGE / RTDA) to enable DMP access. However, if no distribution system is available,
+              SSH password-less access is available for running DMP across computer networks.
+
+              IBM Platform LSF
+
+              Requires LSF version 7.0 or above. In addition, the following scripts/binaries needs to be
+              installed in LSF and requires execution permission.
+                         mpirun.lsf
+                         openmpi_wrapper
+                         Pam
+
+                      Sample config file:
+                       NUMBER_OF_JOBS 16
+                       GRID_TYPE LSF
+                       QUEUE_NAME dmp_queue
+                       SEQUENTIAL_LAUNCH True
+
+
+ANSYS, Inc.
+CHAPTER 11 — Distributed Machine Processing                                  RedHawk User Manual   | 302
+Third Party Distributed Systems
+
+                        ARGUMENTS_FOR_LARGE_JOBS "-q dmp_queue -
+                        R“rusage[mem=130000]”"
+
+
+               • User can specify ‘ARGUMENTS_FOR_LARGE_JOBS’ to provide queue specific
+                 settings like memory reservation, queue names, job names or passwords etc.
+               • User can specify the reservation size, queue names, job names or passwords for
+                 Master using ARGUMENTS_FOR_MASTER_JOB config keyword.
+               • By default, unique machines are chosen for each worker. User can control this by
+                 using -R “span[ptile=<num>]” option in ARGUMENTS_FOR_LARGE_JOBS.
+                 This defines number of partitions to be launched per machine (default =1 in DMP)
+               • LSF output and errors are stored in .dmp/lsf.out and .dmp/lsf.err
+
+              SEQUENTIAL_LAUNCH in LSF
+
+              SEQUENTIAL_LAUNCH in config file helps to control job reservations and memory limits
+              on LSF.
+              When SEQUENTIAL_LAUNCH 0/False
+               • Output of ’bjobs’ (NUMBER_OF_JOBS 4)
+
+
+
+
+               • Single job launched over LSF, reserving unique machines for 4 processes
+               • Depending on LSF setup, job memory reservation might be considered cumulative of
+                 all 4 processes
+               • ‘ptile’ has an impact on reservation, since all jobs are linked
+              When SEQUENTIAL_LAUNCH 1/True (default):
+               • Output of ’bjobs’ (NUMBER_OF_JOBS 4)
+
+
+
+
+               • 4 unique jobs launched, one per process. Memory reservation is per job
+               • ‘ptile’ has no effect since all jobs are unique. Jobs will be launched purely based on
+                 LSF determination of free memory. Multiple jobs may land on same machine if enough
+                 memory is available
+
+              Oracle Grid Engine (previously known as Sun Grid Engine)
+
+              Requires Sun Grid Engine 6.2 update 5 or above. In addition, a Parallel Environment (PE)
+              must be defined for submitting parallel jobs in RedHawk. This setup requires the access
+              of Grid Engine Administrator. To set up a PE named ‘rh_pe’, follow below example:
+                        % qconf -ap rh_pe
+                        pe_name                        rh_pe
+                        slots                          99999
+                        user_lists                     NONE
+                        xuser_lists                    NONE
+                        start_proc_args                NONE
+
+
+ANSYS, Inc.
+CHAPTER 11 — Distributed Machine Processing                                RedHawk User Manual   | 303
+Useful Distribution System Commands
+
+                         stop_proc_args                NONE
+                         allocation_rule               $round_robin
+                         control_slaves                TRUE
+                         job_is_first_task             FALSE
+                         urgency_slots                 min
+                         accounting_summary            FALSE
+
+              Then, the PE configuration ‘rh_pe’ must be added to the queue’s ‘pe_list’.
+                        % qconf -mq all.q
+                        ...
+                        pe_list     make rh_pe
+                        ...
+
+              User can check the PE by using below command.
+
+                        % qconf –sp rh_pe
+                        Sample dmp.cfg file for SGE:
+
+                         GRID_TYPE SGE <PE_name>
+                         NUMBER_OF_JOBS 4
+                         QUEUE_NAME large
+                         ARGUMENTS_FOR_LARGE_JOBS -l mfree=100G
+
+               • PE_name is the name of the parallel environment setup. If SEQUENTIAL_LAUNCH
+                 true (default from 18.0) is used, user need not explicitly specify the PE name. If
+                 SEQUENTIAL_LAUNCH is false, PE_name is mandatory.
+               • Machines will be picked up from the SGE queue based on available memory
+               • ‘-l mfree=xG’ is used to reserve xGB memory for a particular job.
+
+              RTDA NetworkComputer
+
+              Requires RTDA NC 2013.03 or above with RedHawk patch. Please check if ‘nc_redhawk’
+              is available under <nc_installation>/common/eda/Ansys/redhawk/
+              nc_redhawk. In addition, RedHawk environment must be added by the IT. Please
+              check if <nc_installation>/common/local/environments/
+              REDHAWK.start.csh exists.
+
+Useful Distribution System Commands
+
+              IBM Platform LSF
+
+
+
+                bsub                   Submit a job
+
+                bkill                  Kill a job
+
+                bjobs                  Check running jobs
+
+                bhosts                 Check hosts availability
+
+
+
+ANSYS, Inc.
+CHAPTER 11 — Distributed Machine Processing                               RedHawk User Manual    | 304
+DMP Custom Launcher
+
+
+                bqueues               Check queue information
+
+
+
+              Oracle Grid Engine (previously known as Sun Grid Engine)
+
+
+
+                qsub                  Submit a job
+
+                qdel                  Kill a job
+
+                qstat                 Check running jobs
+
+                qhost                 Check hosts availability
+
+                qconf                 Add/Modify/Check configurations
+
+                qmon                  GUI interface
+
+
+
+
+              RTDA NetworkComputer
+
+
+
+                nc run                Submit a job
+
+                nc stop               Kill a job
+
+                nc forget             Forget a job
+
+                nc list               Check running jobs
+
+                nc gui                GUI interface for checking current jobs
+
+                nc mon                GUI interface for viewing system setup
+
+
+
+
+DMP Custom Launcher
+
+              Some grids, like UGE, are uniquely customized at individual accounts. Standard SGE
+              launcher will not work in these cases. DMP has the ability to read in custom launchers
+              built around the customer grid in such cases.
+                        Usage in DMP Config file:
+                         NUMBER_OF_JOBS <num>
+                         GRID_TYPE CUSTOM
+                         CUSTOM_SCRIPT <path_to_script>
+                         <other arguments like ARGUMENTS_FOR_LARGE_JOBS> # Only
+                         valid config file arguments
+
+
+
+
+ANSYS, Inc.
+CHAPTER 11 — Distributed Machine Processing                                RedHawk User Manual     | 305
+SSH Password-Less Access
+
+              All MPI launch commands must be inside the script. ‘redhawk.dmp’ just sources this script
+              and expects ‘redhawk.exe’ to be launched. Please use ‘$APACHEROOT/bin/
+              redhawk.dmp’ for reference.
+
+SSH Password-Less Access
+
+              DMP is able to run without leveraging the third party distribution system. This method is
+              good for testing in a secure, private network environment. However, load balancing is in
+              the hands of the user. Therefore, a very careful and strategic setting of the computing
+              resources should be considered to provide the best performance.
+              To run DMP in this flow, user must obtain SSH password-less access to the specified
+              machines. Please follow below steps:
+
+
+
+
+Running DMP
+
+              RedHawk DMP provides a seamless interface to launch RedHawk with the distributed
+              system. Settings are read in from the configuration file and the keywords are described in
+              the following table.
+                         redhawk -lmwait -dmp <dmp_config_file> run.tcl
+
+                        Where:
+                        <dmp_config_file>: DMP configuration file
+              DMP configuration file provides informations like Number of partitions, Grid type, launch
+              constraints etc.
+
+                      Sample DMP Config file:
+                      NUMBER_OF_JOBS 16
+                      GRID_TYPE LSF/SSH/RTDA/SGE
+                      QUEUE_NAME dmp_queue
+
+
+
+ANSYS, Inc.
+CHAPTER 11 — Distributed Machine Processing                                  RedHawk User Manual     | 306
+DMP Configuration File Keywords
+
+                     ARGUMENTS_FOR_LARGE_JOBS " -q dmp_queue -R
+                     "rusage[mem=130000]”“
+                     ARGUMENTS_FOR_SMALL_JOBS " -q dmp_queue -R
+                     "rusage[mem=130]”“
+                     ARGUMENTS_FOR_MASTER_JOB " -q dmp_queue -R
+                     "rusage[mem=1300]”“
+              Signal net filtering during DMP- EM analysis can be enabled using the option -
+              semnetfilter while launching RedHawk.
+                        redhawk -dmp <cfg> -semnetfilter
+
+DMP Configuration File Keywords
+
+               NUMBER_OF_JOBS
+                    Specifies total number of jobs required to run the design. It includes the sum of total
+                    number of partitions and a single Master. Default: 4
+                     Syntax:
+                      NUMBER_OF_JOBS <number>
+                     Example:
+                     For 8 partitions, number must be 8 (partitions) + 1(master) = 9
+                       NUMBER_OF_JOBS 9
+
+               GRID_TYPE
+                    Specifies the distributed system used for run. For SGE, user must specify the
+                    parallel environment name when SEQUENTIAL_LAUNCH is false. Optional.
+                    Default: LSF
+                     Syntax:
+                      GRID_TYPE [LSF|RTDA|SGE] <parallel environment>
+
+               QUEUE_NAME
+                    Defines the queue name used for run. This can also be defined within
+                    ARGUMENTS_FOR_SMALL/LARGE_JOBS. Optional. Default: None
+                     Syntax:
+                      QUEUE_NAME <queue>
+
+
+               CANDIDATE_HOST_LIST
+                    Specifies the list of machines to launch the jobs. Works with LSF/SSH grid Types.
+                    Required for SSH. If number of machines in list is smaller than
+                    NUMBER_OF_JOBS, then machines in list will be reused for all additional
+                    partitions.
+
+
+
+                     Syntax:
+                      NUMBER_OF_JOBS 4
+                      GRID_TYPE SSH
+                      CANDIDATE_HOST_LIST
+                      {
+                      machine1 # will be considered master machine
+                      machine2
+
+
+ANSYS, Inc.
+CHAPTER 11 — Distributed Machine Processing                                RedHawk User Manual     | 307
+DMP Configuration File Keywords
+
+                       machine2 # user can specify same machine multiple times to
+                       launch more partitions on it
+                       machine3
+                       ..
+                       }
+                  Sample dmp.cfg file for SSH running 2 parallel jobs on worker_1:
+                      GRID_TYPE SSH
+                      NUMBER_OF_JOBS 4
+                      CANDIDATE_HOST_LIST {
+                      master
+                      worker_1
+                      worker_1
+                      worker_2
+                      }
+
+              ARGUMENTS_FOR_LARGE_JOBS
+                  Specify additional options for the distributed system. Optional. Default: None
+                      Syntax:
+                       ARGUMENTS_FOR_LARGE_JOBS <cmd_opt_1> [… <cmd_opt_n>]
+                  Sample dmp.cfg file for LSF choosing machine that has more than 100g free
+                  memory:
+                     NUMBER_OF_JOBS 4
+                     ARGUMENTS_FOR_LARGE_JOBS -R rusage[mem=100000]
+                  Sample dmp.cfg file for SGE choosing machine that has more than 100g free
+                  memory:
+                     GRID_TYPE SGE rh_pe
+                     NUMBER_OF_JOBS 4
+                     QUEUE_NAME large
+                     ARGUMENTS_FOR_LARGE_JOBS -l mem_free=100G
+
+
+              NOTE:         mem_free just confirms that there is 100G of free memory available, but
+                            does not reserve it. In order to reserve a specified amount of memory for a
+                            job, use the option mfree.
+
+
+
+              ARGUMENTS_FOR_SMALL_JOBS
+                  Specifies the option for dispatching reduction jobs to another queue or resources.
+                  Ensure that the queue specified is available otherwise it will slow down the DMP
+                  process if it is queued up for finding available machines. When not specified, it will
+                  launch on existing machines based on "ARGUMENTS_FOR_LARGE_JOBS"
+                  keyword. Optional. Default: None.
+                      Syntax:
+                       ARGUMENTS_FOR_SMALL_JOBS <cmd_opt_1> [… <cmd_opt_n>]
+
+                  Sample dmp.cfg file for submitting reduction jobs to different queue and
+                  requests smaller machines:
+                     NUMBER_OF_JOBS 4
+                     ARGUMENTS_FOR_LARGE_JOBS -q large -l mem_free=100g
+                     ARGUMENTS_FOR_SMALL_JOBS -q small -l mem_free=10g
+
+
+ANSYS, Inc.
+CHAPTER 11 — Distributed Machine Processing                               RedHawk User Manual      | 308
+DMP Configuration File Keywords
+
+
+
+              ARGUMENTS_FOR_MASTER_JOB
+                  Defines a different queue to launch the master job as it requires less memory.
+                  Mainly used for LSF/SGE/RTDA grids. Optional. Default: None
+                    Syntax:
+                     ARGUMENTS_FOR_MASTER_JOB <arguments_like -q smaller_queue
+                     -R ...>
+
+                      or
+
+                      ARGUMENTS_FOR_MASTER_JOB
+                      {
+                      <arguments>
+                      }
+                  Sample dmp.cfg file:
+                     GRID_TYPE LSF
+                     NUMBER_OF_JOBS 5
+                     SEQUENTIAL_LAUNCH TRUE
+                     ARGUMENTS_FOR_LARGE_JOBS -q large -R "rusage[mem=100000]"
+                     ARGUMENTS_FOR_MASTER_JOB -q medium -R "rusage[mem=25000]"
+
+
+              ARGUMENTS_FOR_GSIM_JOBS
+                  Specifies options for launching gsim jobs on resources other than worker machines
+                  with a different memory usage.
+                    Syntax:
+                     ARGUMENTS_FOR_GSIM_JOBS <arguments_like -q smaller_queue -
+                     R ...>
+
+                      or
+
+                      ARGUMENTS_FOR_GSIM_JOBS
+                      {
+                      <arguments>
+                      }
+
+
+              ARGUMENTS_FOR_RH_JOBS
+                  Specifies different reservation criteria for each partition. The keyword overrides
+                  ARGUMENTS_FOR_LARGE_JOBS and ARGUMENTS_FOR_MASTER_JOB
+                  specifications. Partition number is specified using “-rh_dmp_job_id” argument,
+                  where 0 is for Master, 1 for worker1, 2 for worker2 etc. Multiple partitions can be
+                  assigned the same reservation. First line can be default argument. Any partitions
+                  not listed will be assigned this value. Default: None
+
+
+                    Syntax:
+                     ARGUMENTS_FOR_RH_JOBS {
+                     ## Default settings for all unlisted partitions
+                     -q rh1 -R "rusage[mem=2000]“
+                     # For master
+                     -n 16 -q rh -R "rusage[mem=1000]" -rh_dmp_job_id 0
+
+
+ANSYS, Inc.
+CHAPTER 11 — Distributed Machine Processing                               RedHawk User Manual     | 309
+DMP Configuration File Keywords
+
+                      # For worker 1
+                      -n 16 -q rh -R "rusage[mem=2000]" -rh_dmp_job_id 1
+                      #For workers 2 and 3
+                      -q rh -R "rusage[mem=3000]" -rh_dmp_job_id 2,3
+
+                      }
+                    Example:
+                     ARGUMENTS_FOR_RH_JOBS {
+                     -R "rusage[mem=50000]" -rh_dmp_job_id                     1,3
+                     -R "rusage[mem=10000]" -rh_dmp_job_id                     0,2
+                     }
+
+              WORKING_DIR_LIST
+                  Specifies a file which contains the local working directory (to be used to store the
+                  simulation files) for specific machine. This can be used either to improve speed or
+                  when local disk space is low in the run area.Wildcard(*) specified in the list is the
+                  default working directory.Optional. Default: None
+                    Syntax:
+                     WORKING_DIR_LIST <file_name>
+                    Example:
+                     WORKING_DIR_LIST <machinelist>
+
+                    Syntax of machinelist:
+                     <machinename_of_partition1> <path_to_directory>
+                     <machinename_of_partition2> <path_to_directory>
+                     <machinename_of_partition3> <path_to_directory>
+                     ....
+                    Example machinelist file:
+                      * /tmp
+                      Here every machine will store the simulation data in its /tmp directory. This
+                      improves the runtime. Ensure that /tmp has enough space available.
+
+              WORKING_DIR_NAME
+                  Specify the directory name for WORKING_DIR_LIST. Optional. Default:
+                  <user_name>.nwopt*
+                    Syntax:
+                     WORKING_DIR_NAME <name>
+                  Sample dmp.cfg file that uses local working directory:
+
+                    NUMBER_OF_JOBS 4
+                    WORKING_DIR_LIST ./dir.list
+                    WORKING_DIR_NAME .demo_dmp_case
+
+                    dir.list:
+                    host1 /data/user1
+                    host2 /data/user1
+                    * /tmp
+                    ARGUMENTS_FOR_LARGE_JOBS -q large -l mem_free=100g
+                    ARGUMENTS_FOR_SMALL_JOBS -q small -l mem_free=10g
+
+
+ANSYS, Inc.
+CHAPTER 11 — Distributed Machine Processing                                 RedHawk User Manual      | 310
+DMP Configuration File Keywords
+
+
+
+              GLOBAL_DIR_LIST
+                  Specifies a file which contains a list of directories to which all .apache files for
+                  each partition has to be saved.This can be used if the space in current run area is
+                  insufficient.Optional. Default: None
+                    Syntax:
+                     GLOBAL_DIR_LIST <file_name>
+                    Example:
+                     GLOBAL_DIR_LIST <filelist>
+                    Syntax of filelist:
+                     <dir1>
+                     <dir2>
+                     <dir3>
+
+              GLOBAL_DIR_NAME
+                  Specifies the directory name for GLOBAL_DIR_LIST. Optional. Default:
+                  <user_name>.nwopt
+                    Syntax:
+                     GLOBAL_DIR_NAME <name>
+
+              CONFIG_LOCAL_DIR_AS_RH_MM_CACHE
+                  When set to 1, ‘.MM’ directories of the workers are created inside the directory,
+                  working_dir/<username>_nwopt*. Optional. Default: ON when
+                  WORKING_DIR_LIST is used.
+                    Syntax:
+                    CONFIG_LOCAL_DIR_AS_RH_MM_CACHE [ 1 | 0]
+
+              SEQUENTIAL_LAUNCH
+                  When set to TRUE, it picks up unique machine for each worker and helps to get
+                  machines quicker. Default TRUE for LSF and SGE grids.
+                    Syntax:
+                     SEQUENTIAL_LAUNCH [TRUE | FALSE]
+
+              HEARTBEAT_CONFIG
+                  Invokes a different DMP job monitoring and killing algorithm. Default algorithm uses
+                  MPI and existing Grid (LSF/SGE/RTDA) to monitor jobs. If existing grid is too
+                  loaded or unstable, user can use this algorithm. It will kill all jobs if one worker does
+                  not respond within specified time.Optional. Default: 60 sec.
+                    Syntax:
+                     HEARTBEAT_CONFIG <time_in_seconds>
+                    Example:
+                     HEARTBEAT_CONFIG <360>
+              DMP_ASIM_RESTART
+                  When set to 1, enables network_opt to re-fire standalone runs from simulation
+                  stage on failed workers. Default: 0
+                    Syntax:
+                     DMP_ASIM_RESTART [1 |0]
+
+
+
+ANSYS, Inc.
+CHAPTER 11 — Distributed Machine Processing                                RedHawk User Manual      | 311
+DMP GSR Keywords
+
+                   The details of failed partitions and the signature file name required to relaunch the
+                   run are reported in the log file adsRpt.*/nwopt_apache_dynamic.log. For
+                   example, RedHawk will report the following sample error message in nwopt*log.
+                   ‘Process asim_3d failed, If you want to rerun it, use the
+                   command "touch <run_dir>/rerun_asim3d_100618"to rerun it;
+                   otherwise use "touch <run_dir>/abort_asim3d_100618" to
+                   abort.’
+                   In this example, user can execute the commands "touch <run_dir>/
+                   rerun_asim3d_100618" to relaunch the run from simulation and “"touch
+                   <run_dir>/abort_asim3d_100618"" to abort the run. Please note that this
+                   feature requires more disk space than the regular simulation since the input files for
+                   are launched for a new run.
+              MCA_BTL_TCP_IF_EXCLUDE
+                   Specifies the network interfaces that have to be excluded for master-worker
+                   communication.
+                    Syntax:
+                      MCA_BTL_TCP_IF_EXCLUDE <excluding_list>
+                    Example:
+                     MCA_BTL_TCP_IF_EXCLUDE lo,virbr0,usb0
+
+
+              RTDA_DPWAIT
+                   Defines user specific RTDA job queue timeout. Default: 15m
+                    Syntax:
+                     RTDA_DPWAIT <job queue timeout>
+                    Example:
+                     RTDA_DPWAIT 100m
+
+
+              RED_L_MODE
+                    Modifies the handling of inductance during reduction
+                    Syntax:
+                     RED_L_MODE [0|1]
+                     where,
+                     0 : Improved low frequency match method.
+                     1 : Original method
+              RED_MIN_AVG_SAFE_GUARD
+                   When set to 1, adds reduction guard-region area in a such way that the minimum
+                   guard-region distance would be same as the distance used when all the partition
+                   widths are same. This option is only active if the existing option
+                   DMP_SIM_ERRCTRL is set. The net effect is to increase the guard-region distance
+                   for relatively narrow partitions.
+                    Syntax:
+                     RED_MIN_AVG_SAFE_GUARD [0|1]
+
+
+
+DMP GSR Keywords
+
+              See section "DMP Keywords", page C-720
+
+
+
+
+ANSYS, Inc.
+CHAPTER 11 — Distributed Machine Processing                                     RedHawk User Manual      | 312
+Report Generation
+
+Report Generation
+
+              To generate power reports (both power_summary.rpt and <design>.power.rpt) use the
+              following Tcl command:
+                        report power -all ?-dmp_merge?
+                       Where:
+                       -dmp_merge is an optional switch to generate adsPower/*power
+               • When ‘REPORT REDUCTION max’ is used in GSR, instance wise DvD reports are
+                 not generated by default. To generate these, use the following Tcl command
+                       report dvd -instance ?-o <output_file>? ?-limit <number>?
+               • The files *.inst, *.inst.arc, *.isnt.pin, layer_drop.rpt, *power.unused, ir.out, via.ir can be
+                 generated in adsRpt/ or .apache/ on demand using the following Tcl commands:
+
+                         dmp_collect_result -static ?-inst ?-instPin ?-instArc ?-
+                        layerDrop ?-unusedPower ?-irOut ?-viaIR ?-all
+                         dmp_collect_result -dynamic ?-layerDrop ?-unusedPower ?-
+                        irOut ?-viaIR ?-all
+
+Log files
+
+              A complete high level DMP log file is created as adsRpt/nwopt_apache.log. This log file
+              captures runtime statistics and error messages (if DMP run fails) for DMP session,
+              including reduction, simulation, and post-simulation data collection.
+              DMP run creates the following output directories based on the runs carried out:
+                        nwopt_apache.static       - Created for static analysis
+                        nwopt_apache.dynamic - Created for dynamic analysis
+              These directories include nwopt.log file which contains runtime and memory details for
+              reduction and simulation runs.
+
+              Consolidated redhawk.log
+
+              Master log file concatenates redhawk.log from all workers, section by section. The
+              combined redhawk.log file can be reduced to its original master log file by striping away
+              all workers contents using "dafconvert" utility under $APACHEROOT/bin.
+              Usage:
+                        dafconvert d (or dafconvert d -i <combined.log> -o
+                        <reduced.log>)
+
+              Important Files
+
+
+
+                .run.<lsf|sge|rtda>                                     DMP launch commands
+
+                .apache*/dmp.partition                                  DMP partition positions
+
+                ./adsRpt/nwopt_apache*.log                              DMP Simulation log file
+
+                .apache/.debug.<lsf|sge|rtda>                           Scheduler output
+
+                ./nwopt_apache*/apache.nwoptRunInfo                     Overall running status
+
+
+
+ANSYS, Inc.
+CHAPTER 11 — Distributed Machine Processing                                 RedHawk User Manual      | 313
+Export/Import DB
+
+
+                ./nwopt_apache*/apache.nwoptTmpFileInfo_*            Tracking remote machine disk
+                                                                     space
+
+                ./.nwopt_apache*/apache.sim_cmd                      Command to re-launch DMP
+                                                                     simulation only
+
+                ./nwopt_apache*/p_*/*done                            Reduction status indication
+
+                ./nwopt_apache*/sp_*/*done                           Simulation status indication
+
+                ./nwopt_apache*/sp_*/.log                            Simulation log file
+
+                ./nwopt_apache*/sp_*/.debug*                         Simulation debug info
+
+
+Export/Import DB
+
+              ‘Export db’ can be invoked after any stage in DMP similar to a flat run, to save the
+              database.
+              Importing a DB in DMP requires same number of machines as when the DB was
+              exported. The DB directory has a saved DMP config file, user can use the same in import
+              db runs. Importing db via GUI (Invoke empty GUI using redhawk -dmp <config file>) as
+              well as via Tcl file are supported.
+
+Single license for Import DB (-view_only mode)
+
+              This feature enables to import the DB saved from a DMP run by checking out only single
+              license irrespective of the number of partitions.To enable this, set "-view_only"
+              argument while launching RedHawk.
+                      Syntax
+                       redhawk –view_only –dmp <config> <args>
+              The following functions can be performed in the -view_only mode:
+               • Import DB
+               • View Results
+               • View Heatmaps and plots
+               • Use TCL commands to query the design
+               • Launch existing Explorer DB (Cannot launch new Explorer session in this mode)
+
+DMPstat- DMP Monitoring Utility
+
+              dmpstat utility performs Live Monitoring, Tracking and Debugging of the DMP runs.
+              Issues may occur during a DMP run due to different factors like the machine, network,
+              setup etc. which demands continuous monitoring of the runs.
+              dmpstat gathers information into following segments -
+                1.   Live Tracker contains per partition information on command being performed,
+                     memory and disk space consumption, CPU, Duration, Memory etc information on
+                     each sub-process.
+                2.   Performance contains stage-wise breakdown of the runtimes (Wall and CPU)
+                     along with Memory usage, node count, instance count and other useful information
+                     per partition.
+
+
+
+ANSYS, Inc.
+CHAPTER 11 — Distributed Machine Processing                                    RedHawk User Manual      | 314
+Monitoring and Debugging Using dmpstat
+
+                   3.     Log Viewer displays per partition logs. It can also create a combined consolidated
+                          log.
+                   4.     Partition Diagram contains snapshot of the design layout with the partition
+                          boundaries highlighted.
+
+
+
+
+              Launching dmpstat:
+
+              dmpstat can be invoked in multiple ways:
+              a.        directly when launching RedHawk
+                              redhawk –dmp <config> -f <tcl_file> -dmpstat
+
+              b.        or can be launched anytime during or after the run from the runarea:
+                             <path_to_redhawk_installation>/bin/dmpstat
+
+              c.        Can also be launched anytime during or after the run from any area:
+                             <path_to_redhawk_installation>/bin/dmpstat
+                             <path_to_runarea>
+              It reads all information from .dmp and .apache* directories in the run area.Also user can
+              export DB of dmpstat and save for later reference.
+
+
+
+
+              By default, all runtime, memory, disk space and other data from the run is actively tracked
+              and updated every 60 secs.
+              ‘dmpstat -kill’ option is used to kill all RedHawk DMP runs in the working directory.
+
+Monitoring and Debugging Using dmpstat
+
+
+
+ANSYS, Inc.
+CHAPTER 11 — Distributed Machine Processing                                RedHawk User Manual     | 315
+Monitoring and Debugging Using dmpstat
+
+              Live tracker – Memory, Disk space & Process tracking for each partition
+
+              The Live tracker functions are summarized in the following sections:
+
+              Command window
+              Command window lists out the commands being executed in real-time. It can be used to
+              check the current stage of run, when run is improgressive.The ‘Help window’ provides
+              additional details
+              .
+
+
+
+
+              Figure 11-4      Command window
+
+              Right mouse-click displays following additional options:
+
+
+
+
+              Memory window
+              The main functions include Real-time tracking of the Used and Available memory on each
+              partition. It is also possible to place cursor, Zoom-in/out, unify scales of Available and
+              Used Memory etc. It also includes Cache memory tracking in the Available memory
+              graph. The tab indicates whether a partition failure was due to out-of-memory issue.
+
+
+
+
+ANSYS, Inc.
+CHAPTER 11 — Distributed Machine Processing                               RedHawk User Manual     | 316
+Monitoring and Debugging Using dmpstat
+
+
+
+
+              Figure 11-5     Memory window
+
+              Following options can be enabled using Right mouse click.
+              .
+
+
+
+
+              Figure 11-6     Additional options window for Memory tab
+
+              Disk Window
+              Primarily used for real-time tracking of available disk space on all drives used by each
+              partition.It also includes CACHE_DIR and the WORKING_DIR_LIST.This can be used to
+              monitor the available disk on all drives during the run to confirm any erroneous behavior
+              due to disk space issues.
+
+
+
+
+ANSYS, Inc.
+CHAPTER 11 — Distributed Machine Processing                               RedHawk User Manual    | 317
+Monitoring and Debugging Using dmpstat
+
+
+
+
+              Figure 11-7     Disk window
+
+              Process window
+                                                                                .
+              Enlists all the child processes launched by master and each worker It displays Start/End
+              time, Duration, Peak Memory etc of each sub-process. It can be used to identify the
+              processes that are still running or failed to launch, to verify the memory consumed per
+              sub-process, to debug memory related issues.
+
+
+
+
+              Figure 11-8     Process window
+
+
+
+
+ANSYS, Inc.
+CHAPTER 11 — Distributed Machine Processing                                 RedHawk User Manual     | 318
+Monitoring and Debugging Using dmpstat
+
+              Additional options window can be enabled using right mouse click. Information option in
+              this window gives the PID and command used launch the process.
+
+
+
+
+              Performance window
+              Reports stage wise breakdown of different parameters like Wall time, Memory, Node
+              count etc per partition. Both Graphical and Table views are available for this tab and user
+              can switch between both as required.
+              a.   Wall Time: Reports stage-wise breakdown of runtime per partition.
+
+
+
+
+              Figure 11-9      Graphical and Tabular view of Wall time
+
+              b.   Memory: Reports stage-wise breakdown of memory usage for each partition. Select
+
+
+ANSYS, Inc.
+CHAPTER 11 — Distributed Machine Processing                                   RedHawk User Manual     | 319
+Monitoring and Debugging Using dmpstat
+
+                   the RES option (Resident Memory) to view the actual RAM usage
+                      .
+
+
+
+
+              Figure 11-10     Graphical and Tabular View for Memory usage
+
+              c.   Design Object Numbers: Reports stage-wise breakdown of node count, instance
+                   count etc per partition. An option to add up the node count for individual partitions is
+                   available.
+                      .
+
+
+
+
+              Figure 11-11     Tabular view of design Object Numbers
+
+
+ANSYS, Inc.
+CHAPTER 11 — Distributed Machine Processing                               RedHawk User Manual      | 320
+Monitoring and Debugging Using dmpstat
+
+
+
+
+              Load Avg
+              Graphically represents the average load on each partition with respect to time
+              .
+
+
+
+
+              Machines
+              Displays important machine properties such as OS version, number of threads, CPU type
+              etc.Machine/ OS related issues can be debugged using this window as reference.
+
+
+
+
+              Figure 11-12    Machines window
+
+
+                  NOTE:       Note that the "Help" button provides more info on each view. Right
+                              mouse-click shows the additional options available for each “View”
+                              options.
+
+
+
+
+ANSYS, Inc.
+CHAPTER 11 — Distributed Machine Processing                                     RedHawk User Manual      | 321
+Monitoring and Debugging Using dmpstat
+
+              File Menu
+
+              DMP Check
+              Using DMP Check option, you can turn ON/OFF job status monitoring. dmpstat
+              automatically tries to detect if job is alive or complete. This is still new, so may fail in some
+              cases. User can manually set the status as well. If job status is set to alive it can enable
+              auto-detection of hung or unresponsive jobs.
+
+
+
+
+              DMP Abort
+              Used to kill a DMP job. This option sends the grid specific kill command to the job. For
+              unresponsive grids or SSH, user can select check-box “Let RedHawk DMP terminate
+              itself during its heartbeat cycle”. This will force kill the jobs the next time a
+              partition check-in its status (determined by interval in DMP Check).
+
+
+
+
+ANSYS, Inc.
+CHAPTER 11 — Distributed Machine Processing                                  RedHawk User Manual     | 322
+Heartbeat Monitoring
+
+
+
+
+              Save
+              The option saves dmpstat session into a directory for later reference. It bundles a lot of
+              files like redhawk.log, .nx.log, .statistic etc which can be transferred to RD for debug. The
+              dmp_files script is not required in this case. User can collect pstack output of
+              redhawk_main processes from each worker.
+
+
+
+
+Heartbeat Monitoring
+
+              Using this feature the tool queries the state of all processes at every 60th second and if
+              any process dies, then others would exit automatically.
+              To enable this:
+                1.   Create a new config file (say heartbeat.cfg) with below contents:
+                        timeout <value_in_seconds> Ex: 60
+                2.   Launch RedHawk
+                        redhawk -heartbeat <heartbeat_config_file> -dmp
+                        <conf_file>
+                     where:
+                     -heartbeat: controls worker ping and auto-kill in case any one of the workers does
+                     not respond. This is OFF by default. If the option "-heartbeat
+                     <heart_beat_config>" is mentioned and no timeout value is defined in the
+                     config file, then it is 60 seconds by default.
+
+
+ANSYS, Inc.
+CHAPTER 11 — Distributed Machine Processing   RedHawk User Manual   | 323
+Heartbeat Monitoring
+
+
+
+
+ANSYS, Inc.
+

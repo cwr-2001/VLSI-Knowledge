@@ -1,0 +1,1848 @@
+                                                                                        Feedback
+
+
+
+
+C
+Layout Integrity Management
+
+     This appendix describes the layout integrity management feature that is available with the
+     IC Validator tool.
+
+     The layout integrity management feature is described in the following sections:
+      • Using Layout Integrity Management
+      • Layout Integrity Management Examples
+      • The icv_lidb Utility
+      • The icv_lidb_report Utility
+
+
+Using Layout Integrity Management
+     Layout integrity management allows you to verify the integrity of golden intellectual
+     property (IP), standard cell layout, or any other layout cell. It provides a convenient way to
+     verify that certain layout cells have not changed without doing a full layout-versus-layout
+     comparison. The icv_lidb utility creates a layout integrity database (LIDB) from an input
+     layout. The resultant LIDB can then be used in an IC Validator run to check layout cells as
+     the design is read. The icv_lidb_report utility views the content of an LIDB.
+     Note:
+         Although false matches are extremely unlikely, this flow is not a substitute for a
+         full verification run before tapeout.
+     For each cell, the LIDB contains:
+      • One checksum per layer of all geometric data and text on the layer.
+      • One checksum per unique child cell name of all references to the child cell.
+     Each cell in the LIDB can have multiple sets of checksums. The design cell is considered
+     a match if it matches any set of checksums for that cell stored in the LIDB. This matching
+     allows a single LIDB to serve equivalent cells with different checksums. For example,
+     different layout formats can generate slightly different checksums, or a tool in the flow can
+     change the data, such as by merging adjacent or overlapping shapes. In these cases, a
+
+
+IC Validator User Guide                                                                         453
+X-2025.06
+                                                                                        Feedback
+Appendix C: Layout Integrity Management
+Layout Integrity Management Examples
+
+
+     new set of checksums can be merged into an existing LIDB so that any version of the cell
+     passes the layout integrity check.
+     There are three ways that cells in a design can be checked for layout integrity:
+      • Use the icv_lidb utility to validate an input layout against an existing LIDB without doing
+        a full IC Validator run. The utility matches layout cells to a set of checksums in the LIDB
+        by cell name.
+      • Use the layout_integrity_by_cell() function in an IC Validator runset to check
+        cells by name. A design cell is considered a match if its calculated checksums match
+        any set of checksums for a cell of the same name in any input LIDB specified in the
+        layout_integrity_options() function.
+
+      • Use the layout_integrity_by_marker_layer() function in an IC Validator runset
+        to check cells by marker layer. A design cell is considered a match if its calculated
+        checksums match any set of checksums for a cell with data present on the marker
+        layer in any input LIDB specified in the layout_integrity_options() function.
+     Layout integrity mismatches found during an IC Validator run are stored in the error
+     database, are reported in the LAYOUT_ERRORS file, and are visible in VUE. There are no
+     specific coordinates associated with the errors, so there is no highlighting of these errors
+     in VUE.
+     The results of layout integrity checking can be used to control the action taken on DRC
+     errors subsequently found in those cells. The errors can be discarded, reported as normal,
+     or classified using DRC classification.
+
+
+Layout Integrity Management Examples
+     The following section provides several examples of the layout integrity management
+     feature:
+      • Basic Example
+      • Running on a Different Layout Format
+      • Reporting of Mismatches From a Merged LIDB
+      • Marker Layer Check
+      • Mixed Milkyway and GDSII Flow
+
+
+     Basic Example
+     The following example shows basic layout integrity checking by cell name. First, create an
+     LIDB from the input layout.
+
+
+
+IC Validator User Guide                                                                         454
+X-2025.06
+                                                                                      Feedback
+Appendix C: Layout Integrity Management
+Layout Integrity Management Examples
+
+
+     icv_lidb -i EX_ADDER_3.GDS -o orig.lidb
+
+     Next, add the following to your runset, and the IC Validator tool runs as planned.
+     layout_integrity_options(
+        databases = {
+          { db_name = "orig.lidb" }
+        }
+     );
+
+     {
+         @ "Layout Integrity Check";
+         layout_integrity_by_cell(
+            cells = {"*"}
+         );
+     }
+
+     For this run, no layout integrity mismatches are reported in the LAYOUT_ERRORS file
+     because you are running from the same input layout from which the LIDB is generated.
+     However, you can see that the layout integrity checking is performed by examining the
+     run_details/lidb.log file.
+     -------------------------------------------------------------------------
+                            Layout Integrity Processing Log
+                                 11/08/2010 08:12:50
+     -------------------------------------------------------------------------
+
+     Processing layout cell VIA
+       Cell check:
+         Result       = Matched
+         Matched Cell = VIA
+         Database     = /home/user/orig.lidb
+
+     Processing layout cell INV
+       Cell check:
+         Result       = Matched
+         Matched Cell = INV
+         Database     = /home/user/orig.lidb
+     ...
+
+     Also, the layout integrity status of each cell that was checked can be seen in the
+     run_details/hierarchy/cell.tree0 file.
+     CELL = AD4FUL
+             Cell Status                     = USED
+             GDSII Library                   = MAINLIB
+             Layout Integrity Check          = Passed Completely
+
+
+
+
+IC Validator User Guide                                                                      455
+X-2025.06
+                                                                                         Feedback
+Appendix C: Layout Integrity Management
+Layout Integrity Management Examples
+
+
+     There are three possible values for the layout integrity check status in the cell.tree0 file.
+      • Passed Completely. The cell and all cells placed underneath it were checked and found
+        to be a match.
+      • Passed. The cell itself passed the layout integrity check, but at least one child cell was
+        not checked or failed the check.
+      • Failed. No layout integrity match was found for the cell.
+
+
+     Running on a Different Layout Format
+     The following example shows the results of running on a different layout format of the
+     same design. Using a different layout format can result in different checksum data.
+     Common reasons for this difference are:
+      • Some formats, such as Milkyway, can have a cell boundary layer while others, such as
+        GDSII, do not.
+      • Some formats represent cell placements differently. For example, OASIS does
+        not directly support the concept of an AREF. Instead arrayed cell placements are
+        represented as SREFs with a repetition placing the cell multiple times. The IC Validator
+        tool, however, might interpret these cell placements as AREFs internally.
+      • There are several ways in which geometric data can differ between formats while
+        remaining physically equivalent. Point ordering, merging of overlapping shapes, and
+        collinear point removal are examples of how geometric data can differ. The layout
+        integrity management feature checks the original input layout as is, without attempting
+        to transform it in any way.
+     When the IC Validator run from the previous example is given an equivalent Milkyway
+     input layout, layout integrity mismatches because of the cell boundary layer are reported.
+     ...
+
+      Layout Integrity Check
+         layout_integrity_by_cell:layer_mismatch ....... 9 violations found.
+     ...
+
+     runset1.rs:17:layout_integrity_by_cell:layer_mismatch
+     - - - - - - - - - - - - - - - - - - - - -
+     Structure Layer   LIDB      Golden Layout
+     - - - - - - - - - - - - - - - - - - - - -
+     AD4FUL    (255;0) orig.lidb
+     VIA       (255;0) orig.lidb
+     ADFULAH   (255;0) orig.lidb
+     POLYHD    (255;0) orig.lidb
+     INV       (255;0) orig.lidb
+     INVH      (255;0) orig.lidb
+     DGATE     (255;0) orig.lidb
+
+
+IC Validator User Guide                                                                              456
+X-2025.06
+                                                                                       Feedback
+Appendix C: Layout Integrity Management
+Layout Integrity Management Examples
+
+
+     CONT          (255;0) orig.lidb
+     TGATE         (255;0) orig.lidb
+
+     When running on an equivalent OASIS layout, layout integrity mismatches because of cell
+     placements being interpreted as AREFs are reported.
+     ...
+      Layout Integrity Check
+         layout_integrity_by_cell:placement_mismatch .... 6 violations found.
+     ...
+
+     runset1.rs:17:layout_integrity_by_cell:placement_mismatch
+     - - - - - - - - - - - - - - - - - - - - - -
+     Structure Child Cell LIDB      Golden Layout
+     - - - - - - - - - - - - - - - - - - - - - -
+     AD4FUL    ADFULAH    orig.lidb
+     AD4FUL    VIA        orig.lidb
+     ADFULAH   INV        orig.lidb
+     ADFULAH   INVH       orig.lidb
+     DGATE     TGATE      orig.lidb
+     DGATE     VIA        orig.lidb
+
+     Because these three layouts are equivalent, they can be merged into a single LIDB. The
+     LIDB passes on all three formats.
+     icv_lidb -i EX_ADDER_3 EX_ADDER_3.GDS EX_ADDER_3.oas -o merged.lidb
+
+
+     Reporting of Mismatches From a Merged LIDB
+     Because a single cell can have multiple sets of checksums, some cells checksums can
+     be matched but not others. A cell is considered a match only if all layer and placement
+     checksums are a match for one set of checksums in the LIDB. The following example
+     shows the differences between layout integrity error reporting in different scenarios in a
+     merged LIDB.
+     validate_layout.rs:14:layout_integrity_by_cell:layer_mismatch
+     - - - - - - - - - - - - - - - - - - - - -
+     Structure Layer LIDB        Golden Layout
+     - - - - - - - - - - - - - - - - - - - - -
+     TOP       (1;0) merged.lidb 2.gds
+     TOP       (2;0) merged.lidb 1.gds
+     TOP       (3;0) merged.lidb
+
+     In the preceding example, there is no complete match found for the cell TOP. Layer 1
+     matches cell TOP in the layout 1.gds, but does not match 2.gds, so the mismatch is
+     reported against the golden layout 2.gds. Layer 2 matches cell TOP in 2.gds, but does not
+     match 1.gds, so the mismatch is reported against the golden layout 1.gds. Layer 3 does
+     not match any golden layout, so that column is left blank.
+     Cell placement mismatches for the same scenario are shown in the following example.
+
+
+IC Validator User Guide                                                                           457
+X-2025.06
+                                                                                       Feedback
+Appendix C: Layout Integrity Management
+Layout Integrity Management Examples
+
+
+     validate_layout.rs:15:layout_integrity_by_cell:placement_mismatch
+     - - - - - - - - - - - - - - - - - - - - - - -
+     Structure Child Cell LIDB        Golden Layout
+     - - - - - - - - - - - - - - - - - - - - - - -
+     TOP       A          merged.lidb LIB2
+     TOP       B          merged.lidb LIB1
+     TOP       C          merged.lidb
+
+     In the preceding example, no complete match found for the cell TOP. Placements of child
+     cell A match the placements in cell TOP of LIB1, but not LIB2, so the mismatch is reported
+     against LIB2. Placements of child cell B match the placements in cell TOP of LIB2 but not
+     LIB1, so the mismatch is reported against LIB1. Placements of child cell C do not match
+     any golden layout, so that column is left blank.
+
+
+     Hierarchical Mode
+     The IC Validator tool has two modes of operation for layout integrity checking:
+      • Cell level. Each cell is considered individually without regard to whether any children in
+        the hierarchy passed or failed the check. This is the default mode.
+      • Hierarchical. The status of child cells in the hierarchy is considered. Any layout
+        integrity mismatch of a child cell is reported also as a placement mismatch in the
+        parent cell. This reporting continues all the way up the hierarchy.
+     Mismatches are only reported in cells specified in the check function:
+      • layout_integrity_by_cell(). The cells are specified by the cells argument.
+      • layout_integrity_by_marker_layer(). The cells are those that contain a polygon
+        on the layer specified by the marker_layer argument.
+
+
+     Hierarchical Cell Check Example
+     This example shows behavior of checks for the layout_integrity_by_cell() function
+     with hierarchical mode. Consider the design hierarchy shown in Figure 143.
+
+Figure 143    Design Hierarchy for Hierarchical Cell Check Example
+
+
+
+
+IC Validator User Guide                                                                       458
+X-2025.06
+                                                                                          Feedback
+Appendix C: Layout Integrity Management
+Layout Integrity Management Examples
+
+
+     In this example, there is a difference in a layer shape in cell A from the checksum in the
+     layout integrity database.
+     Note:
+         Although the example uses placed cells with matching cell names, this is not
+         required in hierarchical mode. Cells placed under the check cell must have the
+         same content but not the same cell name.
+     The following code checks all cells in hierarchical mode:
+     layout_integrity_by_cell(
+        cells = { "*" },
+        processing_mode = HIERARCHICAL
+     );
+
+     The difference is reported in A, C, and TOP. The output in the LAYOUT_ERRORS file is:
+     test.rs:15:layout_integrity_by_cell:layer_mismatch
+     - - - - - - - - - - - - - - - - - - - -
+     Structure Layer LIDB        Golden Layout
+     - - - - - - - - - - - - - - - - - - - -
+     A         (31;0) test.lidb
+
+     test.rs:15:layout_integrity_by_cell:placement_mismatch
+     - - - - - - - - - - - - - - - - - - - - - -
+     Structure Child Cell LIDB      Golden Layout
+     - - - - - - - - - - - - - - - - - - - - - -
+     TOP       A          test.lidb
+     TOP       C          test.lidb
+     C         A          test.lidb
+
+     The following code checks cells C and TOP, but not cell A:
+     layout_integrity_by_cell(
+        cells = { "*", "!A" },
+        processing_mode = HIERARCHICAL
+     );
+
+     The difference is still reported in C and TOP. The hierarchical mode specifies that
+     everything below a particular cell being checked is also be considered. The output is:
+     test.rs:15:layout_integrity_by_cell:placement_mismatch
+     - - - - - - - - - - - - - - - - - - - - - -
+     Structure Child Cell LIDB      Golden Layout
+     - - - - - - - - - - - - - - - - - - - - - -
+     TOP       A          test.lidb
+     TOP       C          test.lidb
+     C         A          test.lidb
+
+     The run_details/lidb.log file contains additional details that indicate the status of each cell
+     in the hierarchy. In this example, cell A is processed, but there is no "Cell check" entry
+     because cell A was not specified in the layout_integrity_by_cell() function call.
+
+
+IC Validator User Guide                                                                           459
+X-2025.06
+                                                                                    Feedback
+Appendix C: Layout Integrity Management
+Layout Integrity Management Examples
+
+
+     -----------------------------------------------------------------------
+                            Layout Integrity Processing Log
+                                 04/23/2014 06:13:36
+     -----------------------------------------------------------------------
+     Processing layout cell A
+       Database: test.lidb
+         All Layers: No hierarchically equivalent cells found
+
+     Processing layout cell B
+       Database: test.lidb
+         All Layers: Hierarchically equivalent cells found
+       Cell check (hierarchical):
+         Result       = Matched
+         Matched Cell = B
+         Database     = test.lidb
+
+     Processing layout cell C
+       Database: test.lidb
+         All Layers: No hierarchically equivalent cells found
+       Cell check (hierarchical):
+         Result       = No Match Found
+
+     Processing layout cell TOP
+       Database: test.lidb
+         All Layers: No hierarchically equivalent cells found
+       Cell check (hierarchical):
+         Result       = No Match Found
+
+
+     Hierarchical Marker Layer Check Example
+     This example shows behavior of checks for the layout_integrity_by_marker_layer()
+     function with hierarchical mode. Consider the design hierarchy shown in Figure 144.
+
+Figure 144    Design Hierarchy for Hierarchical Layer Check Example
+
+
+
+
+     In this example, only cells M1-M6 have data on the marker layer. Cell B has a difference
+     on layer 3. Cell M5 has a difference on layer 4.
+
+
+
+IC Validator User Guide                                                                     460
+X-2025.06
+                                                                                     Feedback
+Appendix C: Layout Integrity Management
+Layout Integrity Management Examples
+
+
+     Note:
+         Although the example uses placed cells with matching cell names, this is not
+         required in hierarchical mode. Cells placed under the check cell must have the
+         same content but not the same cell name.
+     The following shows several hierarchical mode checks:
+     // This reports mismatches in M1, M2, M4, and M5
+     layout_integrity_by_marker_layer(
+        marker_layer = {1},
+        processing_mode = HIERARCHICAL
+     );
+
+     // This check only reports mismatches in M2 and M5 since the only
+     // layer with a difference being checked is layer 4
+     layout_integrity_by_marker_layer(
+        marker_layer = {1},
+        check_layers = { {2}, {4} },
+        processing_mode = HIERARCHICAL
+     );
+
+     // This check only reports mismatches in M1 and M4 since the only
+     // layer with a difference being checked is layer 3
+     layout_integrity_by_marker_layer(
+        marker_layer = {1},
+        check_layers = { {3} },
+        processing_mode = HIERARCHICAL
+     );
+
+     // This check reports no mismatches, since no layers being checked
+     // contain a difference
+     layout_integrity_by_marker_layer(
+        marker_layer = {1},
+        check_layers = { {2} },
+        processing_mode = HIERARCHICAL
+     );
+
+     The mismatches are reported in the LAYOUT_ERRORS file:
+     test2.rs:17:layout_integrity_by_marker_layer:cell_mismatch
+     - - - - - - - - - - -
+     Structure Marker Layer
+     - - - - - - - - - - -
+     M1        (1;0)
+     M2        (1;0)
+     M4        (1;0)
+     M5        (1;0)
+
+     test2.rs:22:layout_integrity_by_marker_layer:cell_mismatch
+     - - - - - - - - - - -
+     Structure Marker Layer
+     - - - - - - - - - - -
+
+
+IC Validator User Guide                                                                    461
+X-2025.06
+                                                                                         Feedback
+Appendix C: Layout Integrity Management
+Layout Integrity Management Examples
+
+
+     M2            (1;0)
+     M5            (1;0)
+
+     test2.rs:28:layout_integrity_by_marker_layer:cell_mismatch
+     - - - - - - - - - - -
+     Structure Marker Layer
+     - - - - - - - - - - -
+     M1        (1;0)
+     M4        (1;0)
+
+     Details on the status of each cell are reported in the run_details/lidb.log file:
+     Processing layout cell C
+       Database: test.lidb
+         All Layers: Hierarchically equivalent cells found
+         Layers (3;0): Hierarchically equivalent cells found
+         Layers (4;0) (2;0): Hierarchically equivalent cells found
+         Layers (2;0): Hierarchically equivalent cells found
+       Marker Layer Check:
+         Result       = No Data on Marker Layer
+
+     Processing layout cell A
+       Database: test.lidb
+         All Layers: Hierarchically equivalent cells found
+         Layers (3;0): Hierarchically equivalent cells found
+         Layers (4;0) (2;0): Hierarchically equivalent cells found
+         Layers (2;0): Hierarchically equivalent cells found
+       Marker Layer Check:
+         Result       = No Data on Marker Layer
+
+     Processing layout cell B
+       Database: test.lidb
+         All Layers: No hierarchically equivalent cells found
+         Layers (3;0): No hierarchically equivalent cells found
+         Layers (4;0) (2;0): Hierarchically equivalent cells found
+         Layers (2;0): Hierarchically equivalent cells found
+       Marker Layer Check:
+         Result       = No Data on Marker Layer
+
+     Processing layout cell D
+       Database: test.lidb
+         All Layers: Hierarchically equivalent cells found
+         Layers (3;0): Hierarchically equivalent cells found
+         Layers (4;0) (2;0): Hierarchically equivalent cells found
+         Layers (2;0): Hierarchically equivalent cells found
+       Marker Layer Check:
+         Result       = No Data on Marker Layer
+
+     Processing layout cell M6
+       Database: test.lidb
+         All Layers: Hierarchically equivalent cells found
+         Layers (3;0): Hierarchically equivalent cells found
+         Layers (4;0) (2;0): Hierarchically equivalent cells found
+
+
+IC Validator User Guide                                                                        462
+X-2025.06
+                                                                        Feedback
+Appendix C: Layout Integrity Management
+Layout Integrity Management Examples
+
+
+          Layers (2;0): Hierarchically equivalent cells found
+        Marker Layer Check:
+          Result       = Matched
+          Marker Layer = (1;0)
+          Matched Cell = M6
+          Database     = test.lidb
+
+     Processing layout cell M5
+       Database: test.lidb
+         All Layers: No hierarchically equivalent cells found
+         Layers (3;0): Hierarchically equivalent cells found
+         Layers (4;0) (2;0): No hierarchically equivalent cells found
+         Layers (2;0): Hierarchically equivalent cells found
+       Marker Layer Check:
+         Result       = Matched
+         Marker Layer = (1;0)
+         Matched Cell = M5
+         Database     = test.lidb
+
+     Processing layout cell M4
+       Database: test.lidb
+         All Layers: No hierarchically equivalent cells found
+         Layers (3;0): No hierarchically equivalent cells found
+         Layers (4;0) (2;0): Hierarchically equivalent cells found
+         Layers (2;0): Hierarchically equivalent cells found
+       Marker Layer Check:
+         Result       = Matched
+         Marker Layer = (1;0)
+         Matched Cell = M4
+         Database     = test.lidb
+
+     Processing layout cell M3
+       Database: test.lidb
+         All Layers: Hierarchically equivalent cells found
+         Layers (3;0): Hierarchically equivalent cells found
+         Layers (4;0) (2;0): Hierarchically equivalent cells found
+         Layers (2;0): Hierarchically equivalent cells found
+       Marker Layer Check:
+         Result       = Matched
+         Marker Layer = (1;0)
+         Matched Cell = M3
+         Database     = test.lidb
+
+     Processing layout cell M2M
+       Database: test.lidb
+         All Layers: No hierarchically equivalent cells found
+         Layers (3;0): Hierarchically equivalent cells found
+         Layers (4;0) (2;0): No hierarchically equivalent cells found
+         Layers (2;0): Hierarchically equivalent cells found
+       Marker Layer Check:
+         Result       = Matched
+         Marker Layer = (1;0)
+         Matched Cell = M2
+
+
+IC Validator User Guide                                                       463
+X-2025.06
+                                                                                       Feedback
+Appendix C: Layout Integrity Management
+Layout Integrity Management Examples
+
+
+           Database       = test.lidb
+
+     Processing layout cell M1
+       Database: test.lidb
+         All Layers: No hierarchically equivalent cells found
+         Layers (3;0): No hierarchically equivalent cells found
+         Layers (4;0) (2;0): Hierarchically equivalent cells found
+         Layers (2;0): Hierarchically equivalent cells found
+       Marker Layer Check:
+         Result       = Matched
+         Marker Layer = (1;0)
+         Matched Cell = M1
+         Database     = test.lidb
+
+     Processing layout cell TOP
+       Marker Layer Check:
+         Result       = No Data on Marker Layer
+
+
+     Marker Layer Check
+     The layout_integrity_by_marker_layer() function does not check cells by name,
+     but rather checks any cell with data present on the specified marker layer. It looks for any
+     matching set of checksums for any cell in the input LIDB that also contains data on the
+     marker layer.
+     {
+         @ "Layout Integrity Check";
+         layout_integrity_by_marker_layer(
+            marker_layer = { 8,0 }
+         );
+     }
+
+     This example checks cells with data on layer 8 as the marker layer. The following example
+     shows a matching cell and a mismatched cell in the run_details/lidb.log file.
+     -------------------------------------------------------------------------
+                            Layout Integrity Processing Log
+                                 11/08/2010 09:45:33
+     -------------------------------------------------------------------------
+
+     Processing layout cell VIA
+       Marker Layer Check:
+         Result       = No Match Found
+         Marker Layer = (8;0)
+
+     Processing layout cell INV
+       Marker Layer Check:
+         Result       = Matched
+         Marker Layer = (8;0)
+         Matched Cell = INV
+         Database     = /home/user/orig.lidb
+
+
+
+IC Validator User Guide                                                                        464
+X-2025.06
+                                                                                       Feedback
+Appendix C: Layout Integrity Management
+Layout Integrity Management Examples
+
+
+     You can see from the cell.LAYOUT_ERRORS file that mismatches for the marker layer
+     check are reported on a pass or fail basis. No individual layer or cell reference mismatches
+     are reported.
+     ...
+
+      Layout Integrity Check
+         layout_integrity_by_marker_layer:cell_mismatch ... 3 violations found.
+     ...
+
+     runset8.rs:17:layout_integrity_by_marker_layer:cell_mismatch
+     - - - - - - - - - - -
+     Structure Marker Layer
+     - - - - - - - - - - -
+     AD4FUL    (8;0)
+     VIA       (8;0)
+     TGATE     (8;0)
+
+     If you want to check only specific layers in the marked cells, use the check_layers
+     argument.
+     {
+         @ "Layout Integrity Check";
+         layout_integrity_by_marker_layer(
+            marker_layer = { 8,0 },
+            check_layers = { {==6}, {==8}, {==10} }
+         );
+     }
+
+     In the preceding example, if a cell matches on layers 6, 8, and 10, it is considered a
+     complete match.
+
+
+     Mixed Milkyway and GDSII Flow
+     For a mixed Milkyway and GDSII flow, the layout_integrity_options() function
+     specifies the LIDB to be used for checking Milkyway cells. For layout integrity checking to
+     be performed on replacement GDSII or OASIS files, the LIDB must be specified for each
+     replacement library in the milkyway_merge_library_options() function.
+     library(
+        library_name = "EX_ADDER_3",
+        format = MILKYWAY,
+        cell = "AD4FUL"
+     );
+
+     milkyway_merge_library_options(
+       libraries = {
+         {
+           library_name = "EX_ADDER_3",
+           replacement_libraries = {
+             {
+
+
+IC Validator User Guide                                                                       465
+X-2025.06
+                                                                                         Feedback
+Appendix C: Layout Integrity Management
+Layout Integrity Management Examples
+
+
+                         file = "EX_ADDER_3.GDS",
+                         format = GDSII,
+                         layout_integrity = {
+                           { db_name = "gds.lidb" }
+                         }
+                     }
+                 }
+             }
+         }
+     );
+
+     layout_integrity_options(
+        databases = {
+          { db_name = "milkyway.lidb" }
+              }
+     );
+
+     {
+         @ "Layout Integrity Check";
+         layout_integrity_by_cell(
+            cells = {"*"}
+         );
+     }
+
+     After the IC Validator run, the run_details/lidb.log file shows that the Milkyway cell is
+     checked against the milkyway.lidb file, while the GDSII cells are checked against the
+     gds.lidb file.
+     -------------------------------------------------------------------------
+                            Layout Integrity Processing Log
+                                 11/08/2010 09:56:43
+     -------------------------------------------------------------------------
+
+     Processing layout cell AD4FUL
+       Cell check:
+         Result       = Matched
+         Matched Cell = AD4FUL
+         Database     = /home/user/milkyway.lidb
+
+     Processing layout cell VIA
+       Cell check:
+         Result       = Matched
+         Matched Cell = VIA
+         Database     = /home/user/gds.lidb
+
+
+
+
+IC Validator User Guide                                                                          466
+X-2025.06
+                                                                                                  Feedback
+Appendix C: Layout Integrity Management
+The icv_lidb Utility
+
+
+
+The icv_lidb Utility
+     The icv_lidb utility manages LIDBs. Use it to:
+      • Create an LIDB from an input layout.
+      • Merge multiple LIDBs.
+      • Quickly validate an input layout using an existing LIDB.
+
+
+     Command-Line Options
+     The icv_lidb utility command-line syntax supports its three simple use models.
+      • To generate an LIDB from an input layout:
+           icv_lidb -i input_layout -o output_lidb [-c top_cell]
+
+      • To validate an input layout using an existing LIDB:
+           icv_lidb -i input_layout -validate golden_lidb [-c top_cell]
+
+      • To merge multiple LIDBs together:
+           icv_lidb -merge lidb1 lidb2... -o output_lidb
+
+     Table 78 describes the command-line options of the utility.
+Table 78        icv_lidb Utility Command-Line Options
+
+      Syntax                      Description
+
+      -c cell                     The top cell of the input layout. If omitted, all cells in the library are
+                                  processed.
+
+      -elpc num                   Sets the error limit for each type of check. The default is 100.
+      -error_limit_per_check      Note:
+       num
+                                     Setting this command-line option to ERROR_LIMIT_MAX causes
+                                     all errors up to a tool-defined maximum limit to be stored. The
+                                     limit can be set above the tool-defined maximum limit by giving a
+                                     specific number. However, setting the limit above the tool-defined
+                                     maximum might result in decreased performance and increased
+                                     disk usage for large numbers of errors, and therefore is not
+                                     recommended. Setting it to 0 suppresses storage of all errors.
+
+      -help                       Displays a list of the command-line options and exits.
+
+
+
+
+IC Validator User Guide                                                                                        467
+X-2025.06
+                                                                                             Feedback
+Appendix C: Layout Integrity Management
+The icv_lidb Utility
+
+
+Table 78       icv_lidb Utility Command-Line Options (Continued)
+
+      Syntax                     Description
+
+      -i input_layout ...        Input layout name when creating an LIDB or validating a layout
+      input_layout               against an existing LIDB. If creating an LIDB, you can specify multiple
+                                 files to incorporate checksums from all layouts into the output LIDB.
+                                 The following examples show how to specify input layouts for various
+                                 formats:
+                                  • GDSII: icv_lidb -i /path/to/file.gds
+                                  • OASIS: icv_lidb -i /path/to/file.oas
+                                  • Milkyway: icv_lidb -i /library/path/LIBRARY_NAME
+                                  • OpenAccess: icv_lidb -i /path/to/lib.defs/LIBRARY_NAME
+
+      -lf filename               Selects a subset of all layers and object types (polygons, edges, and
+                                 text) to be written to the layout integrity database.
+                                 For example, edges on layer1 are written only to the layout integrity
+                                 database only if the layer file contains an assign_edge() function that
+                                 includes layer1. The layer file is stored in the layout integrity database
+                                 so that any validation runs against this database are restricted to the
+                                 layers and object types found in the database of the layer file.
+                                 The layer file must not contain options functions or runset functions.
+                                 If the file is empty or does not contain assign statements, this
+                                 command-line option is ignored and the IC Validator tool behaves as if
+                                 it is not present.
+
+      -merge lidb ... lidb       Merges the specified input LIDB into the output database.
+
+      -o output_lidb             The output layout integrity database (LIDB) that is generated. If the file
+                                 exists, it is overwritten.
+
+      -oa_layer_map              Optional OpenAccess layer mapping file for OpenAccess databases.
+      layer_mapping_file         Data on any layers not present in the mapping file is not read. See
+                                 the layer_mapping_file argument of the openaccess_options()
+                                 function for information about the mapping file.
+
+      -oa_view view_name         Optional view of the top cell for OpenAccess databases.
+
+      -of options_file           Optional file containing an IC Validator runset OPTIONS section.
+                                 This file can contain any of the OPTIONS section functions, including
+                                 the gds_options(), milkyway_options(), and oasis_options()
+                                 functions.
+
+      -V                         Displays the utility version and exits.
+
+      -validate golden_lidb      Validates the input layout by performing layout integrity
+                                 checking against the specified golden LIDB. Results are in the
+                                 cell.LAYOUT_ERRORS file.
+
+
+
+
+IC Validator User Guide                                                                               468
+X-2025.06
+                                                                                                        Feedback
+Appendix C: Layout Integrity Management
+The icv_lidb_report Utility
+
+
+
+     Exit Status
+     The exit status values of the icv_lidb executable are shown in Table 79.
+Table 79       icv_lidb Utility Exit Status Values
+
+      Exit status value           Definition
+
+      0                           Ran successfully. If validating an input layout, no
+                                  differences were found.
+
+      1                           Ran successfully and found differences.
+
+      negative number             An error occurred.
+
+
+
+     Output Files
+     The output files of the icv_lidb utility are shown in Table 80.
+Table 80       icv_lidb Utility Output Files
+
+      File name                                Description
+
+      lidb_details/icv_lidb.sum                Summary file containing information about the run. All output
+                                               from the screen is captured in this file. It contains
+                                                • The command-line options used for the run.
+                                                • Information about input and output files.
+                                                • Runtime and memory used.
+                                                • Success or failure indication.
+
+      lidb_details/icv_lidb.log                A log of all cells processed for layout validation or database
+                                               generation runs. For layout validation runs, this file might
+                                               indicate whether a design cell was a match for a golden LIDB
+                                               cell. It might also contain details on which golden LIDB cell the
+                                               design cell matches.
+
+      cell.LAYOUT_ERRORS                       Error file containing all layout integrity errors found during a
+                                               layout validation run. If no top cell is given, the file is named
+                                               cell.LAYOUT_ERRORS.
+
+
+
+
+The icv_lidb_report Utility
+     The icv_lidb_report utility reports the content of an LIDB. For each set of checksums
+     contained in the database, this utility shows the golden layout path and the user ID and
+     timestamp, and lists the cells with entries. Output is sent to the screen as well as the
+     icv_lidb_report.sum summary file in the current directory.
+
+
+
+IC Validator User Guide                                                                                            469
+X-2025.06
+                                                                                             Feedback
+Appendix C: Layout Integrity Management
+The icv_lidb_report Utility
+
+
+
+     Command-Line Options
+     The icv_lidb_report utility command-line syntax is:
+
+     icv_lidb_report -i input_lidb
+
+     Table 81 describes the command-line options of the utility.
+Table 81       icv_lidb_report Utility Command-Line Options
+
+      Syntax                  Description
+
+      -help                   Displays a list of the command-line options and exits.
+
+      -i input_lidb           Input layout integrity database to report.
+
+      -V                      Displays the utility version and exits.
+
+
+
+     Output Files
+     The output files of the icv_lidb_report utility are shown in Table 82.
+Table 82       icv_lidb_report Utility Output Files
+
+      File name                          Description
+
+      icv_lidb_report.sum                Summary file containing information about the run. All output
+                                         from the screen is captured in this file. It contains
+                                          • The command-line options used for the run.
+                                          • Information about input and output files.
+
+
+
+
+IC Validator User Guide                                                                                  470
+X-2025.06
+                                                                                      Feedback
+
+
+
+
+D
+IC Validator PXL Debugger
+     The IC Validator PXL Debugger assists you in constructing a runset or part of a runset
+     by allowing you to look at the intermediate stages in each of the design rules or device
+     configuration functions you are writing.
+     The PXL Debugger is described in the following sections:
+      • Running the PXL Debugger
+      • PXL Debugger Commands
+
+
+
+
+IC Validator User Guide                                                                         471
+X-2025.06
+                                                                                       Feedback
+Appendix D: IC Validator PXL Debugger
+Running the PXL Debugger
+
+
+
+Running the PXL Debugger
+     To run the PXL Debugger use the -debug command-line option with the IC Validator
+                                                                      debug option
+
+
+
+
+     command:
+     % icv -debug runset.rs [-debug_source file]
+
+     The -debug_source command-line option allows you to run the PXL Debugger in batch
+     mode. Specify a file written with the record command in a previous debug run. The output
+     of the PXL Debugger displays on screen.
+     When runset execution starts,
+      • A message on screen indicates the start of the PXL Debugger.
+      • The run pauses at the first breakpoint. Five lines before and four lines after the
+        executable line are displayed.
+      • The PXL Debugger prompt (ICVD>>) displays.
+     For example,
+     Starting ICV Debugger
+            13 |          t = t + dtoi((x * y**2) / z);
+            14 |      }
+            15 |      t = dtoi(t / x);
+            16 |      note (" f2(3) = "+ t);
+            17 | }
+       --> 18 | xx:integer;
+            19 | f2(3);
+            20 | note("end. ");
+     ICVD>>
+
+     At the prompt enter the action you want the PXL Debugger to take. See the following PXL
+     Debugger Commands section.
+     Note:
+         The PXL Debugger is designed to execute PXL code sequentially. If distributed
+         processing options are enabled, a warning is generated and the options are
+         ignored.
+         The PXL Debugger steps through code in runset and user functions, but not in
+         remote functions.
+
+
+PXL Debugger Commands
+     The IC Validator PXL Debugger has the commands shown in Table 83.
+
+
+
+
+IC Validator User Guide                                                                      472
+X-2025.06
+                                                                                                Feedback
+Appendix D: IC Validator PXL Debugger
+PXL Debugger Commands
+
+
+Table 83       PXL Debugger Commands
+                   11
+      Commands               Definition
+
+      h[elp]                 Print a listing of the PXL Debugger commands.
+
+      s[tep]                 Step into the function call. See the step command description.
+
+      n[ext]                 Function is executed all at once. See the next command description.
+
+      q[uit]                 Quit the PXL Debugger and the IC Validator run. See the quit command
+                             description.
+
+      c[ont]                 Continue until the next breakpoint or the end of run. See the cont command
+                             description.
+
+      fin[ish]               Execute until the current function returns. See the finish command
+                             description.
+
+      b[reak]                Set a breakpoint. The default is at the current file:line. See the break
+      b[reak]                command description.
+       [file:]line
+      b[reak] function
+
+      info b[reak]           Show the breakpoint status. The default is all breakpoints. See the info
+      [number]               break command description.
+
+      dis[able]              Disable the breakpoint. The default is disable all breakpoints. See the
+      [number]               disable command description.
+
+      en[able] [number] Enable the breakpoint. The default is enable all breakpoints. See the
+                        enable command description.
+
+      d[elete] number        Delete the specified breakpoint. See the delete command description.
+
+      l[ist] l[ist]      List the source. The default is the current file and line. See the list
+      [file:]line l[ist] command description.
+      function
+
+      where                  Show the function call stack. See the where command description.
+
+      pwd                    Prints the current working directory of the IC Validator PXL Debugger. For
+                             example:
+                             ICVD>> pwd
+                             Working directory /remote/data/ICV
+
+      p[rint]                Print the value of the expression. See the print command description.
+      expression
+
+      record [file]          Save the commands from the current debug session. The default is
+                             ICVpid.pdi. See the record command description.
+
+
+11. The commands can be abbreviated as shown with the brackets.
+
+
+IC Validator User Guide                                                                                 473
+X-2025.06
+                                                                                         Feedback
+Appendix D: IC Validator PXL Debugger
+PXL Debugger Commands
+
+
+Table 83       PXL Debugger Commands (Continued)
+                   11
+      Commands               Definition
+
+      source file            Execute commands from the file. See the source command description.
+
+
+
+
+11. The commands can be abbreviated as shown with the brackets.
+
+
+IC Validator User Guide                                                                            474
+X-2025.06
+                                                                                           Feedback
+Appendix D: IC Validator PXL Debugger
+PXL Debugger Commands
+
+
+
+     break
+     The break command sets breakpoints. There are four ways to set breakpoints:
+      1. break
+         When specified without any options, break sets a breakpoint at the current line in the
+         current file.
+                 4 |
+                 5 | f2 : function (
+                 6 |     x : integer
+                 7 |     ) returning ans : integer
+                 8 | {
+           --> 9 |        ans = x;
+                10 |      note("0. ans = " + ans);
+                11 | }
+                12 |
+                13 | xx: integer = 0;
+         ICVD>> b
+         Breakpoint #1, f2() at test.rs:9
+         ICVD>>
+
+      2. break line
+         Sets a breakpoint at a specific line number in the current file.
+         ICVD>> b 13
+         Breakpoint #1,      f2() at test.rs:13
+         ICVD>>
+
+      3. break file:line
+         Sets a breakpoint at the specified line number in the specified file.
+         ICVD>> b test.rs:15
+         Breakpoint #2, _MAIN_() at               test.rs:15
+         ICVD>>
+
+      4. break function
+         Sets the breakpoint in the first executable line within the specified function.
+                8 | {
+                9 |      ans = x;
+               10 |      note("0. ans = " + ans);
+               11 | }
+               12 |
+           --> 13 | xx: integer = 0;
+               14 | xx = f2(3);
+               15 | note("1. f2(3)= " + xx);
+         ICVD>> b f2
+
+
+
+IC Validator User Guide                                                                          475
+X-2025.06
+                                                                                        Feedback
+Appendix D: IC Validator PXL Debugger
+PXL Debugger Commands
+
+
+         Breakpoint #1,      f2() at test.rs:9
+         ICVD>>
+
+         This method allows setting breakpoints on overloaded functions. In this example, f2 is
+         overloaded as it can return either an integer or void. Specifying 2 selected option 2; f2
+         returns an integer.
+         ICVD>> b f2
+         [0] cancel
+         [1] all
+         [2] f2() returning integer, at test.rs:9
+         [3] f2() returning void, at test.rs:16
+         > 2
+
+         In this example, specifying 1 selected option 1; f2 returns an integer and void.
+         Breakpoint #1, f2() at test.rs:9
+         ICVD>> b f2
+         [0] cancel
+         [1] all
+         [2] f2() returning integer, at test.rs:9
+         [3] f2() returning void, at test.rs:16
+         > 1
+         Breakpoint #2, f2() at test.rs:9
+         Breakpoint #3, f2() at test.rs:16
+         ICVD>>
+
+
+
+
+IC Validator User Guide                                                                         476
+X-2025.06
+                                                                                      Feedback
+Appendix D: IC Validator PXL Debugger
+PXL Debugger Commands
+
+
+
+     cont
+     The cont command executes the runset to completion or stops at a specified breakpoint.
+     In this example, the runset completed the debugger run.
+            1 | #include <math.rh>
+            2 | #include <diagnostics.rh>
+            3 |
+       --> 4 | f: list of integer = {1, 1};
+            5 |
+            6 | for (i in 2 thru 19) {
+            7 |        f.push_back(f[i-2] + f[i-1]);
+            8 | }
+     ICVD>> c
+
+     Completed ICV Debugger Run
+     ICVD>>
+
+     In this example, execution stops at a breakpoint that is in a loop. (See the break
+     command description for information about the break command.)
+     ICVD>> b 13
+     Breakpoint #1,       f2() at test.rs:13
+     ICVD>> c
+             8 | {
+             9 |          t : integer = 0;
+            10 |          y : integer = 10;
+            11 |          z : integer = 100;
+            12 |          for ( i=1 to x) {
+     B --> 13 |               t = t + dtoi((x * y**2) / z);
+            14 |          }
+            15 |          t = dtoi(t / x);
+            16 |          note (" f2(3) = "+ t);
+            17 | }
+     Breakpoint #1,       f2() at test.rs:13
+     ICVD>> c
+             8 | {
+             9 |          t : integer = 0;
+            10 |          y : integer = 10;
+            11 |          z : integer = 100;
+            12 |          for ( i=1 to x) {
+     B --> 13 |               t = t + dtoi((x * y**2) / z);
+            14 |          }
+            15 |          t = dtoi(t / x);
+            16 |          note (" f2(3) = "+ t);
+            17 | }
+     Breakpoint #1,       f2() at test.rs:13
+     ICVD>>
+
+
+
+
+IC Validator User Guide                                                                     477
+X-2025.06
+                                                                              Feedback
+Appendix D: IC Validator PXL Debugger
+PXL Debugger Commands
+
+
+
+     delete
+     The delete command deletes the specified breakpoint. The command format is
+
+     delete number
+
+     ICVD>> info b
+     Breakpoint #1,       _MAIN_() at    test.rs:7       Enabled
+     Breakpoint #2,       _MAIN_() at    test.rs:16      Enabled
+     ICVD>> d 1
+     ICVD>> info b
+     Breakpoint #2,       _MAIN_() at    test.rs:16      Enabled
+     ICVD>>
+
+
+
+
+IC Validator User Guide                                                             478
+X-2025.06
+                                                                                   Feedback
+Appendix D: IC Validator PXL Debugger
+PXL Debugger Commands
+
+
+
+     disable
+     The disable command disables the specified breakpoint. There are two ways to disable
+     breakpoints:
+      1. disable
+         Using the command without a breakpoint number disables all breakpoints.
+         ICVD>> info b
+         Breakpoint #1,      _MAIN_() at          test.rs:7        Enabled
+         Breakpoint #2,      _MAIN_() at          test.rs:18       Enabled
+         ICVD>> dis
+         ICVD>> info b
+         Breakpoint #1,      _MAIN_() at          test.rs:7        Disabled
+         Breakpoint #2,      _MAIN_() at          test.rs:18       Disabled
+
+      2. disable number
+         If a breakpoint number is specified, only that breakpoint is disabled.
+         ICVD>> dis 1
+         ICVD>> info b
+         Breakpoint #1,      _MAIN_() at          test.rs:13       Disabled
+         Breakpoint #2,      _MAIN_() at          test.rs:16       Enabled
+         ICVD>>
+
+
+
+
+IC Validator User Guide                                                                  479
+X-2025.06
+                                                                                  Feedback
+Appendix D: IC Validator PXL Debugger
+PXL Debugger Commands
+
+
+
+     enable
+     The enable command enables a previously disabled breakpoint. There are two ways to
+     enable breakpoints:
+      1. enable
+         Using the command without a breakpoint number enables all breakpoints.
+         ICVD>> info b
+         Breakpoint #1,      _MAIN_() at          test.rs:7        Disabled
+         Breakpoint #2,      _MAIN_() at          test.rs:18       Disabled
+         ICVD>> en
+         ICVD>> info b
+         Breakpoint #1,      _MAIN_() at          test.rs:7        Enabled
+         Breakpoint #2,      _MAIN_() at          test.rs:18       Enabled
+         ICVD>>
+
+      2. enable number
+         If a breakpoint number is specified, only that breakpoint is disabled.
+         ICVD>> info b
+         Breakpoint #1,      _MAIN_() at          test.rs:7        Disabled
+         ICVD>> en 1
+         ICVD>> info b
+         Breakpoint #1,      _MAIN_() at          test.rs:7        Enabled
+         ICVD>>
+
+
+
+
+IC Validator User Guide                                                                 480
+X-2025.06
+                                                                                   Feedback
+Appendix D: IC Validator PXL Debugger
+PXL Debugger Commands
+
+
+
+     finish
+     The finish command executes to the end of the function it is in. Execution does stop,
+     however, at breakpoints.
+     In this example, the run continues until the current function is completed.
+            8 | {
+            9 |      t : integer = 0;
+           10 |      y : integer = 10;
+           11 |      z : integer = 100;
+           12 |      for ( i=1 to x) {
+       --> 13 |          t = t + dtoi((x * y**2) / z);
+           14 |      }
+           15 |      t = dtoi(t / x);
+           16 |      note (" f2(3) = "+ t);
+           17 | }
+     ICVD>> fin
+     test.rs:16 f2(3) = 3
+           15 |      t = dtoi(t / x);
+           16 |      note (" f2(3) = "+ t);
+           17 | }
+           18 | xx:integer;
+           19 | f2(3);
+       --> 20 | note("end. ");
+
+     In this example, the run continues to until a breakpoint is encountered.
+     ICVD>> fin
+     test.rs:11 fibonacci(16) = 1597
+             6 | for (i in 2 thru 19) {
+             7 |       f.push_back(f[i-2] + f[i-1]);
+             8 | }
+             9 |
+            10 | for (i in 0 thru 19) {
+     B --> 11 |       note("fibonacci(" + i + ") = " + f[i]);
+            12 | }
+     Breakpoint #2, _MAIN_() at       test.rs:11
+     ICVD>> fin
+     test.rs:11 fibonacci(17) = 2584
+             6 | for (i in 2 thru 19) {
+             7 |       f.push_back(f[i-2] + f[i-1]);
+             8 | }
+             9 |
+            10 | for (i in 0 thru 19) {
+     B --> 11 |       note("fibonacci(" + i + ") = " + f[i]);
+            12 | }
+     Breakpoint #2, _MAIN_() at       test.rs:11
+     ICVD>>
+
+
+
+
+IC Validator User Guide                                                                      481
+X-2025.06
+                                                                                          Feedback
+Appendix D: IC Validator PXL Debugger
+PXL Debugger Commands
+
+
+
+     info break
+     The info break command lists out information about the breakpoints set during the PXL
+     Debugger session. There are two ways to list the breakpoint information:
+      1. info break
+         When specified without a breakpoint number, all breakpoints are listed.
+         ICVD>> info b
+         Breakpoint #1,       _MAIN_() at          test.rs:7         Enabled
+         Breakpoint #2,       _MAIN_() at          test.rs:16        Enabled
+
+      2. info break number
+         If a breakpoint number is specified, only the breakpoint information for it is listed.
+         ICVD>> info b 2
+         Breakpoint #2, _MAIN_() at                test.rs:16        Enabled
+         ICVD>>
+
+
+
+
+IC Validator User Guide                                                                           482
+X-2025.06
+                                                                                            Feedback
+Appendix D: IC Validator PXL Debugger
+PXL Debugger Commands
+
+
+
+     list
+     The list command list lines from the source code. There are four ways to list lines:
+      1. list
+         When specified without any option, the command lists 10 lines from the last printed
+         line.
+                 1 | #include <math.rh>
+                 2 | #include <diagnostics.rh>
+                 3 |
+           --> 4 | f: list of integer = {1, 1};
+                 5 |
+                 6 | for (i in 2 thru 19) {
+                 7 |        f.push_back(f[i-2] + f[i-1]);
+                 8 | }
+         ICVD>> list
+                 9 |
+                10 | /* comment 1
+                11 |    comment 2
+                12 |    comment 3
+                13 |    comment 4
+                14 |    comment 5
+                15 | */
+                16 |
+                17 | for (i in 0 thru 19) {
+                18 |      note("fibonacci(" + i + ") = " + f[i]);
+         ICVD>>
+
+      2. list line
+         Print outs, from the current file, five lines before and four lines after the specified line
+         number.
+      3. list file:line
+         Print outs, from the specified file, five lines before and four lines after the specified line
+         number.
+         ICVD>>   list test.rs:4
+                1 | #include <math.rh>
+                2 | #include <diagnostics.rh>
+                3 |
+           --> 4 | f: list of integer = {1, 1};
+                5 |
+                6 | for (i in 2 thru 19) {
+                7 |        f.push_back(f[i-2] + f[i-1]);
+                8 | }
+         ICVD>>
+
+
+
+
+IC Validator User Guide                                                                             483
+X-2025.06
+                                                                                           Feedback
+Appendix D: IC Validator PXL Debugger
+PXL Debugger Commands
+
+
+      4. list function
+         Prints out five lines before and four lines after the first executable line within the
+         specified function.
+         ICVD>>    list f2
+                  4 |
+                  5 | f2 : function (
+                  6 |      x : integer
+                  7 |      ) returning void
+                  8 | {
+                  9 |       t : integer = 0;
+                 10 |       y : integer = 10;
+                 11 |       z : integer = 100;
+                 12 |       for ( i=1 to x) {
+                 13 |           t = t + dtoi((x * y**2) / z);
+         ICVD>>
+
+
+
+
+IC Validator User Guide                                                                           484
+X-2025.06
+                                                                                       Feedback
+Appendix D: IC Validator PXL Debugger
+PXL Debugger Commands
+
+
+
+     next
+     The next command moves the PXL Debugger prompt to the next executable line in the
+     runset. A next on a function call completes function execution, and then moves to the next
+     executable line in the runset.
+     In this example, the next command is given at an executable line in the runset:
+            13 |          t = t + dtoi((x * y**2) / z);
+            14 |      }
+            15 |      t = dtoi(t / x);
+            16 |      note (" f2(3) = "+ t);
+            17 | }
+       --> 18 | xx:integer;
+            19 | f2(3);
+            20 | note("end. ");
+     ICVD>> n
+            14 |      }
+            15 |      t = dtoi(t / x);
+            16 |      note (" f2(3) = "+ t);
+            17 | }
+            18 | xx:integer;
+       --> 19 | f2(3);
+            20 | note("end. ");
+     ICVD>>
+
+     In this example, the next command is given on a function.
+             8 | {
+             9 |      ans = x;
+            10 | }
+            11 |
+            12 | xx: integer = 0;
+       --> 13 | xx = f2(3);
+            14 | note("1. f2(3)= " + xx);
+     ICVD>> n
+             9 |      ans = x;
+            10 | }
+            11 |
+            12 | xx: integer = 0;
+            13 | xx = f2(3);
+       --> 14 | note("1. f2(3)= " + xx);
+     ICVD>>
+
+
+
+
+IC Validator User Guide                                                                      485
+X-2025.06
+                                                                              Feedback
+Appendix D: IC Validator PXL Debugger
+PXL Debugger Commands
+
+
+
+     print
+     The print command prints values of variables and simple expressions. The command
+     format is
+
+     print expression
+
+     In this example, the value of a variable is printed:
+             5 | f2 : function (
+             6 |     x : integer
+             7 |     ) returning ans : integer
+             8 | {
+     B       9 |      ans = x;
+       --> 10 |       note("0. ans = " + ans);
+           11 | }
+           12 |
+           13 | xx: integer = 0;
+           14 | xx = f2(3);
+     ICVD>> p ans
+     ans = 3
+
+     In this example, the value of a loop variable is printed:
+            2 | #include <diagnostics.rh>
+            3 |
+            4 | f: list of integer = {1, 1};
+            5 |
+            6 | for (i in 2 thru 19) {
+     B --> 7 |        f.push_back(f[i-2] + f[i-1]);
+            8 | }
+            9 |
+           10 | /* comment 1
+           11 |    comment 2
+     Breakpoint #1, _MAIN_() at      test.rs:7
+     ICVD>> p i
+     i = 3
+
+     In this example, the value of an expression is printed.
+            19 | */
+            20 |      t = dtoi(t / x);
+            21 |      note (" f2(3) = "+ t);
+            22 | }
+            23 | xx:integer = 0;
+       --> 24 | f2(3);
+            25 | note("end. ");
+     ICVD>> p xx
+     xx = 0
+     ICVD>> p (xx+7)*20
+     (xx+7)*20 = 140
+     ICVD>>
+
+
+IC Validator User Guide                                                                 486
+X-2025.06
+                                                                             Feedback
+Appendix D: IC Validator PXL Debugger
+PXL Debugger Commands
+
+
+
+     quit
+     The quit command ends the debugging session and the IC Validator run.
+            1 | #include <math.rh>
+            2 | #include <diagnostics.rh>
+            3 |
+       --> 4 | f: list of integer = {1, 1};
+            5 |
+            6 | for (i in 2 thru 19) {
+            7 |        f.push_back(f[i-2] + f[i-1]);
+            8 | }
+     ICVD>> q
+     IC Validator Run: Time= 0:00:04 User=0.06 System=0.01
+     Overall icv_engine time = 0:00:04
+     IC Validator is done.
+
+
+
+
+IC Validator User Guide                                                            487
+X-2025.06
+                                                                                      Feedback
+Appendix D: IC Validator PXL Debugger
+PXL Debugger Commands
+
+
+
+     record
+     The record command saves the commands from the current debugging session into an
+     ASCII file. There are two ways to save commands:
+      1. record
+         If a file name is not specified, the commands are saved in ICVpid.pdi, where pid is the
+         UNIX process ID.
+         ICVD>> record
+         Saving Commands to 'ICV22347.pdi'
+         ICVD>>
+
+      2. record file
+         You can specify a file name, with or without a path.
+         ICVD>> record myfile.cmd
+         Saving Commands to 'myfile.cmd'
+         ICVD>>
+
+     The ASCII file stores all commands, except break and list, verbatim from the PXL
+     Debugger. The break and list commands are stored with the resolved file path. For
+     example,
+
+     Starting ICV Debugger
+            2 | #include "math.rh"
+            3 | #include "string.rh"
+            4 |
+            5 | #include "b.rs"
+            6 |
+     -->    7 | xx: integer = 0;
+            8 | xx = f2(3);
+            9 | note("2. f2(3)= " + xx);
+     ICVD>> record
+     Saving Commands to 'ICV21589.pdi'
+     ICVD>> b f2
+     Breakpoint #1, f2() at b.rs:5
+     ICVD>> list f2
+            1 | f2 : function (
+            2 |     x : integer
+            3 |     ) returning ans : integer
+            4 | {
+     B      5 |     ans = x;
+            6 |     note("0. ans = " + ans);
+            7 | }
+     ICVD>> b 6
+     Breakpoint #2, f2() at b.rs:6
+     ICVD>> q
+
+
+
+
+IC Validator User Guide                                                                       488
+X-2025.06
+                                                  Feedback
+Appendix D: IC Validator PXL Debugger
+PXL Debugger Commands
+
+
+     The recorded file (ICV21589.pdi) contains:
+     b f2
+     list f2
+     b b.rs:6
+     q
+
+
+
+
+IC Validator User Guide                                 489
+X-2025.06
+                                                                                 Feedback
+Appendix D: IC Validator PXL Debugger
+PXL Debugger Commands
+
+
+
+     source
+     The source command executes the PXL Debugger commands in the specified file. After
+     the commands are completed, control of the PXL Debugger returns to the user unless the
+     PXL Debugger completed because of a quit command specified in the source file. The
+     command format is
+
+     source file
+
+     For example,
+     ICVD>>   source ICVDebug9398.pdi
+     ICVD>>   n
+             2 | #include <diagnostics.rh>
+             3 |
+             4 | f: list of integer = {1, 1};
+             5 |
+             6 | for (i in 2 thru 19) {
+       --> 7 |         f.push_back(f[i-2] + f[i-1]);
+             8 | }
+             9 |
+            10 | /* comment 1
+            11 |    comment 2
+     ICVD>> b 7
+     Breakpoint #1, _MAIN_() at       test.rs:7
+     ICVD>> b 16
+     Breakpoint #2, _MAIN_() at       test.rs:16
+     ICVD>> c
+             2 | #include <diagnostics.rh>
+             3 |
+             4 | f: list of integer = {1, 1};
+             5 |
+             6 | for (i in 2 thru 19) {
+     B --> 7 |         f.push_back(f[i-2] + f[i-1]);
+             8 | }
+             9 |
+            10 | /* comment 1
+            11 |    comment 2
+     Breakpoint #1, _MAIN_() at       test.rs:7
+     End of commands from commandfile
+     ICVD>>
+
+
+
+
+IC Validator User Guide                                                                 490
+X-2025.06
+                                                                                     Feedback
+Appendix D: IC Validator PXL Debugger
+PXL Debugger Commands
+
+
+
+     step
+     The step command allows you to step into functions calls, executing each line of within
+     the function. The cursor moves to the first executable line in the function.
+     In this example, the PXL Debugger steps through f2, where the first executable line is 9.
+            14 |      }
+            15 |      t = dtoi(t / x);
+            16 |      note (" f2(3) = "+ t);
+            17 | }
+            18 | xx:integer;
+       --> 19 | f2(3);
+            20 | note("end. ");
+     ICVD>> s
+             4 |
+             5 | f2 : function (
+             6 |     x : integer
+             7 |     ) returning void
+             8 | {
+       --> 9 |        t : integer = 0;
+            10 |      y : integer = 10;
+            11 |      z : integer = 100;
+            12 |      for ( i=1 to x) {
+            13 |          t = t + dtoi((x * y**2) / z);
+     ICVD>>
+
+
+
+
+IC Validator User Guide                                                                        491
+X-2025.06
+                                                                                     Feedback
+Appendix D: IC Validator PXL Debugger
+PXL Debugger Commands
+
+
+
+     where
+     The where command prints the function call stack of a statement in the runset. In this
+     example the command shows that there have been two function calls.
+     ICVD>>   s
+            22 |          c = a + b;
+            23 |     };
+            24 |
+            25 | sum: function (x: integer, y: integer) returning z: integer
+            26 |     {
+        --> 27 |          z = add(x,y);
+            28 |       note("z = " + z);
+            29 |     }
+            30 |
+            31 | q = add(x,y);
+     ICVD>> where
+     #0     | sum()     at test.rs:27
+     #1     | _MAIN_()          at test.rs:32
+
+     In this example the command shows that there have been three function calls.
+     ICVD>>   s
+            17 | note("x is now #2 = " + x);
+            18 | note("y is now #2 = " + y);
+            19 |
+            20 | add: function (a: integer, b: integer) returning c: integer
+            21 |     {
+        --> 22 |          c = a + b;
+            23 |     };
+            24 |
+            25 | sum: function (x: integer, y: integer) returning z: integer
+            26 |     {
+     ICVD>> where
+     #0     | add()     at test.rs:22
+     #1     | sum()     at test.rs:27
+     #2     | _MAIN_()          at test.rs:32
+     ICVD>>
+
+
+
+
+IC Validator User Guide                                                                       492
+X-2025.06
+

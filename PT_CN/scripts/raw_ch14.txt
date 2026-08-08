@@ -1,0 +1,1925 @@
+                                                                                        Feedback
+
+
+
+
+14
+Multivoltage Design Flow
+     PrimeTime supports the use of the IEEE 1801 Unified Power Format (UPF) Standard for
+     specifying the multivoltage features of the design. PrimeTime correctly analyzes the timing
+     of the design in the presence of multivoltage supplies and voltage values set on specific
+     supply nets with the set_voltage command. To learn about the using the multivoltage
+     design flow, see
+     •     Multivoltage Analysis Requirements
+     •     Specifying Power Supply Connectivity
+     •     UPF Commands
+     •     Golden UPF Flow
+     •     Multiple Supply Voltage Analysis
+
+
+Multivoltage Analysis Requirements
+     The Prime Suite tools support multivoltage analysis (which is analysis with different power
+     supply voltages on different cells):
+     •     PrimeTime calculates voltage-correct delays and slews.
+     •     PrimeTime SI calculates voltage-correct crosstalk delay and noise effects.
+     •     PrimePower calculates power consumption based on the actual supply voltage on each
+           supply pin of each cell.
+     To perform a multivoltage analysis, you need to specify the power intent of the design
+     (which logic operates at what voltages). This can be done using either method shown in
+     Table 28.
+Table 28        Providing Multivoltage Power Intent for a Design
+
+     When power intent is             Verilog netlist requirements   Library requirements
+
+     Read from UPF file (or           PG-pin netlist or non-PG-pin   PG-pin library
+     equivalent Tcl commands)         netlist
+
+     Inferred from PG-pin netlist     PG-pin netlist                 PG-pin library
+
+
+
+PrimeTime® User Guide                                                                         470
+T-2022.03
+                                                                                      Feedback
+Chapter 14: Multivoltage Design Flow
+Specifying Power Supply Connectivity
+
+
+     The library requirements for multivoltage analysis are:
+     •   The libraries must contain power and ground (PG) pin information for each cell.
+         The Liberty syntax for specifying PG pin information in the library uses the
+         voltage_map and pg_pin statements. The voltage_map statement defines the power
+         supplies and default voltage values, whereas the pg_pin statements specify the power
+         supply associated with each pin of each cell, as well as some of the power-related pin
+         parameters. For more information about library requirements for multivoltage analysis,
+         see the Library Compiler User Guide.
+         If any cells in a PG pin library are missing power pins or ground pins, PrimeTime
+         removes these cells from the design at link time. No timing or power information is
+         reported for these types of cells.
+     •   The Liberty library data must accurately describes timing behavior at specific voltages.
+         PrimeTime supports voltage scaling by interpolating between data in separate libraries
+         that have been characterized at different supply voltages. You invoke voltage and
+         temperature scaling by using the define_scaling_lib_group command. Note that
+         the behavior of PrimeTime is different from that of Design Compiler, which links the
+         design at precise corner voltages. For more information, see Cross-Library Voltage and
+         Temperature Scaling.
+
+
+Specifying Power Supply Connectivity
+     The PrimeTime tool supports two ways to specify power supply connectivity:
+     •   UPF-Specified Supply Connectivity
+     •   Netlist-Inferred Supply Connectivity
+
+
+     UPF-Specified Supply Connectivity
+     By default, for multivoltage designs with UPF-specified power intent, you get the PG
+     connectivity by loading the UPF files associated with the design. For example,
+     set_app_var search_path "/path1/mydata /path2/mydata"
+     set_app_var link_path "* mylib_1V.db"
+     read_verilog my_design.v
+     link_design
+     load_upf my_design.UPF
+     read_sdc my_constraints.sdc
+     set_voltage 0.9 -min 0.6 -object_list [get_supply_nets VDD1]
+     set_voltage 0.8 -min 0.5 -object_list [get_supply_nets VDD2]
+     set_voltage 0.0 -min 0.0 -object_list [get_supply_nets VSS]
+     ...
+
+
+
+PrimeTime® User Guide                                                                          471
+T-2022.03
+                                                                                       Feedback
+Chapter 14: Multivoltage Design Flow
+Specifying Power Supply Connectivity
+
+
+     See Also
+     •   UPF Commands
+
+
+     Netlist-Inferred Supply Connectivity
+     To have the PrimeTime tool derive the supply connectivity information from a PG pin
+     Verilog netlist, set the link_keep_pg_connectivity variable to true before you read in
+     any design information. For example,
+     set_app_var search_path "/path1/mydata /path2/mydata"
+     set_app_var link_path "* mylib_1V.db"
+     set_app_var link_keep_pg_connectivity true
+     read_verilog my_design.v
+     link_design
+     read_sdc my_constraints.sdc   # no need to load UPF file
+     set_voltage 0.9 -min 0.6 -object_list [get_supply_nets VDD1]
+     set_voltage 0.8 -min 0.5 -object_list [get_supply_nets VDD2]
+     set_voltage 0.0 -min 0.0 -object_list [get_supply_nets VSS]
+     ...
+
+     With this variable set to true, the tool derives the UPF power intent from the PG
+     netlist data and implicitly updates the design database as if it were running UPF
+     commands like create_power_domain, create_supply_port, create_supply_net, and
+     connect_supply_net. After you link the design, you can set the supply voltages by using
+     the set_voltage command.
+     This PG netlist flow works with design data generated in either the UPF-prime flow or the
+     golden UPF flow. It supports PrimeTime features such as timing analysis, voltage scaling,
+     power switches, and ECOs. Note that the PG netlist flow requires all the netlists to have
+     PG information; it does not accept mixture of PG and non-PG netlists.
+     In the netlist-inferred flow, you can read in a UPF file to apply boundary information (port
+     supply and voltage information), but internal block information is ignored. For details, see
+     Reading Block Boundary Information From UPF.
+     The tool creates UPF power switch objects specified in a PG Verilog file. You can query
+     upf_power_switch objects using the following commands:
+     get_power_switches
+     report_power_switch
+     get_supply_nets -of_objects [get_object {upf_power_switch}
+
+     Reading Block Boundary Information From UPF
+     In the netlist-inferred flow, you can read in a UPF file to apply boundary information,
+     such as port supply and voltage information. This is particularly useful when using
+     the extract_model command, to ensure that the resulting model has the correct port
+     attributes.
+
+
+PrimeTime® User Guide                                                                          472
+T-2022.03
+                                                                                        Feedback
+Chapter 14: Multivoltage Design Flow
+UPF Commands
+
+
+     Table 29 lists the boundary UPF commands that are applied.
+Table 29       UPF Commands Applied in the Netlist-Inferred Supply Connectivity Flow
+
+      UPF command                Behavior
+
+      add_pst_state              Always applied
+
+      connect_supply_net         Ignored by default, but applied if pg_allow_pg_pin_reconnection
+                                 is set to true
+
+      set_port_attributes        Always applied (but used only by ETM extraction)
+
+      set_related_supply_net Always applied
+
+
+
+     All other commands, such as those that define internal block information, are ignored
+     when the link_keep_pg_connectivity variable is set to true. In particular, note that the
+     following significant UPF commands are ignored:
+     •     create_supply_net
+
+     •     set_level_shifter
+
+     •     set_isolation
+
+     •     create_power_switch
+
+
+
+UPF Commands
+     Multiple power supplies at different voltages can supply power to different domains
+     occupying different areas of the chip. Some power domains can be selectively shut off
+     to conserve power during periods of inactivity. Level shifter cells convert signals leaving
+     one domain and entering another, while isolation cells supply constant signal levels at
+     the outputs of domains that are shut down. Power-down domains can contain retention
+     registers that can retain logic values during the power-down period. Power-switch cells,
+     operating under the control of a power-controller block, switch the power on and off to
+     specific domains. You can specify all of these multivoltage aspects of a design in the UPF
+     language.
+     A standard PrimeTime license includes UPF support. No additional license is required
+     specifically for UPF. However, power analysis requires a PrimePower license, and IR drop
+     annotation requires a PrimeTime SI license.
+     For background information about the Synopsys multivoltage flow and using UPF
+     commands in the flow, see the Synopsys Multivoltage Flow User Guide.
+
+
+
+
+PrimeTime® User Guide                                                                              473
+T-2022.03
+                                                                                   Feedback
+Chapter 14: Multivoltage Design Flow
+UPF Commands
+
+
+     PrimeTime uses UPF-specified power intent and the set_voltage command to determine
+     the voltage on each power supply pin of each cell. Based on the UPF-specified power
+     intent and set_voltage information, PrimeTime builds a virtual model of the power
+     network and propagates the voltage values from UPF supply nets to the PG pins of leaf
+     instances. Since PrimeTime does not directly read power state tables, the set_voltage
+     command must be consistent with a specific state in the UPF power state table that you
+     intend to verify.
+     You can enter the UPF commands at the shell prompt. You can also source these
+     commands in a command file or with the source or load_upf command. Any loaded UPF
+     information is removed upon relinking a design, just like timing assertions loaded from a
+     Synopsys Design Constraints (SDC) file.
+     The following is a typical sequence of commands used in a PrimeTime timing analysis with
+     UPF-specified power intent. The UPF-related power commands are highlighted in bold.
+     # Read libraries, designs
+      ...
+     read_lib l1.lib
+     read_verilog d1.v
+      ...
+
+     # Read UPF file
+     # (containing commands such as the following ones)
+
+       create_power_domain ...
+       create_supply_set ...
+       create_supply_net ...
+       create_supply_port ...
+       create_power_switch ...
+       connect_supply_net ...
+       set_scope block1
+       load_upf block1_upf.tcl
+
+     # Read SDC and other timing assertions
+     source d1.tcl
+
+     # Define scaling library groups for voltage and temperature scaling
+     define_scaling_lib_group library_list
+
+     # Read SDC and other timing assertions
+      ...
+     set_voltage -object_list supply_net_name
+     set_voltage -cell ... -pg_pin_name ... value
+     # (sets voltage on supply nets or IR drop on cell power pins;
+     # PrimeTime SI license required for -cell and -pg_pin_name options)
+     set_temperature -object_list cell_list value
+
+     # Perform timing, signal integrity analysis
+     report_timing
+
+
+
+PrimeTime® User Guide                                                                      474
+T-2022.03
+                                                                                   Feedback
+Chapter 14: Multivoltage Design Flow
+UPF Commands
+
+
+     PrimeTime reads and uses the UPF information, but it does not modify the power domain
+     description in any structural or functional way. Therefore, PrimeTime does not write
+     out any UPF commands with the write_script command, and PrimeTime does not
+     recognize the save_upf command.
+     PrimeTime supports a subset of the commands and command options in the IEEE 1801
+     (UPF) specification. The unsupported commands are either unrelated to the functions of
+     PrimeTime (for example, synthesis and physical implementation) or represent capabilities
+     that have not been implemented.
+     The supported power supply commands can be divided into the following categories:
+     •   Power domain commands:
+         connect_supply_net
+         create_power_domain
+         create_power_switch
+         create_supply_net
+         create_supply_port
+         create_supply_set
+         set_domain_supply_net
+
+     •   Isolation and retention commands:
+         set_isolation
+         set_isolation_control
+         set_port_attributes
+         set_design_attributes
+         set_retention
+         set_retention_elements
+         set_retention_control
+
+     •   Find and query commands:
+         find_objects
+         query_cell_instances
+         query_cell_mapped
+         query_net_ports
+         query_port_net
+
+     •   Flow commands:
+         load_upf
+         set_scope
+         set_design_top
+         upf_version
+
+     •   Related non-UPF commands:
+         check_timing -include signal_level
+         check_timing -include supply_net_voltage
+         check_timing -include unconnected_pg_pins
+         get_power_domains
+
+
+PrimeTime® User Guide                                                                      475
+T-2022.03
+                                                                                   Feedback
+Chapter 14: Multivoltage Design Flow
+UPF Commands
+
+
+         get_power_switches
+         get_supply_nets
+         get_supply_ports
+         get_supply_sets
+         report_power_domain
+         report_power_network
+         report_power_pin_info
+         report_power_switch
+         report_supply_net
+         report_supply_set
+         set_level_shifter_strategy
+         set_level_shifter_threshold
+         set_related_supply_net
+         set_temperature
+         set_voltage
+
+     Some UPF commands are essential for synthesis and other implementation tools, but they
+     supply information that is either not used during PrimeTime analysis or is available from
+     other sources. PrimeTime accepts these commands as valid UPF syntax, but otherwise
+     ignores them. PrimeTime does not provide man pages for these commands. The following
+     UPF commands are ignored by PrimeTime:
+     add_port_state
+     add_pst_state
+     create_pst
+     map_isolation_cell
+     map_level_shifter_cell
+     map_power_switch
+     map_retention_cell
+     name_format
+     set_level_shifter
+     connect_logic_net
+     create_logic_net
+     create_logic_port
+
+     The following commands are rejected by PrimeTime as unknown syntax. They are either
+     not supported by the Synopsys UPF command subset in all Synopsys tools or they exist
+     only in the RTL UPF.
+     add_domain_elements
+     bind_checker
+     create_hdl2upf_vct
+     create_upf2hdlvct
+     merge_power_domains
+     save_upf
+     set_pin_related_supply
+
+     For descriptions of the supported UPF commands in PrimeTime, see
+     •   UPF Supply Sets
+     •   UPF Supply Set Handles
+
+
+PrimeTime® User Guide                                                                     476
+T-2022.03
+                                                                                     Feedback
+Chapter 14: Multivoltage Design Flow
+UPF Commands
+
+
+     •   Virtual Power Network
+     •   Setting Voltage and Temperature
+     •   Library Support for Multivoltage Analysis
+     •   Multivoltage Reporting and Checking
+     For background information or more information about using each command throughout
+     the synthesis, implementation, and verification flow, see the IEEE 1801 (UPF)
+     specification. For more information about the Synopsys multivoltage flow and Synopsys
+     usage of UPF commands, including usage in PrimeTime, see the Synopsys Multivoltage
+     Flow User Guide.
+
+
+     UPF Supply Sets
+     A supply set is an abstract collection of supply nets, consisting of two supply functions,
+     power and ground. A supply set is domain-independent, which means that the power and
+     ground in the supply set are available to be used by any power domain defined within the
+     scope where the supply set was created. However, each power domain can be restricted
+     to limit its usage of supply sets within that power domain.
+     You can use supply sets to define power intent at the RTL level, so you can synthesize
+     a design even before you know the names of the actual supply nets. A supply set is an
+     abstraction of the supply nets and supply ports needed to power a design. Before such a
+     design can physically implemented (placed and routed), its supply sets must be refined or
+     associated with actual supply nets.
+     For more information about supply sets, see the Synopsys Multivoltage Flow User Guide.
+
+
+     UPF Supply Set Handles
+     A supply set handle is an abstract supply set implicitly created for a power domain.
+     These supply set handles let you synthesize a design even before you create any supply
+     sets, supply nets, and supply ports for the power domain. Before such a design can be
+     physically implemented, its supply set handles must be refined or associated with actual
+     supply sets; and those supply sets must be refined so that they are associated with actual
+     supply nets.
+     By default, when you create a power domain, PrimeTime creates the following predefined
+     supply set handles for that power domain:
+     •   primary
+
+     •   default_isolation
+
+     •   default_retention
+
+
+
+PrimeTime® User Guide                                                                        477
+T-2022.03
+                                                                                    Feedback
+Chapter 14: Multivoltage Design Flow
+UPF Commands
+
+
+     In addition to the predefined supply set handles, you can create your own supply set
+     handles with the following command:
+     create_power_domain -supply {supply_set_handle [supply_set_ref]}
+
+     The design example in Figure 139 has two power domains, TOP and PD1. Example 25
+     shows the use of supply set handles for this design example.
+
+Figure 139    Design example using supply set handles
+
+             top            domain: TOP (always_on)
+
+             - primary
+                             ublk                       domain: PD1
+
+                             - primary
+
+                             Retention strategy: ret1
+                             Isolation strategy: iso1
+                             Switch: sw1
+
+
+
+
+Example 25 Design example using supply set handles
+     # create power domains
+     create_power_domain TOP -include_scope
+     create_power_domain PD1 -elements {u1}
+
+     # retention/isolation/switch
+     set_retention ret1 -domain PD1
+     set_isolation iso1 -domain PD1
+     create_power_switch sw1 -domain PD1 \
+        -input_supply_port {IN TOP.primary.power} \
+        -output_supply_port {OUT PD1.primary.power} \
+        -control_port {CTRL inst_on} \
+        -on_state {on1 IN {CTRL}}
+
+     # set_voltage
+     set_voltage 0.9 -object_list {TOP.primary.power}
+     set_voltage 0.9 -object_list {PD1.primary.power}
+     set_voltage 0.0 -object_list {TOP.primary.ground PD1.primary.ground}
+
+     For more information about creating and working with supply set handles, see the
+     Synopsys Multivoltage Flow User Guide.
+
+
+
+
+PrimeTime® User Guide                                                                       478
+T-2022.03
+                                                                                       Feedback
+Chapter 14: Multivoltage Design Flow
+UPF Commands
+
+
+     Identifying the Power and Ground Supply Nets With Attributes
+     To report the power and ground supply nets associated with the primary supply sets of
+     each power domain, query UPF attributes as shown in Example 26. This script collects
+     and reports the power and ground supply nets associated with the primary supply sets of
+     each power domain.
+
+Example 26 Identifying the power and ground supply nets
+     # ISS is on by default
+     # set upf_create_implicit_supply_sets true
+     ...
+     set domain_list [get_power_domains *]
+     foreach_in_collection domain $domain_list {
+       echo [format "Domain: %s " [get_attribute $domain full_name]]
+       set sset [get_attribute $domain primary_supply]
+       echo [format " Primary supply: %s " [get_attribute $sset full_name]]
+       echo [format "    power net: %s " [get_attribute \
+         [get_attribute $sset power] full_name]]
+       echo [format "    ground net: %s " [get_attribute \
+         [get_attribute $sset ground] full_name]]
+       append_to_collection power_nets [get_attribute $sset power] -unique
+       append_to_collection ground_nets [get_attribute $sset ground] -unique
+     }
+
+     echo "power nets associated with domains:"
+     query $power_nets
+
+     echo "ground nets associated with domains:"
+     query $ground_nets
+     ...
+
+     The script uses the following UPF attributes, which return the predefined supply set
+     handles associated with power domain objects:
+     •   primary_supply
+
+     •   default_isolation_supply
+
+     •   default_retention_supply
+
+     In addition, the following UPF attributes return the power or ground net functions for a
+     supply set:
+     •   power
+
+     •   ground
+
+     For more information about these attributes, see Collection (get_*) Commands.
+
+
+
+
+PrimeTime® User Guide                                                                           479
+T-2022.03
+                                                                                       Feedback
+Chapter 14: Multivoltage Design Flow
+UPF Commands
+
+
+
+     Virtual Power Network
+     In the PrimeTime multivoltage analysis flow, you typically read in the design netlist, source
+     a UPF command script that defines the power supply intent, and then source an SDC
+     script that specifies the timing constraints for analysis. From the design netlist and UPF
+     commands, PrimeTime builds a virtual power network that supplies power to all the PG
+     pins of all the leaf-level cells in the design netlist.
+     PrimeTime builds the power supply network based on UPF commands,
+     including create_power_domain, create_supply_net, create_supply_set,
+     create_supply_port, set_domain_supply_net, and connect_supply_net. It
+     determines which cells belong to which power domains and traces the supply connections
+     through the supply nets and supply ports down to the leaf level.
+     The set_retention , set_retention_elements, and set_retention_control
+     UPF commands determine the supply connections to the retention registers. Similarly,
+     the set_isolation and set_isolation_control UPF commands determine the
+     connections of the backup supply nets of the isolation cells. The set_port_attributes
+     and set_design_attributes commands specify the attributes of the source or sink
+     elements for the set_isolation command. The set_port_attributes command
+     specifies information that is relevant to ports on the interface of the power domains.
+     This information is used to determine isolation and guard requirements for the port. The
+     set_related_supply_net command specifies the attributes and their values on specified
+     cells.
+     The voltage of the supply port is determined in the following order of precedence, from
+     highest to lowest:
+     •   The -driver_supply or -receiver_supply option, along with the -ports option, for
+         driver supply on input ports and receiver supply on output ports
+     •   The -driver_supply or -receiver_supply option, along with -elements option, for
+         driver supply on input ports and receiver supply on output ports
+     •   The set_related_supply_net command
+     •   The primary supply of the power domain of the top design
+     The set_level_shifter UPF command is not supported in PrimeTime; therefore,
+     the connect_supply_net command must explicitly specify the power supply
+     connections of the PG pins of level shifters. Design Compiler automatically generates the
+     connect_supply_net commands when it inserts level shifters and writes them out with
+     the save_upf command. Therefore, you do not need to create these commands yourself
+     when you read the UPF produced by Design Compiler. To specify the behavior of signal
+     level mismatch checking by the check_timing -include signal_level command,
+     use the set_level_shifter_strategy and set_level_shifter_threshold non-UPF
+     commands. These commands do not affect PG connectivity.
+
+
+PrimeTime® User Guide                                                                          480
+T-2022.03
+                                                                                        Feedback
+Chapter 14: Multivoltage Design Flow
+UPF Commands
+
+
+     The set_related_supply_net UPF command associates a supply net to one or more
+     ports of the design. Use the object_list option of the set_related_supply_net
+     command to specify the list of ports associated with supply nets. In the absence of this
+     command, PrimeTime assumes that ports are supplied by the voltage of the design
+     operating condition. Using the -receiver_supply and -driver_supply options of
+     the set_port_attributes command, you can replace the set_related_supply_net
+     command with the set_port_attributes command. You can specify the
+     -receiver_supply option only on the top-level ports and design. PrimePower issues a
+     warning message if you specify ports that are not on the top level of the design hierarchy,
+     and the attribute is ignored.
+
+
+     Setting Voltage and Temperature
+     To determine the supply voltage on each PG pin of each cell, PrimeTime uses the
+     following order of precedence, from highest to lowest. The UPF port voltage has higher
+     precedence than the non-UPF port voltage.
+     •   The -driver_supply or -receiver_supply option, along with the -ports option, for
+         driver supply on input ports or receiver supply on output ports
+     •   The -driver_supply or -receiver_supply option, along with -elements option, for
+         driver supply on input ports or receiver supply on output ports
+     •   The set_related_supply_net command
+     •   The primary supply of the power domain of the top design
+     •   The set_voltage on a PG pin (PrimeTime SI license required)
+
+     •   The set_voltage on a supply net
+
+     •   The set_operating_conditions applied at the design level
+
+     •   The default supply voltage in library cell definition (voltage_map in Liberty syntax)
+     By default, PrimeTime uses the supply voltages in the library cell definitions, as specified
+     by the voltage_map statement in Liberty syntax for the library cell. For more information,
+     see the Library Compiler User Guide.
+     Override the library-specified voltages by using the set_operating_conditions
+     command at the design level (in other words, without using the -object_list option of
+     the command). For example:
+     pt_shell> set_operating_conditions WCIND
+
+     The supply voltages associated with the named operating condition are specified in the
+     library definition for the operating condition or by the create_operating_conditions
+     command.
+
+
+
+PrimeTime® User Guide                                                                            481
+T-2022.03
+                                                                                       Feedback
+Chapter 14: Multivoltage Design Flow
+UPF Commands
+
+
+     Override both the library-specified and operating-condition voltage settings with the
+     set_voltage command for specific supply nets or specific PG pins.
+
+     The command specifies one or more supply nets (-object_list supply_nets) or PG
+     pins (-cell cell -pg_pin_name pg_pin) and applies a specified voltage to the listed
+     objects. You can specify either a single voltage (max_voltage) or both the minimum-delay
+     and maximum-delay voltages (-min min_voltage and max_voltage) used for analysis.
+     Note that the -min min_voltage option specifies the voltage used for minimum-delay
+     analysis, which is typically the larger voltage value. A PrimeTime SI license is required to
+     use the -cell and -pg_pin_name options. For example, to set a voltage of 1.20 on the
+     supply net VDD1, use this command:
+     pt_shell> set_voltage 1.20 -object_list VDD1
+
+     To set a maximum-delay voltage of 0.91 and a minimum-delay voltage of 1.18 on the PWR
+     pin of cell XA91, use this command (PrimeTime SI license required):
+     pt_shell> set_voltage 0.91 -min 1.18 -cell XA91 -pg_pin_name PWR
+
+     A PAD pin is defined by having its is_pad attribute set to true in the Liberty description of
+     the pin. PrimeTime detects ports connected to PAD cells and determines the port voltage
+     in the following order of increasing priority:
+     1. The nominal voltage of the main library
+     2. The nominal voltage of the driving library cell
+     3. The design operating condition
+     4. The voltage of the connected pin of the PAD cell
+     5. The explicit port voltage, set with the set_related_supply_net command in UPF
+        mode or the set_operating_conditions -object_list port command in non-UPF
+        mode
+     Since the operating condition defines only the single voltage value, you must exercise
+     caution when setting operating conditions on designs containing multirail cells, such as
+     level shifters and power management cells. PrimeTime applies the operating condition
+     voltage value only to the first library power rail. For example, the value is applied to the
+     first nonground voltage_map line in the .lib file. Thus, the order of the voltage_map entries
+     in the .lib file is important in this partial multivoltage flow.
+     The correct way to completely avoid this issue on multirail cells is to use a
+     proper multivoltage flow, such as UPF, that defines all design rails using the
+     set_voltage command. To verify voltage values of all rails of a multirail cell, use the
+     report_power_pin_info command.
+
+
+
+
+PrimeTime® User Guide                                                                          482
+T-2022.03
+                                                                                       Feedback
+Chapter 14: Multivoltage Design Flow
+UPF Commands
+
+
+     Use the report_power_pin_info and report_timing -voltage commands to display
+     the voltage of PG and signal pins, respectively. For more information, see Reporting
+     Power Supply Network Information.
+     You can similarly specify the operating temperature for specific cells by using the
+     set_temperature command, overriding the design operating condition settings. Use this
+     command to model the effects of on-chip temperature variation. For example, you can use
+     the following syntax to set the temperature to 130 degrees Celsius on cell XA91:
+     pt_shell> set_temperature 130 -object_list [get_cells XA91]
+
+
+     Library Support for Multivoltage Analysis
+     PrimeTime uses library and supply voltage information to accurately determine the delays
+     and slews of signals.
+     For post-layout analysis using detailed annotated parasitics, PrimeTime determines the
+     delays and slews using analog waveforms. For pre-layout analysis (in the absence of
+     detailed annotated parasitics), PrimeTime performs geometric-like scaling of the transition
+     times and net delays, taking into account the respective voltage swings of the driver and
+     load, and the logic thresholds. In either case, PrimeTime reports transition times in terms
+     of local-library thresholds and local voltages.
+     The use of local trip points and voltages can cause an apparent improvement in transition
+     time along nets in a path. For example, a driver cell might have a transition time of 1.0 ns
+     measured between 20 percent and 80 percent of VDD, while the load on the same net has
+     a transition time of 0.67 ns measured between 30 percent and 70 percent of VDD:
+     1.0 * (70–30)/(80–20) = .67
+     To disable prelayout scaling, set the timing_prelayout_scaling variable to false.
+
+     Scaling Library Groups
+     The recommended way to provide voltage-specific library information to PrimeTime is
+     using scaling library groups.
+     With this feature, you provide a set of libraries characterized across a range of supply
+     voltage and temperature values:
+     pt_shell> define_scaling_lib_group \
+                 {lib_0.9V.db \
+                  lib_1.05V.db \
+                  lib_1.3V.db}
+
+     Then during analysis, PrimeTime automatically interpolates between the specified libraries
+     to compute cell behaviors at the exact voltage and temperature conditions of each cell
+     instance.
+
+
+
+PrimeTime® User Guide                                                                           483
+T-2022.03
+                                                                                              Feedback
+Chapter 14: Multivoltage Design Flow
+UPF Commands
+
+
+     For more information on scaling library groups, see Cross-Library Voltage and
+     Temperature Scaling.
+
+     Cell Alternative Library Mapping
+     The cell alternative library mapping method lets you specify or change the mapping of
+     cell instances to libraries. This can be useful when UPF-specified or netlist-inferred power
+     intent information is not available.
+     For example,
+     set link_path {* slow_0.7v.db}
+     read_verilog text.v
+     link_design MY_DESIGN
+
+     define_scaling_lib_group -exact_match_only { \
+       slow_0.7v.db \
+       slow_1.1v.db}
+     define_cell_alternative_lib_mapping {slow_0.7v.db} -cells {BLK1}
+     define_cell_alternative_lib_mapping {slow_1.1v.db} -cells {BLK2}
+
+     update_timing
+     report_timing
+
+     The define_cell_alternative_lib_mapping command specifies an alternative library
+     to use for the analysis of specific cell instances. Cells can be hierarchical or leaf cells. For
+     hierarchical cells, a set of libraries can be specified; for each leaf cell, the first library in the
+     set that satisfies the cell reference is used.
+     Each library must be part of a scaling library group. The scaling library group definition
+     can include the -exact_match_only option to indicate the per-cell exact match intent.
+     However, this option can be omitted if other areas of the design require true voltage
+     scaling analysis.
+     The library mapping relationships can be specified after the design is linked; they are
+     evaluated during timing analysis. The design does not need to be relinked if the library
+     mappings are updated (although the timing would need to be updated).
+     The precedence rules are as follows:
+     •   Leaf cell specifications take precedence over hierarchical cell specifications.
+     •   define_cell_alternative_lib_mapping settings take precedence over
+         link_path_per_instance settings, set_link_lib_map settings, and instance-specific
+         set_voltage specifications.
+
+     You can determine the assignment of a cell to an alternative library by querying the cell’s
+     exact_match_library attribute:
+     pt_shell> get_attribute [get_cells U01] exact_match_library
+     {"slow_1.1v"}
+
+
+PrimeTime® User Guide                                                                                 484
+T-2022.03
+                                                                                         Feedback
+Chapter 14: Multivoltage Design Flow
+UPF Commands
+
+
+     Per-Instance Link Library Paths
+     You can use per-instance link library paths to control how cell instances link to library files
+     when the design is being linked. These per-instance link paths take precedence over the
+     global link_path specification.
+     Per-instance link library paths can be applied in two ways:
+     •   The link_path_per_instance variable
+     •   The set_link_lib_map command
+     For more information, see Per-Instance Link Library Paths.
+
+     Support for Fine-Grained Switch Cells in Power Analysis
+     PrimeTime supports the fine-grained switch cells that are defined in the library, using the
+     Liberty syntax. A library cell is considered a fine-grained switch cell only when the cell is
+     defined with the cell-level switch_cell_type attribute, as shown in the following example:
+     switch_cell_type: fine_grain;
+
+     Use the report_power command to view the power consumption of the fine-grained
+     switch cells.
+     PrimeTime uses the voltage on the internal PG pins to determine the signal level of the
+     pins that are related to the internal PG pins. Use the set_voltage command to specify
+     design-specific voltage on the internal PG pins. If this is not specified, the voltage is
+     derived from the voltage_map attribute in the library.
+     Note:
+         Using the set_voltage command on the external PG pins of the switch cell
+         does not affect the voltage on its internal PG pins.
+     PrimePower derives the ON and OFF states of the internal PG pins based on the
+     switch_function and the pg_function definitions specified in the library for power
+     analysis.
+     When you use the connect_supply_net command, PrimeTime supports
+     explicit connection to the internal PG pins of fine-grained switch cells. Use the
+     report_power_pin_info command to report both internal and external PG pin
+     information such as the name, type, and voltage value.
+     Note:
+         The report_power command reports the power of internal PG pins and
+         corresponding external PG pins. It does not report the power numbers
+         separately for the internal and external PG pins.
+
+
+
+
+PrimeTime® User Guide                                                                            485
+T-2022.03
+                                                                                     Feedback
+Chapter 14: Multivoltage Design Flow
+UPF Commands
+
+
+     For more information about defining a fine-grained switch, see the Library Compiler User
+     Guide. For more information about power analysis, see the “Multivoltage Power Analysis”
+     chapter in the PrimePower User Guide.
+
+
+     Multivoltage Reporting and Checking
+     Several commands are available for reporting the power supply network and checking
+     the network for errors or unusual conditions, including get_* commands, report_*
+     commands, and check_timing.
+
+     Collection (get_*) Commands
+     The get_* commands each create a collection of objects for reporting purposes. You can
+     create a collection of existing power domains, power, switches, supply nets, or supply
+     ports with the following commands.
+     get_power_domains
+     get_power_switches
+     get_supply_nets
+     get_supply_ports
+     get_supply_sets
+
+     The get_power_domains command returns a collection of power domains previously
+     created with the create_power_domain command. You can pass the collection to
+     another command for further processing, for example, to extract the name, scope, and
+     elements attributes associated the domains. The create_power_domain command
+     options allow you to limit the collection to the power domains meeting specified criteria.
+     For example, the -of_objects option causes the collection to include only the power
+     domains to which the specified objects belong. The patterns option limits the collection
+     to power domains whose names match the specified pattern. The get_power_switches,
+     get_supply_nets, and get_supply_ports commands operate in a similar manner and
+     have similar command options.
+     Table 30 lists the attributes of UPF power domain, supply net, supply port, and power
+     switch objects.
+     Table 30       UPF collection objects
+
+Command and object       Attribute                    Attribute type     Comment
+class
+
+get_power_domains        name                         String             Name as entered
+upf_power_domain
+                         full_name                    String             Hierarchical name
+
+                         elements                     Collection
+
+                         scope                        String
+
+
+
+PrimeTime® User Guide                                                                        486
+T-2022.03
+                                                                                              Feedback
+Chapter 14: Multivoltage Design Flow
+UPF Commands
+
+
+     Table 30       UPF collection objects (Continued)
+
+Command and object       Attribute                       Attribute type       Comment
+class
+
+                         supplies                        String               List of function keyword
+                                                                              and supply set name
+
+                         primary_supply                  Collection           Returns the UPF supply
+                         default_isolation_supply                             set handle associated
+                                                                              with the power domain
+                         default_retention_supply
+
+get_supply_nets          name                            String               Name as entered
+upf_supply_net
+                         full_name                       String               Hierarchical name
+
+                         domains                         Collection
+
+                         resolve                         String               one_hot, etc.
+
+                         voltage_min                     Float                Minimum-delay voltage
+
+                         voltage_max                     Float                Maximum-delay voltage
+
+                         static_prob                     Float                Probability of logic 1 (for
+                                                                              power analysis)
+
+get_supply_ports         name                            String               Name as entered
+upf_supply_port
+                         full_name                       String               Hierarchical name
+
+                         domain                          Collection
+
+                         direction                       String               In, out
+
+                         scope                           String
+
+get_supply_sets          name                            String               Name as entered
+upf_supply_set
+                         full_name                       String               Hierarchical name
+
+                         ground                          Collection (one of   Ground or power net of
+                         power                           upf_supply_net       the supply set
+                                                         object)
+
+get_power_switches       name                            String               Name as entered
+upf_power_switch
+                         full_name                       String               Hierarchical name
+
+                         domain                          Collection
+
+                         output_supply_port_name         String               Name as entered
+
+
+
+
+PrimeTime® User Guide                                                                                 487
+T-2022.03
+                                                                                        Feedback
+Chapter 14: Multivoltage Design Flow
+UPF Commands
+
+
+     Table 30       UPF collection objects (Continued)
+
+Command and object       Attribute                       Attribute type    Comment
+class
+
+                         output_supply_net               Collection        Supply net
+
+                         input_supply_port_name          String            Name as entered
+
+                         input_supply_net                Supply net
+
+                         control_port_name               List of strings   Name as entered
+
+                         control_net                     Collection
+
+                         on_state                        List of strings   Format: state_name
+                                                                           input_supply_port
+                                                                           boolean_function
+
+
+
+     Reporting Power Supply Network Information
+     To obtain information about the power supply network, use these reporting commands:
+     report_power_domain
+     report_power_network
+     report_power_pin_info
+     report_power_switch
+     report_supply_net
+     report_supply_set
+     report_timing -voltage
+
+     The report_power_domain command reports the power domains previously defined with
+     create_power_domain commands. The report includes the names of the PG nets of each
+     domain. For example:
+     pt_shell> report_power_domain [get_power_domains B]
+     ...
+       Power Domain : B
+       Scope : H1
+       Elements : PD1_INST H2 H3
+
+       Connections :    -- Power --         -- Ground --
+         Primary          H1/H7/VDD           H1/H7/VSS
+     --------------------------------------------------------
+
+     The report_power_network command reports all connectivity of the entire power
+     network, through ports and switches. You can restrict the report to one or more specified
+     nets. For example:
+     pt_shell> report_power_network -nets H1/VDD
+      ...
+
+
+PrimeTime® User Guide                                                                           488
+T-2022.03
+                                                                                  Feedback
+Chapter 14: Multivoltage Design Flow
+UPF Commands
+
+
+
+       Supply Net:    H1/VDD
+
+         Connections:
+            Name       Object type         Domain
+           ------------------------------------------------------------
+            VDD         Supply_port         D1
+            H1/VDD      Supply_port         D2
+            U1/VDD      PG_power_pin        D1
+            SW1/IN      Switch_input        D1
+
+       The report_power_pin_info command reports the PG connectivity of leaf-level cells or
+       library cells used. For example:
+pt_shell> report_power_pin_info [get_cells -hierarchical]
+...
+Note: Power connections marked by (*) are exceptional
+Cell            Power Pin       Type                    Voltage           Power Net Connec
+ted
+             Name                          Max        Min
+------------------------------------------------------------------------------
+PD0_INST/I0 PWR          primary_power     0.9300     1.2700   int_VDD_5
+PD0_INST/I0 GND          primary_ground    0.0000     0.0000   A_VSS
+PD0_INST/I1 PWR          primary_power     0.9300     1.2700   int_VDD_5
+PD0_INST/I1 GND          primary_ground    0.0000     0.0000   A_VSS
+I0           PWR         primary_power     1.0000     1.0000   int_VDD_4 (*)
+I0           GND         primary_ground    0.0000     0.0000   int_VSS_4 (*)
+I1           PWR         primary_power     1.1500     1.1500   T_VDD
+I1           GND         primary_ground    0.0000     0.0000   T_VSS
+PD1_INST/I0 PWR          primary_power     1.0000     1.0000   int_VDD_4
+PD1_INST/I0 GND          primary_ground    0.0000     0.0000   int_VSS_4
+PD1_INST/I1 PWR          primary_power     1.0000     1.0000   int_VDD_4
+PD1_INST/I1 GND          primary_ground    0.0000     0.0000   int_VSS_4
+pt_shell> report_power_pin_info [get_lib_cells -of [get_cells -hier]]
+...
+Cell          Power Pin Name   Type                 Voltage
+-------------------------------------------------------------------
+INVX2         PWR              primary_power        1.0000
+INVX2         GND              primary_ground       0.0000
+BUFX2         PWR              primary_power        1.0000
+BUFX2         GND              primary_ground       0.0000
+AND2X1        PWR              primary_power        1.0000
+AND2X1        GND              primary_ground       0.0000
+OR2X1         PWR              primary_power        1.0000
+OR2X1         GND              primary_ground       0.0000
+
+       The report_power_switch command reports the power switches previously created with
+       the create_power_switch command. Here is an example of a power switch report:
+       pt_shell> report_power_switch
+         ...
+
+         Total of 3 power switches defined for design 'top'.
+
+
+
+PrimeTime® User Guide                                                                    489
+T-2022.03
+                                                                               Feedback
+Chapter 14: Multivoltage Design Flow
+UPF Commands
+
+
+
+       Power Switch : sw1
+     ------------------------------------------------------------
+         Power Domain : PD_SODIUM
+         Output Supply Port : vout VN3
+         Input Supply Port : vin1 VN1
+         Control Port: ctrl_small ON1
+         Control Port: ctrl_large ON2
+         Control Port: ss SUPPLY_SELECT
+         On State : full_s1 vin1 { ctrl_small & ctrl_large & ss }
+     ------------------------------------------------------------
+       ...
+
+     The report_supply_net command reports the supply net information for a power domain
+     or specified object in a power domain. For example:
+     pt_shell> report_supply_net
+     ...
+
+        Total of 14 power nets defined.
+
+        Power Net 'VDD_Backup' (power)
+        --------------------------------------------------------
+        Backup Power Hookups:                                  A
+        --------------------------------------------------------
+
+        Power Net 'VSS_Backup' (ground)
+        --------------------------------------------------------
+        Backup Ground Hookups:                                 A
+        --------------------------------------------------------
+
+        Power Net 'T_VDD' (power,switchable)
+        --------------------------------------------------------
+        Voltage states:                                    {1.2}
+        Voltage ranges:                                {1.1 1.3}
+        Max-delay voltage:                                  1.15
+        Min-delay voltage:                                  1.15
+        Primary Power Hookups:                                 T
+        --------------------------------------------------------
+
+        Power Net 'A_VDD' (power)
+        --------------------------------------------------------
+        Max-delay voltage:                                  1.15
+        Min-delay voltage:                                  1.15
+        Primary Power Hookups:                                 A
+        --------------------------------------------------------
+
+     The report_supply_set command reports detailed information about the defined supply
+     sets. For example:
+     pt_shell> report_supply_set
+     ...
+
+
+
+PrimeTime® User Guide                                                                 490
+T-2022.03
+                                                                                      Feedback
+Chapter 14: Multivoltage Design Flow
+UPF Commands
+
+
+        Total of 1 supply net defined for design "mydesign".
+
+        --------------------------------------------------------
+        Supply Set : primary_sset
+        Scope       : top
+        Function    : power, supply net association: VDD
+        Function    : ground, supply net association: VSS
+        --------------------------------------------------------
+
+     The report_timing -voltage command allows you to determine the voltage of signal
+     pins on timing paths. Similarly, you can use the voltage attribute on the timing_point
+     objects in custom reports with the get_timing_paths command. The following example
+     shows the report_timing -voltage command:
+     report_timing -voltage
+       ...
+      Point                                      Incr       Path    Voltage
+      ----------------------------------------------------------------------
+      clock HVCLK_SYNC_D (rise edge)             0.00       0.00
+      clock network delay (propagated)           0.00       0.00
+      input external delay                       5.00       5.00 f
+      in0[0] (in)                                0.00       5.00 f     1.00
+      ALU1/in0[0] (alu_ao_3)                     0.00       5.00 f
+      ALU1/t0_reg_0_/D (SDFQM1RA)                0.00       5.00 f     1.03
+      data arrival time                                     5.00
+
+     Querying Power and Ground Pin Attributes
+     You can use pg_pin_info and lib_pg_pin_info collection objects to query the power
+     and ground pins associated with cells, ports, and library cells.
+     These are informational collection objects that represent PG pins. They can be queried for
+     information, but they are not PG pin netlist objects themselves.
+     To obtain these informational objects, query the pg_pin_info attribute of a cell or port or
+     the lib_pg_pin_info attribute of a library cell. For example,
+     pt_shell> get_attribute [get_cells FF1] pg_pin_info
+     {"FF1/VDD", "FF1/VSS"}
+     pt_shell> get_attribute [get_ports CLK] pg_pin_info
+     {"CLK/<port_power>", "CLK/<port_ground>"}
+     pt_shell> get_attribute [get_lib_cells */DFFX1] lib_pg_pin_info
+     {"DFFX1/VDD", "DFFX1/VSS"}
+
+     The following example shows the attributes available for pg_pin_info objects associated
+     with a cell (ports are similar):
+     pt_shell> report_attribute -application
+                 [get_attribute [get_cells FF1] pg_pin_info]
+     ...
+
+     top         FF1/VDD           string   full_name                     FF1/VDD
+     top         FF1/VDD           string   pin_name                      VDD
+
+
+PrimeTime® User Guide                                                                         491
+T-2022.03
+                                                                                    Feedback
+Chapter 14: Multivoltage Design Flow
+UPF Commands
+
+
+     top         FF1/VDD           string       supply_connection       VDD_TOP_NET
+     top         FF1/VDD           string       type                    primary_power
+     top         FF1/VDD           float        voltage_for_max_delay   0.800000
+     top         FF1/VDD           float        voltage_for_min_delay   1.200000
+     top         FF1/VDD           string       voltage_source
+
+     top         FF1/VSS           string       full_name               FF1/VSS
+     top         FF1/VSS           string       pin_name                VSS
+     top         FF1/VSS           string       supply_connection       VSS_NET
+     top         FF1/VSS           string       type                    primary_ground
+     top         FF1/VSS           float        voltage_for_max_delay   0.000000
+     top         FF1/VSS           float        voltage_for_min_delay   0.000000
+     top         FF1/VSS           string       voltage_source          LIBRARY_VOLTAGE_MAP
+
+     The following example shows the attributes available for lib_pg_pin_info objects
+     associated with a library cell:
+     pt_shell> report_attribute -application
+                 [get_attribute [get_lib_cells */DFFX1] lib_pg_pin_info]
+     ...
+     top       DFCND1LVT/VDD    string    pin_name                VDD
+     top       DFCND1LVT/VDD    string    type                    primary_power
+     top       DFCND1LVT/VDD    float     voltage                 0.864000
+
+     top         DFCND1LVT/VSS         string     pin_name              VSS
+     top         DFCND1LVT/VSS         string     type                  primary_ground
+     top         DFCND1LVT/VSS         float      voltage               0.000000
+
+     For more information about these attributes and what they represent, see the
+     pg_pin_info_attributes and lib_pg_pin_info_attributes man pages.
+
+     The following example uses these attributes to print the supply names and voltages for a
+     collection of cells:
+     set my_cells [get_cells ...]
+     foreach_in_collection cell $my_cells {
+       # print cell name
+       echo [get_object_name $cell]
+
+         # print supply pin names and voltages
+         foreach_in_collection pg_pin_info [get_attribute $cell pg_pin_info] {
+           echo [format {%8s %6.3f %6.3f} \
+             [get_attribute $pg_pin_info pin_name] \
+             [get_attribute $pg_pin_info voltage_for_max_delay] \
+             [get_attribute $pg_pin_info voltage_for_min_delay]]
+         }
+     }
+
+
+
+
+PrimeTime® User Guide                                                                      492
+T-2022.03
+                                                                                    Feedback
+Chapter 14: Multivoltage Design Flow
+UPF Commands
+
+
+     Using the check_timing Command
+     You can use the check_timing command to check the validity of the power supply
+     connections, including the following types of checks:
+     •   Voltage set on each supply net segment (supply_net_voltage)
+     •   Supply net connected to each PG pin of every cell (unconnected_pg_pins)
+     •   Compatible signal levels between driver and load pins (signal_level)
+     Voltage Set on Each Supply Net Segment
+     Every supply net segment must have a voltage set on it with the set_voltage command.
+     To verify that this is the case, include a supply net voltage check in the check_timing
+     command, as in the following example:
+     pt_shell> check_timing -include supply_net_voltage -verbose
+     Information: Checking 'no_clock'.
+     Information: Checking 'no_input_delay'.
+      ...
+     Information: Checking 'supply_net_voltage'.
+     Warning: There are '2' supply nets without set_voltage. (UPF-029)
+       VG
+       VS1
+     Warning: The voltage of driving cell ‘INV’(0.700) does not match the
+     related supply voltage at port ‘reset’(1.080). (UPF-408)
+     Information: Checking 'pulse_clock_non_pulse_clock_merge'.
+
+     Supply Net Connected to Each PG Pin of Every Cell
+     Each PG pin of every cell should be connected to a UPF supply net. To verify that this is
+     the case, include an unconnected PG pin check in the check_timing command, as in the
+     following example:
+     pt_shell> check_timing -include unconnected_pg_pins
+
+     Each UPF supply net connection can be either explicit (as specified by the
+     connect_supply_net command) or implicit (due to the assignment of the cell to a power
+     domain, isolation strategy, retention strategy, and so on).
+     To check for supply nets without an associated supply port, use the following command:
+     pt_shell> check_timing \
+                 -include supply_net_without_associated_supply_port
+
+     Compatible Driver-to-Load Signal Levels
+     To have PrimeTime check for mismatching voltage levels between cells that use different
+     supply voltages, use the following check_timing command:
+     pt_shell> check_timing -include signal_level
+
+
+
+PrimeTime® User Guide                                                                      493
+T-2022.03
+                                                                                        Feedback
+Chapter 14: Multivoltage Design Flow
+UPF Commands
+
+
+     This type of timing check traverses all nets and determines whether the output voltage
+     level of each driver is sufficient to drive the load pins on the net. PrimeTime reports any
+     driver-load pairs that fail the voltage level check. It assumes that there is no voltage
+     degradation along the net. You can fix a violation by changing the supply voltages or by
+     inserting a level shifter between the driver and load.
+     PrimeTime performs signal level checking by comparing the input and output voltage
+     levels defined in the library for the pins of leaf-level cells. The checked signal levels are
+     based on either the gate noise immunity (or signal level range) margins defined by the
+     Liberty syntax input_voltage and output_voltage or a comparison of driver/load supply
+     voltages. You can control driver and load supply voltage mismatch reporting by using the
+     set_level_shifter_strategy and set_level_shifter_threshold commands.
+
+     The set_level_shifter_strategy command specifies the type of strategy used for
+     reporting voltage mismatches: all, low_to_high, or high_to_low. The low_to_high
+     strategy reports the voltage level mismatches when a source at a lower voltage drives a
+     sink at a higher voltage. The high_to_low strategy reports the voltage level mismatches
+     when a source at a higher voltage drives a sink at a lower voltage. The all strategy (the
+     default) reports both types of mismatches.
+     The set_level_shifter_threshold command specifies the absolute and relative
+     mismatch amounts that trigger an error condition. If there is a voltage difference between
+     driver and load, the difference must be less than both the absolute and relative thresholds
+     to be considered acceptable. For example, the following command sets the voltage
+     difference threshold to 0.1 volt and the percentage threshold to 5 percent:
+     pt_shell> set_level_shifter_threshold -voltage 0.1 -percent 5
+
+     A voltage difference that is more than 0.1 volt or more than five percent of the driver
+     voltage is reported as a mismatch. The default thresholds are both zero, so if you set one
+     threshold to a nonzero value, you need to set the other to a nonzero value as well. To
+     disable either absolute or percentage threshold checking, set its threshold to a large value.
+     The percentage difference is determined as follows:
+     abs(driver(VDD)–load(VDD))/driver(VDD)*100
+     PrimeTime reports either of the following conditions as an “incompatible voltage” error:
+     •   Driver VOmax > Load VImax
+     •   Driver VOmin < Load VImin
+     PrimeTime reports either of the following conditions as a “mismatching driver-load voltage”
+     warning:
+     •   Driver VOH < Load VIH
+     •   Driver VOL > Load VIL
+
+
+
+PrimeTime® User Guide                                                                              494
+T-2022.03
+                                                                                       Feedback
+Chapter 14: Multivoltage Design Flow
+UPF Commands
+
+
+     Here is an example of a voltage mismatch report:
+     pt_shell> check_timing -verbose -include signal_level
+      ...
+     Error: There are 2 voltage mismatches
+       MIN-MAX - driver vomax > load vimax:
+
+     Driver      Voltage   Load           Voltage   Margin
+     ---------------------------------------------------------
+     u2/Z        2.50      u3/A           0.90      -1.60
+     u3/Z        2.10      u5/A           1.47      -0.63
+
+     Warning: There is 1 voltage mismatch
+       MIN-MAX - driver vol > load vil:
+
+     Driver      Voltage   Load           Voltage   Margin
+     ---------------------------------------------------------
+     u2/Z        0.30      u3/A           0.20      -0.10
+
+     The logic library defines the input and output voltages in terms of the supply voltage in
+     Liberty syntax. PrimeTime correctly calculates the voltages for comparison. For example, a
+     library might define the input and output voltage levels as follows:
+     •   VIL = 0.3 * VDD, VIH = 0.7 * VDD
+     •   VOL = 0.4, VOH = 2.4
+     •   VImin = –0.5, VImax = VDD + 0.5
+     •   VOmin = –0.3, VOmax = VDD + 0.3
+     PrimeTime calculates the input and output voltages, taking into account the supply
+     voltages that apply to each cell.
+     For proper transition time scaling for cells with multiple power rails, PrimeTime requires
+     that you define the input_signal_level and output_signal_level attributes on
+     multirail cells. For check_timing -include signal_level, PrimeTime uses the
+     definitions of the input_voltage and output_voltage attributes on all pins.
+     Even without input_voltage or output_voltage specified, PrimeTime still attempts
+     to report the 100 worst mismatches based on rail voltages not being exactly equal. For
+     example:
+     pt_shell> check_timing -include signal_level -verbose
+      ...
+     Warning: There are 2 voltage mismatches
+       MAX-MAX - driver rail != load rail:
+       The 100 worst voltage mismatches:
+
+     Driver      Voltage   Load           Voltage   Margin
+     ---------------------------------------------------------
+     u1/Y        4.75      u3/A           3.00      -1.75
+
+
+PrimeTime® User Guide                                                                             495
+T-2022.03
+                                                                                              Feedback
+Chapter 14: Multivoltage Design Flow
+UPF Commands
+
+
+     u3/Y              3.00        ff2/CLK           4.75          -1.75
+
+     Warning: There are 2 voltage mismatches
+       MIN-MIN - driver rail != load rail:
+       The 100 worst voltage mismatches:
+
+     Driver      Voltage   Load           Voltage   Margin
+     ---------------------------------------------------------
+     u1/Y        5.25      u3/A           3.00      -2.25
+     u3/Y        3.00      ff2/CLK        5.25      -2.25
+     ...
+
+     Table 31 summarizes the effects of the threshold and strategy settings.
+     Table 31         Effects of Threshold and Strategy Settings
+
+Signal level    Strategy effect                             Threshold
+check type                                                  effect
+                All       Low_to_high     High_to_low                        Explanation
+
+Driver VOmax None         None            None              None             Driver exceeding
+> Load Vlmax                                                                 breakage voltage of
+                                                                             the load cell defined
+Driver VOmin    None      None            None              None             by the library is a fatal
+< Load Vlmin                                                                 condition. It cannot be
+Driver VOH <    None      None            None              None             filtered.
+Load VIH                                                                     Library-defined
+                                                                             signal level margins
+Driver VOL >    None      None            None              None             define safe region of
+Load VIL                                                                     operation and cannot
+                                                                             be suppressed.
+
+Driver VDD !=   None      Filter any      Filter any        Further filter   The user-defined
+Load VDD                  mismatch        mismatch          any mismatch     tolerance and strategy
+                          VDDdriver >     VDDdriver >       smaller than     are fully used.
+                          VDDload         VDDload           the tolerance
+
+
+
+     Effect of Correlated Supplies on Signal Level Checking
+     The signal level check correctly considers the case where minimum and maximum
+     voltages are set on the power nets that supply both of the cells being compared. For
+     example, suppose that you set the voltage for supply VDD as follows:
+     pt_shell> set_voltage 0.8 -min 1.2 VDD               # corner voltages
+
+     This command sets the supply voltage to 0.8 for maximum-delay analysis and 1.2 Volts
+     for minimum-delay analysis. Suppose that the same VDD supply applies to both the driver
+     and receiver cells of a net, as shown in Figure 140.
+
+
+
+
+PrimeTime® User Guide                                                                                    496
+T-2022.03
+                                                                                        Feedback
+Chapter 14: Multivoltage Design Flow
+Golden UPF Flow
+
+
+Figure 140    Signal Level Checking With Supply Correlation
+
+               set_voltage 0.8 -min 1.2 VDD
+
+
+
+               UPF VDD net
+
+                        0.8 -------- 0.8
+                        1.2 -------- 1.2
+
+
+
+
+                   U1                      U2
+
+
+
+     PrimeTime considers the fact that the supply voltages of the driver and receiver are
+     correlated. When the supply voltage is low for U1, it is also low for U2, so there is no
+     mismatch. The same is true for the case where the supply voltage is high.
+
+
+Golden UPF Flow
+     The golden UPF flow is an optional method of maintaining the UPF multivoltage power
+     intent of the design. It uses the original “golden” UPF file throughout the synthesis,
+     physical implementation, and verification steps, along with supplemental UPF files
+     generated by the synthesis and physical implementation tools.
+     Figure 141 compares the traditional UPF-prime flow with the golden UPF flow.
+
+
+
+
+PrimeTime® User Guide                                                                           497
+T-2022.03
+                                                                                    Feedback
+Chapter 14: Multivoltage Design Flow
+Golden UPF Flow
+
+
+Figure 141    UPF-Prime and Golden UPF Flows
+
+
+
+
+                PrimeTime                                        PrimeTime
+
+
+
+     The golden UPF flow maintains and uses the same, original “golden” UPF file throughout
+     the flow. The synthesis and physical implementation tools write power intent changes
+     into a separate “supplemental” UPF file. Downstream tools and verification tools use a
+     combination of the golden UPF file and the supplemental UPF file, instead of a single UPF’
+     or UPF’’ file.
+
+
+
+
+PrimeTime® User Guide                                                                      498
+T-2022.03
+                                                                                        Feedback
+Chapter 14: Multivoltage Design Flow
+Multiple Supply Voltage Analysis
+
+
+     The golden UPF flow offers the following advantages:
+     •   The golden UPF file remains unchanged throughout the flow, which keeps the form,
+         structure, comment lines, and wildcard naming used in the UPF file as originally
+         written.
+     •   You can use tool-specific conditional statements to perform different tasks in different
+         tools. Such statements are lost in the traditional UPF-prime flow.
+     •   Changes to the power intent are easily tracked in the supplemental UPF file.
+     •   You can optionally use the Verilog netlist to store all PG connectivity information,
+         making connect_supply_net commands unnecessary in the UPF files. This can
+         significantly simplify and reduce the overall size of the UPF files.
+     To use the golden UPF flow in PrimeTime SI, you must enable it by setting a variable:
+     pt_shell> set_app_var enable_golden_upf true
+
+     After you enable this mode, to execute any UPF commands other than query commands,
+     you must put the commands into a script and execute them with the load_upf command.
+     You cannot execute them individually on the command line or with the source command.
+     For more information about using the golden UPF mode, see SolvNetPlus article
+     000024504, “Golden UPF Flow Application Note.”
+
+
+Multiple Supply Voltage Analysis
+     PrimeTime SI can analyze designs with different power supply voltages for different cells.
+     To learn about multiple supply voltage analysis, see
+     •   Multivoltage Analysis Overview
+     •   Simultaneous Multivoltage Analysis (SMVA)
+     •   IR Drop Annotation
+     •   Using Ansys RedHawk-SC With Timing Analysis
+
+
+     Multivoltage Analysis Overview
+     PrimeTime SI has the ability to analyze designs with different power supply voltages
+     for different cells. It accurately determines the effects of delay, slew, and noise in the
+     presence of differences in supply voltage, taking advantage of cell delay models specified
+     in the logic library.
+
+
+
+
+PrimeTime® User Guide                                                                           499
+T-2022.03
+                                                                                        Feedback
+Chapter 14: Multivoltage Design Flow
+Multiple Supply Voltage Analysis
+
+
+     The multivoltage infrastructure lets you do the following:
+     •   Calculate uncoupled signal net delay, constraints, and timing violations while
+         considering exact driver and load power rail voltages.
+     •   Calculate coupled delay, noise bumps, timing violations, and noise violations while
+         considering exact aggressor rail voltages.
+     •   Perform signal level mismatch checking between drivers and loads.
+     •   Perform the foregoing types of analysis with instance-specific annotated voltage (IR)
+         drop on power rails, and with block-specific or instance-specific temperature.
+     Most PrimeTime analysis features are capable of producing results that are fairly close to
+     physical (SPICE simulation) analysis. For accurate analysis in PrimeTime SI, the following
+     types of information must be available:
+     •   Power and ground (PG) connectivity.
+     •   Voltage values on PG nets specified with the set_voltage command.
+     •   IR drop values specified for PG nets with the set_voltage command using the -cell
+         and -pg_pin_name options, as described in IR Drop Annotation. Specifying IR drop is
+         optional. A PrimeTime SI license is required.
+     •   A set of CCS libraries with delay and constraint data (used with the
+         define_scaling_lib_group command) or library delay calculation data for each
+         voltage (used with the link_path_per_instance variable). CCS-based library models
+         are recommended for best accuracy. The define_scaling_lib_group command
+         invokes delay and constraint scaling between a set of libraries that have been
+         characterized at different voltages and temperatures. The link_path_per_instance
+         variable links different cell instances to different library models. For more information,
+         see Library Support for Multivoltage Analysis.
+     •   Settings that define how to use the library data to build delay calculation models. For
+         more information, see the descriptions of the link_path_per_instance variable and
+         define_scaling_lib_group command in Library Support for Multivoltage Analysis.
+
+
+     Simultaneous Multivoltage Analysis (SMVA)
+     In multivoltage designs, timing paths can cross from one power domain to another. When
+     the power domains can operate at multiple supply voltages, traditional analysis cannot
+     accurately analyze how the supply voltage combinations affect each path. If a single
+     voltage is used for each domain, then the voltage combinations are not bounded. If min/
+     max (on-chip variation) voltages are used for each domain, then the analysis is pessimistic
+     because different cells in the same domain cannot operate at different voltages at the
+     same time.
+
+
+
+PrimeTime® User Guide                                                                           500
+T-2022.03
+                                                                                    Feedback
+Chapter 14: Multivoltage Design Flow
+Multiple Supply Voltage Analysis
+
+
+     Graph-based simultaneous multivoltage analysis (SMVA) is an analysis method that
+     removes this pessimism. Within-domain paths are analyzed at all voltage levels of
+     the domain they belong to, and cross-domain paths are analyzed at all voltage level
+     combinations of the voltage domains they traverse, all in a single run.
+     For more information on SMVA analysis, see Chapter 15, SMVA Graph-Based
+     Simultaneous Multivoltage Analysis.
+
+
+     IR Drop Annotation
+     You can annotate supply voltages on the PG pins of cells, and thereby model the effects
+     of IR drop on timing and noise, by using the -cell and -pg_pin_name options of the
+     set_voltage command. For example, this command sets the supply voltage to 1.10 volts
+     on the VDD1 pins of all U5* cells.
+     pt_shell> set_voltage 1.10 -cell [get_cells U5*] -pg_pin_name VDD1
+
+     The -cell and -pg_pin_name options, if used in the set_voltage command, must be
+     used together. These two options require a PrimeTime SI license. You do not need a
+     PrimeTime SI license for the other options of the set_voltage command, such as the
+     -object_list option used to set voltage on power supply nets.
+
+     Signal Level Checking With IR Drop
+     PrimeTime checks for mismatch in voltage levels between cells using different supply
+     voltages when you use the check_timing command:
+     pt_shell> check_timing -include signal_level
+
+     The signal level check correctly considers the case where minimum and maximum
+     voltages are set on voltage rails that supply both the cells being compared. Suppose,
+     however, that IR drop is annotated on a cell using commands similar to the following:
+     pt_shell> set_voltage 0.8 -min 1.2 VDD   # corner voltages
+     pt_shell> set_voltage 0.7 -min 1.1 -cell U3 -pg_pin_name VDD                # IR drop
+
+     This corresponds to the circuit shown in Figure 142.
+
+
+
+
+PrimeTime® User Guide                                                                        501
+T-2022.03
+                                                                                         Feedback
+Chapter 14: Multivoltage Design Flow
+Multiple Supply Voltage Analysis
+
+
+Figure 142     Signal Level Checking With Cell-Level Voltage Annotation
+
+             set_voltage 0.8 -min 1.2 VDD
+
+                                       set_voltage 0.7 -min 1.1 -cell U3 -pg_pin_name VDD
+                                                                     Cell-level voltage drop annotation
+                 UPF VDD net
+
+
+                                                 0.8 -------- 1.1
+                                                 1.2 -------- 0.7
+
+
+                      U1                    U2                      U3
+
+                      Correlated; no violation   Two violations
+
+
+     In this case, PrimeTime SI assumes that the supply voltage annotated at the cell level is
+     not correlated with the main supply voltage. It considers the full worst-case differences
+     between the driver and receiver, which is to compare 0.8 to 1.1 volts and 1.2 to 0.7 volts,
+     thus triggering two mismatch violations.
+
+
+     Using Ansys RedHawk-SC With Timing Analysis
+     The RedHawk-SC power and reliability analysis tool can work together with PrimeTime to
+     analyze IR drop and clock jitter effects on timing analysis.
+
+     Writing Ansys RedHawk-SC STA Files
+     The RedHawk-SC tool requires static timing analysis (STA) data from PrimeTime to
+     perform IR drop, clock jitter, and dynamic voltage drop analysis.
+     To write this data,
+     1. Write design pin information by running the following command:
+         write_rh_file
+          -output string
+          [-filetype jitter | irdrop]
+          [-significant_digits digits]
+
+         The command performs a timing update if needed. It writes out the static timing
+         analysis data in compressed (.gz) format, which is accepted directly by the RedHawk
+         tool.
+         For dynamic voltage drop analysis, use the -filetype irdrop option.
+
+
+
+PrimeTime® User Guide                                                                             502
+T-2022.03
+                                                                                        Feedback
+Chapter 14: Multivoltage Design Flow
+Multiple Supply Voltage Analysis
+
+
+         Writing this data requires a PrimePower or PrimeTime-ADV-PLUS license.
+     2. (Optional) If you are using the critical-path scenario approach in RedHawk-SC, write
+        path information for the desired timing paths using the write_dvd_timing_paths
+        command:
+         set target_paths [get_timing_paths ...]
+         write_dvd_timing_paths -out input.json -paths $target_paths
+
+         For best results, use the -vdd_slack_lesser_than feature of the PrimeShield tool
+         to find violating or near-violating paths that are sensitive to voltage variation. The
+         following settings are recommended for good coverage:
+         set target_paths \
+           [get_timing_paths \
+             -vdd_slack_lesser_than 0.1 \
+             -path_type full_clock_expanded \
+             -pba_mode exhaustive \
+             -max_paths 100000]
+
+         Note:
+             In the S-2021.06 release, the write_dvd_timing_paths command is
+             provided as a Tcl procedure. To obtain it, contact your Synopsys support
+             representative.
+
+     Performing Dynamic Voltage Drop Analysis
+     PrimeTime can read dynamic voltage drop data from the RedHawk-SC tool, then use it to
+     analyze how dynamic variations in power and ground rail voltage affect design timing.
+     This feature considers only power and ground variations that occur within cell signal pin
+     switching windows:
+          Cell signal pin
+          timing window      U1/A                           U1
+
+
+                              VDD
+          Cell power and
+       ground supply rails
+                              VSS
+
+
+
+
+PrimeTime® User Guide                                                                             503
+T-2022.03
+                                                                                           Feedback
+Chapter 14: Multivoltage Design Flow
+Multiple Supply Voltage Analysis
+
+
+     These power and ground variations are then used when computing cell signal pin
+     responses, both for undershoot (slowdown) and overshoot (speedup) effects:
+
+                                       Rising response
+                   Rising response        overshoot
+                     undershoot
+         VDD
+
+       U1/Z
+         VSS
+                                                         Falling response
+                                                           undershoot       Falling response
+                                                                               overshoot
+
+     The effects are computed during path-based analysis, starting at the CRPR common point
+     of each path.
+     This feature requires a PrimeTime-ADV-PLUS license.
+     To perform this analysis,
+     1. Configure voltage scaling library groups for the design, as described in Cross-Library
+        Voltage and Temperature Scaling.
+         The libraries must have CCS noise data.
+     2. Load, link, and constrain the design.
+     3. Enable the dynamic voltage drop feature by setting the following variable:
+         pt_shell> set_app_var timing_enable_dvd_analysis true
+
+     4. Read the dynamic voltage drop file from Ansys RedHawk-SC into PrimeTime:
+         pt_shell> read_dvd –mode 0|1 ./redhawk_data.dvd
+
+         Specify -mode 0 for power rail variation and -mode 1 for simultaneous power/ground
+         rail variation.
+     5. Update the design timing:
+         pt_shell> update_timing
+
+     6. Use path-based analysis to analyze timing paths of interest with dynamic voltage
+        variation effects included.
+         You must use the -path full_clock_expanded option of the report_timing or
+         get_timing_paths command when doing this.
+
+
+
+
+PrimeTime® User Guide                                                                            504
+T-2022.03
+                                                                                     Feedback
+Chapter 14: Multivoltage Design Flow
+Multiple Supply Voltage Analysis
+
+
+     When the timing_enable_dvd_analysis variable is set to true, the report_timing
+     output includes additional dynamic voltage effect information. For example,
+     pt_shell> report_timing \
+                 -pba_mode exhaustive \
+                 -path full_clock_expanded \
+                 -voltage \
+                 -input_pins
+     ...
+       Startpoint: ff1 (rising edge-triggered flip-flop clocked by CLK)
+       Endpoint: ff2 (rising edge-triggered flip-flop clocked by CLK)
+       Last common pin: buf1/Y
+       Path Group: CLK
+       Path Type: max (recalculated)
+
+        Point                   Incr      Path    Voltage   Delta_V DvD_Delay
+        ----------------------------------------------------------------------
+        clock CLK (rise edge)   0.000     0.000
+        clock source latency    0.000     0.000
+        clk (in)                0.000 &   0.000 r   0.570     0.000      0.000
+        buf1/A (BUF_X4)        -0.000 &   0.000 r   0.570    -0.022      0.000
+        buf1/Y (BUF_X4)         0.054 &   0.054 r   0.570    -0.022      0.005
+        ff1/CK (SDFFQ_X1)       0.001 &   0.055 r   0.570    -0.009      0.000
+        ff1/Q (SDFFQ_X1)        0.188     0.243 r   0.570    -0.009      0.017
+        inv2/A (INV_X2)        -0.000     0.243 r   0.570     0.000      0.000
+        inv2/Y (INV_X2)         0.037     0.279 f   0.570     0.000      0.002
+        and/B (AND2_X2)        -0.000     0.279 f   0.570    -0.046      0.000
+        and/Y (AND2_X2)         0.145 &   0.424 f   0.570    -0.046      0.012
+        or/B (OR2_X2)           0.010 &   0.435 f   0.570    -0.075      0.006
+        or/Y (OR2_X2)           0.192     0.627 f   0.570    -0.075      0.054
+        ff2/D (SDFFQ_X1)        0.000     0.627 f   0.570    -0.059      0.000
+        data arrival time                 0.627
+
+        clock CLK (rise edge)   0.500     0.500
+        clock source latency    0.000     0.500
+        clk (in)                0.000 &   0.500 r   0.570     0.000      0.000
+        buf1/A (BUF_X4)         0.000 &   0.500 r   0.570     0.000      0.000
+        buf1/Y (BUF_X4)         0.050 &   0.550 r   0.570     0.000      0.000
+        buf2/A (BUF_X4)         0.000 &   0.550 r   0.570     0.000      0.000
+        buf2/Y (BUF_X4)         0.044 &   0.594 r   0.570     0.000      0.000
+        ff2/CK (SDFFQ_X1)       0.000 &   0.594 r   0.570     0.000      0.000
+        clock reconvergence pessimism
+                                0.004     0.598
+        library setup time     -0.169     0.429
+        data required time                0.429
+        ----------------------------------------------------------------------
+        data required time                0.429
+        data arrival time                -0.627
+        ----------------------------------------------------------------------
+        slack (VIOLATED)                 -0.198
+        DvD slack shift        -0.167
+
+     The Delta_V column indicates the reduced voltage distance between the power and
+     ground rails, and the DvD_Delay indicates the resulting change in the cell delay. The DvD
+     slack shift line at the end indicates the overall path slack change due to dynamic voltage
+     drop effects.
+
+
+
+
+PrimeTime® User Guide                                                                       505
+T-2022.03
+                                                                                    Feedback
+Chapter 14: Multivoltage Design Flow
+Multiple Supply Voltage Analysis
+
+
+     To remove the dynamic voltage drop data and revert to regular timing analysis, use the
+     following command:
+     pt_shell> remove_dvd
+
+     Using Rail Map Files to Apply Scaling/Offset Adjustments
+     In some cases, PrimeTime analysis might be run at a voltage corner that does not have
+     dynamic voltage drop data available. In this case, you can use a rail map file to remap
+     dynamic voltage drop data from one voltage corner to another.
+     A rail map file is a text file in the following format:
+     version: 1.0
+
+     object_type: supply_net
+     object_spec: supply_net1 [supply_net2 ... ]
+     scaling: value_list
+     offset: value_list
+
+     where the fields are as follows:
+     object_type
+         Specifies the object type being scaled. Only supply_net objects are supported.
+     object_spec
+         Specifies a list of one or more supply nets to scale.
+     scaling and offset
+         A list of one or two values, interpreted as follows:
+         •   value (used for both clock and data)
+
+         •   data_value clock_value (separate values for clock and data)
+
+     For example,
+     version: 1.0
+
+     object_type: supply_net
+     object_spec: VDD1
+     scaling: 0.85 0.80
+     offset: 0.02
+
+     object_type: supply_net
+     object_spec: VDD2
+     scaling: 0.85
+     offset: 0.021 0.019
+
+
+
+
+PrimeTime® User Guide                                                                          506
+T-2022.03
+                                                                                      Feedback
+Chapter 14: Multivoltage Design Flow
+Multiple Supply Voltage Analysis
+
+
+     For each original voltage value in the voltage drop input file, a remapped value is
+     computed as follows:
+     Vnew = (Vinput * valuescaling) − valueoffset
+     A positive offset value reduces the adjusted voltage value. If no remap rule applies to a
+     supply net, no adjustment is applied (equivalent to a scaling value of 1 and an offset value
+     of 0).
+     To read a rail map file in, use the -rail_map option of the read_dvd command:
+     set timing_enable_dvd_analysis true
+     read_dvd -mode 1 ir_drop.dvd
+     read_dvd -rail_map high2low_set1.map
+
+     Because the read_dvd command accepts only one file name at a time, the dynamic
+     voltage drop file and the rail map file must be read in using separate commands.
+     To apply new rail map data in place of the existing rail map data, use the -rail_map_only
+     option of the remove_dvd command to remove only the rail map data but not the voltage
+     drop data:
+     remove_dvd -rail_map_only
+     read_dvd -rail_map high2low_set2.map
+
+
+
+
+PrimeTime® User Guide                                                                         507
+T-2022.03
+

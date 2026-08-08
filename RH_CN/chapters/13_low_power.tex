@@ -1,0 +1,1103 @@
+﻿% 第 13 章 低功耗设计分析（原书 13-343 … 13-391）
+\bichapter{低功耗设计分析}{Low Power Design Analysis}
+\label{chap:lp}
+
+\section{引言}
+\subsection*{Introduction}
+
+90\,nm 及以下工艺及无线、移动等低功耗应用广泛采用省电模式以延长电池寿命、控制速度-功耗权衡并改善热性能。亚微米设计面临更大漏电、NBTI 阈值漂移、更强驱动与更高密度。设计者在系统、架构、设计与工艺各层均需「功耗感知」。RedHawk 可准确分析采用下列技术的动态功耗与静态/瞬态压降：
+
+\begin{itemize}
+  \item 多 Vdd/Vss 域
+  \item 电源门控（MTCMOS）：开关控制局部 Vdd/Vss
+  \item 时钟门控
+  \item 电压岛（不同供电电压区域）
+  \item 多 $V\_{\mathrm{th}}$ 单元风格
+  \item 有源体偏置动态调节 $V\_{\mathrm{th}}$
+  \item 保持触发器（掉电期间保持状态）
+\end{itemize}
+
+支持全芯片/块级瞬态动态压降与平均静态压降分析，含文本报告、图形及动态压降影片模式显示。
+
+\section{多 Vdd/Vss 域设计分析}
+\subsection*{Analysis of Multiple Vdd/Vss Domain Designs}
+
+多电压源是常用低功耗技术。在 GSR 中定义多 VDD 域：
+\begin{lstlisting}
+VDD_NETS {
+    VDD0 1.8
+    VDD 1.6
+}
+\end{lstlisting}
+
+可有任意多个 VDD 域，但最多八种不同电压值。单实例接多 VDD 时，用 P/G arc 定义功率分配（见第~3~章与第~9~章）。I/O 单元接 I/O VDD、core VDD、I/O VSS 时，动态分析支持非对称电流轮廓。
+
+View $\rightarrow$ Nets 选择网表查看结果（图~\ref{fig:lp-multi-vdd}、图~\ref{fig:lp-one-vdd}）。点击节点可查看电压、电阻、电流；点击实例查看负载电容、静态 Vdd-Vss、平均功耗等。
+
+\figplaceholder{Figure 13-1}{查看多 VDD 域网表}
+
+\figplaceholder{Figure 13-2}{仅查看一个 VDD 网}
+
+\figplaceholder{Figure 13-3}{放大查看网表压降}
+
+\figplaceholder{Figure 13-4}{放大查看实例压降}
+
+Results $\rightarrow$ List of Worst IR/DvD Instance 列出最高压降实例（最多 1000）；可在 Vdd Domain 组合框选择特定网表。报告字段：排名、最低 VDD-VSS、理想 VDD、坐标、实例名。
+\subsection{多 Vdd 结果查看与报告}
+\subsubsection*{Viewing and Reporting Multi-Vdd Results}
+
+点击网表节点可查看该位置信息，消息窗口示例：
+\begin{lstlisting}
+Net: VDD
+Wire: M2
+LowerLeft = (3710.510, 4388.160)
+Length: 101 um
+Width: 1.46 um
+Resistance: 6.95 Ohm
+Voltage at query position: 1.595129 V
+Current at query position: 0.000168779 A
+\end{lstlisting}
+
+点击 instance 示例：
+\begin{lstlisting}
+Instance: Test/U594
+Cell: test1
+LowerLeft = (3713.860, 4482.880), Width/Height = 5.220 / 4.639
+Total Load Cap: 0.131 pF
+Intrinsic Cap 0: 0 pF
+Intrinsic Cap 1: 0 pF
+Static Vdd-Vss: 1.592 V (domain vdd: 1.6000)
+Average Pwr: 6.72e-10 W
+\end{lstlisting}
+
+\paragraph{P/G Arc 与 I/O 非对称电流}
+单 instance 接多 VDD 时，须在自定义 LIB 或 APL 流程中定义 P/G arc 功率分配（见第~3~章与第~9~章）。I/O 单元同时接 I/O VDD、core VDD、I/O VSS 时，动态分析支持非对称电流轮廓，以正确反映 I/O 对 core 电源的影响。
+
+\paragraph{最坏实例报告字段}
+Results $\rightarrow$ List of Worst IR/DvD Instance 报告字段：
+\begin{enumerate}
+  \item 排名（全芯片最高压降 Top 1000）
+  \item 最低 VDD-VSS 差
+  \item 理想 VDD
+  \item 坐标 (x, y)
+  \item Instance 名
+\end{enumerate}
+在 Vdd Domain 组合框选择特定网表后点击 Apply 可过滤域。
+
+
+\section{电源门控设计分析}
+\subsection*{Analysis of Power Gating Designs}
+
+本节描述 RedHawk 分析电源门控的数据准备。可分析整片块级上下电，以及块内子电路独立开关。基本流程（图~\ref{fig:lp-pg-flow}）：
+
+\begin{enumerate}
+  \item 用 .conf 与 Spice 为 ON/OFF/Power-up 配置开关模型
+  \item \texttt{aplsw} 表征开关
+  \item GSC 与 STA 定义块级 On-Off
+  \item \texttt{apldi -w -s2} 表征全单元 PWL
+  \item GSR 导入开关与块电源条件
+  \item Tech/GSR 导入 LEF/DEF/LIB/GDS
+  \item RedHawk 全芯片静态/瞬态 SPICE 分析
+\end{enumerate}
+
+\figplaceholder{Figure 13-5}{电源门控与开关分析流程}
+
+\subsection{开关类型}
+\subsubsection*{Types of Power Switches}
+
+\begin{itemize}
+  \item \textbf{充电开关（charge switches）}：大电流开关，确保功能开关开启前内部电源达阈值；用 GSR \texttt{CHARGE\_SWITCH} 声明
+  \item \textbf{功能开关（functional switches）}：常规电源门控开关
+\end{itemize}
+
+\subsection{低功耗开关建模}
+\subsubsection*{Low Power Analysis Switch Modeling}
+
+开关串联于外部与内部 P/G 网。控制外部 VDD 的称为 \textbf{header}（图~\ref{fig:lp-header}）；控制地的为 \textbf{footer}（图~\ref{fig:lp-footer}）。上电/下电可分批进行以降低浪涌电流与 SSO 噪声。RedHawk 建模开关启停机制，每开关区域需 ON、OFF、POWERUP、POWERDOWN 四种模式。
+\subsection{电源门控四态电气模型详解}
+\subsubsection*{Detailed Four-State Switch Electrical Models}
+
+每个开关区域须完整表征四种工作模式：
+
+\paragraph{ON 态}
+开关为低阻通路。静态/动态分析报告开关自身压降与电流。\texttt{aplsw} 生成含 ON/OFF/PowerUp/PowerDown 的模型文件。Header ON 态等效为 EXT\_PIN 与 INT\_PIN 间低 $R_{\mathrm{on}}$ 与 IDSAT 限制。
+
+\paragraph{OFF 态}
+由 instance 漏电与开关漏电决定内部节点平衡电压。OFF 分析为 ramp-up 提供初始条件。Footer OFF 态在 INT\_PIN 与 GND 间呈现高阻与寄生电容。
+
+\paragraph{POWERUP 态}
+上电动态：控制 pin 按 \texttt{POWER\_UP} 电压序列变化，开关电阻随栅压变化；\texttt{aplsw} 输出分段 PWL 电流（\texttt{PWL\_CURRENT}）描述浪涌。
+
+\paragraph{POWERDOWN 态}
+下电序列：\texttt{POWER\_DOWN} 定义控制 pin 波形，内部节点放电至 OFF 平衡态。
+
+\paragraph{充电开关（Charge Switch）}
+大电流开关，确保功能开关开启前内部电源达阈值。GSR：
+\begin{lstlisting}
+CHARGE_SWITCH {
+    <charge_switch_inst> <threshold_voltage_V>
+    ...
+}
+\end{lstlisting}
+
+\paragraph{\texttt{charge\_switch.rpt} 报告格式}
+\begin{lstlisting}
+#Initial Function Switch Rampup Time (IFSRT): 10000
+***** Charge Switch Report *****
+[instance_name] [threshold] [voltage@IFSRT] [time_reach_SRT] [violation]
+inst_CSW_VDD  0.7  0.293019  12970  Y
+***** Functional Switch Report *****
+#Time of last charge switch reaching SRT: 12970
+[instance_name] [rampup_time] [violation]
+fsw_inst_VDD-1  15000  N
+\end{lstlisting}
+字段：IFSRT 为功能开关规定的开启时间（ps）；\texttt{voltage@IFSRT} 为 ramp-up 时刻内部节点电压；\texttt{time\_reach\_SRT} 为达到阈值电压的时间；\texttt{violation Y} 表示超时。
+
+\paragraph{双控制 pin 时序}
+\texttt{POWER\_UP} 中一 pin 电压须与 \texttt{OFF\_STATE} 相同以确定触发顺序；\texttt{POWER\_DOWN} 同理。慢/非线性使能建议 \texttt{MD\_PWL 1}；\texttt{SPLIT\_MD\_PWL 1} 可并行加速表征。
+
+\paragraph{GSC 块开关示例}
+\begin{lstlisting}
+sw_inst_A POWERUP
+gated_block_B POWERUP
+* domain_level POWERUP
+sw_* POWERUP
+\end{lstlisting}
+
+
+\figplaceholder{Figure 13-6}{Header 开关示例}
+
+\figplaceholder{Figure 13-11}{Footer 开关通用电路}
+
+\subsubsection{ON 状态}
+开关为低阻通路，可做常规静/动态分析，报告开关压降与电流。\texttt{aplsw} 生成 ON/OFF/PowerUp 模型：
+\begin{lstlisting}
+aplsw [-c] [-d] [-o <output_file>] <sw_config_list.conf>
+\end{lstlisting}
+
+\figplaceholder{Figure 13-7}{Header ON 态等效模型}
+
+\textbf{自适应 ON 电阻}：根据控制 pin 电压变化选择 $R\_{\mathrm{on}}$：
+\begin{lstlisting}
+DYNAMIC_ADAPTIVE_RON [0|1] <variation_threshold_%>
+\end{lstlisting}
+开关宜用 \texttt{MD\_PWL 1} 多维模型。
+
+\subsubsection{OFF 状态}
+由实例漏电与开关漏电决定平衡电压（图~\ref{fig:lp-off}）。OFF 分析确定上电序列初值。
+
+\figplaceholder{Figure 13-8}{Header OFF 态模型}
+
+\figplaceholder{Figure 13-9}{OFF 态漏电开关模型}
+
+\subsubsection{PowerUp 与 PowerDown}
+上电/下电动态由表征过程确定（图~\ref{fig:lp-powerup}）。
+
+\figplaceholder{Figure 13-10}{PowerUp/PowerDown 等效模型}
+
+\subsection{电源门控开关控制}
+\subsubsection*{Control of Power Gating Switches}
+
+控制 pin 管理上电/掉电时序。Header pin 类型：control、vss、vdd\_external、vdd\_internal、vdd\_high/bias；Footer 对应 vdd、vss\_external、vss\_internal 等。
+
+\subsubsection{双使能 pin 检查}
+\begin{lstlisting}
+CHECK_SWITCH_POWERON {
+    [ THRESHOLD <threshold_all_V> |
+    <cellname> <cell_threshold_V> ]
+    ...
+}
+\end{lstlisting}
+生成 \texttt{switch\_poweron.rpt} 列出阈值违例（图~\ref{fig:lp-switch-poweron}）。
+
+\figplaceholder{Figure 13-12}{switch\_poweron.rpt 示例}
+
+\subsection{表征与实现}
+\subsubsection*{Characterization and Implementation}
+
+每开关类型须 ON/OFF/PowerUp/PowerDown 表征。
+
+\subsubsection{开关配置文件}
+主要关键字（详见第~9~章 APL 配置）：
+\begin{lstlisting}
+SWITCH_TYPE [HEADER | FOOTER]
+DEVICE_MODEL_LIBRARY <model_file> <process_corner>
+TEMPERATURE <temperature_degreesC>
+SPICE_NETLIST <switch_name.sp>
+INCLUDE <model_card_name>
+EXT_PIN <pin_connection_to_external_supply>
+INT_PIN <pin_connection_to_cell>
+GND_PIN_NAME <gnd_pin_name>    # HEADER only
+VDD_PIN_NAME <vdd_pin_name>    # FOOTER only
+VDDVALUE <value1> [<value2> ...]
+ON_STATE { <control_pin> <ON_V1> ... }
+OFF_STATE { <control_pin> <OFF_V1> ... }
+POWER_UP { <control_pin> <Up_V1> ... }
+POWER_DOWN { <control_pin> <Down_V1> ... }
+CONTROL_PIN <subckt_pin_name> [R|F|-] [R|F|-]
+DC_BIAS <subckt_pin_name> <value>
+OPENPIN <subckt_pin_name>
+SPICE2LEF_PIN_MAPPING { <spice_pin> <LEF pin> ... }
+SWITCH_TIMING_CHAR [0 | 1]
+EXTERNAL_CONTROL_PIN / INTERNAL_CONTROL_PIN
+CONTROL_SLEW <num> <t1> [<t2> ...]
+INT_TIMING_ON2OFF / INT_TIMING_OFF2ON ...
+SIM_ON_STATE_ONLY [0|1]
+\end{lstlisting}
+
+双控制 pin 时，\texttt{POWER\_UP} 中一 pin 值须与 \texttt{OFF\_STATE} 相同以确定触发顺序；\texttt{POWER\_DOWN} 同理。
+
+\subsubsection{高级开关表征}
+慢/非线性使能波形建议 \texttt{MD\_PWL 1}；\texttt{SPLIT\_MD\_PWL 1} 并行仿真。GSR \texttt{PIECEWISE\_SWITCH\_INPUT <filename>} 指定分段线性控制波形：
+\begin{lstlisting}
+<switch_inst_name> <ctrl_pin_name> ( <t1> <volt1> <t2> <volt2> ... )
+\end{lstlisting}
+
+\subsubsection{开关模型生成}
+主配置列表每行一个开关：
+\begin{lstlisting}
+switch_ab <path>/switch_ab.conf
+switch_cd <path>/switch_cd.conf
+\end{lstlisting}
+运行 \texttt{aplsw} 生成默认 \texttt{aplsw.out}（含四态电气参数与漏电查找表）。
+
+\begin{noteBox}
+用户不应手动编辑开关模型文件。
+\end{noteBox}
+
+\subsection{用 GSC 定义块开关状态}
+\subsubsection*{Defining Block Switching Status with the GSC File}
+
+三种方式：
+\begin{enumerate}
+  \item 同时指定开关与门控块：\texttt{<switch\_instance> POWERUP}、\texttt{<gated\_block> POWERUP}
+  \item 域级：\texttt{* <domain\_name> POWERUP}
+  \item 组合使用；支持通配符 \texttt{*}
+\end{enumerate}
+
+\subsection{获取 STA 时序窗口}
+\subsubsection*{Obtaining STA Timing Window Data}
+
+STA 文件提供时间行为（第~19~章 ATE）。特殊 PT 变量：\texttt{ADS\_CELLS\_NEED\_INPUT\_TW}、\texttt{ADS\_INPUT\_PINS\_NEED\_TW}、\texttt{ADS\_PINS\_NO\_TW}。
+
+\subsection{将开关导入 RedHawk}
+\subsubsection*{Importing Switches into RedHawk}
+
+\begin{lstlisting}
+SWITCH_MODEL_FILE {
+    <switch_model_file>
+}
+\end{lstlisting}
+
+外部 P/G 网须在 \texttt{VDD\_NETS}/\texttt{GND\_NETS} 中列出；\texttt{EXTRACT\_INTERNAL\_NET 1}（默认）时内部网可省略。要求：LEF/DEF 中开关名一致；INT\_PIN 为 OUTPUT/INOUT；EXT\_PIN 为 INPUT/INOUT；STA 含控制 pin 时序窗口。
+
+运行中可 \texttt{gsr set SWITCH\_MODEL\_FILE <file>} 替换模型并重跑。
+
+可用 \texttt{eco add switch} / \texttt{eco delete switch} 增删开关。
+
+开关列表：\texttt{adsRpt/apache.memsw.info}。
+
+\subsection{上电条件设计表征}
+\subsubsection*{Design Characterization for Power-up Conditions}
+
+上电仿真须 PWL 电容/漏电/电阻：
+\begin{lstlisting}
+apldi -w -s2 [-l <cell_list_file>] <apl_config_file>
+apldi -w -s2 [-p <decap_list_file>] <apl_config_file>
+\end{lstlisting}
+GSR：\texttt{PIECEWISE\_CAP\_FILE <file>} 或 \texttt{APL\_FILES \{ <file> pwcap \}}。
+
+\subsection{运行 RedHawk 低功耗分析}
+\subsubsection*{Running RedHawk Low Power Analysis}
+
+\textbf{ON 态}：与常规分析相同，另须 \texttt{SWITCH\_MODEL\_FILE} 与内外 P/G 网定义。
+
+\textbf{Ramp-up}：另须 GSC 定义上电实例、PWL 电容（或 \texttt{RAMPUP\_OFFSTATE\_VOLTAGE}）、STA 控制 pin 时序。
+
+示例命令序列：
+\begin{lstlisting}
+setup analysis_mode lowpower
+import gsr <filename>
+setup design
+perform pwrcalc
+perform extraction -power -ground -c
+perform analysis -lowpower
+\end{lstlisting}
+
+\begin{noteBox}
+\texttt{setup analysis\_mode lowpower} 启用低功耗优化以加速。
+\end{noteBox}
+
+\textbf{混合模式}：低功耗 + VCD/无向量：
+\begin{lstlisting}
+setup design GENERIC.gsr
+perform pwrcalc
+setup analysis_mode lowpower
+perform extraction -power -ground -c
+setup package / wirebond / pad
+perform analysis -dynamic
+\end{lstlisting}
+
+\subsection{电源门控结果}
+\subsubsection*{Power Gating Results}
+
+\textbf{\texttt{switch\_static.rpt}}（静态）：内部节点电压、开关压降、平均电流。
+
+\textbf{\texttt{switch\_dynamic.rpt}}（动态）：活动开关峰值电流（上电分析）。
+
+\textbf{\texttt{charge\_switch.rpt}}（充电开关设计）：电荷开关与功能开关阈值、违例标志；字段含 IFSRT、\texttt{voltage@IFSRT}、\texttt{time\_reach\_SRT} 等。
+
+\section{带开关电源的 IP 块设计分析}
+\subsection*{Analysis of IP Block Designs with Switched Power}
+
+图~\ref{fig:lp-ip-switch} 为典型宏单元电源开关方案。数据要求：
+\begin{itemize}
+  \item 层次 GDS，开关为已放置 master
+  \item 与 GDS 单元名匹配的 SPICE
+  \item LEF/GDS 与 SPICE 内外 P/G 名映射
+  \item 顶层与单元级开关控制定义（类似 PowerGate）
+\end{itemize}
+
+\figplaceholder{Figure 13-13}{IP 宏单元电源开关示意图}
+
+\subsection{流程概述}
+\subsubsection*{Flow Overview}
+
+有/无域文本标签两种 GDS2DEF 流程（图~\ref{fig:lp-ip-flow-text}、图~\ref{fig:lp-ip-flow-notext}）。
+
+\figplaceholder{Figure 13-14}{有文本标签的开关 IP 流程}
+
+\figplaceholder{Figure 13-15}{无文本标签的开关 IP 流程}
+
+\subsection{GDS2DEF 处理}
+\subsubsection*{GDS2DEF Processing}
+
+\textbf{有域文本标签}：单次 \texttt{gds2def}，配置 \texttt{DEFINE\_SWITCH\_CELLS}、\texttt{EXTRACT\_SWITCH\_CELLS}；\texttt{VDD\_NETS}/\texttt{GND\_NETS} 含内外网；输出 \texttt{<IP\_cell>\_adsgds1.lef}。
+
+\textbf{无域文本标签}：先提取各开关 LEF，再建宏模型。开关 LEF 提取示例：
+\begin{lstlisting}
+TOP_CELL <switch cell>
+GDS_FILE <IP cell GDSII file>
+GDS_MAP_FILE <layer map file>
+VDD_NETS { <VDD_EXT> <VDD_INT> }
+GND_NETS { <VSS> }
+OUTPUT_DIRECTORY .
+GENERATE_LEF_PINS 1
+OUTPUT_APACHECELL 0
+\end{lstlisting}
+
+宏模型额外关键字：\texttt{LEF\_FILES}、\texttt{SWITCH\_CELLS}、\texttt{VP\_PAIRS}、\texttt{USE\_LEF\_PINS\_FOR\_TRACING 1}。
+
+\figplaceholder{Figure 13-16}{开关模型}
+
+\figplaceholder{Figure 13-17}{创建 IP 开关 LEF}
+
+\subsection{开关子电路提取}
+\subsubsection*{Switch Subcircuit Extraction}
+
+\texttt{qswitch} 从顶层 IP Spice 提取开关子电路：
+\begin{lstlisting}
+vp_mapping <GDS/LEF_domain> <Spice_node>
+switch_info <IP_macro>.swinfo
+subckt <IP_macro>.nsp
+include <model files>
+\end{lstlisting}
+\begin{lstlisting}
+qswitch <IP_cell>.smin
+\end{lstlisting}
+
+\subsection{IP 开关 aplsw 表征与 ACE}
+\subsubsection*{IP Switch Characterization}
+
+用 \texttt{aplsw} 表征（同电源门控节）。\texttt{ACE} 提供等效电阻、电容、漏电（第~9~章）。
+
+\subsection{用开关 IP 模型运行 RedHawk}
+\subsubsection*{Running RedHawk with Switch IP models}
+
+GSR 关键字：
+\begin{lstlisting}
+GDS_FILE ...
+EXTRACT_INTERNAL_NET 1
+VP_CONTROL {
+    <control_filename>
+}
+\end{lstlisting}
+\texttt{VP\_CONTROL} 描述开关 IP 宏控制 pin（见附录 C）。
+\subsection{IP 开关宏模型关键字详述}
+\subsubsection*{Switch Macro Model Keywords}
+
+创建 IP 开关 LEF 时在 gds2def 配置中增加：
+\begin{lstlisting}
+LEF_FILES {
+    <IP LEF file>
+    <switch_cell_1>_adsgds.lef
+    ...
+}
+USE_LEF_PINS_FOR_TRACING 1
+SWITCH_CELLS {
+    <sw1 cellname> <VDD1_INT>_ADS <VDD1_EXT>_ADS
+    <sw2 cellname> <VDD2_INT>_ADS <VDD2_EXT>_ADS
+}
+VP_PAIRS {
+    <vdd1_int> <vdd1_ext> <vdd2_int> <vdd2_ext>
+}
+\end{lstlisting}
+
+\paragraph{\texttt{qswitch} 示例子电路输出}
+\begin{lstlisting}
+*-- extracted switch subckt for cell 'sw1'
+.SUBCKT sw1 VDD1_EXT_ADS VDD1_INT_ADS PWRUP_ADS PWRON_ADS M0
++ VDD1_EXT_ADS POWERUP_ADS VDD1_INT_ADS ...
+\end{lstlisting}
+
+\paragraph{aplsw IP 开关模型片段}
+\begin{lstlisting}
+SWITCH_CELL sw1 {
+    SWITCH_TYPE: HEADER
+    EXT_PIN: VDD_EXT_ADS
+    INT_PIN: VDD_INT_ADS
+    CTRL_PIN: PWRUP_ADS F -
+    ON:  R 30.1234  I 6.08777e-10  C 5.02222e-14  IDSAT 0.011111
+    OFF: C 2.121212e-18
+    PWL_CURRENT: 3
+}
+\end{lstlisting}
+
+\paragraph{运行 RedHawk 的 GSR 设置}
+\begin{lstlisting}
+GDS_FILE <gds2def modeled IP>
+EXTRACT_INTERNAL_NET 1
+VP_CONTROL {
+    <control_filename>
+}
+SWITCH_MODEL_FILE {
+    <switch_model_file>
+}
+\end{lstlisting}
+
+
+\section{开关 RAM 设计分析}
+\subsection*{Analysis of Switched RAM Designs}
+
+开关集成在 RAM 块内，提取方式不同。支持静态 IR、DvD 与 Ramp-up。
+
+\subsection{支持的开关 RAM 类型}
+\subsubsection*{Types of Switched RAM Supported}
+
+\begin{itemize}
+  \item Case 1：单对外/内 P/G 对，单开关
+  \item Case 2：多对外/内 P/G 对，各用独立开关
+  \item Case 3：单对外 P/G 经同一开关接多对内网
+  \item Case 4：单对外 P/G 经不同开关接多对内网
+\end{itemize}
+
+\figplaceholder{Figure 13-19}{支持的开关 RAM 配置}
+
+Case 5/6（多外网接单内网）不支持（图~\ref{fig:lp-ram-unsupported}）。
+
+\figplaceholder{Figure 13-20}{不支持的开关 RAM 配置}
+
+\subsection{开关 RAM 分析概述}
+\subsubsection*{Overview of Switched RAM Analysis}
+
+静态 IR 流程（图~\ref{fig:lp-ram-static}）：\texttt{LEF\_FILES}（含开关 LEF）、\texttt{GDS\_CELLS}、\texttt{SWITCH\_MODEL\_FILE}、\texttt{EXTRACT\_INTERNAL\_NET 1}、\texttt{APL}、\texttt{STA}、可选 SPEF/VCD。
+
+\figplaceholder{Figure 13-21}{开关 RAM 静态 IR 流程}
+
+动态 DvD（图~\ref{fig:lp-ram-dvd}）：\texttt{perform analysis -vectorless} 等。
+
+Ramp-up（图~\ref{fig:lp-ram-rampup}）：\texttt{setup analysis\_mode lowpower}、GSC、\texttt{PIECEWISE\_CAP\_FILE}、\texttt{VP\_CONTROL}。
+
+\subsection{数据要求与 GSR 关键字}
+\subsubsection*{Data Requirements and GSR Keyword Settings}
+
+开关 RAM 分析的关键 GSR 关键字包括：
+\begin{itemize}
+  \item \texttt{LEF\_FILES}、\texttt{GDS\_CELLS}、\texttt{SWITCH\_MODEL\_FILE}
+  \item \texttt{EXTRACT\_INTERNAL\_NET 1}
+  \item \texttt{GSC\_FILE}：\texttt{<instance> <internal net> POWERUP}
+  \item \texttt{STA\_FILE}、\texttt{POWER\_MODE APL}
+  \item \texttt{VP\_CONTROL \{ <file> \}}（Ramp-up 流程必需）
+\end{itemize}
+
+\subsection{模型生成}
+\subsubsection*{Model Generation}
+
+\subsubsection{GDS 数据准备}
+GDS2DEF 流程支持两类物理模型：\textbf{On-state} 模型用于静态 IR 与动态分析；\textbf{Ramp-up} 模型用于上电条件（图~\ref{fig:lp-ram-gds2def}）。
+
+\figplaceholder{Figure 13-24}{GDS2DEF 模型流程}
+
+\textbf{On-state 模型}（图~\ref{fig:lp-ram-onstate}）文件包括：
+\begin{itemize}
+  \item DEF：开关 instance 布局、内外 P/G 网物理层、开关 P/G pin 逻辑连接及虚拟 pin instance
+  \item LEF：连接到内外 P/G 网的器件虚拟 pin instance
+  \item Pratio：器件虚拟 pin 相对强度数据
+\end{itemize}
+
+\figplaceholder{Figure 13-25}{On-state 物理模型}
+
+\textbf{Ramp-up 模型}（图~\ref{fig:lp-ram-rampup-model}）输出数据较 On-state 精简以提升 Ramp-up 性能，亦可用于 On-state 流程。文件包括：
+\begin{itemize}
+  \item DEF：开关布局、仅外 P/G 网物理层、P/G pin 逻辑连接（应用于开关与外部域虚拟 pin，\textbf{不含}内部域 pin）
+  \item LEF：仅连接外 P/G 网及内部域 pin（连至开关）的器件虚拟 pin
+  \item Pratio：器件虚拟 pin 相对强度
+\end{itemize}
+
+\figplaceholder{Figure 13-26}{Ramp-up 物理模型}
+
+\subsubsection{通用 GDS2DEF 配置文件}
+Ramp-up 分析必需（On-state 可选）关键字 \texttt{EXTRACT\_SWITCH\_CELLS} 与 \texttt{DEFINE\_SWITCH\_CELLS}，须配合使用：
+\begin{lstlisting}
+EXTRACT_SWITCH_CELLS {
+     <switch name> [HEADER | FOOTER] <extern_net_name>
+     <intern_net_name>
+     ...
+}
+DEFINE_SWITCH_CELLS {
+     <switch_name> [HEADER|FOOTER] <input/ext_LEF_pin_name>
+     <output/int_LEF_pin_name>
+     <control pin 1> <control pin 2> ... <control pin N>
+}
+\end{lstlisting}
+
+同一开关 cell 多域切换（Case 3）示例：
+\begin{lstlisting}
+EXTRACT_SWITCH_CELLS {
+    sw1 HEADER ext_vdd1 int_vdd1
+    sw1 HEADER ext_vdd2 int_vdd2
+}
+\end{lstlisting}
+
+Ramp-up 须在 \texttt{VDD\_NETS}/\texttt{GND\_NETS} 中指定内部 P/G 域，并设 \texttt{SWITCH\_MODEL\_MODE RAMPUP}。On-state 可不指定内部网，除非做内部域仿真；若指定 \texttt{EXTRACT\_SWITCH\_CELLS}/\texttt{DEFINE\_SWITCH\_CELLS}，内部网须在 \texttt{VDD\_NETS}/\texttt{GND\_NETS} 中列出，并设 \texttt{SWITCH\_MODEL\_MODE ONSTATE}（默认）。
+
+通用配置示例：
+\begin{lstlisting}
+TOP_CELL <design_name>
+GDS_FILE <gds_pointer>
+GDS_MAP_FILE <layer map_pointer>
+VDD_NETS {
+   <External_Power_net_group_name> {
+     VDD:
+     VDD_ext
+   }
+   <Internal_Power_domain_name> {
+     Vint:
+     Vint @ <layer_id> <x_coord_um> <y_coord_um>
+   }
+}
+GND_NETS {
+   <Ground_net_group_name> {
+     VSS
+   }
+}
+LEF_FILE {
+   <design_LEF_file_pointer>
+}
+USE_LEF_PINS_FOR_TRACING 1
+EXTRACT_SWITCH_CELLS {
+     <switch name> <HEADER | FOOTER>
+     <external net name> <internal_net_name>
+}
+DEFINE_SWITCH_CELLS {
+     <switch_name> <HEADER|FOOTER> <ext_LEF_pin>
+         <int_LEF_pin> <control_pin1> ... <control_pinN>
+}
+CHECK_TRACING 1
+SWITCH_MODEL_MODE [RAMPUP|ONSTATE]
+\end{lstlisting}
+
+\texttt{Vint @ <layer\_id> <x> <y>} 用于按位置追踪 P/G 网；\texttt{\{VSS ...\}} 用于文本标签追踪。使用文本追踪法时移除 \texttt{USE\_LEF\_PINS\_FOR\_TRACING 1}。\texttt{DEFINE\_SWITCH\_CELLS} 为开关 LEF 生成所必需。
+
+\begin{noteBox}
+控制 pin 名须与 APL 开关模型一致。
+\end{noteBox}
+
+\subsubsection{Case 1--4 GDS2DEF 配置}
+\textbf{Case 1}（单对外/内 P/G 对，单开关）：
+\begin{lstlisting}
+TOP_CELL <design_name>
+GDS_FILE <gds_pointer>
+GDS_MAP_FILE <layer_map_pointer>
+VDD_NETS {
+   Ext_VDD1
+   Int_VDD1
+}
+GND_NETS {
+        VSS
+}
+EXTRACT_SWITCH_CELLS {
+     sw1 HEADER EXT_VDD1 INT_VDD1
+}
+DEFINE_SWITCH_CELLS {
+     sw1 HEADER VDD_EXT VDD_INT EN1
+}
+LEF_FILE {
+     <design_LEF_file_pointer>
+}
+USE_LEF_PINS_FOR_TRACING 1
+SWITCH_MODEL_MODE [RAMPUP|ONSTATE]
+\end{lstlisting}
+Case 1 的 EXT\_VDD1/INT\_VDD1 在 ONSTATE 下可选，RAMPUP 下必需。
+
+\textbf{Case 2}（多对外/内 P/G 对，各用独立开关）：在 \texttt{VDD\_NETS} 中列出所有 Ext/Int 网，\texttt{EXTRACT\_SWITCH\_CELLS} 为各开关分别定义。
+
+\textbf{Case 3}（单外网经同一开关接多内网）：\texttt{EXTRACT\_SWITCH\_CELLS} 中对同一 \texttt{sw1} 多次定义不同内部网。
+
+\textbf{Case 4}（单外网经不同开关接多内网）：\texttt{EXTRACT\_SWITCH\_CELLS} 中为 \texttt{sw1}、\texttt{sw2} 等分别定义。
+
+各 Case 的 EXT/INT 网在 ONSTATE 下可选、RAMPUP 下必需。
+\subsubsection{Case 2 GDS2DEF 完整示例}
+\begin{lstlisting}
+TOP_CELL <design_name>
+GDS_FILE <gds_pointer>
+GDS_MAP_FILE <layer_map_pointer>
+VDD_NETS {
+    Ext_VDD1
+    Ext_VDD2
+    INT_VDD1
+    INT_VDD2
+}
+GND_NETS { VSS }
+EXTRACT_SWITCH_CELLS {
+    sw1 HEADER EXT_VDD1 INT_VDD1
+    sw2 HEADER EXT_VDD2 INT_VDD2
+}
+DEFINE_SWITCH_CELLS {
+    sw1 HEADER VDD_EXT VDD_INT EN
+    sw2 HEADER VDD_EXT VDD_INT EN
+}
+LEF_FILE { <design LEF file pointer> }
+USE_LEF_PINS_FOR_TRACING 1
+SWITCH_MODEL_MODE [RAMPUP|ONSTATE]
+\end{lstlisting}
+Case 2 的 EXT/INT 网在 ONSTATE 下可选，RAMPUP 下必需。
+
+\subsubsection{Case 3 GDS2DEF 完整示例}
+同一 \texttt{sw1} 多次出现在 \texttt{EXTRACT\_SWITCH\_CELLS}：
+\begin{lstlisting}
+EXTRACT_SWITCH_CELLS {
+    sw1 HEADER EXT_VDD1 INT_VDD1
+    sw1 HEADER EXT_VDD1 INT_VDD2
+}
+\end{lstlisting}
+
+\subsubsection{开关 RAM 动态与 Ramp-up 命令}
+On-state DvD：
+\begin{lstlisting}
+perform analysis -vectorless
+# 或 -vcd / -mcycle 等
+\end{lstlisting}
+Ramp-up：
+\begin{lstlisting}
+setup analysis_mode lowpower
+perform analysis -lowpower
+perform analysis -lowpower -alp3d   # 约 3x 加速，精度影响 10-15%
+\end{lstlisting}
+时间步须 $\le 150$\,ps（\texttt{-alp3d}）。
+
+\subsection{电源门控运行示例与混合模式}
+\subsubsection*{Power Gating Run Examples}
+
+\textbf{纯 ON 态分析}：
+\begin{lstlisting}
+import gsr design.gsr
+setup design
+perform pwrcalc
+perform extraction -power -ground -c
+setup pad / wirebond / package
+perform analysis -static
+perform analysis -dynamic
+\end{lstlisting}
+
+\textbf{Ramp-up} 另须 GSC（\texttt{POWERUP}）、\texttt{PIECEWISE\_CAP\_FILE} 或 \texttt{RAMPUP\_OFFSTATE\_VOLTAGE}、STA 控制 pin TW。
+
+\textbf{混合低功耗 + VCD}：
+\begin{lstlisting}
+setup design GENERIC.gsr
+perform pwrcalc
+setup analysis_mode lowpower
+perform extraction -power -ground -c
+setup package / wirebond / pad
+perform analysis -dynamic
+\end{lstlisting}
+
+\subsection{switch\_static/dynamic 报告字段}
+\texttt{switch\_static.rpt}：内部节点电压、开关压降、平均电流。\texttt{switch\_dynamic.rpt}：活动开关峰值电流（上电分析）。\texttt{adsRpt/apache.memsw.info} 列出设计中所有开关 instance。
+
+
+\subsubsection{APLSW 数据准备}
+\begin{enumerate}
+  \item 核对 APL 开关模型与 GDS 物理模型中的开关 cell 名、pin 名一致性
+  \item 使用 \texttt{SPICE2LEF\_PIN\_MAPPING} 确保 pin 名匹配
+  \item 配置 APLSW 关键字（见第~13~章「开关配置文件」及第~9~章 APL 配置说明）
+\end{enumerate}
+
+\subsection{On-state 分析——静态 IR 与 DvD}
+\subsubsection*{On-state Analysis - Static IR and DvD Conditions}
+
+On-state 分析方案见图~\ref{fig:lp-ram-onstate-scheme}。要点：
+\begin{itemize}
+  \item 支持独立宏 On-state 分析
+  \item 须指定开关 cell APL 模型
+  \item \texttt{VDD\_NETS}/\texttt{GND\_NETS} 仅列外部网
+  \item \texttt{EXTRACT\_INTERNAL\_NET 1} 自动追踪内部网
+  \item 可选 \texttt{VP\_CONTROL} 为块开关时间分配内部延迟
+  \item 结果检查：确认功耗计算成功、P/G pin instance 连接正确；\texttt{plot current -net -name <internal net>} 确认电流分配合理
+\end{itemize}
+
+\figplaceholder{Figure 13-27}{On-state 分析方案}
+
+\subsubsection{静态 IR 分析 GSR 关键字}
+须定义：\texttt{TECH\_FILE}、\texttt{VDD\_NETS}、\texttt{GND\_NETS}（不含内部网）、\texttt{BLOCK\_POWER\_FOR\_SCALING}、\texttt{LIB\_FILES}、\texttt{LEF\_FILES}（含 \texttt{<macroname>\_adsgds1.lef}）、\texttt{DEF\_FILES}、\texttt{GDS\_CELLS}、\texttt{FREQ}、\texttt{SWITCH\_MODEL\_FILE}、\texttt{PAD\_FILES}、\texttt{EXTRACT\_INTERNAL\_NET 1}。
+
+\subsubsection{DvD 分析 GSR 关键字}
+除上述外还须：\texttt{APL\_FILES}（current/cap）、\texttt{DYNAMIC\_SIMULATION\_TIME}、\texttt{GSC\_FILE}（格式 \texttt{<instance> [HIGH|LOW]}）、\texttt{STA\_FILE}、\texttt{POWER\_MODE APL}、可选 \texttt{VP\_CONTROL}。
+
+\subsection{Ramp-up 分析}
+\subsubsection*{Ramp-up Analysis}
+
+Ramp-up 分析方案见图~\ref{fig:lp-ram-rampup-scheme}。要点：
+\begin{itemize}
+  \item \texttt{VP\_CONTROL} 为 GSR 必需项，指定存储器块内开关控制 pin 内部延迟，与 STA 时序窗叠加形成最终开关 TW
+  \item 多域 Ramp-up 仅支持 cdev APL 模型；可用 \texttt{RAMPUP\_OFFSTATE\_VOLTAGE} 指定初始关态电压（默认 \texttt{VDD\_NETS} 标称电压的 1/3）
+  \item 单域 Ramp-up 可用 cdev 或 pwcap；\texttt{aplcdev2pwl} 可将 cdev 转为 pwcap
+  \item 电容连至 Ramp-up 仿真中逻辑连接的开关 instance
+  \item 不支持独立宏 Ramp-up；须建 dummy 顶层 DEF 实例化宏
+  \item 支持 \texttt{VP\_CONTROL} 自动 daisy-chain 延迟分配
+  \item 命令：\texttt{perform analysis -lowpower -alp3d}（约 3$\times$ 加速，精度影响约 10--15\%；时间步须 $\le$ 150\,ps）
+\end{itemize}
+
+\figplaceholder{Figure 13-28}{Ramp-up 分析方案}
+
+\subsubsection{Ramp-up 分析 GSR 关键字}
+须定义：\texttt{TECH\_FILE}、\texttt{VDD\_NETS}、\texttt{GND\_NETS}、\texttt{APL\_FILES}（pwcap 或 cdev）、\texttt{LIB\_FILES}、\texttt{LEF\_FILES}、\texttt{DEF\_FILES}、\texttt{GDS\_CELLS}、\texttt{FREQ}、\texttt{SWITCH\_MODEL\_FILE}、\texttt{DYNAMIC\_SIMULATION\_TIME}、\texttt{PAD\_FILES}、\texttt{EXTRACT\_INTERNAL\_NET 1}、\texttt{GSC\_FILE}（格式 \texttt{<instance> <internal net> POWERUP}，例：\texttt{mem\_inst1 vdd\_int POWERUP}）、\texttt{STA\_FILE}、\texttt{POWER\_MODE APL}、\texttt{VP\_CONTROL}。
+
+\subsection{开关 RAM 时序控制}
+\subsubsection*{Switched RAM Analysis Timing Control Settings}
+
+开关 RAM 分析尽可能灵活控制带内置电源门控的存储器上电顺序。RedHawk 以宏 ENABLE/Control pin 的 STA 时序窗口为起点；基于可选增量 $\Delta$，在 TW、TW+$1\times\Delta$、TW+$2\times\Delta$……依次开启 RedHawk 选定的开关（\texttt{adsU\#}）。若 $\Delta=0$（未指定），所有开关在 TW 同时开启。
+
+GDS2DEF 生成的 DEF 通常不含开关间关系，上电顺序不易控制。可指定全局或实例级（\texttt{adsU\#}）开关上电延迟 $\Delta$ 控制各开关时序。
+
+\texttt{VP\_CONTROL} 为 Ramp-up 流程必需关键字，指定存储器宏内开关 instance 时序；内容为基于 MACRO 的模型。有两种指定方式：全局与实例级。
+
+\textbf{全局时序分配}：可设 \texttt{POWERUP} 与可选 \texttt{POWERON}：
+\begin{lstlisting}
+<macro name> {
+    POWERUP <block ctrl pin> <int domain> <powerup_time_sec> ?<daisy delay_sec>?
+    ...
+    POWERON <block ctrl pin> <int domain> <poweron_sec>  # optional
+}
+\end{lstlisting}
+
+示例：
+\begin{lstlisting}
+Mem1 {
+    POWERUP ctrl vdd_int 1e-9
+}
+\end{lstlisting}
+则 master cell 为 \texttt{mem} 的 IP instance 内所有开关在 $T = \mathrm{TW\_of\_ctrl} + 1\,\mathrm{ns}$ 开启。\texttt{POWERUP} 中的块控制 pin 用于从 STA 文件提取外部宏开关时序。
+
+\textbf{实例级时序分配}：须同时使用 \texttt{POWERUP}、\texttt{POWERON}（可选）与 \texttt{SWITCH\_RAMPUP\_TIMING}：
+\begin{lstlisting}
+SWITCH_RAMPUP_TIMING <switch inst adsU#> <powerup_time_sec> ?<poweron_time_sec>?
+\end{lstlisting}
+
+未在 \texttt{SWITCH\_RAMPUP\_TIMING} 中指定的开关使用 \texttt{POWERUP} 时间。示例：\texttt{mem1} 含 \texttt{adsU2}--\texttt{adsU4}：
+\begin{lstlisting}
+mem1 {
+    POWERUP ctrl vdd_int 500e-12
+    SWITCH_RAMPUP_TIMING adsU2 1e-9
+}
+\end{lstlisting}
+则 \texttt{adsU2}、\texttt{adsU3} 在 $T = \mathrm{TW\_of\_ctrl} + 1\,\mathrm{ns}$ 开启，\texttt{adsU4} 在 $T = \mathrm{TW\_of\_ctrl} + 500\,\mathrm{ps}$ 开启。
+
+\section{LDO 低功耗设计分析}
+\subsection*{Analysis of LDO Low Power Designs}
+
+片上 LDO 广泛用于 MSMV、DVFS 等供电控制。本节描述 LDO 模型生成及在 RedHawk 中静/动态压降分析（图~\ref{fig:lp-ldo-flow}）。
+
+\figplaceholder{Figure 13-29}{LDO 分析流程}
+
+\subsection{LDO 设计建模}
+\subsubsection*{LDO design modeling}
+
+三种 LDO 模型：
+\begin{itemize}
+  \item 理想 LDO（恒定输出电压）
+  \item 静态模型：电流控制 DC 传递电压源（一阶）
+  \item 动态/瞬态模型：捕获高电流需求瞬时压降（最准）
+\end{itemize}
+
+\figplaceholder{Figure 13-30}{典型 LDO 原理图}
+
+\figplaceholder{Figure 13-31}{LDO 数据流}
+
+四步流程（DC 流仅前两步）：
+\begin{enumerate}
+  \item \texttt{APLDO} 生成 DC 模型
+  \item GSR \texttt{LDO\_MODEL\_FILE}、\texttt{DECOUPLE\_LDO\_GROUND 1}（GSR 与 LDO 配置均须）；GDS 中 LDO 须在 \texttt{WHITE\_BOX\_CELLS}。生成 CPM-LDO：
+\begin{lstlisting}
+perform powermodel -nx <x> -ny <y> -vcd -pincurrent -global_gnd
+    -o CPM_LDO -probe -reportcap
+\end{lstlisting}
+  \item 动态：\texttt{APLDO} 生成 AC 模型（负载/线调整）
+  \item 用 AC 模型重跑 RedHawk（VCD 或无向量）
+\end{enumerate}
+
+\subsection{用 GSC 控制 LDO 开关状态}
+\begin{enumerate}
+  \item 静态使能/禁用（支持通配符）：\texttt{<LDO inst> [DISABLE|ENABLE]}
+  \item 动态切换（不支持通配符）：
+\begin{lstlisting}
+# LDO_INST_CONFIG
+<LDO inst> enable <time_ps> disable <time_ps> ...
+# END_LDO_INST_CONFIG
+\end{lstlisting}
+\end{enumerate}
+
+检查：\texttt{plot current -ldo -name <LDO instance>}；影响 \texttt{adsRpt/Dynamic/ldo.current}。
+
+\subsection{LDO 分析输出}
+\texttt{adsRpt/Dynamic}：\texttt{ldo.current}、\texttt{ldo.voltage}、\texttt{ldo\_dynamic.rpt}（最小/最大负载电流、输入/输出电压、$di/dt$ 等）。
+
+\subsection{APLDO 建模}
+\subsubsection*{LDO Modeling with APLDO}
+
+输入：Spice 网表与模型、配置文件、可选 CPM/封装。输出：加密 LDO 模型、DC I-V 表、瞬态 RLC 与控制源。
+
+DC 配置要点：
+\begin{lstlisting}
+DC_RAMP_TIME <load current ramp-up time>
+LDO_CELL LDO_cell
+SPICE_NETLIST ...
+TEMPERATURE 25
+MIN_IDLE_CURRENT 1.0mA
+MIN_LOAD_CURRENT 1.0mA
+MAX_LOAD_CURRENT 320mA
+DC_CURRENT_SWEEP_STEP 2mA
+POWER_OUTPUT_PIN vccr 2.2
+POWER_INPUT_PIN vcc_in 3.0
+GROUND_PIN gnd 0
+DC_BIAS ...
+\end{lstlisting}
+
+负载调整动态模型与线调整动态模型配置类似，另含瞬态相关关键字。负载调整动态模型 APLDO 配置示例：
+\begin{lstlisting}
+LDO_CELL LDO_cell
+SPICE_NETLIST ../totem/netlist_subckt_vcc
+TEMPERATURE 25
+DEVICE_MODEL_LIBRARY ./user_data/SPICE/device.lib TT
+INCLUDE ./totem/tt
+OPTION GSHUNT=1e-12
+MIN_IDLE_CURRENT 1.0mA
+MIN_LOAD_CURRENT 1.0mA
+MAX_LOAD_CURRENT 320mA
+DC_CURRENT_SWEEP_STEP 2mA
+POWER_OUTPUT_PIN vccr 2.2
+POWER_ARC {
+  POWER_OUTPUT_PIN <vdd_pin1> <voltage>
+  ...
+}
+POWER_INPUT_PIN vcc_in 3.0
+GROUND_PIN gnd 0
+DC_BIAS vcc_in 3.00
+DC_BIAS gnd 0.0
+DC_BIAS vbgr 1.25
+CPM_LDO_MODEL adsPowerModel
+CPM_LDO_FILE ./power_model_CPM-LDO
+CPM_LDO_PORT *:VCC 3.0
+CPM_LDO_PORT *:VSS 0
+CPM_OPEN_PORT VBB:*
+CPM_LDO_TRANSIENT_TIME 120ns
+PACKAGE_MODEL REDHAWK_PKG
+PACKAGE_FILE redhawk_pkg_0.spi
+\end{lstlisting}
+
+\subsubsection{生成 DC LDO 模型}
+使用以下命令生成 DC LDO 模型：
+\begin{lstlisting}
+apldo apldo.config
+\end{lstlisting}
+调试时在配置文件中设 \texttt{DEBUG 1}，保留 \texttt{.apache/APLDO} 目录中的 \texttt{ldo\_dc\_vdd.cir}（DC 扫描）与 \texttt{ldo\_ac\_vdd.cir}（AC 扫描）。
+
+\subsubsection{测试 LDO 模型}
+生成的 LDO 模型已加密。可在 \texttt{apldo} 工作目录对 \texttt{<>_LOAD\_REGULATION\_TEST\_BENCH.sp} 运行 Spice 仿真做健全性检查。亦可用 \texttt{aplreader -ldo <LDO model>} 绘制 LDO 输出 I-V 曲线。
+
+\subsection{LDO 的其他实用应用}
+\subsubsection*{Other practical LDO applications}
+
+所述 LDO 方法学不仅分析压降，还可辅助调整片上 LDO 尺寸（驱动强度）与位置以实现降功耗与缩小芯片面积。例如将正常尺寸片上 LDO 替换为一半尺寸，比较两者输出 pin 电压波形（图~\ref{fig:lp-ldo-half}）。若半尺寸 LDO 满足压降约束，可采用以节省面积。该方法还可作为调整片上 LDO 尺寸的 what-if 分析，且无需修改 MSMV、DVFS 等低功耗技术；并可结合芯片电源模型（CPM）用于芯片-封装协同设计。
+
+\figplaceholder{Figure 13-32}{正常与半驱动强度 LDO 输出电压}
+\subsection{APLDO 线调整与瞬态模型}
+\subsubsection*{Line Regulation and Transient APLDO Models}
+
+线调整动态模型在输入电压阶跃下表征输出电压响应；负载调整在负载电流阶跃下表征。两者均须完整 \texttt{POWER\_ARC}、\texttt{DC\_BIAS} 与封装/CPM 接口定义。
+
+\paragraph{测试台与调试}
+\begin{lstlisting}
+apldo apldo.config          # 生成加密模型
+aplreader -ldo <LDO model>  # 绘制 I-V 曲线
+\end{lstlisting}
+调试设 \texttt{DEBUG 1} 保留 \texttt{.apache/APLDO/ldo\_dc\_vdd.cir} 与 \texttt{ldo\_ac\_vdd.cir}。对 \texttt{<>_LOAD_REGULATION_TEST_BENCH.sp} 运行 Spice 做健全性检查。
+
+\paragraph{GSC 动态 LDO 切换示例}
+\begin{lstlisting}
+# LDO_INST_CONFIG
+ldo_inst_1 enable 100 disable 5000 enable 8000
+# END_LDO_INST_CONFIG
+\end{lstlisting}
+不支持通配符。检查：\cmd{plot current -ldo -name <LDO instance>}；输出 \texttt{adsRpt/Dynamic/ldo.current}、\texttt{ldo.voltage}、\texttt{ldo\_dynamic.rpt}（最小/最大负载电流、输入/输出电压、$di/dt$）。
+
+\subsection{开关 RAM Case 2--4 配置补充}
+\subsubsection*{Additional Case 2--4 GDS2DEF Configurations}
+
+\textbf{Case 2}（多对外/内 P/G 对，各用独立开关）：
+\begin{lstlisting}
+VDD_NETS { Ext_VDD1 Int_VDD1 Ext_VDD2 Int_VDD2 }
+EXTRACT_SWITCH_CELLS {
+    sw1 HEADER EXT_VDD1 INT_VDD1
+    sw2 HEADER EXT_VDD2 INT_VDD2
+}
+DEFINE_SWITCH_CELLS {
+    sw1 HEADER VDD_EXT1 VDD_INT1 EN1
+    sw2 HEADER VDD_EXT2 VDD_INT2 EN2
+}
+\end{lstlisting}
+
+\textbf{Case 3}（单外网经同一开关接多内网）——\texttt{EXTRACT\_SWITCH\_CELLS} 对同一 \texttt{sw1} 多次声明不同内部网。
+
+\textbf{Case 4}（单外网经不同开关接多内网）——为 \texttt{sw1}、\texttt{sw2} 分别定义。
+
+\paragraph{Ramp-up GSC 与 VP\_CONTROL 示例}
+\begin{lstlisting}
+# GSC
+mem_inst1 vdd_int POWERUP
+# VP_CONTROL
+Mem1 {
+    POWERUP ctrl vdd_int 1e-9
+    SWITCH_RAMPUP_TIMING adsU2 1e-9
+}
+\end{lstlisting}
+未在 \texttt{SWITCH\_RAMPUP\_TIMING} 中列出的开关使用 \texttt{POWERUP} 时间；$\Delta=0$ 时所有开关在 TW 同时开启。
+
+\subsection{LDO 负载/线调整动态模型配置}
+\subsubsection*{Load and Line Regulation Dynamic Model Configuration}
+
+负载调整（Load Regulation）动态模型 APLDO 配置除 DC 关键字外，还须指定 CPM 与封装接口：
+\begin{lstlisting}
+CPM_LDO_MODEL adsPowerModel
+CPM_LDO_FILE ./power_model_CPM-LDO
+CPM_LDO_PORT *:VCC 3.0
+CPM_LDO_PORT *:VSS 0
+CPM_OPEN_PORT VBB:*
+CPM_LDO_TRANSIENT_TIME 120ns
+PACKAGE_MODEL REDHAWK_PKG
+PACKAGE_FILE redhawk_pkg_0.spi
+\end{lstlisting}
+
+线调整（Line Regulation）模型类似，激励加在输入 pin 而非负载电流阶跃。
+
+\paragraph{LDO 与 CPM 协同}
+含 LDO 的芯片可直接 \cmd{perform powermodel}；检测到 LDO 时自动启用 \texttt{-plocname} 并在 LDO pin 生成内部端口。系统级仿真须含 LDO 子电路（晶体管级或 APLDO 行为级）；推荐 \texttt{-pincurrent -global\_gnd}。
+
+
+\section{门控时钟设计分析}
+\subsection*{Analysis of Gated Clock Designs}
+
+为支持移动与高密度应用，低功耗设计常仅部分电路在工作。这些功耗模式通过开关不同时钟域及其对应逻辑实现；多时钟域通常由多路选择逻辑与时钟控制输入管理，称为「门控时钟（gated clock）」设计。
+
+从功耗分析角度，在全芯片所有时钟均开启的情况下分析不切实际。关键是识别各功耗模式，并针对动态压降与时序影响分析关键模式。门控时钟动态分析详见第~\ref{chap:dvd}~章「门控时钟动态分析」（Gated Clock Dynamic Analysis）一节。
+
+\begin{noteBox}
+门控时钟设计中，每个「模式」须单独分析，并使用该模式专用的静态时序分析（STA）文件。
+\end{noteBox}
+
+
+\subsection{低功耗技术引言补充}
+\subsubsection*{Additional Low-Power Technique Context}
+
+亚微米设计面临更大漏电、NBTI 阈值漂移、更强驱动与更高密度。省电技术虽在系统/架构层影响最大，设计层常见手段包括：时钟门控控制触发器时钟；电压岛降低动态功耗；多 $V_{\mathrm{th}}$ 单元风格在关键路径外使用高阈值降低漏电；有源体偏置动态调节 $V_{\mathrm{th}}$；保持触发器在掉电期间保持状态。
+
+RedHawk 支持全芯片/块级瞬态 DvD 与平均静态 IR，含文本报告、图形及影片模式显示动态压降演化。
+
+\subsection{开关配置文件关键字逐项说明}
+\begin{itemize}
+  \item \texttt{SWITCH\_TYPE [HEADER|FOOTER]}：header 控制 VDD，footer 控制 VSS
+  \item \texttt{EXT\_PIN / INT\_PIN}：外部/内部 P/G 子电路端口
+  \item \texttt{ON\_STATE / OFF\_STATE}：\{控制pin 电压...\}
+  \item \texttt{POWER\_UP / POWER\_DOWN}：上电/下电控制电压序列
+  \item \texttt{CONTROL\_PIN <pin> [R|F|-] [R|F|-]}：边沿触发方向
+  \item \texttt{DC\_BIAS}：各端口 DC 偏置
+  \item \texttt{OPENPIN}：开路 pin（高阻）
+  \item \texttt{SPICE2LEF\_PIN\_MAPPING}：Spice 与 LEF pin 名映射
+  \item \texttt{SWITCH\_TIMING\_CHAR [0|1]}：是否表征开关时序
+  \item \texttt{EXTERNAL/INTERNAL\_CONTROL\_PIN}：外/内控制 pin 声明
+  \item \texttt{CONTROL\_SLEW}：控制 pin 转换时间
+  \item \texttt{INT\_TIMING\_ON2OFF / INT\_TIMING\_OFF2ON}：内部时序
+  \item \texttt{SIM\_ON\_STATE\_ONLY}：仅仿真 ON 态加速
+  \item \texttt{DYNAMIC\_ADAPTIVE\_RON}：自适应 ON 电阻
+  \item \texttt{PIECEWISE\_SWITCH\_INPUT}：分段线性控制波形文件
+\end{itemize}
+
+\subsection{IP 块无文本标签流程步骤}
+\begin{enumerate}
+  \item 对各唯一开关 master 运行 gds2def 提取 \texttt{<cell>\_adsgds.lef}
+  \item 建宏模型：\texttt{LEF\_FILES}、\texttt{SWITCH\_CELLS}、\texttt{VP\_PAIRS}、\texttt{USE\_LEF\_PINS\_FOR\_TRACING 1}
+  \item \texttt{qswitch} 提取开关子电路
+  \item \texttt{aplsw} 表征四态模型
+  \item \texttt{ACE} 生成等效 R/C/漏电
+  \item RedHawk 导入 \texttt{GDS\_FILE}、\texttt{SWITCH\_MODEL\_FILE}、\texttt{VP\_CONTROL}
+\end{enumerate}
+
+\subsection{门控时钟与低功耗模式说明}
+\subsubsection*{Gated Clock and Low-Power Mode Notes}
+
+门控时钟设计中每个功耗模式须单独分析，并使用该模式专用 STA 文件（见第~\ref{chap:dvd}~章门控时钟动态分析）。\texttt{setup analysis\_mode lowpower} 启用低功耗仿真优化；与 VCD/无向量动态分析可组合用于混合功耗场景验证。
+
+\subsection{低功耗分析检查清单}
+\subsubsection*{Low-Power Analysis Checklist}
+
+\begin{enumerate}
+  \item 多 Vdd：\texttt{VDD\_NETS} 定义；P/G arc 与 I/O 非对称电流
+  \item 电源门控：\texttt{aplsw} 四态模型；GSC \texttt{POWERUP/POWERDOWN}；\texttt{SWITCH\_MODEL\_FILE}
+  \item IP 开关：gds2def \texttt{DEFINE/EXTRACT\_SWITCH\_CELLS}；\texttt{qswitch}；\texttt{VP\_CONTROL}
+  \item 开关 RAM：Case 1--4 GDS2DEF；\texttt{SWITCH\_MODEL\_MODE}；Ramp-up 须 \texttt{VP\_CONTROL}
+  \item LDO：\texttt{APLDO}；\texttt{LDO\_MODEL\_FILE}；GSC \texttt{ENABLE/DISABLE} 或 \texttt{LDO\_INST\_CONFIG}
+  \item 报告：\texttt{switch\_static/dynamic.rpt}、\texttt{charge\_switch.rpt}、\texttt{ldo\_dynamic.rpt}
+\end{enumerate}
+
+\subsection{双使能 pin 与开关阈值检查补充}
+\subsubsection*{Dual Enable and Switch Threshold Checks}
+
+\gsr{CHECK_SWITCH_POWERON} 在 ramp-up 后验证所有控制 pin 达阈值：
+\begin{lstlisting}
+CHECK_SWITCH_POWERON {
+    THRESHOLD <threshold_all_V>
+    <cellname> <cell_threshold_V>
+    ...
+}
+\end{lstlisting}
+输出 \texttt{switch\_poweron.rpt} 列出违例 instance 与控制 pin 电压（图~\ref{fig:lp-switch-poweron}）。与 \texttt{PIECEWISE\_SWITCH\_INPUT}、STA 控制 pin TW 共同决定实际上电顺序。
+
+\subsection{aplsw 与 apldi 命令摘要}
+\subsubsection*{aplsw and apldi Command Summary}
+
+\begin{lstlisting}
+aplsw [-c] [-d] [-o <output_file>] <sw_config_list.conf>
+apldi -w -s2 [-l <cell_list>] [-p <decap_list>] <apl_config_file>
+\end{lstlisting}
+开关主配置列表每行一个开关 conf 文件；\texttt{aplsw.out} 含四态电气参数，\textbf{勿手动编辑}。全单元 PWL 电容须 \texttt{apldi -w -s2} 或 \texttt{PIECEWISE\_CAP\_FILE}。
+
+\paragraph{开关 RAM On-state 结果检查}
+确认功耗计算成功、P/G pin instance 连接正确；\cmd{plot current -net -name <internal net>} 验证内部域电流分配；Ramp-up 须检查 \texttt{VP\_CONTROL} 与 GSC \texttt{POWERUP} 时序叠加是否符合预期。
+
+\paragraph{LDO CPM 生成命令}
+\begin{lstlisting}
+perform powermodel -nx <x> -ny <y> -vcd -pincurrent -global_gnd
+    -o CPM_LDO -probe -reportcap
+\end{lstlisting}
+须 GSR \texttt{LDO\_MODEL\_FILE}、\texttt{DECOUPLE\_LDO\_GROUND 1}，且 LDO 在 \texttt{WHITE\_BOX\_CELLS} 中声明。
+

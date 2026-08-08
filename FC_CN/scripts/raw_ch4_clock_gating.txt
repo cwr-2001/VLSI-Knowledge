@@ -1,0 +1,1975 @@
+
+===== PAGE 285 =====
+Feedback
+4
+Clock Gating
+RTL clock gating is a power optimization feature provided by the Fusion Compiler tool. 
+This is a high-level optimization technique that can save a significant amount of power by 
+adding clock gates to registers that are not always enabled and have synchronous load-
+enable or explicit feedback loops. The tool gates flip-flops by extracting common enable 
+signals shared by the flip-flops either in the same hierarchy or across hierarchies. This 
+technique greatly reduces dynamic power consumption by reducing the switching activity 
+on the clock inputs to registers and eliminating the multiplexers. It can also result in a 
+smaller chip area.
+Clock gating occurs by default during the compile_fusion  command using specified 
+clock-gating settings. If you do not specify any clock-gating constraints, the default 
+constraints are used. While you cannot disable clock gating, you can use the clock-gating 
+commands in this section to prevent insertion of clock gates in specific blocks or the whole 
+design.
+The tool identifies preexisting clock-gating cells during the analyze  and elaborate 
+commands. The tool inserts one more level of clock-gating cells at the leaf level.
+For more information, see the following topics:
+•
+Introduction to Clock Gating
+•
+Clock-Gating Prerequisite Conditions
+•
+Setting Up Clock Gating
+•
+Clock Gating Flows
+•
+Replacing Clock Gates
+•
+Controlling Clock-Gate Latencies
+•
+Controlling the Number of Clock-Gate Levels
+•
+Merging Clock Gates
+•
+Setting Clock Gating Transformations
+•
+Setting Routing Rules for Clock Gates
+•
+Clock Gating and Multibit Registers
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+285
+
+===== PAGE 286 =====
+Chapter 4: Clock Gating
+Introduction to Clock Gating
+Feedback
+•
+Placement-Aware Clock Gating
+•
+Fanin-Based Sequential Clock Gating
+•
+Reporting Clock-Gating Results
+•
+Reporting Clock-Gate Enable Signals
+•
+Clock Gate Efficiency Reporting
+•
+Self-Gating Optimization
+•
+Special Naming and Querying for DFT Wrapper Clock Gates
+Introduction to Clock Gating
+Clock gating applies to synchronous load-enable registers, which are flip-flops that share 
+the same clock and synchronous control signals. Synchronous control signals include 
+synchronous load-enable, synchronous set, synchronous reset, and synchronous toggle.
+Synchronous load-enable registers are represented by a register with a feedback loop 
+that maintains the same logic value through multiple cycles. Clock gating applied to 
+synchronous load enable registers reduces the power needed when reloading the register 
+banks.
+Figure 45 shows a simple register bank implementation using a multiplexer and feedback 
+loop.
+Figure 45
+Synchronous Load-Enable Register With Multiplexer
+Flip Flop
+Mux
+Control 
+Logic
+Register 
+Bank
+EN
+CLK
+DATA IN
+0
+1
+DATA OUT
+When the synchronous load enable signal (EN) is at logic state 0, the register bank is 
+disabled. In this state, the circuit uses the multiplexer to feed the Q output of each storage 
+element in the register bank back to the D input. When the EN signal is at logic state 1, the 
+register is enabled, allowing new values to load at the D input.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+286
+
+===== PAGE 287 =====
+Chapter 4: Clock Gating
+Introduction to Clock Gating
+Feedback
+These feedback loops can unnecessarily use power. For example, if the same value is 
+reloaded in the register throughout multiple clock cycles (EN equals 0), the register bank 
+and its clock net consume power while values in the register bank do not change. The 
+multiplexer also consumes power.
+Clock gating eliminates the feedback net and multiplexer shown in Figure 45 by inserting a 
+gate in the clock net of the register.
+Note:
+While applying the clock-gating techniques, the tool considers generated clocks 
+similar to defined clocks.
+The clock-gating cell selectively prevents clock edges, thus preventing the gated-clock 
+signal from clocking the gated register.
+Figure 46 shows a latch-based clock-gating cell and the waveforms of the signals are 
+shown with respect to the clock signal, CLK.
+Figure 46
+Latch-Based Clock Gating
+Flip Flop
+Control 
+Logic
+Register 
+Bank
+D
+Q
+G
+Latch
+CLK
+ENCLK
+ENL
+EN
+CLK
+DATA IN
+DATA OUT
+CLK
+CLK
+EN
+ENL
+ENCLK
+The clock input to the register bank, ENCLK, is gated on or off by the AND gate. ENL is 
+the enabling signal that controls the gating; it derives from the EN signal on the multiplexer 
+shown in Figure 45. The register bank is triggered by the rising edge of the ENCLK signal.
+The latch prevents glitches on the EN signal from propagating to the register’s clock pin. 
+When the CLK input of the 2-input AND gate is at logic state 1, any glitching of the EN 
+signal could, without the latch, propagate and corrupt the register clock signal. The latch 
+eliminates this possibility because it blocks signal changes when the clock is at logic 1.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+287
+
+===== PAGE 288 =====
+Chapter 4: Clock Gating
+Introduction to Clock Gating
+Feedback
+In latch-based clock gating, the AND gate blocks unnecessary clock pulses by maintaining 
+the clock signal’s value after the trailing edge. For example, for flip-flops inferred by HDL 
+constructs of rising-edge clocks, the clock gate forces the gated clock to 0 after the falling 
+edge of the clock.
+By controlling the clock signal for the register bank, you can eliminate the need for 
+reloading the same value in the register through multiple clock cycles. Clock gating 
+inserts clock-gating circuitry into the register bank’s clock network, creating the control to 
+eliminate unnecessary register activity.
+Clock gating does the following:
+•
+Reduces clock network power dissipation
+•
+Relaxes datapath timing
+•
+Reduces congestion by eliminating feedback multiplexer loops
+For designs that have large register banks, clock gating can save power and area by 
+reducing the number of gates in the design. However, for smaller register banks, the 
+overhead of adding logic to the clock tree might not compare favorably to the power saved 
+by eliminating a few feedback nets and multiplexers.
+Naming Convention for Tool-Inserted Clock Gates
+Clock gates inserted by the Fusion Compiler tool use a naming convention that is 
+consistent between runs. The naming convention is as follows:
+prefix_base-name[_index]
+•
+The prefix is clock_gate  by default. To change the prefix, set the 
+compile.clockgate.clock_gate_name_prefix  application option.
+•
+The base name is the most frequent instance name among the registers gated by the 
+clock gate. The base name does not include bus bit indexes.
+•
+If necessary to resolve a naming conflict between clock gates, the tool adds an 
+underscore separator character and an integer index number beginning with 0.
+For example, if the tool inserts a clock gate that gates a register named out_reg, the clock 
+gate is named clock_gate_out_reg. If the tool inserts a second clock gate for a register 
+named out_reg (perhaps on a different bit in the same bus), the clock gate is named 
+clock_gate_out_reg_0.
+However, if the tool inserts a clock gate for a register named out_reg_1, the inserted clock 
+gate is named clock_gate_out_reg_1_0 to avoid conflicts with the names of clock gates 
+related to the out_reg register.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+288
+
+===== PAGE 289 =====
+Chapter 4: Clock Gating
+Introduction to Clock Gating
+Feedback
+Clock Gating in the Compile Log File
+The compile log file contains information about clock gating, which can help you debug 
+simple setup issues.
+By default, the clock-gating information is displayed after
+•
+Clock-gate insertion n the initial_map  stage
+•
+Clock-gate restructuring in the logic_opto  stage
+•
+Clock-gate restructuring in the initial_opto  stage
+•
+Self-gating insertion in the initial_opto  stage, if enabled
+The reported information includes the following:
+•
+The number of preexisting clock gates that have a dont_touch  attribute, which 
+prevents optimization and might lead to unsatistactory results
+•
+The number of clock-gating library cells that have a CTS purpose, which is required for 
+insertion
+•
+Clock-gating metrics such as the number of elements and the number of gated 
+registers
+•
+A summary of reasons for registers that could not be gated
+If the self-gating or fanin-based sequential clock gating features are enabled, their metrics 
+are displayed separately.
+An example of the compile log for a run that includes self-gating is as follows:
+Number of Pre-Exsting Clock Gates with dont_touch Attribute: 0
+Number of ICG library cells with CTS purpose: 12
+---------------------------------------------------------------------------
+                 Tool Gated Register Summary
+---------------------------------------------------------------------------
+Clock Gating Type    | Number of Clock Gates  | Register Count | Bitwidth
+                     |                        |                | Equivalent
+---------------------------------------------------------------------------
+Regular Clock Gating |        1               |       2        |       2
+Self Gating          |        0               |       0        |       0
+---------------------------------------------------------------------------
+---------------------------------------------------------------------------
+                 Regular Clock Gating Ungated Register Summary
+---------------------------------------------------------------------------
+          Ungated Reason                      |     Count      | Bitwidth
+---------------------------------------------------------------------------
+Enable is Constant One                        |       2        |      2
+---------------------------------------------------------------------------
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+289
+
+===== PAGE 290 =====
+Chapter 4: Clock Gating
+Introduction to Clock Gating
+Feedback
+---------------------------------------------------------------------------
+                 Self Gating Ungated Register Summary
+---------------------------------------------------------------------------
+          Ungated Reason                      |     Count      | Bitwidth
+---------------------------------------------------------------------------
+Register is clock gated, and ineraction       |                |
+   is set to none                             |       2        |      2
+The tool as not able to find enough registers |                |
+   that are compatible to this register       |                |
+   in order to be gated.                      |       2        |      2
+---------------------------------------------------------------------------
+Clock-Gate Levels and Stages
+The tool uses the following definitions for clock-gate levels and stages in clock-gating 
+commands and options:
+•
+The clock-gate level is related to the fanin of a clock gate.
+◦
+Level 0 refers to a clock source.
+◦
+Level 1 refers to the first clock gate downstream from the clock source.
+◦
+Level 2 refers to a clock gate driven by a clock gate of level 1.
+◦
+Level N refers to a clock gate driven by a clock gate of level N-1.
+•
+The clock-gate stage is related to the fanout of a clock gate.
+◦
+Stage 0 refers to a register driven by a clock gate.
+◦
+Stage 1 refers to a clock gate that only drives registers directly or across buffers, 
+inverters, or hierarchical transitions. In addition, stage 1 is assigned to clock gates 
+whose stage cannot be determined, such as unloaded clock gates.
+◦
+Stage N refers to a clock gate that drives at least one clock gate of stage N-1, either 
+directly or across buffers, inverters, or hierarchical transitions.
+The tool keeps a separate count of levels and stages for all clock gates and for tool-
+inserted clock gates.
+Figure 47 shows a simple circuit with two preexisting clock gates (P1 and P2) and three 
+tool-inserted clock gates (T1, T2, and T3). Table 23 lists the levels and stages for each of 
+the clock gates.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+290
+
+===== PAGE 291 =====
+Chapter 4: Clock Gating
+Introduction to Clock Gating
+Feedback
+Figure 47
+Design With Multiple Clock Gates
+Table 23
+Clock-Gate Levels and Stages
+Object
+Type
+Level
+(all clock 
+gates)
+Level
+(tool-inserted 
+clock gates)
+Stage
+(all clock 
+gates)
+Stage
+(tool-inserted 
+clock gates)
+P1
+Preexisting 
+clock gate
+1
+0
+4
+2
+P2
+Preexisting 
+clock gate
+2
+0
+3
+2
+T1
+Tool-inserted 
+clock gate
+3
+1
+2
+2
+T2
+Tool-inserted 
+clock gate
+4
+2
+1
+1
+T3
+Tool-inserted 
+clock gate
+3
+1
+1
+1
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+291
+
+===== PAGE 292 =====
+Chapter 4: Clock Gating
+Clock-Gating Prerequisite Conditions
+Feedback
+Clock-Gating Prerequisite Conditions
+Before gating the clock signal of a register, the Fusion Compiler tool checks to see if 
+certain clock-gating conditions are satisfied. The tool inserts a clock gate only if all the 
+clock-gating conditions are met:
+•
+The circuit demonstrates synchronous load-enable functionality.
+•
+The circuit satisfies the setup condition.
+•
+The register bank or group of register banks satisfies the minimum number of bits you 
+specify with the set_clock_gating_options  -minimum_bitwidth  command. The 
+default minimum bitwidth is 3.
+After clock gating is complete, the status of clock-gating conditions for gated and ungated 
+register banks appears in the clock-gating report. For information about the clock-gating 
+report, see Reporting Clock-Gating Results.
+Clock-Gating Conditions
+The register must satisfy the following conditions for the tool to gate the clock signal of the 
+registers:
+•
+Enable condition
+If the register bank’s synchronous load-enable signal is a constant logic 1, reducible to 
+logic 1, or logic 0, the condition is false  and the circuit is not gated. If the synchronous 
+load-enable signal is not a constant logic 1 or 0, the condition is true  and the setup 
+condition is checked. The enable condition is the first condition that the tool checks. For 
+more information, see Clock-Gating Enable Condition.
+•
+Setup condition
+This condition applies to latch-free clock gating only. The enable signal must come 
+from a register that uses the same clock as the register being gated. The setup 
+condition is checked only if the register satisfies the enable condition. For more 
+information, see Clock-Gating Setup Condition.
+•
+Width condition
+The width condition is the minimum number of bits for gating registers or groups 
+of registers with equivalent enable signals. The default is 3. You can set the width 
+condition by using the -minimum_bitwidth  option of the set_clock_gating_options 
+command. The width condition is checked only if the register satisfies the enable 
+condition and the setup condition.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+292
+
+===== PAGE 293 =====
+Chapter 4: Clock Gating
+Setting Up Clock Gating
+Feedback
+Clock-Gating Enable Condition
+The enable condition of a register or clock gate is a combinational function of nets in the 
+design. The enable condition of a register represents the states for which a clock signal 
+must be passed to the register. The enable condition of a clock gate corresponds to the 
+states for which a clock is passed to the registers in the fanout of the clock gate. The tool 
+uses the enable condition of the registers for clock-gate insertion.
+Enable conditions are represented by Boolean expressions for nets. For example:
+module TEST (en1, en2, en3, in, clk, dataout);
+  input en1, en2, en3, clk;
+  input [5:0] in;
+  output [5.0] dataout;
+  reg [5.0] dataout;
+  wire enable;
+  assign enable = (en1 | en3) & en2;
+always @( posedge clk ) begin
+       if( enable )
+          dataout <= in;
+       else
+          dataout <= dataout;
+end
+endmodule
+In this example, the enable condition for the register bank dataout_reg* can be expressed 
+as en1 en2 + en3 en2.
+Clock-Gating Setup Condition
+To perform clock gating, the tool requires that the enable signal of the register bank is 
+synchronous with its clock. This is the setup condition.
+For latch-based or integrated clock gating, the tool can insert clock gating irrespective of 
+the enable signal’s and the clock’s clock domains. If the enable signal and the register 
+bank reside in different clock domains, you must ensure that the two clock domains are 
+synchronous and that the setup and hold times for the clock-gating cell meet the timing 
+requirements.
+An exception exists for primary input ports that use a clock specified with the 
+set_input_delay  command. In this case, the input port is synchronous with the clock and 
+the setup condition is true.
+Setting Up Clock Gating
+The clock gating feature only supports latch-based integrated clock-gating cells. Tool-
+inserted clock-gating cells do not have a wrapper hierarchy.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+293
+
+===== PAGE 294 =====
+Chapter 4: Clock Gating
+Setting Up Clock Gating
+Feedback
+Clock-gating optimization uses the following defaults:
+•
+The maximum fanout is infinite.
+•
+The minimum bitwidth is three.
+•
+A latch-based precontrol cell for both positive-edge and negative-edge triggered flip-
+flops is used as a clock-gating cell. If only positive-edge or negative-edge clock-gating 
+cells are available, the tool inserts inverters on both sides of the clock-gating cell.
+You must load a design and libraries before you can set up clock-gating constraints. To set 
+up clock gating, follow these steps:
+1. Load the design and libraries
+2. Set the style by using the set_clock_gate_style  command
+3. Set the options by using the set_clock_gating_options  command
+4. Specify objects to be included or excluded from clock gating by using the 
+set_clock_gating_objects  command
+5. Allow other clock-gating cell types for optimization by using the following command:
+fc_shell> set_lib_cell_purpose -include cts [get_lib_cells ...]
+For more information, see the following topics:
+•
+Setting the Clock-Gating Style
+•
+Setting Clock-Gating Options
+•
+Enabling or Disabling Clock Gating on Design Objects
+•
+Clock-Gating Enable Source Selection
+•
+User-Driven Enable Exclusion
+•
+Report Clock Gating Options
+Setting the Clock-Gating Style
+Use the set_clock_gate_style  command to select the type of integrated clock-gating 
+cell you want to use. The following options are available:
+Option
+Description
+-test_point
+Specifies the test point position with respect to the latch 
+within the integrated clock gate. Valid values are none, 
+before  (the default), and after.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+294
+
+===== PAGE 295 =====
+Chapter 4: Clock Gating
+Setting Up Clock Gating
+Feedback
+Option
+Description
+-observation_output
+Specifies that the library clock-gating cell must have 
+an observation output pin. Valid values are true  and 
+false.
+-target
+Specifies the type of target sequential elements. 
+Valid values are pos_edge_flip_flop  and 
+neg_edge_flip_flop. The default is both.
+-objects
+Objects to which the clock gate applies.
+Setting Clock-Gating Options
+Use the set_clock_gating_options  command to define the netlist structure of the 
+inserted clock-gating cells. The following options are available:
+Option
+Description
+-minimum_bitwidth
+Specifies the minimum number of accumulated bits that 
+can be gated. The default is 3.
+-max_fanout
+Specifies the maximum number of cells gated by the 
+same clock-gating cell. The default is infinite.
+-objects
+Specifies the list of objects to which the clock-gating 
+options are applied. The design objects can be 
+hierarchical instances, power domains, and designs.
+Enabling or Disabling Clock Gating on Design Objects
+You can enable or disable clock gating on certain design objects by overriding all 
+necessary conditions set by the clock-gating style. The set_clock_gating_objects 
+command specifies the design objects on which clock gating should be enabled or 
+disabled during the compile_fusion  command.
+The following example excludes all registers in the subdesign ADDER, except the 
+out1_reg bank. The out1_reg bank is clock gated according to the specified clock-gating 
+style:
+fc_shell> set_clock_gating_objects -exclude ADDER \
+     -include ADDER/out1_reg[*]
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+295
+
+===== PAGE 296 =====
+Chapter 4: Clock Gating
+Setting Up Clock Gating
+Feedback
+The following example sets and then removes the inclusion and exclusion criteria specified 
+by the -include, -exclude, and -clear  options:
+fc_shell> set_clock_gating_objects -include ADDER/out1_reg[*] \
+     -exclude ADDER/out2_reg[*]
+fc_shell> set_clock_gating_objects \
+     -clear {ADDER/out1_reg[*] ADDER/out2_reg[*]}
+Clock-Gating Enable Source Selection
+By default, the tool extracts the clock-gating enable condition from one of these sources:
+•
+Signals connected directly to the synchronous enable pin of the sequential element, as 
+shown in Figure 48
+Figure 48
+Directly Connected Enable Signal
+•
+The enable condition on the feedback loops of the input and output data pins of the 
+sequential element, as shown in Figure 49
+Figure 49
+Enable Signal in a Feedback Loop
+When using clock gating, you can specify the signal source of the enable logic. The 
+set_clock_gating_objects -enable_source  option applies to all objects specified with 
+the -force  or -include  options in the same command. If you use the -enable_source 
+option, you cannot use the -clear, -reset, or -exclude  options.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+296
+
+===== PAGE 297 =====
+Chapter 4: Clock Gating
+Setting Up Clock Gating
+Feedback
+The -enable_source  option can be one of the following:
+•
+none
+•
+enable_pin_only
+•
+feedback_loop_only
+•
+both  (default)
+•
+prefer_enable_pin
+•
+prefer_feedback_loop
+For example, the following command inserts an always-enabled clock-gating cell:
+set_clock_gating_objects -force [get_cells u_dfx/input_b_reg*] \
+     -enable_source none
+The following command uses the enable signal from the synchronous enable pin, if there 
+is one. Otherwise, the tool uses the enable on the feedback loop of the register.
+set_clock_gating_objects -include [get_cells u_dfx/input_c_reg*] \
+     -enable_source prefer_enable_pin
+User-Driven Enable Exclusion
+The set_clock_gating_enable  command provides an interface to specify signals to 
+be excluded from clock-gating enable. The report_clock_gating -ungated  command 
+reports a new reason for registers that are not gated due to enable exclusion.
+The options and syntax of the set_clock_gating_enable  command are identical to the 
+corresponding Design Compiler command. Use this command to control the signals to 
+enable clock gating during clock-gate insertion. This command provides a mechanism to 
+specify why a given signal should not be used as an enable condition for clock gating.
+The syntax of the set_clock_gating_enable  command is as follows:
+status set_clock_gating_enable
+[-exclude objects_to_exclude]
+[-undo objects_to_remove_exclusion]
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+297
+
+===== PAGE 298 =====
+Chapter 4: Clock Gating
+Setting Up Clock Gating
+Feedback
+The following figure shows a circuit before enable exclusion:
+In this step, a forward traversal is performed from all user-specified exclusion signals until 
+endpoints (primary output ports, input ports of sequential cells, including clock gating cells, 
+black boxes, and so on) are reached. If the endpoint is a clock-gate-enable pin, then all 
+pins on the path are marked with a temporary design attribute for use in subsequent steps.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+298
+
+===== PAGE 299 =====
+Chapter 4: Clock Gating
+Setting Up Clock Gating
+Feedback
+The following figure shows a circuit after enable exclusion:
+Report Clock Gating Options
+The report_clock_gating_options  command reports the clock gating settings used for 
+the current design. The command output includes a table that reports minimum bitwidth 
+and maximum fanout for each relevant object. A parameter to print options set up only for 
+certain objects is also available.
+The available parameters for the command are as follows:
+•
+No split: By default, long names are split in multiple lines for easier human reading. 
+Enabling this option makes names print in a single line.
+•
+Objects: A list of hierarchical objects to query. Ignores the rest of the objects in the 
+design, and displays an error for each non-hierarchical cell passed with CGT-2500  and 
+CGT-2501  warning messages.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+299
+
+===== PAGE 300 =====
+Chapter 4: Clock Gating
+Setting Up Clock Gating
+Feedback
+The output of the report_clock_gating_options  command is shown in Figure 50:
+Figure 50
+Output of the report_clock_gating_options Command
+When no gating options have been set, or when the design has been set only with specific 
+options, the table displays the assigned options in a single row, alongside any other 
+objects that might have been passed through the -objects parameter.
+Figure 51 shows the report_clock_gating_options  command output when no options 
+are set to specific objects.
+Figure 51
+Command Output With no Options set to Specific Objects
+Figure 52 shows the report_clock_gating_optionscommand output when no options 
+are set to specific objects, but both the design and b0  have been passed as parameters 
+for objects.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+300
+
+===== PAGE 301 =====
+Chapter 4: Clock Gating
+Clock Gating Flows
+Feedback
+Figure 52
+Command Output With no Specific Object Options but Passed as Parameters
+When multiple objects are set using the same options, they appear in a single row, with 
+the name column being divided into multiple lines if the -nosplit  parameter is not used. 
+Otherwise, everything occupies a single line.
+report_clock_gating_options -objects {design, obj1, obj2, obj3, obj4}
+Figure 53
+Command Output With the Same Option set to Multiple Objects
+Figure 54 shows the same scenario as Figure 53, but with the -nosplit  parameter:
+report_clock_gating_options -objects {design, obj1, obj2, obj3, obj4} 
+ -nosplit
+Figure 54
+Clock Gating Flows
+The Fusion Compiler tool inserts clock-gating cells during the compile_fusion  command. 
+The following topics describe clock-gating flows:
+•
+Inserting Clock Gates in Multivoltage Designs
+•
+Inserting Clock Gates in an RTL Design
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+301
+
+===== PAGE 302 =====
+Chapter 4: Clock Gating
+Clock Gating Flows
+Feedback
+Inserting Clock Gates in Multivoltage Designs
+In a multivoltage design, the different hierarchies of the design might have different 
+operating conditions and use different target library subsets. When inserting clock-gating 
+cells in a multivoltage design, the tool chooses the appropriate library cells based on the 
+specified clock-gating style as well as the operating conditions that match the operating 
+conditions of the hierarchical cell of the design. If you do not specify a clock-gating style, 
+the tool uses a default style where the test point is before  and the observation output is 
+false.
+If the tool does not find a library cell that suits the clock-gating style and the operating 
+conditions, the tool issues a warning message and does not insert a clock-gating cell. To 
+check whether there are integrated clock-gate cells available for clock-gate insertion, use 
+the check_clock_gate_library_cell_availability  command.
+Inserting Clock Gates in an RTL Design
+To insert clock gating logic in an RTL design and to synthesize the design with the clock-
+gating logic, follow these steps:
+1. Read the RTL design.
+2. (Optional) Use the insert_dft  command to insert test cells into the design.
+3. Use the compile_fusion  command to compile the design.
+During the compile process, the tool inserts clock gates on the registers qualified for 
+clock-gating. By default, during clock-gate insertion, the compile_fusion  command 
+uses the clock gating default settings and also honors the setup, hold, and other 
+constraints specified in the logic libraries. To override the setup and hold values 
+specified in the library, use the set_clock_gating_check  command before compiling 
+the design. The default settings are suitable for most designs.
+The compile_fusion  command automatically connects the scan enable and test ports 
+or pins of the integrated clock-gating cells, as needed.
+4. Use the report_clock_gating  command to report the registers and the clock-gating 
+cells in the design. Use the report_power  command to get information about the 
+dynamic power used by the design after clock-gate insertion.
+The following example illustrates a typical command sequence for clock using default 
+settings:
+fc_shell> read_verilog design.v
+fc_shell> create_clock -period 10 -name CLK
+fc_shell> compile_fusion
+fc_shell> insert_dft
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+302
+
+===== PAGE 303 =====
+Chapter 4: Clock Gating
+Replacing Clock Gates
+Feedback
+fc_shell> report_clock_gating
+fc_shell> report_power
+Replacing Clock Gates
+If you want to replace all the technology-independent clock gates in your RTL with 
+integrated clock-gating cells from the libraries, use the replace_clock_gates  command 
+before executing the compile_fusion  command. The replace_clock_gates  command 
+identifies combinational elements in the clock network acting as clock gates and replaces 
+them.
+When you use the replace_clock_gates  command, the tool honors the 
+constraints specified by the set_clock_gate_style, set_lib_cell_purpose, and 
+set_target_ligrary_subset  commands when it selects a library cell.
+When the tool identifies combinational elements, these elements must have only two input 
+pins (the clock pin and the enable signal pin) and only one output pin. If the cell does not 
+meet these criteria, the cell is not a candidate for replacement. The following table lists the 
+WVGTECH instances and their replacement cells.
+Combinational Cell in RTL
+Integrated Clock Gate Replacement
+AND gate
+Rising-edge triggered latch-based clock gate
+OR gate
+Falling-edge triggered latch-based clock gate
+NAND gate
+Falling-edge triggered latch-based clock gate. Clock 
+input pin is inverted.
+NOR gate
+Falling-edge triggered latch-based clock gate. Both 
+input pins are inverted.
+The new clock-gating cell is inferred with the following name:
+rep_clock_gate_+<instance_name_of_combinational_cell>
+The tool reports replaced clock gates as tool-inserted clock gates.
+Controlling Clock-Gate Latencies
+During synthesis, the Fusion Compiler tool assumes that clocks are ideal. An ideal clock 
+incurs no delay through the clock network. This assumption is made because real clock-
+network delays are not known until after clock tree synthesis. In reality, clocks are not ideal 
+and there is a nonzero delay through the clock network. For designs with clock gating, the 
+clock-network delay at the registers is different from the clock-network delay at the clock-
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+303
+
+===== PAGE 304 =====
+Chapter 4: Clock Gating
+Controlling Clock-Gate Latencies
+Feedback
+gating cell. This difference in the clock-network delay at the registers and at the clock-
+gating cell results in tighter constraints for the setup condition at the enable input of the 
+clock-gating cell.
+The tool can obtain clock-gate latencies in the following ways:
+•
+Integrated latency estimation
+By default, the tool estimates and updates clock-gate latencies throughout the flow. 
+Estimated clock latencies are more accurate than user-specified clock latencies.
+•
+User-specified latency
+You can disable integrated latency estimation for specific instances and specify latency 
+values manually.
+Integrated Clock-Gate Latency Estimation
+By default, the tool estimates and updates clock-gate latencies throughout the 
+compile_fusion  command flow. This ensures that the tool uses accurate clock-gate 
+latencies during datapath optimization and useful-skew optimization performed before 
+clock tree synthesis, when clocks are ideal.
+If you plan to perform structural multisource clock tree synthesis for 
+your design, ensure that the tool estimates clock-gate latencies that 
+are appropriate for structural multisource clock subtrees by setting the 
+opt.clock_latency_estimation.estimate_smscts_subtrees  application option to 
+true.
+To improve the accuracy of the estimated clock-gate latencies, specify clock tree synthesis 
+settings before you run the compile_fusion  command. Such settings include the clock 
+tree buffer library cell list, the clock tree inverter library cell list, and clock nondefault 
+routing rules.
+Estimated clock latencies are more accurate than user-specified clock latencies. In 
+addition, the tool updates the estimated clock latencies after steps such as placement and 
+multibit banking, while user-specified latencies are static values.
+To prevent the tool from estimating the latency for a specific clock gate, set the 
+dont_estimate_clock_latency  attribute on its clock pin by using the set_attribute 
+command, as shown in the following example:
+fc_shell> set_attribute \
+   [get_pins {ICG21/CK}] dont_estimate_clock_latency true
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+304
+
+===== PAGE 305 =====
+Chapter 4: Clock Gating
+Controlling Clock-Gate Latencies
+Feedback
+For best results, do not use the following features with integrated clock-gate latency 
+estimation:
+•
+Trial clock tree synthesis
+To disable this feature, set the compile.flow.trial_clock_tree  application option to 
+false.
+•
+Clock-gate optimization
+To disable this feature, set the compile.flow.optimize_icgs  application option to 
+false.
+•
+Placement-aware clock gating
+The tool automatically disables this feature when clock-gate latency estimation is 
+enabled regardless of the compile.clockgate.physically_aware  application option 
+setting.
+•
+User-specified latencies
+User-specified latencies are set by the set_clock_latency, 
+set_clock_gate_latency, set_clock_gating_check -setup, or set_path_margin 
+-setup  commands.
+The tool does not modify any set_clock_latency  constraints that you specify on clock-
+gating cells. Tool-estimated clock-gate latency values are stored as offsets from the user-
+specified values. You can see the offset values by using the write_script -format 
+icc2  command and checking for the set_clock_latency -offset  commands in the 
+generated output. If you do not set any latency values, the reported offsets are equal to the 
+estimated latency values.
+The estimated latency offset values are not captured in an SDC file generated by the 
+write_sdc  command.
+Latency estimates are most accurate if the relative locations of the clock gates and their 
+gated registers do not change during clock tree synthesis. To preserve the placement of 
+integrated clock gates, enable the automatic relocation of clock network cells by setting 
+the cts.compile.enable_cell_relocation  application option to auto  before clock tree 
+synthesis.
+User-Specified Clock-Gate Latency
+You cannot disable general integrated clock-gate latency estimation. However, you can 
+disable the feature for specific clock gates by setting a dont_estimate_clock_latency 
+attribute on their clock pins. This topic describes how to manually specify latency values 
+on those clock gates.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+305
+
+===== PAGE 306 =====
+Chapter 4: Clock Gating
+Controlling Clock-Gate Latencies
+Feedback
+Specify the clock network latency by using either the set_clock_latency  or 
+set_clock_gate_latency  command. The set_clock_gate_latency  command can be 
+used for both gate-level and RTL designs.
+The clock latency specified using the set_clock_gate_latency  command is annotated 
+on the registers during the compile_fusion  command when the clock-gating cells 
+are inserted. However, if you modify the latency values on the clock gates after the 
+compilation, you must manually apply the latency values on the existing clock-gating cells 
+using the apply_clock_gate_latency  command.
+Note:
+After you modify the clock-gate latency using the set_clock_gate_latency 
+command, if you compile your design using the compile_fusion  command, it 
+is not necessary to use the apply_clock_gate_latency  command to apply 
+the latency values. The tool annotates the specified value during compilation.
+To remove clock latency information previously set on clock-gating cells with the 
+set_clock_gate_latency  or apply_clock_gate_latency  commands, use the 
+reset_clock_gate_latency  command. This command removes the clock latency values 
+on the specified clocks. If you do not specify the clock, the clock latency values on all the 
+clock-gating cells are removed.
+The set_clock_latency Command
+Use the set_clock_latency  command to specify clock network latency for specific clock-
+gating cells.
+In Figure 55, lat_cgtoreg  is the estimated delay from the clock pin of the clock-gating 
+cell to the clock pin of the gated register and lat_reg  is the estimated clock-network 
+latency to the clock pins of the registers without clock gating.
+Figure 55
+Clock Latency With Clock-Gating Design
+Clock-
+Gating Cell
+Register
+Clock tree 
+delay
+Clock tree 
+delay
+lat_reg
+lat_cgtoreg
+For all clock pins of registers (gated or ungated) in the design that are driven by a specific 
+clock, use the lat_reg  value for the set_clock_latency  command. For clock pins of 
+all the clock-gating cells, use the difference between the lat_reg  and lat_cgtoreg 
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+306
+
+===== PAGE 307 =====
+Chapter 4: Clock Gating
+Controlling Clock-Gate Latencies
+Feedback
+values for the set_clock_latency  command. Because the purpose of setting the latency 
+values is to account for the different clock-network delays between the registers and 
+the clock-gating cell, it is important to get a reasonably accurate value of the difference 
+(lat_cgtoreg). The absolute values used are less important unless you are using these 
+values to account for clock-network delay issues not related to clock gating.
+The set_clock_gate_latency Command
+When you use the compile_fusion  command, clock gates are inserted during the 
+compilation process. To specify the clock network latency before the clock-gating cells 
+are inserted by the tool, use the set_clock_gate_latency  command. This command 
+lets you specify the clock network latency for the clock-gating cells as a function of the 
+clock domain, clock-gating stage, and the fanout of the clock-gating cell. The latency 
+that you specify is annotated on the clock-gating cells when they are inserted by the 
+compile_fusion  command. You can manually annotate the latency values on the existing 
+clock-gating cells in your design using the apply_clock_gate_latency  command.
+The set_clock_gate_latency  command takes the following arguments:
+•
+-clock clock_list
+•
+-stage clock_gate_stage
+•
+-fanout_latency fanout_list
+The fanout_list  is a list of tuples specifying a fanout range and a delay decrement. In 
+the following example, three fanout ranges are created: 1 to 5 with a latency value of 0.5, 
+6-15 with a latency value of 0.8, and 16 to infinity with a latency value of 0.6.
+set_clock_gate_latency -stage 1 \
+      -fanout_latency {{1-5 0.5} {6-15 0.8} {16-inf 0.6}}
+To specify a clock latency value for clock-gated registers, use the -stage  option with a 
+value of 0. Because you are specifying the latency value for the clock-gated registers, the 
+value for the -fanout_latency  option should be 1-inf  (1 to infinity) and the latency is the 
+absolute clock latency value for the registers, as shown in the following example:
+set_clock_gate_latency -clock CLK -stage 0\
+      -fanout_latency {1-inf 1.0}
+If the -clock  option is not specified, the setting applies to all clocks in the design.
+Clock latencies using the set_clock_latency  command have higher precedence and are 
+not overwritten.
+Figure 56 shows an example of clock-gate stages and fanout.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+307
+
+===== PAGE 308 =====
+Chapter 4: Clock Gating
+Controlling Clock-Gate Latencies
+Feedback
+Figure 56
+Clock-Gating Stages and Latency Calculations
+The following commands set the latency values for Figure 56:
+set_clock_gate_latency -stage 0 -fanout_latency {{1-inf 1.0}}
+set_clock_gate_latency -stage 1 -fanout_latency {{1-inf 0.3}}
+set_clock_gate_latency -stage 2 -fanout_latency {{1-inf 0.2}}
+set_clock_gate_latency -stage 3 -fanout_latency {{1-inf 0.1}}
+Figure 57 shows another example of fanout and latency calculations.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+308
+
+===== PAGE 309 =====
+Chapter 4: Clock Gating
+Controlling the Number of Clock-Gate Levels
+Feedback
+Figure 57
+Latency Calculations With Varying Fanout
+The following commands specify the latency and fanout for Figure 57.
+set_clock_gate_latency -stage 0 \
+   -fanout_latency {{1-inf 1.6}}
+set_clock_gate_latency -stage 1 \
+   -fanout_latency {{1-20 0.6} {21-inf 0.8}}
+set_clock_gate_latency -stage 2 \
+   -fanout_latency {{1-20 0.2} {21-inf 0.3}}
+set_clock_gate_latency -stage 3 \
+   -fanout_latency {{1-30 0.1} {31-65 0.8} {66-inf 0.18}}
+set_clock_latency "0.4" {uicg_a/CK}
+Note that for the clock gate uicg_a, the latency value of 0.4 is assigned using the 
+set_clock_latency  command, which cannot be overwritten.
+Controlling the Number of Clock-Gate Levels
+The number of clock-gate levels is the count of clock gates between a clock source and a 
+register. Standard clock-gate insertion provides one level of clock-gate insertion. However, 
+designs often contain preexisting clock gates, in which case the design might contain 
+multiple levels of clock gates.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+309
+
+===== PAGE 310 =====
+Chapter 4: Clock Gating
+Controlling the Number of Clock-Gate Levels
+Feedback
+You can modify the default clock-gate insertion operation by allowing additional levels of 
+clock gating, by limiting the number of clock-gate levels, or both.
+Clock-Gate Multilevel Expansion
+It is difficult to determine the optimum number of clock-gate levels manually. The Fusion 
+Compiler tool can analyze all clock gates and insert additional clock gates to take 
+advantage of shared enable signals. Inserting additional clock gates might improve power, 
+area, or other metrics, depending on the design. If six or more clock gates share an enable 
+signal, the tool inserts an additional level of clock gates. The new clock gates are then 
+considered for further level expansion. As a result, the tool might insert multiple levels of 
+clock gates during this operation.
+To allow the tool to expand the number of clock-gate levels, set the 
+compile.clockgate.enable_level_expansion  application option to true  (the default 
+is false) and set the compile.clockgate.max_number_of_levels  application option to 
+a nonzero value (the default is 0). In this case, the tool adds clock gates until either of the 
+following conditions is met:
+•
+All common enable signals are identified and used for multilevel clock-gate expansion.
+•
+The user-specified maximum number of clock-gate levels is reached.
+The tool names a newly-inserted clock gate as follows, based on the status of the set of 
+clock gates whose enable functions are modified by the new clock gate:
+•
+If at least one of the clock gates is a tool-inserted clock gate, the base name is 
+clock_gate_ml. The name is appended with the register base name, similar to the 
+naming convention for other tool-inserted clock gates.
+•
+If all of the clock gates are preexisting clock gates, the tool uses the name of the 
+preexisting clock gate with the largest fanout and appends _ml_pe.
+The compile.clockgate.max_number_of_levels  application option specifies the 
+maximum number of allowed clock-gate levels. The default is 0, which allows an 
+infinite number of levels. However, to use the clock-gate level expansion capability, 
+you must set this application option to a nonzero value (in addition to setting the 
+compile.clockgate.enable_level_expansion  application option to true).
+If you specify clock-gate level expansion, but the maximum number of allowed levels is 
+low, the expansion operation cannot take full advantage of the tool's ability to analyze 
+common enable signals.
+To enable or disable clock-gate level expansion for specific clock gates, use the 
+set_clock_gate_transformations -expand_levels  command.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+310
+
+===== PAGE 311 =====
+Chapter 4: Clock Gating
+Controlling the Number of Clock-Gate Levels
+Feedback
+The following usage notes apply:
+•
+New clock gates inherit the constraints set by the set_clock_gate_transformations, 
+set_clock_gate_style, set_dont_touch, set_size_only, set_lib_cell_purpose, 
+and set_boundary_optimization  commands.
+•
+Clock-gate latency estimations are updated after the insertion operation.
+•
+When the insertion operation modifies the enable signal of a clock gate, the gate 
+retains its original designation of being either preexisting or tool-inserted.
+•
+Self-gating is restricted from adding another clock-gate level if the maximum number of 
+levels is already reached.
+•
+Integrated clock gates inside multibit cells are counted as part of the clock-gate level 
+count. However, they are not candidates for clock-gate level expansion.
+•
+New clock gates do not inherit timing exceptions.
+Clock-Gate Collapsing
+The default of the compile.clockgate.max_number_of_levels  application option is 0, 
+which allows an infinite number of levels.
+You can set the compile.clockgate.max_number_of_levels  application option without 
+enabling clock-gate level expansion. In this case, the tool collapses clock-gate levels if the 
+specified limit is less than the number of clock-gate levels that exist after the initial_map 
+stage. The tool collapses clock-gate levels as follows:
+•
+The tool first tries to collapse clock gates at levels higher than the specified maximum 
+level, starting from the clock gates at the highest level (closest to the registers).
+•
+If a specific clock gate cannot be collapsed, the tool tries to collapse upstream clock 
+gates until it reaches the lowest level (closest to the source). The collapse can occur 
+across hierarchies. The tool tries to preserve the parent (upstream) clock gate.
+•
+The tool removes all remaining clock gates that do not meet the maximum number of 
+levels.
+Controlling Tool-Inserted Clock-Gate Levels
+You can specify the maximum number of clock-gate levels that the tool should use for 
+either all clock gates or only tool-inserted clock gates. If you specify a value for all clock 
+gates, you must know how many clock-gate levels already exist in the RTL design. 
+Alternatively, you can specify a value only for tool-inserted clock gates. For details about 
+how the Fusion Compiler tool counts clock-gate levels, see Clock-Gate Levels and Stages.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+311
+
+===== PAGE 312 =====
+Chapter 4: Clock Gating
+Controlling the Number of Clock-Gate Levels
+Feedback
+To specify the maximum number of clock-gate levels, use the 
+set_clock_gating_tree_options  command with one of the following mutually exclusive 
+options:
+•
+The -max_total_levels  option specifies the maximum number of levels for all clock 
+gates. The argument is an integer greater than or equal to 1.
+•
+The -max_tool_inserted_levels  option specifies the maximum number of levels for 
+tool-inserted clock gates. The argument is an integer greater than or equal to 1.
+To restrict the clock-level control to specific clock sources, use the the -clocks  option 
+of the set_clock_gating_tree_options  command, which takes a list of clocks as an 
+argument.
+To allow clock-gate removal (also known as ungating) if some clock gates are not 
+collapsible when the tool attempts to meet the maximum clock level constraint, use the 
+-ungate_if_not_collapsible  option.
+Activity-Based Optimization
+If you load a SAIF file, the Fusion Compiler tool analyzes the switching activity to evaluate 
+whether to expand a tool-inserted clock gate. This analysis prevents the insertion of 
+unnecessary clock gates.
+For example, in Figure 58, clock gates A1 and A2 are each common to two paths and are 
+therefore candidates for multilevel expansion.
+Figure 58
+Before Clock-Gate Level Expansion
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+312
+
+===== PAGE 313 =====
+Chapter 4: Clock Gating
+Merging Clock Gates
+Feedback
+However, if clock gate A2 is always enabled, it has a toggle rate of 0 and a static 
+probability of 1. Adding another clock-gate level does not provide any benefit in this case. 
+The final configuration is shown in Figure 59.
+Figure 59
+After Clock-Gate Level Expansion
+If clock-gate level expansion is enabled, the Fusion Compiler tool performs activity-
+driven analysis by default. If a SAIF file is not available, disable this feature by setting the 
+compile.clockgate.enable_activity_drivel_level_expansion  application option to 
+false  (the default is true).
+If clock-gate level expansion is disabled, the tool ignores the 
+compile.clockgate.enable_activity_driven_level_expansion  application option.
+Merging Clock Gates
+By merging clock gates, the tool attempts to minimize the number of clock gates while 
+maximizing clock-gating coverage. The tool looks for clock-gating cells that share a 
+common clock and enable signal. This feature is on by default.
+The fanout of clock-gating cells in different hierarchies can be moved to a clock-gating cell 
+in a common ancestor if there is no restriction preventing port punching. Note that the the 
+tool also checks clock-gating style and multivoltage constraints.
+Clock-gating cells with the dont_touch  or size_only  constraints are not optimized.
+To disable this feature, use the set_clock_gate_transformations  command.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+313
+
+===== PAGE 314 =====
+Chapter 4: Clock Gating
+Setting Clock Gating Transformations
+Feedback
+Setting Clock Gating Transformations
+By default, clock gating optimization occurs automatically when you synthesize fhs design. 
+You can, however, define settings to allow or prevent clock gating optimization on specific 
+objects.
+The tool makes no distinction among clock gates. Every clock gate is subject to 
+optimization, whether it is a preexisting or tool-inserted clock gate.
+The simplest way to restrict clock gating optimization is by using the set_dont_touch 
+and set_size_only  commands. These commands restrict all clock gating optimization by 
+preventing removal, merging, and splitting of all clock gates.
+For a more refined approach, use the set_clock_gate_transformations  command. 
+With this command, you can set specific constraints on each integrated clock gate and 
+control which operations can be performed on the clock gate.
+The set_clock_gate_transformations  command provides the following options:
+•
+-split_fanout
+Setting this option to false  prevents fanout splitting even if the fanout is larger than 
+the maximum allowed. This setting also prevents any splitting performed by placement-
+aware clock gating.
+•
+-merge_equivalents
+Setting this option to true  allows a clock gate to be merged with an equivalent clock 
+gate.
+•
+-collapse_levels
+Setting this option to false  prevents redundant clock gates from being collapsed
+•
+-ungate_fanout
+Setting this option to true  specifies that the clock gate fanout remain ungated
+•
+-reset
+Resets all clock gate settings for the whole design
+If the size_only  or dont_touch  attributes are set on a clock-gating instance or clock- 
+gating library cell, these attributes take precedence over any of the constraints specified 
+by the set_clock_gate_transformations  command.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+314
+
+===== PAGE 315 =====
+Chapter 4: Clock Gating
+Setting Routing Rules for Clock Gates
+Feedback
+Example Using Clock Gating Transformations
+For the example in Figure 60, suppose you set the following restrictions:
+set_clock_gating_options -minimum_bitwidth 6
+set_clock_gate_transformations [get_cells uicg_b*] true \
+     -ungate_fanout false
+set_clock_gate_transformations [get_cells uicg_c*] false
+Figure 60
+Example of Clock Gating Restrictions
+During optimization, the tool removes the uicg_a clock gate because of a minimum 
+bitwidth violation (minimum bitwidth is 6). The uicg_b1 and uicg_b2 clock gates are 
+merged (assuming they have an equivalent enable signal). Even though the minimum 
+bitwidth is not met, ungating is not allowed, so the registers remain gated. The uicg_c1 
+and uicg_c2 clock gates do not allow any transformations, therefore no optimizations are 
+performed for these clock gates.
+Setting Routing Rules for Clock Gates
+When you set constraints for physical implementation, you can set nondefault routing 
+rules to define stricter (wider) wire width and spacing requirements for specific nets 
+to improve timing and reduce crosstalk. To specify nondefault routing rules, use the 
+create_routing_rule  and set_routing_rule  commands.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+315
+
+===== PAGE 316 =====
+Chapter 4: Clock Gating
+Clock Gating and Multibit Registers
+Feedback
+However, the set_routing_rule  command does not allow annotation on the output nets 
+of tool-inserted clock gates, because these nets do not exist until after the execution of the 
+compile_fusion  command.
+To specify nondefault routing rules that are applied automatically on nets connected to 
+the output pins of tool-inserted clock gates, use the set_clock_gate_routing_rule 
+command. These rules are applied on clock gates after the compile_fusion  command.
+For example,
+create_routing_rule cg_rule...
+set_clock_gate_routing_rule -rule cg_rule
+...
+compile_fusion
+...
+report_routing_rules
+Clock Gating and Multibit Registers
+In the Fusion Compiler flow, clock gating works in conjunction with multibit register 
+mapping. The multibit packing ratio has a higher precedence than clock gating.
+The following command enables multibit mapping:
+fc_shell> set_app_options -name compile.flow.enable_multibit -value true
+Clock-gating cells are not inserted to gate preinstantiated multibit registers.
+For more information on clock gating reports, see Reporting Clock-Gating Results.
+Placement-Aware Clock Gating
+When you enable placement-aware clock gating, the tool performs the following 
+optimizations:
+•
+Replication of clock gates with timing-critical enables
+•
+Adjustment of clock gates so they are placed closer to their gated registers
+•
+Automatic clock network latency annotation for clock-gate cells
+To enable this feature, set the compile.clockgate.physically_aware  application option 
+to true. (The default is false.)
+The example in Figure 61 shows the difference between using and not using physically-
+aware clock gating. In this layout view, you can see that the integrated clock gates (shown 
+in red) are physically closer to their gated registers.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+316
+
+===== PAGE 317 =====
+Chapter 4: Clock Gating
+Fanin-Based Sequential Clock Gating
+Feedback
+Figure 61
+Placement-Aware Clock Gating
+Clock gate cells are shown in red
+Gated clock nets are shown in blue
+Placement-Aware Clock 
+Gating Disabled
+Placement-Aware Clock 
+Gating Enabled
+Fanin-Based Sequential Clock Gating
+Sequential clock gating is the process of extracting and propagating enable conditions 
+from upstream or downstream sequential elements in the data path for the purpose of 
+enabling clock gate insertion for additional registers. The Fusion Compiler tool supports 
+fanin-based sequential clock gating, in which a register can be gated during a given clock 
+cycle if all the registers in the transitive fanin did not change state in the previous clock 
+cycle.
+To enable this feature, set the comple.clockgate.fanin_sequential  application option 
+to true  (the default is false). This feature requires the FC-New-Tech-Power license.
+Figure 62 and Figure 63 illustrate the general concept of fanin-based sequential clock 
+gating. The circuit in Figure 62 has a register bank R1 whose transitive fanin consists 
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+317
+
+===== PAGE 318 =====
+Chapter 4: Clock Gating
+Fanin-Based Sequential Clock Gating
+Feedback
+of register bank R0. All registers in bank R0 share the same enable condition EN0 and 
+all registers in both register banks are clocked by clock CLK. If in one clock cycle the 
+registers in bank R0 are disabled (in other words, enable signal EN0 is 0), those registers 
+do not change their values. Therefore, in the next clock cycle, the registers in bank R1 do 
+not change their values and consequently they are candidates for clock gating.
+Figure 62
+Before Clock Gating
+Figure 63 shows the clock-gate implementation. Clock gate CG1 is first inserted for 
+register bank R0. The tool creates a new register RD1 to generate a delayed version of 
+enable signal EN0. The delayed signal drives sequential clock gate SEQCG1 for register 
+bank R1.
+Figure 63
+After Clock Gating
+The Fusion Compiler tool implements several different clock-gating strategies as needed, 
+based on analyzing the circuit. For example, if the fanin registers do not all have the same 
+enable signals, the tool looks for common signals upstream from the enable signals and 
+uses those signals as inputs to the inserted delay register.
+Sequential clock gates are inserted by the compile_fusion  command. During the 
+initial_map  stage, the tool analyzes the local hierarchy of the registers and inserts 
+clock gates as needed. During the logic_opto  stage, the tool performs analysis across 
+hierarchical boundaries and inserts additional clock gates as needed.
+The name of a clock gate inserted as a result of fanin-based sequential clock gating 
+begins with the prefix seq_clock_gate_fi_. The rest of the name follows standard clock-
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+318
+
+===== PAGE 319 =====
+Chapter 4: Clock Gating
+Fanin-Based Sequential Clock Gating
+Feedback
+gate naming conventions. If the tool inserts a delay register as a result of this feature, the 
+register name begins with the prefix reg_seqcg_  followed by standard clock-gate naming 
+conventions (in other words, the most common base name among the gated registers).
+Setting Sequential Clock Gating Options
+Sequential clock gates inserted by the tool honor the settings in the 
+set_clock_gating_style  command, which applies to all clock gates. However, the 
+following commands are specific to fanin-based sequential clock gates:
+•
+The set_fanin_sequential_clock_gating_options  command
+This command specifies the minimum bitwidth and maximum fanout that a fanin-based 
+sequential clock gate is allowed to gate. The default minimum bitwidth is 3 and the 
+default maximum fanout is unlimited. You can specify a list of designs, power domains, 
+and hierarchical instances to which the settings apply.
+•
+The report_fanin_sequential_clock_gating_options  command
+This command lists the settings for design objects.
+•
+The set_fanin_sequential_clock_gating_objects  command
+This command allows you to specify registers, hierarchical cells, power domains, or 
+modules to be included in or excluded from fanin-based sequential clock gate insertion.
+•
+The report_fanin_sequential_clock_gating_objects  command
+This command lists the settings explicitly set with the 
+set_fanin_sequential_clock_gating_objects  command.
+Regardless of any settings made with the 
+set_fanin_sequential_clock_gating_options  and 
+set_fanin_sequential_clock_gating_objects  commands, the following conditions 
+prevent fanin-based sequential clock-gate insertion:
+•
+A register has asynchronous state changes.
+•
+A register contains objects other than edge-triggered flip-flops in its transitive fanin. 
+Disallowed objects include ports, latches, and registers with asynchronous state 
+changes.
+•
+The enable signal extracted from registers in the transitive fanin depends on their 
+output pins.
+•
+The toggle rate of a register's clock signal is so low that clock gating provides no 
+benefit.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+319
+
+===== PAGE 320 =====
+Chapter 4: Clock Gating
+Fanin-Based Sequential Clock Gating
+Feedback
+•
+Registers in the transitive fanin are controlled by a different base clock or triggered by 
+the opposite clock edge.
+•
+At least one of the registers in the transitve fanin is always enabled.
+•
+The next state function of the register under analysis or of the registers in its transitive 
+fanin depends on logic that contains a dont_care  condition in the RTL.
+•
+The register under analysis is multibit and its slices do not share the same enable 
+signal.
+Reporting Sequential Clock Gates
+If sequential clock gating is enabled, the report_clock_gating  command automatically 
+displays a summary table, similar to the following:
+Sequential Clock Gating Summary
+------------------------------------------------------------------------------
+|                                                             |   Bitwidth   |
+------------------------------------------------------------------------------
+|No of sequential clock gates                  |    2         |              |
+|                                              |              |              |
+|No of fanin-based sequential clock gates      |   2 (100.0%) |              |
+|                                              |              |              |
+|No of sequentially-gated registers            |   7 (21.2%)  |   7 (21.2%)  |
+|                                              |              |              |
+|No of fanin-based sequentially-gated regs     |   7 (21.2%)  |   7 (21.2%)  |
+|                                              |              |              |
+|No of registers not sequentially gated        |  26 (78.8%)  |  26 (78.8%)  |
+|                                              |              |              |
+|Total number of registers                     |  33          |  33          |
+------------------------------------------------------------------------------
+Use the report_clock_gating -ungated  command to report the reasons why sequential 
+clock gating is not implemented. The report is similar to the following:
+fc_shell> report_clock_gating -ungated
+ 
+--------------------------------------------------------------------------
+             Not fanin-based sequentially gated registers
+--------------------------------------------------------------------------
+   Register    |    Reason for not gating            | What's next?
+--------------------------------------------------------------------------
+ q2_reg[0]     | Register contains object different than edge-triggered
+                 flip-flops in its transitive fanin  | Check the register
+                                                       transitive fanin
+ q2_reg[4]     | Register contains object different than edge-triggered
+                 flip-flops in its transitive fanin  | Check the register
+                                                       transitive fanin
+ u/reg1_reg[2] | Register enable function is not a cover of the transitive
+                 fanin enable function               | Check the register
+                                                       enable condition
+--------------------------------------------------------------------------
+   Total                   7
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+320
+
+===== PAGE 321 =====
+Chapter 4: Clock Gating
+Reporting Clock-Gating Results
+Feedback
+Reporting Clock-Gating Results
+After compiling your design, you can check the results using the report_clock_gating 
+command. An example is shown in Figure 64.
+Figure 64
+Example of a report_clock_gating Report
+The report provides a summary of the clock-gating statistics. The term "pre-existing clock 
+gates" refers to user-instantiated clock gates. The preexisting category also includes 
+registers that are gated by a tool-inserted clock gate. This includes registers that are gated 
+by both preexisting and tool-inserted clock-gating cells.
+By default, the tool reports multilevel statistics. This includes the maximum level of clock-
+gating cells in the design.
+Clock-gate levels are counted from the clock source toward the register.
+If multibit flip-flops are found in the design, multibit composition is automatically reported.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+321
+
+===== PAGE 322 =====
+Chapter 4: Clock Gating
+Reporting Clock-Gating Results
+Feedback
+Figure 65
+Example of a Multibit Composition Report
+To report the details on ungated registers, use the -ungated  option for 
+report_clock_gating. For details on the gated registers, use the -gated  option.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+322
+
+===== PAGE 323 =====
+Chapter 4: Clock Gating
+Reporting Clock-Gate Enable Signals
+Feedback
+Reporting Clock-Gate Enable Signals
+A clock gate often has an enable signal that is a Boolean expression comprising of one or 
+more of the following reference (or invariant) points:
+•
+Hierarchical ports
+•
+Sequential output pins
+•
+Black box output pins
+To report the clock gate enable signal as a Boolean function, use the 
+report_clock_gating_enable_condition  command. You must specify a collection of 
+clock gates to be reported.
+Clock Gate Efficiency Reporting
+The clock gate efficiency reporting feature calculates the efficiency of clock-gates by 
+considering toggle rate. This computation based on toggle rate has a direct dependency 
+on power saving which can be used to improve gating efficiency.
+The report_clock_gating_efficiency  command reports the overall clock gating 
+efficiency of the user specified clock gates for each clock tree.
+The syntax of the command is as follows:
+- report_clock_gating_efficiency
+[-by_register]
+[-by_clock_gate]
+[-bin_size]
+[-type clock_gate | self_gate | fanin_seqcg]
+[-origin tool_inserted | pre_existing]
+[-sortby name | stage | gating_efficiency]
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+323
+
+===== PAGE 324 =====
+Chapter 4: Clock Gating
+Clock Gate Efficiency Reporting
+Feedback
+The following figure shows the report_clock_gating_efficiency  command report:
+The columns of this report include the following parameters:
+•
+Toggle Savings Distribution: A histogram of registers efficiency with a bin size of 5 (the 
+bin size can be modified)
+•
+Number of Registers: The number of registers in each histogram bin
+•
+Accumulated Percentage: The cumulative percentage of registers encountered so far
+•
+Number of Bitwidth: The bitwise equivalent for the number of registers in each bin
+•
+Accumulated Percentage (of the bitwidth): The cumulative bitwise register equivalent 
+percentage encountered so far
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+324
+
+===== PAGE 325 =====
+Chapter 4: Clock Gating
+Clock Gate Efficiency Reporting
+Feedback
+The reports can be refined to report efficiency with respect to the following:
+•
+Bin size using the following command:
+report_clock_gating_efficiency -bin_size #numberofbin
+•
+Registers using the following command:
+report_clock_gating_efficiency -by_register
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+325
+
+===== PAGE 326 =====
+Chapter 4: Clock Gating
+Clock Gate Efficiency Reporting
+Feedback
+The columns of this report include the following parameters:
+◦
+Register: The name of the register under consideration
+◦
+Bitwidth: Bitwidth of the register
+◦
+Local Clock Toggle Rate: Toggle rate at the clock pin of the register after gating
+◦
+D Toggle Rate: Toggle rage at the D-pin of the register
+◦
+Q Toggle Rate: Toggle rage at the Q-pin of the register
+◦
+D/Clk Toggle Rate: D toggle rate per local clock toggle rate
+◦
+Q/Clk Toggle Rate: Q toggle rate per local clock toggle rate
+◦
+Current Gating Efficiency: Efficiency of the register computed as 1 (local clock 
+toggle by root clock toggle)
+•
+Clock gates using the following command:
+report_clock_gating_efficiency -by_clock_gate
+The columns of this report include the following parameters:
+◦
+Clock: The root clock of the clock gate
+◦
+Clock Gating Stage: Stage of the clock gate
+◦
+Gating Element
+◦
+Number of Fanout Registers: The number of registers the clock gate is directly 
+driving
+◦
+Number of Fanout Bitwidth: The bitwidth equivalent for the number of registers the 
+clock gate is directly driving
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+326
+
+===== PAGE 327 =====
+Chapter 4: Clock Gating
+Clock Gate Efficiency Reporting
+Feedback
+◦
+Toggle Savings: Toggle saving of the clock-gate
+◦
+Clock Gating Efficiency: The efficiency of the clock gate
+◦
+Receiver Clock Gate: The name of clock-gate directly driven by the clock-gate 
+under consideration
+The output can also be sorted based on name, efficiency, or stage of clock gates in 
+ascending order using the following command:
+report_clock_gating_efficiency -sort_by [name | stage | 
+ gating_efficiency]
+•
+name: Alphabetically
+•
+stage: By clock gate stage
+•
+gating_efficiency: By clock gate or register gating efficiency
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+327
+
+===== PAGE 328 =====
+Chapter 4: Clock Gating
+Self-Gating Optimization
+Feedback
+The following figure shows an example report:
+Self-Gating Optimization
+The tool supports self-gating optimization, which occurs at the compile_fusion 
+command. This feature reduces dynamic power consumption by turning off the clock 
+signal of certain registers during clock cycles when the data remains unchanged.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+328
+
+===== PAGE 329 =====
+Chapter 4: Clock Gating
+Self-Gating Optimization
+Feedback
+Figure 66
+Example of a Self-Gating Cell
+CLK
+D
+Q
+Registers with an enable condition that cannot be inferred from the existing logic can only 
+be gated using the self-gating technique. They cannot be gated using traditional clock 
+gating. By default, the tool supports self-gating only on registers that are not gated. You 
+can use the set_self_gating_options  command to allow self-gating on these registers. 
+However, the time duration that the clock signal is turned off might increase for these 
+registers,.
+To ensure QoR improvements, the self-gating algorithm takes timing and power into 
+consideration. A self-gating cell is inserted for the registers if
+•
+There is enough timing slack available in the register's data pin. For designs with 
+multiple scenarios, the algorithm considers the timing of the worst case among active 
+scenarios enabled for setup.
+•
+Internal dynamic power of the circuit is reduced. For designs with mutiple scenarios, 
+the algorithm uses the average internal dynamic power among active scenarios 
+enabled for dynamic power.
+To minimize the area and power overhead, a self-gating cell can be shared across a few 
+registers by creating a combined enable condition with a tree of comparator cells. If the 
+self-gated registers are driven by synchronous set or synchronous clear signals, these 
+signals are also included in the construction of the enable signal so that the circuit remains 
+functionally unchanged. Figure 67 is an example of a self-gating cell that is shared across 
+two registers (4 bits). Note that one of the self-gated registers is a multibit register and 
+the other register is a single-bit register. The tool can also self-gate a group of multibit 
+registers or a group of single-bit registers.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+329
+
+===== PAGE 330 =====
+Chapter 4: Clock Gating
+Self-Gating Optimization
+Feedback
+Figure 67
+Self-Gating Tree
+CLK
+D0
+Q0
+D2
+Q2
+D1
+Q1
+D
+Q
+EN
+The tool does not support the following types of sequential cells for self-gate insertion:
+•
+Level-sensitive sequential cells
+•
+Level-sensitive scan design registers
+•
+Master-slave flip-flops
+•
+Retention registers
+•
+Single-bit and multibit registers that belong to shift registers
+•
+Multibit registers with multiple clock paths
+For more information, see the following topics:
+•
+Self-Gating Flow
+•
+Library Requirements for Self-Gating
+•
+Setting Up for Self-Gating
+•
+Reporting and Querying Self-Gating Cells
+Self-Gating Flow
+Figure 68 illustrates the Fusion Compiler flow for inserting self-gates by using the 
+compile_fusion  command.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+330
+
+===== PAGE 331 =====
+Chapter 4: Clock Gating
+Self-Gating Optimization
+Feedback
+Figure 68
+General Self-Gating Flow
+Fusion Compiler
+read_saif in.saif
+or
+set_switching_activity
+compile_fusion
+SAIF
+RTL/netlist
+Libraries
+Reports
+set_app_options -name 
+compile.clockgate.self_gating -value true  
+Library Requirements for Self-Gating
+To perform self-gating, the logic library should contain AND and OR gates to build the self-
+gating tree. The library should also contain XOR, NAND, and OR gates for the comparator 
+gate. The integrated clock-gating cells in the library must have the following settings:
+•
+Sequential cell: latch
+•
+Control point: before
+•
+Control signal: scan_enable
+•
+Observation point: none
+If the library does not contain cells with these configurations for the corresponding 
+operating conditions, the tool does not insert self-gating cells. If an integrated clock gate 
+compatible with self-gating is specified by the set_clock_gate_style  command, the self-
+gating feature uses the same integrated clock gate or the clock gate that is most similar to 
+the one specified.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+331
+
+===== PAGE 332 =====
+Chapter 4: Clock Gating
+Self-Gating Optimization
+Feedback
+Setting Up for Self-Gating
+To set up the block for self-gating, perform the following steps before you run the 
+compile_fusion  command:
+1. Enable self-gating by setting the compile.clockgate.self_gating  application option 
+to true.
+fc_shell> set_app_options -name compile.clockgate.self_gating \
+            -value true
+2. Apply switching activity by using the read_saif  or set_switching_activity 
+command.
+3. (Optional) Specify self-gating settings using the set_self_gating_options 
+command. For more information, see Setting Self-Gating Options.
+4. (Optional) Override the tool's default behavior of selecting self-gating objects by using 
+the set_self_gating_objects  command. For more information, see Controlling the 
+Selection of Self-Gating Objects.
+Setting Self-Gating Options
+To specify self-gating settings, use the set_self_gating_options  command with the 
+following options:
+•
+-min_bitwidth  bitwidth
+Controls the minimum size for self-gating banks. The default is 4.
+•
+-max_bitwidth  bitwidth
+Controls the maximum size for self-gating banks. The default is 8.
+•
+-interaction_with_clock_gating interaction_type
+Registers gated by user-instantiated clock-gating cells are candidates for self-gating. 
+Valid arguments are none  (skip registers gated by tool-inserted clock gates), insert 
+(the default; insert self-gates on gated registers), and collapse  (collapse tool-inserted 
+clock gates if they are in the same hierarchy).
+•
+-objects object_list
+Specifies that the options should be applied to the listed objects. Supported objects are 
+hierarchical instances, power domains, and designs. By default, the settings apply to 
+the entire design.
+•
+-tree_type combinational_logic_type
+Uses the specified logic type to build the gated enable tree. Valid arguments are xor, 
+nand, or, and auto  (the default).
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+332
+
+===== PAGE 333 =====
+Chapter 4: Clock Gating
+Self-Gating Optimization
+Feedback
+To report self-gating options, use the report_self_gating_options  command.
+Controlling the Selection of Self-Gating Objects
+To override the default behavior of selecting self-gating objects, use the 
+set_self_gating_objects  command with the following options:
+•
+-force object_list
+Directs the tool to perform self-gating on the listed objects, even if the objects do not 
+pass internal checks.
+•
+-exclude object_list
+Prevents the tool from self-gating the listed objects, even if they pass the internal 
+checks.
+•
+-include object_list
+Specifies that the listed objects should be self-gated according to the insertion rules 
+set by the set_clock_gating_options  command. This is the default setting for all 
+registers in the design.
+•
+-clear object_list
+Removes all inclusion, exclusion, and forced criteria on the listed objects.
+•
+-reset
+Removes all configurations previously set by the set_self_gating_objects 
+command.
+•
+-tree_type combinational_logic_type
+Specifies the type of combinational cells to use. Valid arguments are xor  (the default), 
+or, nand, and auto. When auto  is specified, the tool automatically decides which 
+comparison logic to use based on switching activity information. This might help to 
+reduce the area while optimizing power. You must use this option with the -include  or 
+-force  options.
+To report self-gating objects, use the report_self_gating_objects  command.
+Reporting and Querying Self-Gating Cells
+By default, the report_clock_gating  command automatically detects the presence of 
+self-gates in the design and displays the corresponding information at the bottom of the 
+report, as shown in the following example report.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+333
+
+===== PAGE 334 =====
+Chapter 4: Clock Gating
+Special Naming and Querying for DFT Wrapper Clock Gates
+Feedback
+                     Clock Gating Summary
+------------------------------------------------------------------
+|  Number of Clock gating elements         |         5           |
+|                                          |                     |
+|  Number of Tool-Inserted Clock gates     |         5 (100.00%) |
+|                                          |                     |
+|  Number of Pre-Existing Clock gates      |         0   (0.00%) |
+|                                          |                     |
+|  Number of Gated registers               |        48 (100.00%) |
+|                                          |                     |
+|  Number of Tool-Inserted Gated registers |        48 (100.00%) |
+|                                          |                     |
+|  Number of Pre-Existing Gated registers  |         0   (0.00%) |
+|                                          |                     |
+|  Number of Ungated registers             |         0   (0.00%) |
+|                                          |                     |
+|  Total number of registers               |            48       |
+|                                          |                     |
+|  Max number of Clock Gate Levels         |             2       |
+|                                          |                     |
+|  Number of Multi Level Clock Gates       |             4       |
+------------------------------------------------------------------
+                        Self Gating Summary
+---------------------------------------------------------
+|    Number of self-gating cells        |       3        |
+|                                       |                |
+|    Number of self gated registers     |  20  (41.67%)  |
+|                                       |                |
+|    Number of registers not self-gated |  28  (58.33%)  |
+|                                       |                |
+|    Total number of registers          |      48        |
+----------------------------------------------------------
+Self-gating cells are also counted as clock gates in the clock gating summary table. In 
+this example, there are two clock gates and three self-gates, for a total of five clock-gating 
+elements.
+You can find all the self-gates in a design by using the get_clock_gates  command. 
+This command returns a collection of clock-gating or self-gating cells. For example, the 
+following command returns the self-gating cells that gate registers clock by CLK:
+fc_shell> get_clock_gates -clock CLK -type self-gate
+Special Naming and Querying for DFT Wrapper Clock Gates
+DFT wrapper clock gates refer to those clock gates that drive only DFT wrapper cells. The 
+clock gating engine prefixes dft_wrapper_  to the names of all DFT wrapper clock gates 
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+334
+
+===== PAGE 335 =====
+Chapter 4: Clock Gating
+Special Naming and Querying for DFT Wrapper Clock Gates
+Feedback
+clock gates irrespective of their origin. This helps to identify specific clock gates driving 
+wrapper cells during automatic test pattern generation (ATPG).
+Table 24
+Commands and their expected return values
+Command
+Expected Return Value
+get_clock_gates -gating_wrapper_cells_only 
+(Returns all clock gates that drive wrapper cells only)
+dft_wrapper_ICG  and 
+dft_wrapper_clock_gate_reg
+get_clock_gates -gating_wrapper_cells_only 
+-origin tool_inserted  (Returns only tool inserted 
+clock gates that drive wrapper cells only)
+dft_wrapper_clock_gate_reg  only
+get_clock_gates -gating_wrapper_cells_only 
+-origin pre_existing  (Returns only pre-existing 
+clock gates that drive wrapper cells only)
+dft_wrapper_ICG  only
+get_clock_gates {ICG clock_gate_reg} 
+-gating_wrapper_cells_only
+empty string denoting that both the clock 
+gates are not gating the wrapper cells
+get_clock_gates {ICG 
+dft_wrapper_clock_gate_reg} 
+-gating_wrapper_cells_only  (Returns clock gates 
+that only drive wrapper cells from given cells within the 
+{ } brackets)
+dft_wrapper_clock_gate_reg
+get_clock_gates {*clock_gate_reg} 
+-gating_wrapper_cells_only  (Returns clock gates 
+that only drive wrapper cells and match the given 
+pattern within the { } brackets)
+dft_wrapper_clock_gate_reg
+This feature works only when you enable clock gate support for DFT wrapper cells. To 
+enable clock gate support for DFT wrapper cells, set the following variable to true:
+compile.clockgate.enable_dft_wrapper_cell_support
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+335
+
+===== PAGE 336 =====
+Chapter 4: Clock Gating
+Special Naming and Querying for DFT Wrapper Clock Gates
+Feedback
+The following figures show how a clock gate can be split so that different clock gates can 
+gate internal cells and wrapper cells separately:
+Figure 69
+Splitting a Clock Gate to Internal Cells and Wrapper Cells
+Figure 70
+Gating Internal Cells and Wrapper Cells Separately
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+336
+
+===== PAGE 337 =====
+Chapter 4: Clock Gating
+Special Naming and Querying for DFT Wrapper Clock Gates
+Feedback
+Note:
+The clock gates cloned to gate wrapper cells alone, inherit their names from 
+parent clock gates and have dft_wrapper_  appended to their names. This is 
+not applicable to the names of self-gates that drive wrapper cells only.
+Table 25 shows how different types of clock gates are renamed.
+Table 25
+How different clock gate types are renamed
+Clock Gate Type
+Name
+New Name
+tool-inserted
+clock_gate_reg
+dft_wrapper_clock_gate_reg
+pre-existing
+icg_0
+dft_wrapper_icg_0
+Use the -gating_wrapper_cells_only  option with the get_clock_gates  command to 
+return all clock gates (except self-gates) that drive wrapper cells only. This option can be 
+used in conjunction with the already existing options.
+Use the compile.clockgate.substring_list_for_dft_wrapper_dont_rename_icgs 
+application option to restrict the renaming of pre-existing clock gates (driving wrapper cells 
+only). This option accepts a list of strings as values. The clock gates matching any of the 
+substrings provided in the application option are not renamed.
+Note:
+The 
+compile.clockgate.substring_list_for_dft_wrapper_dont_rename_icgs 
+application option does not have any effect on the 
+-gating_wrapper_cells_only  querying option.
+Consider the following example:
+set_app_options -name 
+ compile.clockgate.substring_list_for_dft_wrapper_dont_rename_icgs -value 
+ {clk_gate_ctl clk_gate_snps}
+This prevents the renaming of any pre-existing clock gates that have the clk_gate_ctl  or 
+clk_gate_snps  pattern in their name but can still be queried using the get_clock_gates 
+-gating_wrapper_cells_only  command.
+Fusion Compiler™ User Guide
+V-2023.12-SP3
+337

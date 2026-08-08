@@ -1,0 +1,2230 @@
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                   RedHawk User Manual   | 33
+Introduction
+
+
+                                              Chapter 4
+                       Power Calculation, Static IR Drop
+                                       and EM Analysis
+Introduction
+
+              This chapter describes how to run power calculation, static IR voltage drop and
+              electromigration (EM) analyses in RedHawk-S, following the data preparation steps
+              described in the Chapter 3.
+              An outline of the static IR drop and EM analysis flow is shown in Figure 4-1.
+
+
+                    Library
+                  Technology                              Design Specific
+
+                                                               DSPF or         STA
+                     LEF files                DEF files
+                                                                SPEF           File
+                     .LIB files                MW db
+
+                       Tech                   Pad cell                GSR
+                        File
+                                              Pin Loc                 File
+
+
+                                                             RedHawk: Single Kernel Engine
+                                         RedHawk-S           • Power Calculation
+                                                             • Power Grid Extraction
+                                                             • Static Analysis
+                         ASCII Reports              Contour Maps
+
+                               Voltage                    Voltage
+                               Report                      Map
+
+
+                                EM                         EM
+                               Report                      Map
+
+
+                               Power                      Power
+                               Report                      Map
+
+              Figure 4-1          RedHawk-S (static) IR drop flow
+
+              The following are the key steps in the static IR drop and EM analysis flow.
+                1.   Prepare design data files (see Chapter 3, "User Interface and Data Preparation").
+                2.   Import design data using the automated setup script or the GSR file (see Chapter
+                     3)
+                3.   Perform power calculation (see following section).
+
+
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                   RedHawk User Manual     | 34
+Power Calculation
+
+                4.   Perform power grid extraction for R network (see section "Power Grid Resistance
+                     Extraction", page 4-51).
+                5.   Evaluate power/ground grid weakness (see section "Examining Power/Ground
+                     Grid Weakness", page 4-52)
+                6.   Define pad and package constraints (see section "Defining Pad and Package
+                     Parameters", page 4-55).
+                7.   Perform static IR voltage drop and EM analysis (see section "Running RedHawk-S
+                     (Static IR/EM Analysis)", page 4-56).
+                8.   Review static IR/EM summary reports and evaluate what other information is
+                     needed from the analysis.
+                9.   Explore solutions to reduce excessive static IR drop with the RedHawk power grid
+                     Fixing and Optimization tools (see Chapter 7, "Fixing and Optimizing Grid and
+                     Power Performance").
+              Steps 3 through 8 are described in the following sections. After importing all design data,
+              the full chip view should be displayed. Continue with the analysis procedure in the
+              following sections.
+
+Power Calculation
+
+              Power calculation uses information from a number of design files to evaluate the average
+              cycle power consumption of all cell instances for both flat and hierarchical designs. The
+              calculated power is used for both static and dynamic analysis. It then displays the power
+              distribution results in a graphical “map” of the design. Power calculation is typically
+              performed once for each design, and the results are summarized in several power
+              reports. The power reported by power calculation is “ideal” power, based on the supply
+              voltage specified in the VDD_NETS keyword in the GSR, or otherwise the nominal
+              voltage specified in the LIB file. RedHawk honors .lib negative internal energy values for
+              power calculation. The computed total power also includes power due to instances not
+              connected to power nets or instance power pins connected to non-Vdd nets, hence the
+              actual power may be different due to instances not connected in the design.
+              The setup procedure for power calculation involves providing the best design information
+              available to RedHawk, in order to get the most accurate results. Three methods are
+              available for modeling chip activity and setting up power calculation:
+               • vectorless, when no VCD file is available, and toggle-based state propagation
+                 methods are used.
+               • event-propagation, using full chip VCD file data
+              Power calculation is propagated through flip-flops in both State Propagation and Event
+              Propagation methodology, which is enabled in both vectorless and RTL-VCD flows.
+              An outline of how to select the power calculation method based on the input data
+              available is presented in Figure 4-2. The two primary propagation flows are shown in
+              Figure 4-3.
+
+
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                 RedHawk User Manual      | 35
+Power Calculation
+
+
+
+
+              Figure 4-2      Selection of power calculation method
+
+
+
+
+              Figure 4-3      Event propagation and State propagation flows
+
+              The setup procedures and information needed by RedHawk for the different types of
+              activity modeling are described in the following sections.
+
+              Setup for Vectorless Power Calculation
+
+              When no VCD file is available, an estimate of the toggle rate should be made, using
+              values from a group of GSR keywords, as described in the following paragraphs.
+
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                   RedHawk User Manual     | 36
+Power Calculation
+
+              Setting Frequency and Clock Parameters
+              Use the following GSR keywords to specify the primary design frequency and clocks.
+               • STA_FILE
+                   If this keyword is defined, the power for each net is calculated from the transition
+                   times (“slew”) of each instance’s input/output pins, using the clock frequency
+                   domain for all the instances that are specified in the STA output file, instead of
+                   deriving its value from the CLOCK_ROOTS keyword.
+                   For instances not defined in the STA output file or VCD file, the frequency of the
+                   instance is set to zero. Use the frequency specified by the
+                   FREQ_OF_MISSING_INSTANCES option in STA_FILE keyword for those
+                   instances that are not covered in the STA file. FREQ_OF_MISSING_INSTANCES
+                   is not required to be specified unless you know that STA does not cover the design
+                   well. If the EXTRACT_CLOCK_NETWORK option is specified as 1 (default 0),
+                   clockroots defined in the clock section of the STA output file are used for clockroot
+                   tracing, instead of the STA-identified clock instances.
+                   See Chapter 19, "Timing File Creation Using Apache Timing Engine (ATE)" for
+                   details on how to generate the STA output file. Required for dynamic analysis;
+                   Optional for static analysis.
+                     Syntax:
+                      STA_FILE
+                      {
+                           FREQ_OF_MISSING_INSTANCES <frequency in hertz>
+                           EXTRACT_CLOCK_NETWORK [ 0 |1 ]
+                           <top_level_block_name> <sta_output_file>
+                      }
+                   where
+                     FREQ_OF_MISSING_INSTANCES <frequency in hertz> : specifies the operating
+                        frequency for instances not in the STA file but in the design. Default: 0.
+                     EXTRACT_CLOCK_NETWORK : when set to 1, specifies that the clock network
+                        is extracted from clock roots defined in STA
+                     <top_level_block_name>: the top level block name of the chip
+                     <sta_output_file> : the file generated from STA analysis. See Chapter 19, "Timing
+                         File Creation Using Apache Timing Engine (ATE)"
+               • CLOCK_ROOTS
+                   Traces the nets from a specified clock root and finds the respective clock domain
+                   for all the nets and instances. Specifies the names of the clock roots (either net
+                   name or pin name) and the frequency. No wildcard matching is supported for this
+                   keyword. If STA_FILE is specified, CLOCK_ROOTS is not used. Optional. Default:
+                   None.
+                     Syntax:
+                      CLOCK_ROOTS
+                      {
+                           <clock_root_name> <freq in Hz>
+                               ...
+                      }
+               • FREQUENCY
+                   Defines the dominant operating frequency on the chip, or the lowest frequency that
+                   includes a majority of the power consumption on the chip. More specifically, for a
+                   design in which there are several frequencies that consume significant power, the
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                  RedHawk User Manual    | 37
+Power Calculation
+
+                     frequency to be specified is the frequency for which less than 10% of the chip
+                     power is consumed at lower frequencies. For example, assume that there are three
+                     significant frequencies on the chip, and they consume the following power: 100
+                     MHz (5mw), 200 MHz (20mw), and 400 Mz (70mw). The FREQUENCY value to be
+                     specified in this case would be 200 MHz, even though a majority of the power is
+                     consumed at 400 MHz. Required. Default: none.
+                      Syntax:
+                       FREQUENCY <value in Hertz>
+
+              Setting the Switching State of Instances and Blocks
+              Using the Global Switching Configuration (GSC) file, appropriate switching states for
+              instances and blocks can be set, such as HIGH, LOW, STANDBY, DISABLE and OFF, to
+              achieve more controlled power calculation. Using the GSC_FILE to establish switching
+              states for power calculation is described below.
+              The GSC filename is specified using the GSR keyword ‘GSC_FILE <gsc_filename>’.
+              The syntax of the GSC file is:
+                       [<blockName> | <instanceName> ] ? <domain_name>?
+                       [ UNDECIDED | TOGGLE |HIGH | LOW | POWERUP | POWERDOWN |
+                       STANDBY | DISABLE | OFF | <custom_state_name> ]
+                       ...
+              Refer to section "Global Switching Configuration (GSC) File", page C-575, for details on
+              the syntax and use of the GSC file.
+              Note that only HIGH, LOW, TOGGLE, STANDBY, DISABLE, and OFF states affect power
+              calculation results.
+              If an instance has a power specified using the GSR keywords INSTANCE_POWER_FILE
+              or BLOCK_POWER_FOR_SCALING, RedHawk uses these power values, even if it has
+              been assigned a switching mode in GSC_FILE. This can be overridden by setting
+              ‘GSC_OVERRIDE_IPF 1’ in the GSR (the default value is 0).
+
+              Setting the Toggle Rate
+              The toggle rate for an instance is defined as the average sum of the state changes from 0
+              ->1 and 1 ->0 within a clock cycle, with respect to the net's clock domain. For the most
+              accurate power analysis you must compile and input the best toggle rate information
+              available to indicate the average switching performance of the instances in the design.
+              The general priorities for setting toggle rates are listed below, from highest to lowest.
+              However, because there are interactions between values chosen for each keyword in a
+              specific design, see the individual keyword descriptions following, or in Appendix C, for
+              more information about toggle rate specification and instance toggle rate estimation. The
+              priorities for toggle rate setting are (GSR keywords, unless otherwise noted; see section
+              "Global System Requirements File (*.gsr)", page C-577, for full keyword syntax):
+                1.   INSTANCE_POWER_FILE
+                2.   BLOCK_POWER_FOR_SCALING or BLOCK_POWER_FOR_SCALING_FILE
+                3.   GSC_FILE
+                     If the GSR keyword GSC_OVERRIDE_IPF is set to 1 and there is no VCD setting,
+                     the GSC_FILE has priority over IPF and BPFS settings. Also, if a VCD file setting
+                     exists, the GSC value overrides the VCD for any instances specified.
+                4.   INSTANCE_TOGGLE_RATE or INSTANCE_TOGGLE_RATE_FILE
+                     With the GSR key word ITR_OVERRIDE_BPFS set to 1,
+                     INSTANCE_TOGGLE_RATE will have higher priority than
+                     BLOCK_POWER_FOR_SCALING.
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                     RedHawk User Manual      | 38
+Power Calculation
+
+                5.   NET_TOGGLE_RATE or NET_TOGGLE_RATE_FILE or SAIF_FILE
+                6.   VCD_FILE
+                        With the GSR key word POWER_VCD_OVERRIDE_IPF set to 1, VCD will have
+                     higher priority than INSTANCE_POWER_FILE.
+                7.   BLOCK_TOGGLE_RATE, BLOCK_TOGGLE_RATE_FILE, or
+                     CELL_TOGGLE_RATE
+                8.   STATE_PROPAGATION
+                        a. VCD-based STATE_PROPAGATION starts from the toggle rate derived from
+                           the VCD file.
+                        b. Vectorless state propagation uses the toggle rate derived from evaluating
+                           parameters in items 3-7 and 9-11.
+                        c. For details on use of the STATE_PROPAGATION keyword, see section
+                           "STATE_PROPAGATION", page C-657.
+                9.   A signal specified as 'CONST <pin>' in the STA_FILE has a toggle rate of 0.
+                10. CLOCK_DOMAIN_TOGGLE_RATE
+                11. POWER_DOMAIN_TOGGLE_RATE
+                12. TOGGLE_RATE_RATIO_COMB_FF <ratio>
+                13. TOGGLE_RATE
+
+
+              In general the highest priority keyword that has a toggle rate value for an instance is used
+              in power calculation, and all other values are ignored.
+              Note that any of the keyword-estimated toggle rate values are ignored when they are
+              specified in a VCD file, as described in the next section on setting up for VCD power
+              calculation.
+               • INSTANCE_TOGGLE_RATE_FILE
+                     Specifies the instance toggle rate file, which provides toggle rates for instances on
+                     the chip. The format of the file is as described in the INSTANCE_TOGGLE_RATE
+                     keyword syntax. Optional. Default: None.
+                      Syntax:
+                       INSTANCE_TOGGLE_RATE_FILE
+                       {
+                       <instance_toggle_rate_file>
+                       }
+               • INSTANCE_TOGGLE_RATE
+                     Specifies average toggle rates for instances in the design. If there are a lot of
+                     instances in the chip, using this keyword is recommended, rather than using
+                     BLOCK_TOGGLE_RATE or BLOCK_TOGGLE_RATE_FILE keywords. No
+                     wildcard (*) is supported. Whether a clock network instance or not, the first TR entry
+                     applies to the network toggle rate, and the second, if present, applies to the clock
+                     buffer and clock pin toggle rate. If only one TR value is specified, it is used for the
+                     output/signal toggle rates associated with the instance. Optional. Default: None.
+                      Syntax:
+                       INSTANCE_TOGGLE_RATE
+                       {
+                            <non-clock_inst_name> <output_TR> ?<clock_pin_TR>?
+                            <clock_network_inst_name> <output_TR> ?<clock_pin_TR>?
+                            ...
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                      RedHawk User Manual      | 39
+Power Calculation
+
+                        }
+
+               • BLOCK_TOGGLE_RATE_FILE
+                    Specifies the file containing toggle rates for blocks/instances that are defined in the
+                    DEF file. The format of the file is as described in the BLOCK_TOGGLE_RATE
+                    keyword syntax. Optional. Default: None.
+                     Syntax:
+                      BLOCK_TOGGLE_RATE_FILE
+                      {
+                      <toggle_rate_filename>
+                      }
+
+               • BLOCK_TOGGLE_RATE
+                    Defines the default toggle rate for nets in a user-specified block, or instances that
+                    are not otherwise specified. The block or instances should be defined in the DEF
+                    files. The <block-instance_name> specification can take a wildcard ‘*’. For
+                    example, ABC* matches all block/instance names starting with ABC. The
+                    <clock_network_TR> entry for a block applies to clock pins and clock buffer
+                    outputs. For an instance, whether a clock network instance or not, the first TR entry
+                    applies to the network toggle rate, and the second, if present, applies to the clock
+                    buffer and clock pin toggle rate. Optional. Default: None.
+                     Syntax:
+                      BLOCK_TOGGLE_RATE
+                      {
+                      <block-instance_name> <non-clock_TR> ?<clock_network_TR>?
+                      <non-clock_inst_name> <output_TR> ?<clock_pin_TR>?
+                      <clock_network_inst_name> <output_TR> ?<clock_pin_TR>?
+                           ...
+                      }
+               • TOGGLE_RATE
+                    Specifies the default toggle rate for nets in the design that are not otherwise
+                    specified. The rate is the product of the probability that the nets will toggle times the
+                    actual clock toggle rate. Toggle rate is defined as the average sum of the state
+                    changes from 0->1 and 1->0 within a clock cycle with respect to the net's clock
+                    domain. For example, a clock net has a toggle rate of 2.0 with respect to its clock
+                    domain, since the net switches once from 0->1 and once 1->0 within a clock cycle.
+                    Note that if there is no power consumption table in .lib the toggle rate is taken from
+                    TOGGLE_RATE, and charge is scaled to meet power. Optional. Default: 0.3.
+                     Syntax:
+                      TOGGLE_RATE <non_clock_TR> ?<clock_network_TR>?
+                    where
+                     <non_clock_TR> : defines the probability for nets switching during a clock cycle
+                     <clock_network_TR>: applies to both clock pins and to clock buffer outputs-- the
+                     actual network clock toggle rate (Default: 2.0)
+
+              Setting Toggle Rate Scaling Parameters
+              Since the power consumption of any part of the design is a linear function of the average
+              toggle rate, scaling parameters allow RedHawk to adjust the effective toggle rates based
+              on known and calculated power values. For example, if a block has known power
+              consumption PK, and the calculated power based on an estimated toggle rate TRE1 is
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                   RedHawk User Manual     | 40
+Power Calculation
+
+              PC1, then the program can scale the estimated toggle rate to TRe2 and recalculate power
+              PC2 so that it is equivalent to the known power consumption, as shown in the following
+              equations:
+
+                                              TRE2 /TRE1 = PC2/PC1                                 (EQ 1)
+
+                                               we want PC2 =PK                                     (EQ 2)
+
+                                        therefore, set TRE2 = TRE1*PK/PC1                          (EQ 3)
+
+              So by providing known power consumption values for individual blocks and instances
+              RedHawk can scale their toggle rates accordingly for analysis and make a much more
+              accurate power calculation.
+              The power scaling keywords are described in the following paragraphs.
+               • BLOCK_POWER_FOR_SCALING_FILE (GSR Keyword)
+                    Specifies the absolute or relative path from RedHawk run directory that contains the
+                    power specification, as in BLOCK_POWER_FOR_SCALING keyword. Optional;
+                    default: None
+                     Syntax:
+                      BLOCK_POWER_FOR_SCALING_FILE
+                      {
+                           <Block_Power_FilePathName >
+                      }
+               • BLOCK_POWER_FOR_SCALING (GSR Keyword)
+                    Performs scaling of the estimated toggle rate for the block, instance, cell, or
+                    celltype, based on user-supplied known power data. Top-level block is specified for
+                    a flat design. Note that to avoid confusion a top cell name should not be the same
+                    as an included cell name. Pin-specific Vdd power and Vss current can be specified
+                    for multiple Vdd/Vss designs. Optional. Default: none.
+                     Syntax:
+                      BLOCK_POWER_FOR_SCALING {
+                           CELLTYPE <cell_name> [<pwr_W> ?<Vdd_pin>? |
+                                        <cell_current_A> ?<Vss_pin> ? ]
+                           ...
+                           [FULLCHIP |<top_block_name>] <full_leaf_inst_path> <pwr_W>
+                           [FULLCHIP |<top_block_name>] <full_block_path> <pwr_W>
+                                        ? <domain> ?
+                           ...
+                           [FULLCHIP |<top_block_name>] <full_mVdd_inst_path>
+                                   [<pwr_W> ?<VDD_pin>? | <current_A> ?<Vss_pin>?]
+                           ...
+                           CELLS [ comb | ff_latch | mem | clockinst | io ] <pwr_W>
+                           ...
+                           BLOCK [<full_block_path> <pwr_W> ?<domain>? |
+                                   <full_leaf_inst_path> <pwr_W> ? <pin> ? ]
+                           ...
+                       }
+                    See section "BLOCK_POWER_FOR_SCALING", page C-631, for more detailed
+                    information on using this keyword.
+               • SCALE_CLOCK_POWER (GSR Keyword)
+                    Selects scaling of toggle rate for clock network components. If set to zero, clock
+                    nets are not scaled. Optional. Default: 1.
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                   RedHawk User Manual       | 41
+Power Calculation
+
+                      Syntax:
+                       SCALE_CLOCK_POWER [0|1]
+
+               • INSTANCE_POWER_FILE (GSR Keyword)
+                    Defines absolute or relative path from RedHawk run directory to the power file,
+                    which contains a list of instances and their power consumption, in the following
+                    format: <instance_name> <power in Watts>. For instances not specified in the
+                    power file, the power is assumed to be zero. Therefore all significant power
+                    consumers should be specified, or none. Optional; default: None.
+                      Syntax:
+                       INSTANCE_POWER_FILE
+                       {
+                            <instance_power_file_path-name>
+                       }
+               • GSC_OVERRIDE_IPF (GSR Keyword)
+                    When set to 1, overrides settings of BLOCK_POWER_FOR_SCALING and
+                    BLOCK_POWER_FOR_SCALING_FILE, INSTANCE_TOGGLE_RATE,
+                    BLOCK_TOGGLE_RATE, and TOGGLE_RATE, and the toggle rate value set in the
+                    GSC is honored. Optional. Default: 0.
+                      Syntax:
+                       GSC_OVERRIDE_IPF [ 0 | 1 ]
+               • Global Switching Configuration (GSC) File
+                    Instances that have states defined in the GSC file are handled by power calculation
+                    in the following ways:
+                      High – considers power when the instance switches from 0 to 1
+                      Low – considers power when the instance switches from 1 to 0
+                      Standby – averages power when a clock pin switches from 0 to 1 or 1 to 0
+                      Disable – considers leakage power only
+                      Off – sets all power to zero
+
+              Using both clock and signal toggle rates in power calculation
+              By default both the signal toggle rate and clock toggle rate are scaled uniformly to reach
+              specified total power consumption; if you want to meet power targets by scaling the signal
+              toggle rate only, set SCALE_CLOCK_POWER to 0 in the GSR. (Clock power includes
+              both clock network power and clock pin power.) However, the power is not scaled to a
+              value below specified leakage power.
+              If the specified block power is smaller than the RedHawk computed block leakage power,
+              and SCALE_CLOCK_POWER is set to 1 (default), the power values are scaled uniformly
+              to meet the specified block power.
+
+              Setting Extraction Parameters
+              The following keywords set parameters for extraction.
+               • CELL_RC_FILE
+                    Defines the SPEF/DSPF interconnect parasitics file for a flat or hierarchical design.
+                    For extraction of detailed RC used in dynamic voltage drop analysis, set the
+                    suboption EXTRACT_RC to 1, which is its default. Otherwise, for static IR-drop
+                    analysis, optionally set EXTRACT_RC to 0. The CONDITION keyword allows
+                    selection of one of the capacitance value types from a three-value SPEF file.
+                    Optional. Defaults: EXTRACT_RC: 1; CONDITION: typical.
+
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                     RedHawk User Manual      | 42
+Power Calculation
+
+                     Syntax:
+                      CELL_RC_FILE
+                      {
+                           EXTRACT_RC [ 0 | 1 ];
+                           CONDITION [best | typical | worst ]
+                           <cell_name> <path to DSPF-SPEF_file>
+                               ...
+                      }
+
+               • INTERCONNECT_GATE_CAP_RATIO
+                   Defines the ratio of the total interconnect capacitance of the nets relative to the total
+                   gate capacitance of the input pin fanouts. If none of the following keywords,
+                   INTERCONNECT_GATE_CAP_RATIO, CELL_RC_FILE, or
+                   STEINER_TREE_CAP have specified values, power calculation uses the default
+                   value of INTERCONNECT_GATE_CAP_RATIO. Optional. Default: 1.
+                     Syntax:
+                      INTERCONNECT_GATE_CAP_RATIO <value>
+                     Example:
+                      INTERCONNECT_GATE_CAP_RATIO 1.5
+
+               • STEINER_TREE_CAP
+                   When specified, a Steiner Tree routing is performed and the resulting length is
+                   multiplied by the cap value specified in pF per um. Optional. Default: none.
+                     Syntax:
+                      STEINER_TREE_CAP <cap in pF per um>
+
+
+              Selecting Power Calculation Methodology
+              The following GSR keywords set parameters for power calculation.
+               • SCANMODE
+                   Specifies whether scan pin power is included in vectorless power calculation or not.
+                   Optional. Default: 0 .
+                     Syntax:
+                      SCANMODE[ 0 | 1 ]
+
+               • POWER_MODE
+                   Specifies the primary data source for internal/switching power and leakage power
+                   calculation analysis. Optional. Default: Mixed.
+                     Syntax:
+                      POWER_MODE [ APL | LIB | MIXED | APL_PEAK | APL_PEAK1 ]
+                   where
+                     APL : specifies primary use of APL power data for internal/switching (cell.ifprof)
+                        and leakage power (<cell>.cdev). Where APL data are not available, .lib
+                        data are used.
+                     LIB : specifies use of .lib power consumption data; cells without power data in .lib
+                          have no internal power consumption data, but have switching power
+                          information from RedHawk.
+
+
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                      RedHawk User Manual       | 43
+Power Calculation
+
+                     MIXED : specifies primary use of .lib power data; for cells without power
+                        components (internal power consumption or leakage power) in .lib, APL data
+                        are used.
+                     APL_PEAK: uses the peak charge from APL to calculate the power for every cell
+                        in the design, and the current is derived from the charge.
+                     APL_PEAK1: uses the peak current from APL for every cell in the design to
+                        calculate power. Peak current leads to a very pessimistic power calculation if
+                        that type of model is desired.
+               • INPUT TRANSITION
+                    Defines the input transition time for input pins of all instances not specified in an
+                    STA file. Optional. Default: 10% of the value of the inverse of the frequency defined
+                    by the “FREQ” keyword.
+                     Syntax:
+                      INPUT_TRANSITION <value in second>
+                     Example:
+                      INPUT_TRANSITION 0.2e-9 (or 0.2ns)
+
+               • NAME_CASE_SENSITIVE
+                    Defines the name case sensitivity. If the value is set to 1, all .lib, lef/def, spef/dspf,
+                    vcd, and STA filenames are assumed to be case-sensitive. Optional. Default: 1.
+                     Syntax:
+                      NAME_CASE_SENSITIVE [ 0 | 1 ]
+                     Example:
+                      NAME_CASE_SENSITIVE 0
+
+
+              Specifying Supply Nets
+              The following keywords define the power supply nets and their voltages.
+               • VDD_NETS
+                    Specifies the voltage for Vdd nets. The power domain names are defined in the
+                    DEF file using the SPECIALNETS keyword. Required. Default: none.
+                     Syntax:
+                      VDD_NETS
+                      {
+                        <Vdd net_name in DEF> <value in Volt>
+                        ...
+                      }
+                    where
+                     <Vdd net_name in def> : specifies the name for a power net, such as VDD for the
+                        core power domain, and VDDQ for the I/O power ring.
+
+               • GND_NETS
+                    Specifies the voltage for Vss nets. The power/ground domain names are defined in
+                    the DEF file using the SPECIALNETS keyword. Optional. Default: all
+                    SPECIALNETS are designated as USE GROUND and set to 0 volts.
+                     Syntax:
+                      GND_NETS
+                      {
+                        <Gnd net_name_in_DEF> <Volts>
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                     RedHawk User Manual     | 44
+Power Calculation
+
+                         ...
+                        }
+
+
+
+              Setting Bus and Hierarchy Delimiter Keywords
+              The following keywords provide name mapping functions by defining delimiter characters
+              for busses and design hierarchy.
+               • BUS_DELIMITER
+                    Defines the character used to delimit bus bits in the RedHawk database and GSR.
+                    Optional. Default: [ ]
+                     Syntax:
+                      BUS_DELIMITER <delim>
+               • PIN_DELIMITER
+                    Defines a special character to separate net or instance names from pin names in
+                    RedHawk working files. Any character can be used that is not reserved in LEF or
+                    used in pin names. Optional. Default: :
+                     Syntax:
+                      PIN_DELIMITER <delim>
+
+               • HIER_DIVIDER
+                    Defines the character used to specify the hierarchy in the RedHawk database and
+                    GSR. Optional. Default: /
+                     Syntax:
+                      HIER_DIVIDER <divider>
+               • BUS_DELIMITER_STA
+                    Defines the character used to delimit the bus bits in STA files. Optional. Default: [ ]
+                     Syntax:
+                      BUS_DELIMITER_STA <delim>
+
+               • PIN_DELIMITER_STA
+                    Defines the character between instance and pin names in STA files. Optional.
+                    Default: /
+                     Syntax:
+                      PIN_DELIMITER_STA <delim>
+               • HIER_DIVIDER_STA
+                    Defines the character used to specify the hierarchy in STA files. Optional. Default: /
+                     Syntax:
+                      HIER_DIVIDER_STA <divider>
+
+              Setting up for Event-Driven (VCD File) Power Calculation
+
+              If you have a VCD file for the design it is strongly recommended that you perform power
+              calculation based on VCD data, as described in this section.
+              The following GSR keywords described in the previous section for vectorless power
+              calculation also need to be defined when using a VCD file. All keywords are used the
+              same for both vectorless and event-driven calculation, so their descriptions are not
+              repeated in this section:
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                RedHawk User Manual      | 45
+Power Calculation
+
+               • STA_FILE
+               • CLOCK_ROOTS
+               • BLOCK_POWER_FOR_SCALING_FILE
+               • BLOCK_POWER_FOR_SCALING
+               • SCALE_CLOCK_POWER
+               • CELL_RC_FILE
+               • INTERCONNECT_GATE_CAP_RATIO
+               • STEINER_TREE_CAP
+               • SCANMODE
+               • POWER_MODE
+               • INPUT_TRANSITION
+               • NAME_CASE_SENSITIVE
+               • VDD_NETS
+               • GND_NETS
+               • Bus and Hierarchy Delimiter Keywords
+
+              Setting GSR Keywords for Event-driven (VCD) Power Calculation
+
+                  General Setup
+              The following keyword is used to specify VCD-based power calculation. See section
+              "vcdscan", page E-886 and section "fsdbtrans", page E-887, for information on VCD-
+              based utilities.
+               • VCD_FILE
+                   The VCD_FILE keyword reads in original VCD files directly for power calculation
+                   purpose. Note that instance switching specified in the GSC file overrides the VCD
+                   file. See section "VCD_FILE", page C-616 for more details on this keyword.
+                   Optional. Default: None.
+                     Syntax:
+                      VCD_FILE
+                      {
+                      <top_block_name> <VCD filepath>
+                         FILE_TYPE [ VCD | FSDB ]
+                         FRONT_PATH <“string”>
+                         SUBSTITUTE_PATH <“string”>
+                         FRAME_SIZE <integer value in ps>
+                         START_TIME <integer value in ps>
+                         END_TIME <integer value in ps>
+                         TRUE_TIME [0|1]
+                         MAPPING_RULE_FILE <file_name>
+                      }
+                   where
+                     <top_block_name> <VCD file>
+                     FILE_TYPE [ VCD | FSDB ]
+                     FRONT_PATH <“string”>: specifies the string that needs to be replaced by
+                     SUBSTITUTE_PATH <“string”> to match the DEF hierarchy.
+                     FRAME_SIZE <value_ps> : specifies the duration per frame for cycle-by-cycle
+                        power calculation.
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                   RedHawk User Manual      | 46
+Power Calculation
+
+                     START_TIME and END_TIME <value_ps> : optional, specifies the start and end
+                        times in the VCD for power calculation.
+                     TRUE_TIME : if =0, uses STA timing data and assumes no glitches; if =1, uses
+                        VCD switching and timing data; default=0.
+                     MAPPING_RULE_FILE : points to file that contain list of rules for name mapping
+                        between VCD and DEF names. This is used in RTL VCD based analysis
+                        where there will be unfamiliar changes between vcd/netlist names. (see
+                        following section)
+
+                  Name Mapping using MAPPING_RULE_FILE
+              The following are various rules used in MAPPING_RULE_FILE for name mapping
+              between VCD and DEF names:
+               • change_gate_name <string1> <string2>
+                     ‘string1’ is replaced with ‘string2’ for def (gate level) names when attempting to
+                     map as in the below example:
+                        change_gate_name ricc icc
+                     if you want to remove a particular string (say, 'extra') fully from a name, you can
+                     specify as:
+                        change_gate_name extra ""
+               • change_rtl_name <string1> <string2>
+                     ‘string1’ is replaced with ‘string2’ for vcd (rtl level) names when attempting to map
+                     Example is:
+                        change_rtl_name gen_pqr_i(%d) pqr_ixx%dx/
+               • define_bus_rule <rtl_bus> <gate_transform> -
+                     generally buses defined in rtl of form string[%d] (say, cnt[13]) appear in gate
+                     netlist as string_reg_%d (cnt_reg_13), which is what the algorithm looks to
+                     map,by default. But there can be situations when the synthesis tool uses some
+                     other bus rule conventions to given names corresponding to each bus in the gate
+                     netlist. Here define_bus_rule can help. Please note that the output pin name also
+                     has to be specified along with gate name. Example is:
+                       define_bus_rule [%d] %d__regxx_/Q
+               • skip_gate_element <string>
+                     This option is used when one knows that a particular name in GATE level netlist/
+                     DEF will never appear in RTL VCD, and doesn’t need to be mapped. It is aimed at
+                     improving the runtime for the algorithm. Example is:
+                       skip_gate_element top/block_name
+                     Please note that only names that start with the string are skipped.
+               • generate_label <string> :
+                     There are generate constructs in rtl which get synthesized in a very specific way
+                     when the netlist is generated. For example :
+                        rtl name : top/label[2]/block/cnt[2]
+                        gate name : top/block2/cnt[2]
+                     Notice how the string 'label' is gone and the number along with it moves to the
+                     next hierarchy. Using the rule generate_label, we can give this particular string
+                     (label) and RedHawk will take care of the rest of mapping part. So, here,
+                     specifying 'generate_label label' will ensure proper mapping.
+              Wildcards ‘%d’ are also supported in rules ‘change_gate_name’ and
+              ‘change_rtl_name’ where %d denotes a number.
+              Example for wildcard usage:
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                  RedHawk User Manual     | 47
+Power Calculation
+
+              If RTL and GATE names are as follows :
+                      RTL : blockA/case_move_gen[0]/abc_move/rise_edge
+                      GATE : blockA/case_movexx0x/rise_edge_reg
+                      RTL : level_three_6/abc/abc_ip/gen_pqr_i(1)/pqr_i/gen_xyz_i(1)/xyz_i/
+                         xyz_defg_ctrl_reg[14]
+                      GATE : level_three_6/abc/abc_ip/pqr_ixx1x/xyz_ixx1x/
+                         xyz_defg_ctrl_reg_regx14x
+                      RTL : level_three_6/abc/abc_ip/gen_pqr_i(2)/pqr_i/gen_xyz_i(2)/xyz_i/
+                         xyz_defg_ctrl_reg[14]
+                      GATE : level_three_6/abc/abc_ip/pqr_ixx2x/xyz_ixx2x/
+                         xyz_defg_ctrl_reg_regx14x
+              These can be mapped easily by using the following rule:
+              change_rtl_name case_move_gen[%d]/abc_move/ case_movexx%dx/
+              change_rtl_name gen_pqr_i(%d)/pqr_i/ pqr_ixx%dx/
+              change_rtl_name gen_xyz_i(%d)/xyz_i/ xyz_ixx%dx/
+
+                  MBFF Name Mapping using MAPPING_RULE_FILE
+              In RTL-VCD based analysis, the presence of Multi Bit Flip Flops in the design can cause
+              limitations in mapping RTL-VCD names to gate level names. Multi Bit Flip Flops have
+              multiple inputs/outputs and are used to instantiate multiple bits of a register. Typically
+              there are 20-30 D pins and Q pins in an MBFF. Generally the name of MBFF instance
+              has all the individual register names concatenated. Mostly, there are delimiters/prefix
+              names that identify MBFFs. Mapping of flip-flops with pin name o, o1, o2.. etc is
+              supported. In scan mode, user can shift the input values among all output pins (Q0->Q1-
+              >Q2->Q3).
+              RedHawk internal mapping can take care of Multi Bit Flip Flops (MBFF) naming issues if
+              the MBFFs are specified in a GSR mapping rule file option.
+              For example, for a 2-bit MBFF:
+                        inst: xxx/MBIT__cp15_st_reg_1_MB_cp15_st_reg_2_
+                        pin:Q0, mapped to RTL Name : xxx/cp15_st[1]
+                        pin:Q1, mapped to RTL Name : xxx/cp15_st[2]
+              Note that here “MBIT_” is the prefix and “MB_” is the delimiter.
+              For a 4-bit MBFF:
+              MBIT_cp_addr_reg_reg_4_MB_cp_addr_reg_reg_5_MB_cp_addr_reg_reg_6_MB_cp_addr
+                    _reg_reg_7_
+                        pin:Q0, mapped to xxx/cp_addr_reg[4]
+                        pin:Q1, mapped to xxx/cp_addr_reg[5]
+                        pin:Q2, mapped to xxx/cp_addr_reg[6]
+                        pin:Q3, mapped to xxx/cp_addr_reg[7]
+              To map MBFFs, the following VCD_FILE GSR option can be used:
+                      VCD_FILE {
+                          ...
+                          MAPPING_RULE_FILE <file_name>
+                      }
+              The MAPPING_RULE_FILE provides the common rules needed for mapping RTL names
+              to gates. For describing MBFFs, the available rules are as follows:
+               • define_mbit_prefix <prefix_name>
+                      where Mbit_prefix denotes the string that comes before the concatenated register
+                      names in an MBFF. In the example below,
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                  RedHawk User Manual     | 48
+Power Calculation
+
+                        XXX/MBIT__cp_addr_reg_reg_0_MB_cp_addr_reg_reg_1_
+                      MBIT__ is the prefix. This can be provided in MAPPING_RULE_FILE as
+                      define_mbit_prefix MBIT__
+               • define_mbit_delim <delimiter_name>
+                      where mbit_delim denotes the string that separates the two register names. In
+                      the example below:
+                        XXX/cp_addr_reg_reg_0_MB_cp_addr_reg_reg_1_
+                      MB_ is the delimiter. This can be provided in MAPPING_RULE_FILE as
+                      define_mbit_delim MB_
+               • define_mbit_lsb <0/1> (default value is 0)
+                      where mbit_lsb denotes the least significant bit in the MBFF array.
+              MBFF Name Mapping can support Bus Style Outputs: RedHawk can map register names
+              in RTL VCD to corresponding gate level names in netlist (def), even if these have been
+              synthesized with Multi Bit Flip Flop (MBFF) in gate level. Certain specifics regarding
+              MBFF names have to be specified via a rule file to enable this. This particular MBFF
+              mapping flow has been further enhanced to map bus-style output pin names for MBFF.
+              Pin names of style Q[0], Q[1] etc are supported.
+
+
+
+              Power Calculation Procedure and Results Evaluation
+
+              With all design data imported and the appropriate GSR keyword values set, you can
+              perform power calculation from the TCL command line or using the GUI. The TCL
+              command is:
+                   perform pwrcalc
+              If you have already run power calculation on the design and have made no changes, you
+              can import the calculated power directory data from your previous calculation by using the
+              menu command Static > Power > Import, and select the previous power directory, such
+              as adsPower. Figure 4-4 shows the form for importing power information.
+              Or perform the import using the TCL command:
+                  import power <Power_Dir_Name>
+
+
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                             RedHawk User Manual         | 49
+Power Calculation
+
+
+
+
+              Figure 4-4          Importing adsPower directory information
+
+              Or, to perform power calculation using the GUI and then evaluate the results, follow the
+              GUI-based steps below.
+                1.    Calculate the power using the Static > Power > Calculate or Dynamic > Power >
+                      Calculate command.
+                2.    Review the power summary in the file power_summary.rpt in the adsRpt directory,
+                      as shown in Figure 4-5 example. The Power Summary Report recommends the
+                      simulation time needed to capture a majority of power events, and lists the
+                      calculated total_pwr, leakage_pwr, internal_pwr, switching_pwr and percentage of
+                      total power consumption by frequency domain, by power domain, and by cell type.
+                      Note that imported power values are scaled during power calculation to meet
+                      instance-specific power consumption numbers.
+                3.    Generate a power density distribution map, using commands such as:
+                      • View > Power Maps > Power Density Map
+                      • View > Power Maps > Power Map of Instances
+                      • View > Power Maps > Power Map of Clock Instances
+                      or use the corresponding control buttons on the right side of the GUI.
+
+
+              ------------------------------- Power Summary Report -----------------------------------------------------
+              Recommended dynamic simulation time, 5000psec, to include 100%
+              of total power for DYNAMIC_SIMULATION_TIME in GSR.
+
+              INFO: Importing user specified power file: demo.inst.power
+              INFO: Instances not specified in this file will have zero power.
+              INFO: 100% of instances specified in instance_power_file have corresponding
+              instances in the design.
+              0 out of 4142 instances do not have corresponding instance in the design.
+              INFO: For complete list of PWR-121 and PWR-122 WARNINGS, please see adsRpt/
+              apache.inst_pwr_file.mismatch.
+
+
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                                      RedHawk User Manual             | 50
+Power Calculation
+
+              The power is based on the INSTANCE_POWER FILE: demo.inst.power
+              Redhawk honors instance-by-instance power as specified in the above file.
+              Individual components of power, like switching power, internal power,
+              however, are calculated by RedHawk and may have been scaled to
+              meet the total instance-specific power number.
+
+              Power of different frequency (MHz) domain in Watts:
+
+              Frequency           total_pwr leakage_pwr internal_pwr switching_pwr %_total_pwr
+              4.000e+02           1.729e-02 1.704e-04    1.107e-02     6.052e-03    8.333e+01%
+              2.000e+02           3.4595e-03 2.1869e-05 3.1000e-03     3.3758e-04   1.666e+01%
+              0.000e+00           0.000e+00 0.000e+00    0.000e+00     0.000e+00    0.000e+00%
+
+              Power of different Vdd domain in Watts:
+              Vdd_domain total_pwr leakage_pwr internal_pwr switching_pwr %_total_pwr
+              VDD (1.1V) 2.075e-02 1.922e-04 1.417e-02      6.389e-03      1.000e+02%
+
+              Power of different cell types in Watts:
+              cell_type    total_pwr leakage_pwr internal_pwr switching_pwr %_total_pwr
+              combinational 7.111e-03 1.221e-04 1.754e-03          5.235e-03 3.426e+01
+              latch_and_FF 4.292e-03 3.890e-05 3.323e-03           9.301e-04 2.067e+01
+              memory        0.000e+00 0.000e+00 0.000e+00          0.000e+00 0.000e+00
+              I/O           0.000e+00 0.000e+00 0.000e+00          0.000e+00 0.000e+00
+              clocked_inst 9.352e-03 3.119e-05 9.096e-03           2.246e-04 4.505e+01
+              decap         0.000e+00 0.000e+00 0.000e+00          0.000e+00 0.000e+00
+              where clocked_inst are instances that cannot be classified as latch_and_FF,
+              memory, or I/O, but have clock pin(s).
+
+              Total chip power, 0.020757 Watt including core power and other domain power.
+              Total clock network only power, 0.003225 Watt. Total clock power, including
+              clock network and FF/latch clock pin power, 0.005992 Watt.
+              ---------------------------------------------------------------------------------------------------------------
+              Figure 4-5            Example Power Summary Report
+
+              Some of the information that can be checked in the power summary report is:
+               • Does the total power consumption make sense?
+               • Are clock network and the clock power values reasonable?
+               • Is the power reported by clock frequency what would be expected?
+              Having several elements that consume a lot of power close to several elements that
+              consumes little power may not create a voltage drop problem. But having an area where
+              many elements consume a lot of power can create a voltage drop problem if the area is
+              not well supplied. The power consumption maps give important feedback regarding the
+              power distribution, i.e., the quality of the placement/floorplanning vs. power consumption.
+              Some aspects of the power calculation results to investigate:
+               • What is the total power consumption in the design?
+               • Is the overall power demand well distributed?
+               • Will the power pads handle this load safely?
+               • How is the power balanced between the different frequency domains?
+               • How much power is used in the clock network?
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                   RedHawk User Manual     | 51
+Power Grid Resistance Extraction
+
+              You can click on any instance to see a text report of its power consumption, as well as its
+              associated capacitance and applied voltage.
+
+Power Grid Resistance Extraction
+
+              After power calculation, the next step is to perform network resistance extraction, using
+              either TCL or GUI commands. At technology nodes now being used for design, very
+              precise estimates of wire resistance, and therefore wire thickness, is necessary. This
+              effect of metal density on resistance calculation is described in the following section.
+
+              Metal Density Calculation
+
+              To obtain very accurate resistance values for wire segments, both width and thickness
+              values must be accurately determined. To achieve an accurate estimate of wire
+              thickness, an accurate assessment of the metal density for all metal geometries in the
+              region of the wire is needed, because of the effects of CMP on wire thickness. The
+              procedure for estimating metal density around wire segment is as follows.
+                1.   Read geometries from DEF/LEF, or from GDS2RH/DB. Include all geometries from
+                     LEF/DEF (NETS, SPECIALNETS, PINS, MFILL), as well as all geometries from
+                     GDS2DB (including MFILL).
+                2.   Merge and flatten all metal geometries per layer, which eliminates redundant
+                     geometries from different hierarchies or from GDS.
+                3.   Calculate the metal density over the whole design in small gridded regions that
+                     contain wires.
+                4.   Perform extraction. Calculate the density of segments based on average density of
+                     regions around each segment.
+                5.   By default each uniform wire geometry uses the density from an average of all
+                     regions that the wire passes through.
+                6.   When you require the most accurate resistance calculation, such as for long wires
+                     that go through multiple regions of varying metal density, set the GSR keyword
+                     LONG_WIRE_RES_CALC 1. In this case, the metal density of every region that
+                     contains the long wire geometry is used in the calculation.
+                7.   Then calculate the final wire thickness based on the calculated metal density-- for
+                     example, using the POLYNOMIAL_BASED_THICKNESS_VARIATION Tech file
+                     keyword setting.
+
+
+
+
+              TCL Command R Extraction
+
+              .To run static resistance extraction for IR drop analysis using the TCL command, execute:
+                   perform extraction [-power | -ground]
+              To run RLC extraction for dynamic voltage drop analysis using the TCL command,
+              execute:
+                   perform extraction [-power | -ground] -l -c.
+              The ‘perform extraction’ command builds connectivity and performs extraction for
+              the selected elements of the selected power/ground nets.
+
+
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                    RedHawk User Manual     | 52
+Examining Power/Ground Grid Weakness
+
+              GUI Extraction
+
+              To use the GUI commands to perform extraction on both VDD and VSS, use the following
+              steps:
+                1.   For static IR analysis, use the extraction command Static -> Network Extraction.
+                     From the extraction form displayed, select resistance (R), and both VDD and VSS.
+                2.   For faster static analysis of either the power or the ground network, either VDD or
+                     VSS can be selected. However, both VDD and VSS must be selected for dynamic
+                     analysis.
+              The key information you can get from the extraction step is:
+               • Are all power and ground nets connected to a source? If not, the a warning message
+                 is displayed: “Net VDD in cell not driven by any pad”.
+               • Are there any missing connections? (reported in the file adsRpt/apache.*.unconnect).
+
+Examining Power/Ground Grid Weakness
+
+              Excessive voltage drop can occur due to weak power/ground grid structures. RedHawk
+              can identify problems in P/G structures early in the design cycle after placement and CTS
+              is completed, even without STA and SPEF files. P/G weakness analysis can report two
+              different measures of grid weakness:
+               • perform gridcheck - an estimate of the upper bound on grid resistance for all instances
+                 in the design, normalized to the highest instance grid resistance
+               • perform res_calc - the calculated effective grid resistance for a specified number of
+                 instances in the design
+              For gridcheck, an instance that has a weakly connected Power or Ground network shows
+              up as high impedance in the generated report. Using the GUI you can also review power
+              grid resistance maps showing the distribution of power and ground resistance across the
+              design. Also, pins not connected to VDD or VSS are listed as “floating” in the PG
+              Weakness report, and are listed together at the end of the report.
+              Note that you do not need to run power calculation or static analysis prior to doing this
+              assessment. Once the design is imported and P/G extraction is performed, the design
+              environment can generate the resistance report using the TCL interface. This can be
+              done early in the design cycle when detailed routing or timing information is not available.
+              The procedure for generating and evaluating a P/G grid weakness report is as follows:
+                1.   Normalized resistance estimation. On the TCL command line execute:
+                       perform gridcheck -o <output_file_name> ? -limit <line_limit>?
+                     The format of the resistance report displays RVDD and RVSS for each instance or
+                     arc as percentages of the total P/G resistance distribution, as shown in the
+                     example report below (Figure 4-6). For multiple P/G arc designs, adsRpt/
+                     apache.gridcheck is constructed as follows:
+                       a. The arc that has the highest relative R value is displayed first and continues
+                          up to the specified line limit.
+                       b. The rest of the arcs are displayed up to the specified line limit, or until the
+                          relative R becomes smaller than the last displayed relative R in the previous
+                          arc that reached the line limit.
+              ---------------------------------------------------------------------
+                  # Power/Grnd arcs listed separately, there are 2 P/G arcs w/ non-zero R.
+                  #
+
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                     RedHawk User Manual      | 53
+Examining Power/Ground Grid Weakness
+
+                  # Max. Resistances (%) of Power/Ground Arcs:
+                  # Arc1 ( VDD_INT VSS) 100.0000
+                  # Arc2 ( VDD VSS) 93.7410
+                   { Power/Ground Arc1:
+                  # Total VDD_INT(%) VSS(%) Location (x y) ArcID Instance_name
+                  100.000 49.5167 50.4833 3316.37 3950.55 Arc1 inst_129973/inst_366358
+                  99.6966 50.8138 49.1862 3318.21 3965.32 Arc1 inst_129973/inst_366355
+                  99.5191 50.4213 49.5787 3316.83 3961.62 Arc1 inst_129973/inst_366346
+                  ...
+                  }
+                  { Power/Ground Arc2:
+                  # Total VDD(%) VSS(%) Location (x y) ArcID Instance_name
+                  93.7410 50.0202 49.9798 2099.90 3888.64 Arc2 inst_129228/inst_465808
+                  92.9774 50.7174 49.2826 2131.64 3903.41 Arc2 inst_129228/inst_412486
+                  92.9138 50.8630 49.1370 2131.18 3903.41 Arc2 inst_129228/inst_412485
+                  92.8791 50.0223 49.9777 2131.64 3896.03 Arc2 inst_129228/inst_466552
+                  ...
+                  }
+
+                  # Floating Instances: Location (x y)     Name
+                  floating        0       977.5 io/pad/VSSC/extra/left/4/adsU1
+                  floating        10000 2956.24 io/pad/VDDC/extra/right/23/adsU1
+                  floating        5435.09 191     io/pad/extra/VDDC/11/adsU1
+                  floating        3935.09 191     io/pad/mpi/VDDC/2/inst/adsU1
+                  floating        7300.05 0       io/pad/extra/VSSC/15/adsU1
+                  ...
+              ---------------------------------------------------------------------
+              Figure 4-6      Sample P/G Weakness Report
+
+                    The instance P/G resistance, Rinst, is normalized such that the instance or arc with
+                    the highest total effective resistance is assigned a value of 100 and the instance or
+                    arc with the lowest total effective resistance has a normalized value of 0, using the
+                    following equation:
+
+                                         (Rinst - Rmin)/(Rmax, - Rmin )*100                           (EQ 4)
+
+                    where, Rinst is the total effective P/G resistance for an instance (RVDD + RVSS),
+                    Rmin is the minimum value of all Rinst and Rmax is the maximum value of all Rinst.
+                    The first column of the report, Total, lists the normalized resistance for every cell as
+                    a percentage of the maximum Rinst. The second column lists the percentage of
+                    RVDD grid resistance to the total effective resistance for that instance. For multiple
+                    P/G arcs, the % resistance numbers are normalized to the highest resistance of all
+                    the domains.
+                    The third column provides a similar number for RVSS. The report values are sorted
+                    based on the highest total relative resistance percentage. The sum of ‘VDD(%)’
+                    and ‘VSS(%)’ entries is always 100.
+                    A very large imbalance between RVDD and RVSS (in percentage terms) indicates a
+                    significant weakness in the P/G grid at that instance, particularly for instances that
+                    have large values of total R.
+                    The list of P/G weakness instances also can be viewed without the TCL 'perform
+                    gridcheck' command by using the GUI pulldown menu Results -> List of Weak
+                    PG Instances, which brings up an ordered list of high total resistance instances.
+
+
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                     RedHawk User Manual      | 54
+Examining Power/Ground Grid Weakness
+
+                    Clicking on any entry and on 'Go To Location' zooms to and highlights the weak P/
+                    G instance. The list can be sorted based on Total resistance, VDD(%) or VSS(%).
+               2.   View Resistance Maps
+                    The resistance maps can be displayed using the GUI menu option View ->
+                    Resistance maps
+                    The Resistance maps display either Total Resistance, RVDD , or RVSS, which are
+                    the relative effective resistances for all instances in the design. To see the meaning
+                    of each color, click on the 'Set Color Range' Configuration button at the right side of
+                    the GUI. A 'Resistance Color Map' dialog is displayed, indicating the resistance
+                    “gradient” (normalized resistance) for each color. The display and the resistance
+                    ranges can be changed using the dialog.
+               3.   The View -> Nets menu option can be used to select the resistance maps to be
+                    displayed by net.
+               4.   To view a grid problem area, you can highlight the weak instances in GUI using the
+                    resistance report described above. Use the following TCL command to highlight
+                    weak P/G instance:
+                       select addfile high_VDD_res_instance
+                    to highlights instances with weak VDD structures, or
+                        select addfile high_VSS_res_instance
+                    to highlight instances with weak VSS structures.
+               5.   Effective Grid Resistance Calculation. Reviewing the highlighted high
+                    impedance instances, you can now start debugging the causes of weak P/G
+                    structures in more detail. An important tool in finding out more about weak grid
+                    areas is the ‘perform res_calc’ TCL command (see section "perform", page D-795,
+                    for command syntax description).
+                    The ‘perform res_calc’ command calculates the effective P/G grid resistance from
+                    all pads to selected instances or locations, and provides absolute resistance
+                    values. The default invocation, without any options, creates a resistance report of
+                    the worst instances, as indicated by an initial quick estimation. Using the options
+                      ‘-instance’, ‘-inst_file’, or ‘-box’ allow the effective resistance of particular
+                    instances or identified weak areas of the grid to be investigated in more detail. The
+                    -cell_file <CellFile> option specifies a text file that contains the cell names, one per
+                    line, for res_calc to compute the equivalent grid resistances. A sample ‘perform
+                    res_calc’ output file is shown below.
+                         # Ohm       Location(x y)             Layer      Net         Instance
+                         4.54617 1005.4 8755.2 MET3                       VSS         inst_1234
+                         4.39744 1055.6 8855.3 MET5                       VDD         inst_4134
+                         3.32929 1855.7 8455.6 MET3                       VDD         inst_2324
+                         ...
+               6.   Special Node Resistance Reports. Two other options allow you to select the type
+                    of node resistance reports, for standard cells or macro blocks, as follows:
+                        perform gridcheck ?-stdcell [ ave| min| max| all| none ]?
+                                      ?-macro [ ave| min| max| all| none ]?
+                    The option ‘ave’ is the average resistance for all nodes in each instance selected,
+                    and is the default. For the 'min' and 'max' options, the node with the minimum or
+                    the maximum resistance value for the instance is reported, instead of the average
+                    of all nodes in the instance. The 'none' option is used to eliminate reporting on all
+                    standard cell or macro instances. For 'all', the largest 5000 (default) node
+                    resistances in the design are reported.
+
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                   RedHawk User Manual     | 55
+Defining Pad and Package Parameters
+
+                    The report format is like 'perform res_calc', where VDD/VSS values are listed
+                    point-by- point, without pairing up. An example report follows:
+                    Example all-point gridcheck resistance listing for instances:
+                      Resistance(%) Location( x y) Layer Net                     Instance
+                      87.4927 4459.77 443.855 METAL3 VDD                       inst_129747/adsU1
+                      87.3918 2839.76 443.855 METAL3 VDD                       inst_129747/adsU1
+                      42.4231 3741.59 609.345 METAL3 VDD                       inst_129747/adsU1
+                      33.1267 1874.49 119.18 METAL3 VDD                        inst_129747/adsU1
+
+Defining Pad and Package Parameters
+
+              Before performing static IR drop and EM analysis, the pad, package wirebond or flip-chip
+              bumps and associated electrical package parameters must be defined.
+
+              Command Line Procedure for Package Modeling
+
+              The pad, wirebond or flip-chip bump, and package parasitics are typically specified in the
+              RedHawk .tech file. The units used for the package TCL commands are: R in Ohms, C in
+              picoFarads, and L in picoHenrys.
+              The following three TCL commands define simplified lump models for all pad RC, wire-
+              bond/bump RLC, and package RLC circuits, respectively.
+                   setup pad [-power | -ground] [-r <R_Ohms> | -c <C_pF>]
+
+                   setup wirebond [-power | -ground ]
+                       [-r <R_Ohms> | -l <L_pH> | -c <C_pF>]
+
+                   setup package -r <R_Ohms> -l <L_pH> -c <C_pF>]
+                    where
+                      -power -ground : selects which P/G net to define
+                      -r <R_Ohms> : specifies equivalent resistance value in Ohms
+                      -c <C_pF> : specifies equivalent capacitance value in picoFarads
+                      -l <L_pH> : specifies equivalent inductance value in picoHenrys
+              To specify individual bump/pad RLC values, see the PLOC file specifications in section
+              "Pad Location File (*.ploc)", page C-757. If you need a more accurate Spice package
+              subcircuit for your design, see Chapter 12, "Package and Board Analysis", for more
+              information about package subcircuit modeling.
+              To set up your package parameters such that you can easily look at the effects of different
+              package designs on power integrity, after extraction you can use the TCL command
+              ‘setup pss’, which defines PLOC and package subcircuit files to be used in simulation,
+              using the follow syntax:
+                   setup pss -pad_file <filename> -subckt <pss_ckt_name>
+                    where
+                      -pad_file <filename> : specifies a PLOC pad definition file that must have a .ploc
+                          extension and be in PSS PLOC format.
+                      -subckt <pss_ckt_name> : specifies the Spice package subcircuit file
+              After running RedHawk with one set of PLOC and package subcircuit files, you can then
+              modify one or both of the files, rerun the ‘setup pss’ command, and then rerun RedHawk
+              to see the effects of the new package data.
+
+
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                        RedHawk User Manual         | 56
+Running RedHawk-S (Static IR/EM Analysis)
+
+              GUI Procedure for Package Modeling
+
+                1.     Set the package and pad constraints by selecting the Static -> Pad, Wire_bond/
+                       Bump and Package Constraint command. The data form is displayed, as shown
+                       in Figure 4-7.
+                2.     Enter appropriate RLC pad and package values for your design.
+              The package model RLC values are needed to include the impact of package parameters
+              on the circuit analysis. The package can have a significant impact on voltage drop. If you
+              do not have accurate RLC values from testing or Spice models, you can provide
+              reasonable default values to see the effects on the voltage drop results.
+                     Note: For static analysis only, R values are sufficient. However, for dynamic analysis
+                     good L and C values are necessary for accurate results.
+
+
+
+
+              Figure 4-7          Pad, Wire-bond/Bump, and Package constraints form
+
+              Package Compiler Utility
+
+              The RedHawk Package Compiler is a versatile utility that checks the die-package
+              interface, as follows:
+               • checks package Spice syntax
+               • checks package RLCK passivity
+               • calculates effective package Inductance for each voltage domain
+               • matches die and package pins and creates an annotated PLOC
+              RedHawk Package Compiler makes use of the Chip Package Protocol (CPP) header
+              information to determine the following:
+               • identifies package and die pins
+               • identifies which nodes belong to the die side and which belong to the PCB side
+               • uses CPP header data to differentiate between power nets and ground nets
+              For details on using Package Compiler, see section "Chip-Die Mapping Using Package
+              Compiler", page 12-338.
+
+Running RedHawk-S (Static IR/EM Analysis)
+
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                    RedHawk User Manual     | 57
+Running RedHawk-S (Static IR/EM Analysis)
+
+              If all of the previous steps have been performed properly, you are now ready to run static
+              IR drop and EM analysis, as follows:
+                1.   Use the command Static > Static IR-drop & EM Analysis. The execution of this
+                     command typically takes a few minutes on a Linux machine.
+                     You can also run static analysis from the TCL command line, using the command
+                            perform analysis -static
+                2.   When the analysis is complete, in the Log window the five worst Voltage drops for
+                     each Power/ground net are listed.
+                3.   Evaluate the overall static voltage drop by clicking on the IR button, as shown in an
+                     example VDD plot in Figure 4-8 and VSS plot in Figure 4-9.
+
+
+              The following are some important issues that can be identified by the static voltage drop
+              maps:
+               • number and location of hot spots (expected or not)
+               • unexpected color jumps may indicate missing straps or connections
+               • any unexpected black areas (which could mean a black box element, missing data, a
+                 missing logical connection, or a missing physical connection)
+               • if a color change from source to hot spot make sense
+
+
+
+
+              Figure 4-8       VDD static IR drop map
+
+
+
+
+              Figure 4-9       VSS static IR drop map
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                    RedHawk User Manual       | 58
+Running RedHawk-S (Static IR/EM Analysis)
+
+              Exporting and Importing Results to the Design Database
+
+              The results of intermediate RedHawk operations and final results can be exported to the
+              design database from the command line using
+                   export db <Output_filename>
+              or from the GUI using the File -> Export DB menu command. The exported DB is
+              platform-independent among Linux, Solaris, and AMD 64-bit Linux systems.
+              The results can be imported back into RedHawk as needed using the command
+                   import db <DB_filename>
+              or the File -> Import DB command in subsequent runs.
+
+              Exporting a Database
+              The following procedure describes how to use the export db command:
+                1.   Select the Export DB menu item. A dialog window is displayed.
+                2.   Type in the design directory name and click on the OK button.
+                3.   A snapshot directory is created, containing binary files with the following names:
+                     • general (general information such as .gsr, .tech, etc.)
+                     • library.0, library.1, ... (library information)
+                     • design.0, design.1, design.2, ... (design netlist, hierarchy, data, etc.)
+              Some text files, such as apache.gsr, which are needed for power calculation and
+              simulation, are also included in Export DB.
+
+              Database Compatibility
+              The compatibility of RedHawk databases from different releases is as follows:
+               • If the database version and RedHawk version are of the same major release, but from
+                 different minor releases or patches:
+                       a. A database generated by an older version of RedHawk can be loaded with a
+                          newer version of RedHawk, but new features in the newer versions of
+                          RedHawk are not available.
+                       b. A database generated by a newer version of RedHawk cannot be loaded by
+                          an older version of RedHawk.
+               • If the database version and RedHawk version are from different major releases (for
+                 example, 2007.x and 2008.x), the database cannot be loaded across these versions.
+              Apache recommends that the database version and the RedHawk version used to load
+              the DB be the same. The “database version” is the version of the tool used to generate
+              the database.
+
+              Importing a Database
+              The following procedure describes how to use the import db command:
+                1.   Select the Import DB menu item, a dialog window is displayed.
+                2.   Select the design directory name and click on the OK button.
+                3.   If the entry field of Selection: ... is empty, as may happen on AMD64-bit and
+                     Enterprise 3.0 platforms, type in the directory name in the selection field. For
+                     example, enter /home/design/MY_DB, where MY_DB is the DB directory that
+                     needs to be imported.
+
+
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                    RedHawk User Manual     | 59
+Early Analysis Methodology
+
+
+              NOTE:           You may only load the design into the snapshot directory. No editing or
+                              updates are allowed in any of the binary files. No query operations are
+                              supported.
+
+              For version control purposes, a label is encoded into the binary file general. Therefore,
+              DB snapshots can only be reloaded using the same version of RedHawk that was used to
+              run ‘export db’. If there is a mismatch between DB and RedHawk versions, an Error
+              message is displayed and the RedHawk session terminates, with the following type of
+              error message:
+                   Data/File version is not RedHawk2004100-BINARY!
+
+
+              Flexible Memory Caching for Database Reloading
+              To accommodate the physical memory size of different machines that are used to run
+              RedHawk, use the -cache_mode option when importing a database, particularly when
+              the design size is larger than the available physical memory. This allows smart caching of
+              the part of the database that does not fit into the memory. So regardless of the memory
+              size of the machine from which the DB was exported, to efficiently import a saved
+              database dynamic_run1.db into a machine with limited physical memory, use the
+              command
+                   import db dynamic_run1.db -cache_mode 1
+              Note that setting the GSR keyword ‘CACHE_MODE 1’ also invokes RedHawk adaptive
+              memory caching. Setting a zero value turns caching off in both types of invocations.
+
+Early Analysis Methodology
+
+              Overview
+
+              For designs that are in early stages of design and do not have complete placement and
+              routing information, RedHawk allows you to perform power grid verification early in the
+              design process to ensure that the grid meets initial design guidelines. This can verify, at
+              an early stage, the placement of power pads and check electromigration issues at the pad
+              connections or at other key locations on the grid. The usage model is extremely flexible
+              and allows you to run the analysis with different types of design abstraction. The following
+              levels of design abstraction and power grid completion are supported:
+                1.   Design has power and ground (P/G) routing only, with no block placement
+                     information. Power consumption numbers are available for either the entire chip or
+                     for the entire chip along with information on power consumption in specific regions.
+                2.   Design has P/G routing and macro placements only. Macros do not have any port
+                     views (LEF pins) or detailed views (P/G routing).
+                3.   Design has P/G routing and macro placements. Macros have port views (LEF pins)
+                     but do not have detailed views (P/G routing).
+                4.   Design has P/G routing and macro placements. Macros can have either port views
+                     (LEF pins) or detailed views (P/G routing).
+              RedHawk can help analyze designs at any of the stages listed above. Based on the data
+              provided and the constraints specified, RedHawk creates realistic current sinks in the
+              design and assigns user-specified current at the current sink locations. Several examples
+
+
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                      RedHawk User Manual        | 60
+Early Analysis Methodology
+
+              of different early analysis scenarios, with different levels of block information, are shown
+              in Figure 4-10.
+
+                                                                 Sub-blk    Blk c
+                                        Blk a                    cc
+
+
+
+
+                Blk b
+
+
+                                                                                                Region E
+
+
+
+
+                Case: LEF pin            Case: LEF pin          Case: Hierarchical    Case: User-
+                view only and no         view only, and no      block c and sub-      specified region E
+                details.                 details.               block cc have         only.
+                Method: Assign           Method: Assign         routing.
+                                                                                      Method: Assign
+                power from top           power from top         Method: Assign        power equally at
+                level grid               level grid             power to block and    grid intersections
+                distributed to block     distributed based      sub-block based       in the defined
+                area.                    on connectivity        on layer              region.
+                                         available to block     specification.
+                                         pins.
+
+              Figure 4-10          Early block analysis scenarios
+
+              Input Data Required
+
+              The data requirements for executing early design static analysis are as follows:
+                1.      RedHawk technology file
+                2.      LEF file that describes the macros placed in the design. If current sinks have to be
+                        created at the ports of the macros, the LEF file must contain the PIN definitions.
+                3.      DEF file for the macros for which detailed routing must be considered
+                4.      top level DEF file for the design
+                5.      voltage source location definitions
+                6.      GSR file
+
+              Early Analysis Flow
+
+              Block Power and Current Assignment
+              For performing power analysis on early stage designs RedHawk uses information
+              specified using the GSR keyword BLOCK_POWER_ASSIGNMENT, which defines power
+              parameters for particular blocks, pins, regions and the top level in early stages of design.
+              RedHawk creates current sinks in the design based on the constraints specified with
+              BLOCK_POWER_ASSIGNMENT and distributes power among these current sinks
+              based on user-defined power and/or current numbers. Particular regions and blocks can
+              also be excluded from power assignment, if desired, and power calculation data then can
+              be used for those excluded.
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                   RedHawk User Manual     | 61
+Early Analysis Methodology
+
+                   Because of the large number of options for different types of applications, the
+                   syntax is broken down into different types of applications in the following syntax
+                   section.
+                       Syntax:
+                        BLOCK_POWER_ASSIGNMENT {
+
+                   •    To assign power to existing instances from LEF/DEF:
+                        <instName> [BLOCK|PIN] <layerSpec> <netName> [<powerW>|<currentA>]
+                       where
+                       <layerSpec> specifies either the layer name, or ALL to include all layers, or TOP
+                           or BOTTOM to include either the highest or the lowest mask layers
+                           overlapping the BPA instance.
+                       [<powerW>|<currentA>] : specifies either the power in Watts for power nets, the
+                           ground current in Amps for ground nets, or '-1' to allow power calculation to
+                           decide the power.
+
+                   •     To create a new instance and assign power:
+                         <BPA_instName> REGION <layerSpec> <netName> [<powerW>|<currentA>]
+                                   <llx> <lly> <urx> <ury>
+
+                   •     To create a new instance for cells declared in DECAP_CELL or
+                         BLOCK_POWER_MASTER_CELL keywords:
+                         <BPA_instName> <cellName> <layerSpec> <netName>
+                              [<powerW>|<currentA>] <llx> <lly> <orientation>
+
+                   •     To assign power in a region the size of the entire design:
+                         <BPA_instName> FULLCHIP <layerSpec> <netName>
+                             [<powerW>|<currentA>]
+
+                   •     To define sub-regions inside an existing BPA instance (multiple declarations on
+                         the same instance is allowed) for power assignment:
+                         <BPA_instName> BLOCK AREA <llx> <lly> <urx> <ury>
+                         <BPA_instName> BLOCK RECTILINEAR <x1 y1 x2 y3 x4 y5 ..>
+
+                   •     To exclude a region from BPA power assignment:
+                         <regionName> REGION EXCLUDE <llx> <lly> <urx> <ury>
+
+                   •     To exclude an overlapping instance in the design from BPA power assignment:
+                         <instName> BLOCK EXCLUDE
+
+                   •     To modify an area defined by 'EXCLUDE' to form rectilinear regions:
+                         <regionName> REGION INCLUDE <llx> <lly> <urx> <ury>
+
+                   •     To use the boundary box of an existing instance to do the same as above:
+                         <instName> BLOCK INCLUDE
+
+                   •     To exclude macro instances overlapping an BPA instance for power
+                         assignment:
+                         <BPA_instName> BLOCK EXCLUDE_MACRO
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                     RedHawk User Manual      | 62
+Early Analysis Methodology
+
+
+
+                     •   To exclude instances defined in the BLOCK_POWER_FOR_SCALING
+                         keyword and which overlap the BPA instance for power assignment:
+                         <instName> BLOCK EXCLUDE_BPFS
+
+                     •   To exclude an area occupied by all instances overlapping the BPA instance:
+                         <BPA_instName> BLOCK OVERLAP_OK
+
+              Using the BLOCK_POWER_ASSIGNMENT (BPA) keyword you can specify VDD power
+              and/or VSS current for any block or region for multiple metal /via layers on which current
+              sinks are created. Or if “-1” is specified, power calculation determines the appropriate
+              power/current based on other information available, such as toggle rate, BPFS and APL
+              characterization. If metal layers are specified, all top and bottom vias for those layers that
+              satisfy other criteria act as current sinks, and the assigned power or current is distributed
+              equally among these current sinks. If a via layer is specified, the current sinks are created
+              in the lower metal layer, if possible. Otherwise, the current sink is created in the upper
+              metal layer of the via. Current sinks can be created for different power and ground nets in
+              the design. All current sinks are analyzed in a single run. The keyword ‘ALL’ can be used
+              to include all layers in the power/current analysis.
+              The total current drawn by the current sinks in a power net depends on the power (Watts)
+              assigned to that net for a specific region, block or full-chip. The total current drawn by the
+              current sinks in a ground net, on the other hand, depend on the current (Amps) assigned
+              to that ground net for a specific region, block, or full-chip. Negative currents may be
+              assigned as needed for particular design methodologies.
+              BLOCK_POWER_ASSIGNMENT supports MMX pin-based region power assignment for
+              MMX instances that have many P/G pins inside to represent transistors using the
+              MMX_PIN and MMX_REGION keywords. See section "Power Assignment to MMX Pin-
+              based Regions", page 4-65.
+              The INCLUDE and EXCLUDE capabilities make it easier for you to define areas that are
+              not complete rectangles to be specified for power assignment. The EXCLUDE option
+              allows you to define rectangular regions to be excluded from areas occupied by BPA
+              blocks/regions, and the INCLUDE option then can add back areas to be included within
+              EXCLUDE areas.
+              The power calculation engine can estimate power and current for early stage blocks by
+              setting their BLOCK_POWER_ASSIGNMENT values to -1. This can be used for either
+              cell instances (blocks) or regions. You must provide correct and complete power
+              calculation data so that power for the block can be calculated accurately. See section
+              "Power Calculation", page 4-34, for details.
+
+
+              Use one line in the BPA specification for every domain (net) in the block, such as:
+                regionA REGION met3 vdd1 -1 100 200 300 400
+                regionA REGION met4 vdd2 -1 100 200 300 400
+                regionA REGION met3 vss -1 100 200 300 400
+              Note that if one net in the block is assigned -1 for power/current in BPA, power/current for
+              all domains in the block is determined by the power calculation engine.
+              All other areas and elements of the design not specified in the Block_Power_Assignment
+              statement are treated as in a normal RedHawk analysis. So early stage blocks that have
+              power assigned in BLOCK_POWER_ASSIGNMENT (BPA) can be simulated together
+              with other “regular” blocks (fully designed and specified), including those specified using
+              the keyword BLOCK_POWER_FOR_SCALING (BPFS). For this mixed process any BPA
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                     RedHawk User Manual        | 63
+Early Analysis Methodology
+
+              declaration overrides a BPFS declaration for the same instance. Power assignment for
+              FULLCHIP must be defined in BPFS, not in BPA.
+              So a general guideline is to use BPFS for “ready” completed instances, and BPA for
+              “early” blocks (such as regions, or macro (LEF) cell instances inside “early” design
+              blocks). If you need to assign power with FULLCHIP, using BPFS is highly recommended.
+              This generally applies to “mixed” early designs (that is, when the design has some blocks
+              that are completed, mixed with some early blocks).
+              You can also use the following GSR keywords to refine current sink assignment for
+              instances defined in BLOCK_POWER_ASSIGNMENT (see page C-579):
+                BPA_BY_LAYER
+                BPA_CONN_DISTANCE
+                BPA_CONN_MARGIN
+                BPA_CURRENT_DENSITY
+
+
+                  Block Power Assignment On-the-fly
+              Early analysis can also support interactive block power assignment and re-definition,
+              allowing you to experiment, using the TCL command
+                        gsr set BLOCK_POWER_ASSIGNMENT_FILE <BPA_filename>
+              anytime before and after 'setup design' to initialize and re-initialize the BPA settings.
+              Some example cases follow:
+              To display the current BPA settings in RedHawk:
+                        gsr get BLOCK_POWER_ASSIGNMENT
+              To display the block power master cells defined:
+                        gsr get BLOCK_POWER_MASTER_CELL
+              When using interactive changes to BPA, RedHawk compares any newly-loaded BPA
+              statements to what is already in RedHawk, and proceeds as follows:
+               • If there are errors in the newly-loaded set, such that the BPA statement cannot be
+                 understood, RedHawk does not change that BPA setting.
+               • If a new BPA statement is not in RedHawk, it is added.
+               • If a BPA statement is in RedHawk, but not in the new set, it is deleted.
+               • For BPA statements in both versions, the new BPA parameters are used.
+
+
+                  Hierarchical Power/Current Assignment
+              For power/current assigned to hierarchical elements in a design, power/current assigned
+              to child elements are included in the parent‘s assignment. So a parent’s power
+              assignment is the sum of the power assigned specifically to its children and also the
+              power assigned to areas that are outside of its children. See the hierarchical assignment
+              example below:
+                         CHIP FULLCHIP m1 vdd 10
+                         A BLOCK m1 vdd 8
+                         A/B BLOCK m1 vdd 5
+                         A/B/C BLOCK m1 vdd 2
+              So for this case BLOCK 'A/B/C' is assigned 2W, 'A/B outside of ‘C' is assigned 5 - 2 = 3W
+              (a total for ‘A/B’ of 3+2=5W), and the parent BLOCK 'A' outside of ‘B’ has the remainder of
+              3W (a total of 3+5=8W for ‘A’). For nodes in CHIP that are not in 'A', 10-8 = 2W is
+              assigned, and the whole chip has 10W.
+
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                   RedHawk User Manual     | 64
+Early Analysis Methodology
+
+              The ‘REGION’ specs in Block_Power_Assignment are designed as “place holders” for
+              design elements that are not available yet, so a warning is displayed if the coordinates of
+              two different REGIONS overlap, except for “sub-regions”. That is, for “regionA” and
+              “regionA/sub1”, “regionA/sub1” is expected to be inside “regionA”. Also, if a BPA region
+              overlaps all or part of a regular instance, the instance is considered “inactive”, and is
+              ignored in the analysis.
+              Every region declared in BLOCK_POWER_ASSIGNMENT can be referenced as an
+              instance in the design using the region name as the instance name. The cell name
+              associated with the instance is then the region name for most cases, except for regions
+              that have a hierarchical name. For example, in the cell name “U10/I5”, the “/” is replaced
+              by a “_” character in the cell name, “U10_I5”.
+              Optionally rectilinear areas inside BPA REGIONs or in LEF/DEF blocks, that share a
+              common master cell can be defined. Rectilinear area definitions enable you to distribute
+              power to specified sub-areas within a rectilinear block. Power/current assigned to
+              REGIONs/blocks is hooked up within the user-defined rectilinear areas. You must define
+              the common master cells and the rectilinear regions within it using a
+              BLOCK_POWER_MASTER_CELL definition and the BLOCK_POWER_ASSIGNMENT
+              keyword. Different regions can share the same master cell. You can use the GSR
+              keyword BLOCK_POWER_MASTER_CELL to achieve this, with the following syntax:
+                        BLOCK_POWER_MASTER_CELL {
+                            <master_cell_name1> <BB_llx> <BB_lly> <BB_urx> <BB_ury>
+                              ...
+                              ?<master_cell_name2> <bbox> {
+                              <sub-area bbox>
+                              ...
+                              }?
+                        }
+              Multiple regions can share a common master cell using BLOCK_POWER_ASSIGNMENT
+              by referencing a cell name declared in BLOCK_POWER_MASTER_CELL, as follows:
+                   BLOCK_POWER_ASSIGNMENT {
+                          <region> <master_cell_name> <layer> <net_name>
+                          [<power_W>|<gnd_I>] <BB_llx> <BB_lly> <orientation_code>
+                          ...
+                          }
+              A typical example of using the Block_Power_Assignment keyword follows:
+                         RegionABC FULLCHIP           via7    VDD      2.0      # in Watts
+                         RegionABC FULLCHIP           via5    VDDC     0.4      # in Watts
+                         BlckA         BLOCK          MET6    GND      1.0      # in Amps
+                         BlckB         PIN            MET6    VDD      0.2      # in Watts
+                         BlckC         BLOCK          via2    VDD      0.4      # in Watts
+                         Region1       REGION         via3    VDDC     0.3 30.0 65.0 60.0 95.0
+                         IOL           REGION      MET5 VDD_L 0.005 100 1050 1000 9900
+                         IOL           REGION      MET6 VDD_L 0.010 100 1050 1000 9900
+                         regionA       REGION     ALL VSS 0.1 10.0 20.0 30.0 4.0
+
+              To specify power in regions inside an MMX instance, you can use region names with the
+              prefix “adsU1/”-- for example, “adsU1/regionA”. In this way RedHawk knows that “adsU1/
+              regionA” is a sub-region inside 'adsU1' and the BLOCK_POWER_ASSIGNMENT
+              specifications can be interpreted correctly.
+              The steps for executing an early design static analysis flow are summarized in the
+              following TCL commands:
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                    RedHawk User Manual     | 65
+Early Analysis Methodology
+
+                         setup design <GSR_NAME>.gsr
+                         perform pwrcalc
+                         perform extraction -power -ground
+                         perform analysis -static
+
+                     Power Assignment to MMX Pin-based Regions
+              BLOCK_POWER_ASSIGNMENT supports MMX pin-based region power assignment for
+              MMX instances that have many P/G pins inside to represent transistors using the
+              MMX_PIN and MMX_REGION keywords. So the power is only distributed to P/G pins,
+              while regular region-based BPA assigns power to nodes on the given layer within the
+              region. This feature is used to change the power distribution inside a MMX instance for
+              static analysis only.
+              You can assign power :
+               • to transistor pins inside MMX instances using the MMX_PIN keyword in BPA.
+               • to regions inside MMX instances using MMX_REGION keyword and a “/” character to
+                 indicate hierarchy in the first column.
+               • hierarchically by defining a region inside another region using the MMX_REGION
+                 keyword. Use “/” character to indicate hierarchy.
+              For example:
+                BLOCK_POWER_ASSIGNMENT {
+                   BlockABC/ram64/adsU1 MMX_PIN all VDD 0.18
+                   BlockABC/ram64/adsU1 MMX_PIN all VSS 0.1
+                   BlockABC/ram64/adsU1/R1 MMX_REGION all VDD 0.04 1789 980 1822 1031
+                   BlockABC/ram64/adsU1/R1 MMX_REGION all VSS 0.01 1789 980 1822 1031
+                   BlockABC/ram64/adsU1/R10 MMX_REGION all VSS 0.03 1842 934 1888 966
+                   BlockABC/ram64/adsU1/R10/R11 MMX_REGION all VSS 0.02 1843 935 1863 965
+                   BlockABC/ram64/adsU1/RR REGION all VDD 0.09 0 0 40 40
+                   BlockABC/ram64/adsU1/RR REGION all VSS 0.05 0 0 40 40
+                }
+              In general, block power is assigned hierarchically, so power of a child block of the same
+              type as the parent is considered part of the parent’s power assignment.
+              In the above example, the final power for this instance is 0.18W for VDD and 0.1A for
+              VSS. Power/current in region R1 is 0.04W for VDD and 0.01A for VSS. Current in region
+              R10 is 0.03A for VSS. Current in region R10/R11 is 0.02A for VSS.
+              The last two lines in this BPA example are regular metal/via region-based BPA settings.
+              Instance BlockABC/ram64/adsU1/RR is created and is assigned 0.09W for VDD and
+              0.05A for VSS. However, since the */RR region is not type MMX, its power is not included
+              in the MMX region assignments.
+              Note that unlike metal/via region-based BPA, pin-based region BPA does not create
+              instance hierarchy for the given region, but it redistributes and adjusts the transistor pin
+              power/current inside the MMX instance, while keeping the total power/current of the MMX
+              instance unchanged.
+              Also, pin-based region BPA and metal/via-based region BPA can be used in the same
+              design at the same time, as follows:
+                1.    You can apply pin-based BPA to MMX instance while assigning metal/via based
+                      BPA to place outside MMX instance.
+                2.    It is possible to assign pin-based region BPA and metal/via based region BPA to
+                      the same MMX instance. But the metal/via based region BPA cannot cover any
+                      MMX transistor pins, or it would conflict with the assumption. Use MMX_REGION
+
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                    RedHawk User Manual     | 66
+Early Analysis Methodology
+
+                      to handle such case. So in the above example, pin-based region BPA is used while
+                      assigning power/current to “BlockABC/ram64/adsU1/RR” with metal/via existing,
+                      but the metal/via region BPA does not include any MMX transistor pins.
+
+
+                      MMX BPA Restrictions
+              The following restrictions on MMX pin-based region BPA use are checked to avoid
+              analysis errors:
+                1.    An MMX instance cannot be inside an MMX_REGION.
+                2.    An MMX_REGION must be defined inside an MMX instance.
+                3.    An MMX_REGION can only be within another MMX_REGION if they belong to the
+                      same instance.
+                4.    Regions cannot overlap.
+
+                     Power Assignment to OBS Regions in LEF Macros
+              Early stage analysis allows assignment of power to ‘OBS’ regions in LEF blocks. The
+              regions are defined in the OBS section in LEF for cell macros. There are two elements to
+              this methodology:
+               • RedHawk reads the specified parts of the OBS section in LEF to get the regions to be
+                 assigned power, when a new GSR keyword is turned on (default off, 0):
+                       READ_LEF_OBS 1
+                 The only parts of the OBS data read in are LAYERs defined as OVERLAP and shapes
+                 defined as RECT. All other items defined in the LEF OBS section are ignored. For
+                 example, the following OBS section items in LEF would be included in power
+                 assignment:
+                       OBS
+                           LAYER OVERLAP ;
+                           RECT 0.0 0.0 800.0 400.0 ;
+                           RECT 0.0 400.0 400.0 600.0 ;
+                       END
+               • Also, in the BLOCK_POWER_ASSIGNMENT (BPA) GSR keyword, a block type
+                 keyword ‘OBS’ is used. So LEF/DEF instances are categorized as BLOCK, PIN, or
+                 OBS. User-defined regions are specified by two GSR keywords:
+                    • REGION in BPA
+                    • <cellName> in BLOCK_POWER_MASTER_CELL
+                 Areas defined in the specified LEF OBS sections are used to assign power to a block
+                 only when the block type is also OBS in the BPA statement. The OBS type keyword is
+                 a block-level attribute by implementation, not a net-level attribute; BPA syntax is “per
+                 net” by definition. So if a user specifies the following:
+                        U1 BLOCK metal1 VDD 0.2
+                        U1 OBS metal2 VSS 0.15
+                 it would be interpreted as applying OBS to ALL nets specified in BPA for U1.
+              So it should be noted that the new OBS syntax assigns power/current to the whole
+              specified OBS area, and if one net is assigned to OBS for a block, all nets in the block are
+              assigned to OBS.
+
+              Creating Decap Cells During BPA
+              You can use the GSR keyword DECAP_CELL and BPA to create new decap cells/blocks
+              and assign decap values,. These decap blocks are also considered by the 'print decap'
+              command. Decap cells can either come from LEF or be created in the flow. BPA
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                   RedHawk User Manual      | 67
+Early Analysis Methodology
+
+              instantiates the existing decap cells to put decap instances in the design, using the
+              syntax:
+                         APL_FILES {
+                         # optional
+                              mydecap.cdev cap
+                              ...
+                         }
+
+                        BLOCK_POWER_ASSIGNMENT {
+                            DecapABC_10 DecapABC METAL1 VDD 0.0 3800 4200 N
+                            DecapABC_10 DecapABC METAL1 VSS 0.0 3800 4200 N
+                            DecapABC_20 LEF_decap1 METAL1 VDD 0.0 3900 4300 N
+                            DecapABC_20 LEF_decap1 METAL1 VSS 0.0 3900 4300 N
+                        }
+
+                        DECAP_CELL {
+                        # decap cells defined in LEF
+                            LEF_decap1
+                            ...
+
+                        # decap cells to be created, use the syntax:
+                        # <decap_cell> <width> <height> <C_pF> <R_ohm> <layer> <leakage_A>
+                            DecapABC 100 100 0.1 10 METAL1 0.001
+                            }
+              In this example RedHawk creates a decap cell (instead of a regular leaf cell) for
+              ‘DecapABC’, and ‘DecapABC_10’ and ‘DecapABC_20’ are decap instances.
+              When a decap instance is selected in the GUI, the instance name, the cell name and the
+              decap value assigned to it are all displayed in the log window.
+
+              Early Stage Decap Estimation
+              Early stage decap estimation can be performed to help meet your global dynamic voltage
+              drop (DvD) requirements, using the following estimation procedure:
+                1.   Run DvD analysis on the design that has rough placement or CTS completed.
+                     Look at DvD values.
+                2.   Place user-specified decap cells uniformly over all standard cell rows to fill a
+                     desired percentage of rows (may result in overlaps with existing standard cells),
+                     using the 'decap fill' command for uniform coverage:
+                        decap fill -uniform <percentage> -pattern {<list decap masters>}
+                3.   Rerun DvD analysis to get new DvD values. Delete the placed decaps if the global
+                     DvD target is not met (ignore local hot spots).
+                4.   Repeat steps 2 and 3 with different combinations of percentage coverage values
+                     and decap master cells until the global DvD target is met.
+                5.   Feed back the amount of decap required (and optionally, placement info) to the
+                     place and route tool for the pre-placement design database.
+                6.   Continue with regular placement and routing steps.
+              The command creates a report of results in a tabular format, with the number and amount
+              of decaps added for each decap master. A sample output report is shown below:
+                   DECAP_MASTER_NAME Number_of_Instance              Amount_of_Decap_Added
+                   cell_698               333548              457.397700 pF
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                    RedHawk User Manual     | 68
+Early Analysis Methodology
+
+                   cell_200             333548          93.843726 pF
+                   -------------------------------------------------------
+                   Total_Amount         667096          551.241426 pF
+
+              Reports Created
+
+              The reports created from early analysis are very similar to those available from a standard
+              RedHawk static analysis, including:
+               • wire-based voltage drops
+               • pad currents
+               • potential EM problem areas
+
+              Example Analyses
+
+              The following cases describe how you can simulate early designs for different design
+              phase scenarios.
+               Case 1
+              Conditions: Design has power and ground (P/G) routing only, with no block placement
+              information available. Power consumption numbers are available for either the entire chip
+              or for the entire chip along with information on power consumption in specific regions.
+              For this case you can specify top (FULLCHIP) level power and define region specific
+              power. He or she can also define the metal or via layer on which the current sinks can be
+              inserted and these definitions can be unique for each region and for the full-chip.
+              The Block_Power_Assignment keyword syntax is as follows:
+                  BLOCK_POWER_ASSIGNMENT {
+                       [ <DEF_inst_name> [ BLOCK | PIN ] |
+                           <regionName> [ FULLCHIP | REGION ] ]
+                           [ <layer_name> | ALL | TOP | BOTTOM |
+                           <via_name> ] <pwr_domain_name>
+                       [ <domain_power-W> | <gnd_net_current-A> | -1 ]
+                       ?<Bounding box- x1 y1 x2 y2 - req’d for REGION, same line>?
+                       }
+              So for this case current sinks in top level metal6 consume 1.0W of power in the VDD_X
+              domain:
+                   RegionXYZ FULLCHIP              metal6 VDD_X 1.0
+                   ...
+
+              For current sinks in via4 in a region bounded by opposite corner locations 100,100 and
+              200,200, and draw 0.35 Amps in the GND_X net, the entry is:
+                   RegionA         REGION via4         GND_X 0.35 100.0 100.0 200.0 200.0
+                   ....
+                   }
+
+              RedHawk inserts current sinks in all via4 shapes that fall inside “RegionA”. These current
+              sinks draw a total of 0.35Amps in the GND_X net. Specifying a metal layer name for this
+              region means that all top and bottom vias for the specific layer that falls inside “RegionA”
+              would have current sink locations. Or, if you specify a via layer name for this region, all
+              vias of that layer type that fall inside “RegionA” would have current sink locations.
+
+
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                    RedHawk User Manual      | 69
+Early Analysis Methodology
+
+               Case 2
+              Conditions: Design has P/G routing and macro placements only. Macros do not have port
+              views (LEF pins) or detailed views (P/G routing).
+              For this case, you can specify top (FULLCHIP) level power and define block-specific
+              power. You also can define the metal or via layer on which the current sinks can be
+              inserted; these definitions can be unique for each block and for the full-chip.
+              Using the Block_power_assignment syntax described above, for this case the current
+              sinks at top level metal6 consume 1.0W of power in VDD_X domain would be specified:
+                        RegionMNOP        FULLCHIP metal6 VDD_X 1.0
+                         ...
+              And for current sinks in via4 in a block that consumes 0.35Amps in the GND_X net:
+                   BlockA BLOCK via4               GND_X 0.35
+                   BlockA BLOCK via4               VDD_X 0.42
+                   ...
+              For current sinks in metal3 in a block that consumes 0.72W in the VDD_X net:
+                   BlockB BLOCK metal3 VDD_X 0.72
+                   ...
+                   }
+              RedHawk inserts current sinks in all top and bottom vias that intersect the specified layer
+              at the top level. In this case all via5 and via6 shapes in the top level outside “BlockA” and
+              “BlockB” have 1.0W assigned (since in both of these two blocks, VDD_X net is covered,
+              which is the same one specified in the top level). The power assigned to the FULLCHIP
+              current sinks is 1.0W, so the power for the top level should be specific to the top level
+              current sinks exclusively.
+              RedHawk inserts current sinks in all via4 shapes that fall inside “BlockA”. These current
+              sinks draw a total of 0.35Amps in the GND_X net.
+              All current sinks on metal3 geometries inside “BlockB” are designated as current sinks
+              specific to “BlockB”. Power of 0.72W is assigned to the current sinks in the VDD_X net.
+               Case 3
+              Conditions: Design has P/G routing and macro placements. Macros have port views (LEF
+              pins) but do not have detailed views (P/G routing).
+              For this case, you can specify top (FULLCHIP) level power and define block-specific
+              power. You also can define the metal or via layer on which the current sinks are inserted,
+              and these definitions can be unique for each block and for the full-chip.
+              The same GSR keyword syntax is used:
+                      BLOCK_POWER_ASSIGNMENT {
+                      [ <DEF_inst_name> [ BLOCK | PIN ] |
+                           <regionName> [ FULLCHIP | REGION ] ]
+                          [ <layer_name> | ALL | TOP | BOTTOM |
+                          <via_name> ] <pwr_domain_name>
+                          [ <domain_power-W> | <gnd_net_current-A> | -1 ]
+                          ?<Bounding box x1 y1 x2 y2 - req’d for REGION, same line>?
+                          ...
+                      }
+              So for current sinks in top level metal6 that consume 1.0W of power in the VDD_X
+              domain:
+                   RegionCDEF FULLCHIP            metal6 VDD_X 1.0
+                   ...
+
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                    RedHawk User Manual     | 70
+Evaluating Results of Static IR Voltage Drop Analysis
+
+              For current sinks in via4 in a block that consumes 0.35Amps in the GND_X net:
+                   BlockA PIN            via4      GND_X 0.35
+                   BlockA PIN            via4      VDD_X 0.42
+                   ...
+              For current sinks in metal3 in a block that consumes 0.72W in the VDD_X net:
+                   BlockB PIN          metal3 VDD_X 0.72
+                   ...
+                   }
+              RedHawk inserts current sinks in all top and bottom vias that intersect the specified layer
+              at the top level -- in this case all via5 and via6 shapes in the top level outside “BlockA”.
+              “BlockB” has 1.0W power assigned. The power assigned to the FULLCHIP current sinks
+              is 1.0W, so the power for the top level should be specific to the top level current sinks
+              exclusively.
+              RedHawk inserts current sinks in all via4 shapes that fall inside “BlockA” and that
+              intersect with all the PIN geometries defined in the LEF view of “BlockA”. These current
+              sinks draw a total of 0.35Amps in the GND_X net.
+              All via2 and via3 shapes that intersect with metal3 geometries inside “BlockB” that
+              intersect with all the PIN geometries defined in the LEF view of “BlockB” are designated
+              as current sinks specific to “BlockB”. A power of 0.72W is assigned to the current sinks in
+              the VDD_X net.
+
+
+
+Evaluating Results of Static IR Voltage Drop Analysis
+
+              A number of useful analysis techniques are available for viewing the results of voltage
+              analysis, which are discussed in the following steps.
+                1.   View IR voltage drop by layer by selecting View -> Map Configuration -> IR Drop
+                     Color Map.
+                2.   Zoom in so that individual instance voltages can be seen, as shown in Figure 4-11.
+
+
+
+
+              Figure 4-11      View individual instance IR drop values with View -> Map
+                               Configuration -> IR Drop Color Map
+
+                3.   You can change the range of IR drop violations displayed and the display colors by
+                     using the ‘Set Color Range’ button in the ‘Configuration’ panel (middle button) on
+                     the right hand side. Figure 4-12 shows the form for setting the IR voltage drop color
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                  RedHawk User Manual     | 71
+Evaluating Results of Static IR Voltage Drop Analysis
+
+                     range, which enables you to change either the percentage of the voltage drop to
+                     VDD or the absolute value of the voltage drop. You can also click on any of the
+                     color buttons to customize the color display and the range of voltage drops each
+                     color represents. The colors show the varying levels of voltage drop, from the
+                     highest in red to the lowest in blue and magenta.
+
+
+
+
+              Figure 4-12     settings for the voltage drop color map
+
+                4.   Zoom in on the voltage drop color map and see more detail, as shown in Figure 4-
+                     13.
+                5.   Observe the instances with the highest power usage using the IPM button on the
+                     ‘View Results’ panel. Click on a key hot instance, as shown in Figure 4-14.
+                6.   Observe the power density distribution of the design using the PD button on the
+                     ‘View Results’ panel.
+                7.   Observe the electromigration profile and possible EM violations using the EM
+                     button on the ‘View Results’ panel.
+              Once the static results are acceptable (analysis runs without a problem, results are well
+              understood, no obvious power grid/layout issues), and once you have done all the
+              needed modifications, it is time to proceed to the voltage drop analysis in dynamic mode.
+
+
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis          RedHawk User Manual   | 72
+Evaluating Results of Static IR Voltage Drop Analysis
+
+
+
+
+              Figure 4-13     Zoom in to view the worst voltage drop violation area
+
+
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                    RedHawk User Manual     | 73
+Example Procedure to Fix IR Drop Problems
+
+
+
+
+              Figure 4-14      Click on a hot instance for more information
+
+Example Procedure to Fix IR Drop Problems
+
+              This brief example section uses an example design to illustrate how to fix IR drop
+              problems discovered during static analysis. The example demonstrates how the addition
+              of three power pads, two metal straps and a metal layer resistivity change can reduce
+              static IR drop. This example assumes that you are familiar with procedures for running IR
+              drop and EM analysis, described previously in this chapter. If you want more details on
+              the power grid modification commands used in this example, see Chapter 7, "Fixing and
+              Optimizing Grid and Power Performance".
+
+              Example IR Drop Case
+
+              The original IR drop map of the example design is shown in Figure 4-15. The results show
+              a worst-case Vdd - Vss voltage differential of 1.1073V in the upper left corner of the chip,
+              which contains several high-power instances. The RedHawk screen displays the following
+              message highlighting the worst-case IR drop.
+                  The worst IR drop of the top cover cell
+                  voltage = 1.1073 at node (2679.182500,2737.390000)
+              The existing metal4 straps extending from the top and the metal6 strap extending from
+              the left side do not supply adequate power to the high-power instances.
+
+
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis               RedHawk User Manual   | 74
+Example Procedure to Fix IR Drop Problems
+
+
+
+
+                                                             Metal4 straps
+
+
+
+
+                             Metal6 strap
+
+
+                          Worst IR = 1.1073V
+
+
+
+
+              Figure 4-15     Original IR drop map
+
+              Modifying Power Pads
+
+              Adding new power pads and straps is described, and then analyzing the impact on IR
+              drop.
+                1.   Add two power pads on the two metal4 straps by using Edit > Add Pad, as shown
+                     in Figure 4-16.
+
+
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis              RedHawk User Manual   | 75
+Example Procedure to Fix IR Drop Problems
+
+
+
+
+                                                                       Add power pads
+
+
+
+
+                                                                     Metal4 straps
+
+
+
+
+              Figure 4-16     Adding two power pads on two metal4 straps
+
+                2.   Then add one power pad on the metal6 strap using the command Edit > Add Pad,
+                     as shown in Figure 4-17.
+
+
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                RedHawk User Manual   | 76
+Example Procedure to Fix IR Drop Problems
+
+
+
+
+                                                                 Add power pad
+
+
+
+                                                                           Metal6 strap
+
+
+
+
+              Figure 4-17     Adding a power pad on the metal6 strap
+
+              Adding Metal6 Straps
+
+                3.   Add two metal6 straps on top of the two metal4 straps by using Edit > Add Power
+                     Strap, as shown in Figure 4-18. This reduces the resistance of the grid segment
+                     supplying the hotspot. Make the following selections in the pop-up menu when
+                     adding the metal6 straps.
+                     • Deselect Add strap by text input to use drawing input method.
+                     • Select a Vertical power strap.
+                     • Input the strap width as 20um.
+                     • Select metal6 for the stack via top metal layer.
+                     • Select metal4 for the stack via bottom metal layer.
+                     • Select metal6 for the strap metal layer.
+
+
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                   RedHawk User Manual     | 77
+Example Procedure to Fix IR Drop Problems
+
+
+
+
+                                                     Add metal6 straps
+
+
+
+
+                                                 Metal4 straps
+
+
+
+
+              Figure 4-18      Adding two metal6 power straps to two existing metal4 power
+                               straps
+
+                4.   Draw two metal6 power straps that cover the length of the metal4 power straps.
+                     This is indicated by a red rectangular box that covers the width and length of the
+                     metal4 straps.
+                5.   Click on Commit Adding to add the power straps to the design.
+                6.   Now rerun Static->Network Extraction and Static->Static IR-drop & EM
+                     analysis.
+                     The results show that the worst Vdd - Vss differential is now 1.1076V, showing very
+                     little improvement from the initial IR drop run.
+
+
+
+
+ANSYS, Inc.
+CHAPTER 4 — Power calculation, Static IR Drop, EM Analysis                   RedHawk User Manual        | 78
+Example Procedure to Fix IR Drop Problems
+
+              Resistivity Sensitivity
+
+                1.   As a way of evaluating its impact on voltage drop, reduce the metal6 resistivity
+                     from 0.027 to 0.014 in the RedHawk technology file.
+                2.   Now rerun Static->Network Extraction, Static->Power->Import, and Static->
+                     Static IR-drop & EM analysis, using the modified technology file.
+                     The worst Vdd - Vss differential is now 1.109V. This shows slightly more
+                     improvement from the previous IR drop analysis.
+                3.   This would indicate that further improvement in IR drop could be obtained by
+                     adding an extra layer of metal on top of metal6, or by changing the wire-bond
+                     package to a flip-chip package.
+
+
+              If you feel there are additional IR drop problems that need to be resolved before
+              proceeding to Dynamic Analysis, see Chapter 7, "Fixing and Optimizing Grid and Power
+              Performance".
+              When you have finished evaluating and fixing IR drop performance, proceed to Chapter 5,
+              "Dynamic Voltage Drop Analysis".
+
+
+
+
+ANSYS, Inc.
+

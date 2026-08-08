@@ -1,0 +1,1164 @@
+% 第 22 章 Hierarchical Analysis
+\bichapter{层次化分析}{Hierarchical Analysis}
+\label{chap:hier}
+
+对于大型芯片设计，从顶层层次进行扁平时序分析可能消耗大量内存或运行时间。可采用层次化分析，使每次分析运行仅针对整片芯片的一部分。要学习层次化分析，请参阅：
+\begin{itemize}
+  \item 层次化分析概述
+  \item HyperScale 分析
+  \item Context 特征化
+  \item Context 预算（Budgeting）
+  \item 提取时序模型（ETM）
+  \item 快速时序模型（QTM）
+\end{itemize}
+
+\section{层次化分析概述}
+\subsection*{Overview of Hierarchical Analysis}
+
+大型设计的分析可能消耗大量内存或运行时间。层次化分析使每次运行仅针对芯片一部分。
+
+PrimeTime 提供以下层次化分析特性：
+\begin{itemize}
+  \item HyperScale 分析 — 先进技术，分别分析块级与顶层部分，准确处理顶层与下级块之间的时序接口；在块级分析的缩减运行时间与内存占用下获得接近全扁平分析的精度。
+  \item Context 特征化 — 写出块在顶层内的时序 context，使块可脱离顶层单独分析并仍获得在顶层 context 下工作的准确时序。
+  \item 提取时序模型（ETM） — 直接从下级块网表提取的块时序模型，由时钟、输入与输出 pin 之间的时序弧组成；可移植并导出到其他工具。
+  \item 快速时序模型（QTM） — 用一组 PrimeTime 命令指定输入、输出与约束以创建简化时序模型，用于早期层次化分析。
+\end{itemize}
+
+\figplaceholder{Figure 381}{层次化分析流程}{fig:hier-flows}
+
+\subsection{何时使用扁平与层次化分析}
+\subsubsection*{When to Use Flat vs Hierarchical Analysis}
+
+\begin{table}[htbp]
+\centering
+\caption{扁平全芯片分析与 HyperScale 层次化分析对比}
+\begin{tabularx}{\textwidth}{@{}X X@{}}
+\toprule
+扁平全芯片分析 & HyperScale 层次化分析 \\
+\midrule
+最终 signoff、最佳顶层性能 & 大型设计、内存/运行时间受限 \\
+整片同时分析 & 块级与顶层分别运行 \\
+无需块模型 & 使用 HyperScale 块模型与 context \\
+替代旧 ILM 流程 & 支持自底向上、自顶向下与混合流程 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+典型层次化流程包括：生成块级约束 → 块级分析 → 顶层 HyperScale 分析 → 时序收敛迭代。
+
+\section{HyperScale 分析}
+\subsection*{HyperScale Analysis}
+
+HyperScale 技术分别对块级与顶层部分进行分析，准确处理块接口时序，在层次化运行时间与内存下接近扁平分析精度。
+
+PrimeTime HyperScale 层次化分析方法的主要优势：
+\begin{itemize}
+  \item 运行时间与容量 — 相比扁平全芯片分析，HyperScale 将分析拆分为多次较小运行，显著降低内存与运行时间。
+  \item 精度 — 与扁平分析执行相同延时计算、POCV/AOCV 与耦合/非耦合 SI 分析，在块接口保持完整精度。
+  \item 高效顶层分析 — 自动记录并缩减顶层需分析的块内部逻辑，仅保留接口时序信息。
+  \item 自动 context 更新 — 顶层与块级迭代时自动更新并传递块边界条件。
+  \item ECO 指导 — HyperScale 信息指导时序 ECO，支持顶层与块级协同修复。
+  \item 约束管理 — 在块级收敛时序，顶层使用 HyperScale 块模型；支持约束提取保证块级与顶层一致。
+\end{itemize}
+
+大型芯片可跨多个层次级。HyperScale 可在每一级分别分析下级块与当前级，“顶层”可指包含一个或多个下级块的任意分析级。
+
+\figplaceholder{Figure 382}{扁平分析与 HyperScale 层次化分析对比}{fig:flat-vs-hs}
+
+\figplaceholder{Figure 383}{跨多层次的层次化分析}{fig:hs-multi-level}
+
+\subsection{HyperScale 关键技术特性}
+\subsubsection*{Key HyperScale Technology Features}
+
+\begin{itemize}
+  \item HyperScale 建模 — 块以 HyperScale 模型表示，保留接口路径、约束与 CRPR 信息。
+  \item HyperScale 块 Context — 顶层向块传递边界条件（到达/要求时间、转换时间、case 值、串扰数据等）。
+  \item 多重实例化模型（MIM） — 对多重实例化模块合并 context。
+  \item 上下文覆盖（Context Override） — 块级运行中根据顶层 context 调整边界。
+\end{itemize}
+
+HyperScale 块模型包含以下逻辑类型：输入到寄存器、寄存器到输出、输入到输出、时钟路径、接口锁存器与时间借用、最小脉冲宽度/周期检查、噪声与 SI 相关逻辑。模型包含准确时序分析所需的全部接口逻辑。
+
+\begin{lstlisting}
+set_app_var hier_enable_analysis true
+read_verilog block.v
+link_design block
+read_parasitics block.spef
+source block.sdc
+update_timing -full
+write_hier_data $blkDir
+\end{lstlisting}
+
+\figplaceholder{Figure 384}{HyperScale 块模型}{fig:hs-block-model}
+
+\figplaceholder{Figure 385}{HyperScale 块 Context}{fig:hs-block-context}
+
+\figplaceholder{Figure 386}{多重实例化模块的 Context 合并}{fig:mim-context-merge}
+
+\subsection{HyperScale 使用流程}
+\subsubsection*{HyperScale Usage Flows}
+
+支持自顶向下、自底向上与混合流程：
+\figplaceholder{Figure 387}{HyperScale 分析流程}{fig:hs-usage-flows}
+
+\figplaceholder{Figure 389}{HyperScale 自顶向下与自底向上流程}{fig:hs-td-bu}
+
+\figplaceholder{Figure 390}{HyperScale 自顶向下流程}{fig:hs-td-flow}
+
+\figplaceholder{Figure 391}{HyperScale 自底向上流程}{fig:hs-bu-flow}
+
+\subsubsection{无 Context 的块模型自底向上分析}
+\paragraph*{Bottom-Up Analysis Using Block Models Without Context}
+
+自底向上无 context 建模中，用预算约束分析块时序，生成 HyperScale 块模型供顶层使用。比 ETM 更准确（保留块内部网表与接口逻辑），顶层性能与容量优于带 context 的完整流程，但精度低于自顶向下带 context 流程。
+
+\subsubsection{从 ETM 层次化流程迁移}
+\paragraph*{Moving From an ETM Hierarchical Flow}
+
+已有 ETM 层次化流程可少量修改脚本转为 HyperScale 以获得更高精度：块级用 \cmd{write\_hier\_data} 替代 \cmd{extract\_model}；顶层用 HyperScale 块模型路径替代 ETM .lib/.db 路径；可用 \cmd{read\_context} 读入已有顶层 context（若可用）。
+
+\subsubsection{使用块模型与 Context 的自顶向下分析}
+\paragraph*{Top-Down Analysis Using Block Models and Context}
+
+顶层先运行 HyperScale 分析并写出块 context；块级读入 context 进行独立分析，结果回注顶层。
+
+\figplaceholder{Figure 388}{使用顶层与块级分析运行的 HyperScale 分析}{fig:hs-top-block-runs}
+
+\subsubsection{含 MIM 的自顶向下分析}
+\paragraph*{Top-Down Analysis With Multiply Instantiated Modules (MIMs)}
+
+对同一块的多实例，HyperScale 合并各实例 context 并处理 MIM 悲观度（mim_pessimism）。
+
+\figplaceholder{Figure 392}{自底向上流程中的时钟匹配问题}{fig:clk-match-bu}
+
+\subsubsection{顶层与块之间的时钟映射}
+\paragraph*{Clock Mapping Between Top and Block}
+
+块级与顶层须建立时钟映射；\cmd{write\_context} 写出 clock\_map.pt，块级读入后映射顶层时钟名。自底向上流程中顶层与块时钟名/周期不匹配会导致接口时序错误。可用 \cmd{create\_clock -name CLKZ} 在块级创建虚拟时钟调试映射问题。
+
+HyperScale 按优先级映射：共享物理时钟源网络；周期与波形精确匹配；时钟名前缀匹配。失败时发出 HS-004 错误但 \cmd{update\_timing} 仍完成。用 \cmd{report\_clock -map} 检查映射；N/A 表示未找到对应时钟。
+
+SMVA/DVFS 设计中，\cmd{create\_clock -dvfs\_scenario} 定义的时钟在映射时选择周期匹配的顶层时钟；未映射时钟端口传播无时钟到达窗口以确保块级分析边界顶层分析。块 context 须用 \cmd{write\_context -format gbc} 二进制格式以包含 DVFS 信息。
+
+\cmd{get\_hier\_clocks} 返回 \texttt{hier\_clock} 集合，可在块级查询顶层时钟定义，在顶层查询块级时钟定义；用 \cmd{report\_attributes -application [get\_hier\_clocks]} 查看属性。
+
+\subsection{选择自顶向下或自底向上流程}
+\subsubsection*{Choosing a Top-Down or Bottom-Up Flow}
+
+自顶向下为首选：时序收敛更快，块约束与顶层约束从一开始保证一致。若块可分析而顶层约束尚未就绪，可用自底向上流程从预算约束开始，顶层分析后须检查顶层与块级约束一致性。
+
+\subsection{自顶向下 HyperScale 流程}
+\subsubsection*{Top-Down HyperScale Flow}
+
+\figplaceholder{Figure 390}{HyperScale 自顶向下层次化分析流程}{fig:hs-td-flow-detail}
+
+自顶向下流程四步（各在独立 PrimeTime 会话）：
+\begin{enumerate}
+  \item 全芯片提取块约束（\cmd{hier\_characterize\_context\_mode constraints\_only}，最小 update，不用寄生）
+  \item 块级分析（读入提取约束，\cmd{write\_hier\_data} 写初始块数据）
+  \item 顶层 HyperScale 分析（\cmd{set\_hier\_config}，\cmd{write\_hier\_data} 写块 context）
+  \item 块级分析（\cmd{read\_context} 读详细 context，迭代收敛）
+\end{enumerate}
+
+步骤 3--4 可重复直至时序收敛。顶层可用 \cmd{report\_timing -path\_type full\_clock\_expanded -from IN1 -to BLKA/reg2} 报告跨层次完整路径。块级报告中顶层施加的约束以 ``@'' 标记（如 input external delay 0.34 @）。
+
+\subsection{自底向上 HyperScale 流程}
+\subsubsection*{Bottom-Up HyperScale Flow}
+
+\figplaceholder{Figure 391}{HyperScale 自底向上层次化分析流程}{fig:hs-bu-flow-detail}
+
+自底向上三步：
+\begin{enumerate}
+  \item 用预算约束做块级分析，\cmd{write\_hier\_data} 生成 HyperScale 块模型
+  \item 顶层 HyperScale 分析（可用 \cmd{set\_clock\_map} 映射时钟，\cmd{report\_clock -cells/-map} 检查）
+  \item 块级用准确 context 最终分析（\cmd{read\_context}）
+\end{enumerate}
+
+可用约束一致性检查器比较预算块约束与顶层扁平约束：\cmd{set\_app\_var sh\_enable\_constraint\_consistency\_checker true}，\cmd{report\_constraint\_analysis} 报告不一致。
+
+\subsection{HyperScale 脚本与块 Context 自动生成}
+\subsubsection*{Automatic Generation of HyperScale Scripts and Block Context}
+
+若有全芯片扁平分析脚本，可启用 HyperScale 模板脚本生成：\cmd{set\_app\_var hier\_enable\_analysis true}、\cmd{set\_app\_var hier\_create\_script\_mode true}。\cmd{characterize\_context -block ...} 后为各块创建 partition0/..partitionN/ 目录及 RUN.ptsh 脚本。
+
+\subsection{HyperScale 配置}
+\subsubsection*{HyperScale Configuration}
+
+使用 \cmd{set\_hier\_config}（或 \cmd{set\_hyperscale\_configuration}）配置块数据路径、时间戳与 HyperScale 目录结构。
+
+\opt{-block} 指定块名，\opt{-path} 指定块会话数据目录，\opt{-instances} 指定实例列表，\opt{-name} 关联配置名。顶层分析在配置目录下执行；各块数据目录建议以 HS\_ 为前缀。
+
+\subsubsection{顶层 HyperScale 配置示例}
+\paragraph*{Example of Top-Level HyperScale Configuration}
+
+\begin{lstlisting}
+set_hyperscale_configuration -block_config_path ./hs_data/BLKA
+read_verilog top.v
+link_design top
+read_parasitics top.spef
+source top.sdc
+update_timing -full
+\end{lstlisting}
+
+\subsection{HyperScale 会话数据}
+\subsubsection*{HyperScale Session Data}
+
+HyperScale 流程须用 \cmd{write\_hier\_data} 保存、\cmd{read\_context} 恢复会话数据。数据目录含网表快照、约束、context、时钟映射、时间戳与变量设置。顶层 \cmd{link\_design} 在配置路径下查找块级会话数据；指定 \opt{-instances} 时按实例路径查找。
+
+\subsection{HyperScale 使用细节}
+\subsubsection*{HyperScale Usage Details}
+
+使用 HyperScale 的基本步骤：
+\begin{enumerate}
+  \item 配置 HyperScale（\cmd{set\_hier\_config}）
+  \item 读入并链接设计
+  \item 读入寄生与约束
+  \item \cmd{update\_timing}（及 \cmd{update\_noise} 若适用）
+  \item \cmd{write\_hier\_data} 写出块数据或 context
+\end{enumerate}
+
+用 \cmd{report\_hier\_analysis} 确认配置；\cmd{set\_app\_var hier\_enable\_analysis true} 使能层次化分析。
+
+\subsection{模型与 Context 不匹配处理}
+\subsubsection*{Model-Context Mismatch Handling}
+
+块网表与 HyperScale 模型/context 不一致时，工具检测端口 net 变更并尝试 context 覆盖。无法解析时钟时应用无时钟 context。\cmd{report\_context -list\_context\_override} 列出覆盖信息；属性 	exttt{is\_netlist\_dont\_override}、	exttt{is\_clock\_dont\_override}、\texttt{has\_model\_mismatch\_clock} 标识问题端口。\cmd{report\_constraint -boundary\_check} 报告块边界约束违例（clock\_mapping、clock\_attributes、clock\_uncertainty 等），许多可通过修正块级约束或继续迭代 HyperScale 流程解决。
+
+\subsection{块级分析}
+\subsubsection*{Block-Level Analysis}
+
+块级运行读入网表、寄生、块约束与顶层写出的 context：
+\begin{lstlisting}
+read_verilog block.v
+link_design block
+read_parasitics block.spef
+read_context -path ./hs_data/BLKA
+source block.sdc
+update_timing -full
+\end{lstlisting}
+
+\subsubsection{带调整后 Context 的块级分析}
+\paragraph*{Block-Level Analysis With Adjusted Context}
+
+顶层 context 在块边界自动调整到达/要求时间与转换时间，反映顶层实际时序环境。
+
+\subsection{链接设计}
+\subsubsection*{Linking the Design}
+
+层次化分析中 link_design 须正确解析块引用、HyperScale 模型与黑盒实例。
+
+\subsection{控制裕量应用方式}
+\subsubsection*{Controlling How Margins Are Applied}
+
+HyperScale 在块边界应用 OCV/AOCV/POCV 裕量；\cmd{report\_hyperscale\_constraints} 报告边界检查与裕量传递。
+
+\subsection{层次化约束提取}
+\subsubsection*{Hierarchical Constraint Extraction}
+
+可用 HyperScale 约束提取器从全芯片扁平约束中提取一致的块级时钟、case 值与例外，用于 context 准确的块级分析。
+
+\subsubsection{配置与运行约束提取}
+\paragraph*{Configuring and Running Constraint Extraction}
+
+\begin{lstlisting}
+set_app_var hier_characterize_context_mode constraints_only
+source full_chip_analysis_script.tcl
+characterize_context -block BlockA
+update_timing
+write_context -format ptsh -output $outDir
+\end{lstlisting}
+
+输出目录包含 clock_map.pt、constraints.pt、variables.pt。
+
+\subsection{Context 覆盖}
+\subsubsection*{Context Override}
+
+HyperScale 提供 context 覆盖特性：
+\begin{itemize}
+  \item 检测端口 net 上的网表更改
+  \item 对每个差异尽力应用 context 覆盖
+  \item 无法解析时钟时应用无时钟 context 数据
+\end{itemize}
+
+查询覆盖信息：\cmd{report\_context -list\_context\_override}；属性 is_netlist_dont_override、is_clock_dont_override 标识问题端口。
+
+\subsubsection{侧输入与 Stub Pin 的时钟映射}
+\paragraph*{Clock Mapping for Side-Input and Stub Pins}
+
+在侧输入或 stub pin 上标注到达/要求时间时，工具检测时钟映射错误；has_model_mismatch_clock 属性标识未映射时钟。
+
+\subsection{控制块边界调整}
+\subsubsection*{Controlling the Block Boundary Adjustment}
+
+使用 \cmd{set\_dont\_override} 忽略顶层 context 数据，回退到预算约束。
+\opt{-include} 可选择性忽略 arc_delay、case_value、pin_transition 等类型。
+
+\begin{table}[htbp]
+\centering
+\caption{set\_dont\_override -include 关键字}
+\begin{tabular}{@{}ll@{}}
+\toprule
+-include & 忽略的顶层 context 数据 \\
+\midrule
+arc\_delay & 输入端口到叶负载 pin 的 net 延迟；叶驱动到输出端口的延迟 \\
+case\_value & 输入端口的 case analysis \\
+pin\_transition & 输入端口的 context 转换时间 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\figplaceholder{Figure 422}{HyperScale 块级分析（抑制不完整块 context）}{fig:hs-block-dont-override}
+
+\subsection{HyperScale 属性}
+\subsubsection*{HyperScale Attributes}
+
+可用 get_attribute 查询 HyperScale 相关属性，包括：
+\begin{itemize}
+  \item 单元对象：block_config_name、block_config_path、block_timestamp、critical_path_max 等
+  \item 设计对象：is_hyperscale_block、hyperscale_mode 等
+  \item pin 对象：context_arrival、context_required、has_model_mismatch_clock 等
+  \item port 对象：context_capacitance、is_user_dont_override 等
+\end{itemize}
+
+\subsection{HyperScale 数据目录结构}
+\subsubsection*{HyperScale Data Directory Structure}
+
+HyperScale 块数据目录包含网表、约束、context、时钟映射与时间戳文件，供顶层与块级运行共享。
+
+\subsection{为 HyperScale 块写出网表与约束}
+\subsubsection*{Writing Netlists and Constraints for a HyperScale Block}
+
+使用 \cmd{write\_context}、\cmd{write\_script} 等命令保存块数据。
+
+\subsection{HyperScale ECO 收敛方法}
+\subsubsection*{HyperScale ECO Closure Methods}
+
+PrimeTime ECO 流程与 HyperScale 集成：
+\begin{itemize}
+  \item 顶层 ECO 修复 — 在顶层运行 fix_eco_*，写出变更列表。
+  \item 块级 ECO 修复 — 在块级运行，使用更新后的块 context。
+  \item 使用更新块 context 进行块级 ECO。
+  \item MIM 的 ECO — 跨实例一致应用更改。
+  \item 在 ECO 流程中解析块违例。
+  \item 并行运行 ECO 以改善运行时间与容量。
+\end{itemize}
+
+HyperScale ECO 与 IC Compiler、StarRC 的接口支持 signoff 增量 ECO 流程。
+
+\subsection{HyperScale 中的时序分析}
+\subsubsection*{Timing Analysis in HyperScale}
+
+HyperScale 顶层分析使用块 HyperScale 模型替代内部网表，在接口保留完整时序信息。支持 CRPR、SI、POCV 等分析模式。
+
+路径类型标记：I（ideal network）、H（HyperScale context override）等。
+
+\subsection{路径特定例外建模}
+\subsubsection*{Path-Specific Exception Modeling}
+
+HyperScale 在块边界建模路径特定例外（false path、multicycle path 等），确保顶层与块级约束一致。
+
+\figplaceholder{Figure 393}{两级层次设计示例}{fig:two-level-hier}
+
+\section{Context 特征化}
+\subsection*{Context Characterization}
+
+Context 特征化支持块级分析：写出块在顶层内的时序 context，块可单独分析并获得在顶层环境下工作的准确时序。
+
+\figplaceholder{Figure 424}{Context 特征化示例}{fig:ctx-char-example}
+
+\subsection{将 Context 用于块级时序分析}
+\subsubsection*{Using Context for Block-Level Timing Analysis}
+
+使用 \cmd{characterize\_context} 标记待特征化块，\cmd{update\_timing} 后执行特征化，\cmd{write\_context} 写出 context 文件。
+
+\begin{lstlisting}
+characterize_context -block block1 -instances BLK1
+update_timing
+write_context -format ptsh -output BLK1_context [get_cells BLK1]
+\end{lstlisting}
+
+读入块级分析：
+\begin{lstlisting}
+read_context -path BLK1_context
+\end{lstlisting}
+
+context 包含输入端口到达时间、输出端口要求时间、转换时间、case 值、串扰信息与时钟映射。
+
+\subsection{Context 特征化命令与选项}
+\subsubsection*{Context Characterization Commands and Options}
+
+\begin{itemize}
+  \item \cmd{characterize\_context} — 指定块与实例
+  \item \cmd{write\_context} — 写出 context（ptsh/sdc 格式）
+  \item \cmd{read\_context} — 读入 context
+  \item \cmd{report\_context} — 报告 context 信息
+  \item \cmd{remove\_context} — 移除已加载 context
+\end{itemize}
+
+\section{Context 预算}
+\subsection*{Context Budgeting}
+
+Context Budgeting（PrimeTime-APX）在层次化流程中为块接口分配时序预算，从顶层 slack 按比例分配到各块段，生成块级 I/O 约束。
+
+\figplaceholder{Figure 425}{Context Budgeting 概念}{fig:ctx-budget-concept}
+
+\subsection{Budgeting 期间如何调整 Context}
+\subsubsection*{How Contexts are Adjusted During Budgeting}
+
+使用 \cmd{set\_timing\_budget} 配置预算模式，\cmd{update\_budget} 在时序更新后计算预算，调整各块边界的 input/output delay。
+
+\begin{lstlisting}
+characterize_context -block block1 -instances BLK1
+characterize_context -block block2 -instances BLK2
+update_timing
+set_timing_budget -mode pin_slack
+update_budget
+report_budget -through BLK1/Z
+\end{lstlisting}
+
+\subsection{报告 Context 预算}
+\subsubsection*{Reporting the Context Budget}
+
+\cmd{report\_budget -through pin} 报告通过指定层次 pin 的关键路径各段延迟、权重与分配预算。若 pin 有 context 调整，还显示调整计算细节。
+
+\begin{table}[htbp]
+\centering
+\caption{report\_budget 输出列示例}
+\small
+\begin{tabular}{@{}l l r r r@{}}
+\toprule
+Point & Mode & Delay & Weight & Budget \\
+\midrule
+BLK1/Z & pin\_slack & 4.00 & 0.33 & 3.33 \\
+MID/A & pin\_slack & 1.00 & 0.08 & 0.83 \\
+MID/Z & pin\_slack & 2.00 & 0.17 & 1.67 \\
+BLK2/A & pin\_slack & 1.00 & 0.08 & 0.83 \\
+BLK2/FF/D & pin\_slack & 4.00 & 0.33 & 3.33 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{自定义 Context 预算}
+\subsubsection*{Customizing the Context Budget}
+
+默认按路径段延迟比例分配 slack，可自定义：
+\begin{itemize}
+  \item 应用 Slack 裕量（-slack_margin、-positive_slack_margin）
+  \item 设置块段目标 slack
+  \item 设置块段精确延迟
+  \item 设置块段时钟周期百分比
+  \item 设置块段最小延迟
+  \item 预算规范的优先级
+\end{itemize}
+
+\subsubsection{应用 Slack 裕量}
+\paragraph*{Applying Slack Margins}
+
+\cmd{set\_timing\_budget -slack\_margin} 影响违例路径（从负 slack 减去裕量）；\opt{-positive\_slack\_margin} 影响通过路径（最多减至零 slack）。
+
+\subsection{写出预算后的 Context}
+\subsubsection*{Writing Out Budgeted Context}
+
+预算计算后使用 \cmd{write\_context} 写出含预算约束的块 context，供块级独立分析使用。
+
+\subsection{在 HyperScale 流程中使用 Context 预算}
+\subsubsection*{Using Context Budgeting in a HyperScale Flow}
+
+HyperScale 顶层运行中使能 context budgeting 时：\cmd{set\_hier\_config -block} 自动选择块进行 context 特征化（非 HyperScale 全网表块仍须 \cmd{characterize\_context}）；\cmd{write\_hier\_data} 自动包含预算调整（仍可用 \cmd{write\_context} 做独立测试）。块级默认使用预算 context；用 \cmd{read\_context -exclude\_budget} 读入非预算实际 context。
+
+\begin{noteBox}
+Context Budgeting 限制：\cmd{set\_timing\_budget -target\_slack} 仅用于块 feedthrough 段；\cmd{update\_budget} 只能运行一次。
+\end{noteBox}
+
+\subsection{预算规范优先级}
+\subsubsection*{Budget Specification Precedence}
+
+同一路径多段应用多个规范时顺序：
+\begin{enumerate}
+  \item 应用 \opt{-slack\_margin}/\opt{-positive\_slack\_margin} 更新路径 slack
+  \item 应用 \texttt{timing\_budget\_segment\_delay\_threshold} 放大小段延迟
+  \item 应用 \opt{-target\_slack}/\opt{-delay\_value}/\opt{-percent\_value}
+  \item 其余段按延迟比例分配剩余 slack
+\end{enumerate}
+
+\section{提取时序模型（ETM）}
+\subsection*{Extracted Timing Model (ETM)}
+
+ETM 是由 \cmd{extract\_model} 生成的块抽象时序模型，可在更高层次替代块网表进行分析。\figplaceholder{Figure 429: Extracted Timing Model Analysis}{ETM 分析}{fig:etm-analysis}优势：降低 PrimeTime/DC/ICC 全芯片分析运行时间与内存；保护 IP 网表。模型用组合与时序弧抽象接口行为，延时以 NLDM/CCS 查找表表示，随输入转换与输出负载变化，属 context-independent 模型。
+
+\subsection{ETM 使用流程}
+\subsubsection*{Usage Flow of ETM}
+
+块级：读入网表/寄生/约束，\cmd{update\_timing}，设置 \cmd{hier\_modeling\_version 2.0}，\cmd{extract\_model ... -validate timing} 自动验证网表与包装器中模型实例的 slack 匹配。顶层：用 extract\_model 生成的 .db/.lib 替换块实例，读入顶层网表与约束分析。
+
+\figplaceholder{Figure 430: Timing model extraction process}{时序模型提取过程}{fig:etm-extract-proc}\figplaceholder{Figure 431--432: Gate-Level Netlist and Extracted Model}{门级网表与提取模型}{fig:etm-netlist-model}
+
+\subsection{ETM 流程概述}
+\subsubsection*{ETM Flow Overview}
+
+典型 ETM 流程：
+1. 准备块设计（读入网表、寄生、约束）。
+2. check_timing 检查潜在问题。
+3. report_timing 验证时序。
+4. 设置模型提取变量。
+5. extract_model 生成 .db/.lib 模型。
+6. 在顶层实例化模型并分析。
+
+\subsection{生成模型}
+\subsubsection*{Generating the Model}
+
+\begin{lstlisting}
+pt_shell> extract_model -output example_model -format {db}
+\end{lstlisting}
+
+生成 .lib 模型时可能含 min_delay_flag、original_pin 等用户定义属性。
+
+\subsection{时序模型提取细节}
+\subsubsection*{Timing Model Extraction Details}
+
+extract_model 从原始设计时序路径提取简单时序弧，涵盖：
+\begin{itemize}
+  \item 边界 net 与内部 net
+  \item 输入到寄存器路径
+  \item 输入到输出路径
+  \item 寄存器到输出路径
+  \item 寄存器到寄存器路径（不提取，仅遍历接口逻辑）
+  \item 时钟路径
+  \item 透明锁存器与时间借用
+  \item 最小脉冲宽度与最小周期
+  \item False path
+  \item 时钟门控检查
+  \item 反标延迟
+  \item 噪声特性
+\end{itemize}
+
+\subsubsection{边界 net 与内部 net}
+\paragraph*{Boundary Nets and Internal Nets}
+
+提取模型不保留原始边界 net，而将边界 net 延迟分解到模型中。内部 net 无详细寄生时 PrimeTime 计算电容/电阻；有 SPEF/RSPF 反标时使用详细寄生值。
+
+\subsubsection{输入到寄存器路径}
+\paragraph*{Paths From Inputs to Registers}
+
+提取为输入 pin 与寄存器时钟之间的 setup 弧与 hold 弧；setup 弧捕获最长路径延迟加寄存器 setup 时间，hold 弧捕获最短路径延迟加 hold 时间。
+
+\subsubsection{输入到输出与寄存器到输出路径}
+\paragraph*{Paths From Inputs/Registers to Outputs}
+
+各提取两条延迟弧（最长与最短路径）。延迟为输入转换时间与输出负载电容的函数；弧与使用环境无关，在不同环境中延迟可能不同。
+
+\subsubsection{时钟路径}
+\paragraph*{Clock Paths}
+
+时钟网络延迟与转换时间反映在模型中，但不含时钟 latency；使用模型时须指定 source latency 与 network latency。
+
+\subsubsection{透明锁存器与时间借用}
+\paragraph*{Transparent Latches and Time Borrowing}
+
+\cmd{extract\_model} 可提取接口逻辑中简单锁存器结构，在指定条件下保留最多两级借用行为。\opt{-latch\_levels}（0--2，默认 2）控制考虑的透明锁存器级数。
+
+write_interface_timing 与 compare_interface_timing 用于验证模型与网表时序，对含锁存器接口尤为重要。
+
+\subsubsection{最小脉冲宽度与最小周期}
+\paragraph*{Minimum Pulse Width and Minimum Period}
+
+\figplaceholder{Figure 433}{最小脉冲宽度与最小周期提取}{fig:mpw-mp-extract}
+
+\subsection{控制提取表大小}
+\subsubsection*{Controlling the Extracted Table Sizes}
+
+应用变量控制查找表索引数量与范围，影响模型精度与文件大小。\cmd{set\_extract\_model\_indexes} 显式指定电容/转换索引；\cmd{reset\_extract\_model\_indexes} 移除用户指定索引。\cmd{set\_extract\_model\_margin} 在提取时为延时/约束弧加固定裕量。
+
+\subsection{指定模型索引与裕量}
+\subsubsection*{Specifying Model Indexes and Margins}
+
+\begin{lstlisting}
+set_extract_model_indexes -type capacitance \
+  {0.11 0.12 0.15 0.18 0.20} -ports [get_ports out[1]]
+set_extract_model_margin -max 10 -ports [get_ports *]
+\end{lstlisting}
+
+\subsection{抽头输出端口}
+\subsubsection*{Tapped Output Ports}
+
+抽头输出（同时连驱动与接收）是不良设计实践，工具发 MEXT-75 警告。NLDM 默认可建 3-D 弧（	exttt{related\_output\_load}）；设 \cmd{extract\_model\_with\_3d\_arcs false} 得 2-D 弧。CCS 提取恒为 2-D。稳健层次建模应缓冲所有端口。
+
+\subsection{时序例外与生成时钟}
+\subsubsection*{Timing Exceptions and Generated Clocks}
+
+接口 false path 影响提取弧；multicycle path 调整 setup/hold/延时。建议在接口避免复杂例外，提取后在顶层对 ETM 实例施加端口/时钟特定约束。生成时钟命名：	exttt{instance\_name/generated\_clock\_name}；ETM 保留与接口寄存器相关的生成时钟及 feedthrough 时钟路径。级联生成时钟应逐级引用 master（div-by-2 再 div-by-4），勿均指原始 master。
+
+\subsection{提取内部 Pin 与检查 Pin}
+\subsubsection*{Extracting Internal Pins and Check Pins}
+
+内部 pin 时钟信息存为模型内部 pin；时钟网络含组合路径时创建 check pin 以允许时钟追踪继续到时钟输出，否则 setup/hold 弧会阻止时钟路径遍历。\figplaceholder{Figure 441--442: Check pins in ETM}{ETM 中的检查 pin}{fig:etm-check-pin}
+
+\subsection{跨块内电源域合并模型}
+\subsubsection*{Merging Models Across Block-Internal Power Supplies}
+
+多电源域块可合并为单一 ETM 或按域分别提取，取决于分析需求。
+
+\subsection{保守块时序分析与模型提取}
+\subsubsection*{Conservative Block Timing Analysis and Model Extraction}
+
+块分析（update_timing）质量直接决定 extract_model 模型质量。遵循保守块收敛方法以产生高质量 ETM。
+
+\subsubsection{块 Context 的保守建模}
+\paragraph*{Conservative Modeling of the Block Context}
+
+建议采用 STA 最坏情况方法：
+\begin{itemize}
+  \item 穷尽保守评估块使用场景与 context（PVT、电压、温度、裕量、驱动/接收类型等）
+  \item 以值或条件范围指定 context，覆盖所有实例化场景
+  \item 对时序分析与模型提取应用相同约束
+\end{itemize}
+
+\subsubsection{块输出约束}
+\paragraph*{Constraints for Block Outputs}
+
+\begin{lstlisting}
+set_load -pin_load -min $min_cap [all_outputs]
+set_load -pin_load -max $max_cap [all_outputs]
+\end{lstlisting}
+
+通常 $min_cap=0.0；$max_cap 保守估计为强驱动器输入电容加典型线电容。
+
+\subsubsection{块输入约束}
+\paragraph*{Constraints for Block Inputs}
+
+\begin{lstlisting}
+set_driving_cell -min -input_transition_rise/fall $min_slew \
+  -lib_cell $strong_driver ...
+set_driving_cell -max -input_transition_rise/fall $max_slew \
+  -lib_cell $weak_driver ...
+\end{lstlisting}
+
+对长顶层连线可在输入端口加集总电容建模；IP 块周边缓冲环是层次 signoff 的最安全做法。
+
+\figplaceholder{Figure 448}{在输入端口设置 driving cell}{fig:driving-cell-port}
+
+\subsubsection{转换时间传播效应}
+\paragraph*{Slew Propagation Effects}
+
+ETM .lib 文件用 NLDM 查找表表示延迟、转换与约束；顶层到达 ETM 的慢转换可能触发 max_transition DRC。
+
+\subsection{ETM 的 SI 与串扰建模}
+\subsubsection*{SI and Crosstalk Modeling in ETM}
+
+提取时使用当前分析的边界串扰延迟；si_filter_keep_all_port_aggressors 在 extract_model 时强制为 true，包含所有端口级 aggressor 以实现保守 SI 建模。
+
+\subsection{模型验证}
+\subsubsection*{Model Validation}
+
+验证流程：
+1. 对块网表 write_interface_timing 作为参考。
+2. extract_model -test_design 生成测试设计。
+3. 对测试设计应用约束并 update_timing。
+4. compare_interface_timing 比较 slack（典型绝对容差 20 ps）。
+
+\subsubsection{排查模型验证不匹配}
+\paragraph*{Troubleshooting Model Validation Mismatches}
+
+\begin{itemize}
+  \item 工作条件与分析模式须与块分析一致
+  \item 接口路径上不推荐 multicycle path；块内部 multicycle 不影响 ETM
+  \item 不支持 set_max_delay/set_min_delay 异步约束提取
+  \item 包装（wrapper）设计中须对测试网表 net 反标零电容/电阻
+  \item 输入 driving cell 与集总电容差异可导致验证误差
+  \item ETM 中已含 derating 时验证约束避免双重 derating
+\end{itemize}
+
+\figplaceholder{Figure 449}{含 ETM 实例的测试设计}{fig:etm-test-design}
+
+\figplaceholder{Figure 450}{反标边界 net}{fig:ba-boundary-nets}
+
+\subsection{ETM 的噪声特性}
+\subsubsection*{Noise Characteristics in ETM}
+
+extract_model 可将噪声裕量信息纳入模型，供顶层 SI 分析使用。\cmd{extract\_model -noise} 在模型中包含噪声数据；提取时 \cmd{si\_filter\_keep\_all\_port\_aggressors} 强制为 true 以保守包含所有端口 aggressor。
+
+\subsection{块内部路径与接口路径}
+\subsubsection*{Block-Internal and Interface Paths}
+
+ETM 替换块后内部寄存器到寄存器路径不可见，须在提取前闭合块内部时序。提取扫掠接口路径转换与负载索引，用当前分析边界串扰延时；对输入可用 \cmd{set\_si\_delay\_analysis -ignore\_arrival} 设无限到达窗口以保守建模未知到达对齐。
+
+\section{快速时序模型（QTM）}
+\subsection*{Quick Timing Model (QTM)}
+
+QTM 通过 PrimeTime 命令指定输入、输出与约束创建简化时序模型，用于设计早期快速层次化分析，精度低于 ETM 但创建更快。
+
+\subsection{创建 QTM}
+\subsubsection*{Creating a Quick Timing Model}
+
+QTM 通过 PrimeTime 命令手动定义端口、弧与约束，无需完整块网表。常用命令：\cmd{create\_qtm\_model}、\cmd{create\_qtm\_port}、\cmd{create\_qtm\_delay\_arc}、\cmd{create\_qtm\_constraint\_arc}、\cmd{create\_qtm\_drive\_type}、\cmd{set\_qtm\_port\_drive}、\cmd{save\_qtm\_model}、\cmd{report\_qtm\_model}、\cmd{remove\_qtm\_model}。端口类型：input、output、clock、bidirectional。弧可指定 max/min（setup/hold/recovery/removal）。
+
+\begin{table}[htbp]
+\centering
+\caption{常用 QTM 命令}
+\begin{tabular}{@{}ll@{}}
+\toprule
+命令 & 功能 \\
+\midrule
+create\_qtm\_model & 创建 QTM 模型 \\
+create\_qtm\_port & 定义端口 \\
+create\_qtm\_delay\_arc & 创建延迟弧 \\
+create\_qtm\_constraint\_arc & 创建约束弧 \\
+create\_qtm\_drive\_type & 定义驱动类型 \\
+save\_qtm\_model & 保存 QTM 模型 \\
+report\_qtm\_model & 报告 QTM 信息 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{创建 QTM 的脚本示例}
+\subsubsection*{Script Example to Create a Quick Timing Model}
+
+\begin{lstlisting}
+create_qtm_model -name my_block_qtm
+create_qtm_port -type input I1
+create_qtm_port -type output O1
+create_qtm_port -type clock CLK
+create_qtm_drive_type -type input_drive input_drv \
+  -lib_cell BUF1
+set_qtm_port_drive -type input_drv I1
+create_qtm_delay_arc -from I1 -to O1 -path_type max \
+  -value 0.5
+create_qtm_constraint_arc -from I1 -to CLK \
+  -path_type setup -value 0.3
+save_qtm_model -format lib -output my_block_qtm.lib
+\end{lstlisting}
+
+\subsection{在顶层使用 QTM}
+\subsubsection*{Using a QTM at the Top Level}
+
+顶层读入 QTM .lib 文件，将块实例链接为 QTM 模型进行早期时序评估。随着设计成熟，应迁移到 ETM 或 HyperScale 流程以获得 signoff 精度。
+
+\subsection{QTM 与 ETM 对比}
+\subsubsection*{QTM vs ETM}
+
+\begin{table}[htbp]
+\centering
+\caption{QTM 与 ETM 对比}
+\begin{tabularx}{\textwidth}{@{}X X X@{}}
+\toprule
+特性 & QTM & ETM \\
+\midrule
+创建方式 & 手动指定弧与约束 & 从网表自动提取 \\
+精度 & 低（早期估算） & 高（基于实际实现） \\
+创建速度 & 快 & 较慢（需完整块分析） \\
+适用阶段 & RTL/早期 netlist & 布局后/ signoff 前 \\
+SI/串扰 & 不支持 & 支持保守 SI 建模 \\
+HyperScale 集成 & 有限 & 完整支持 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 第~\ref{chap:eco}~章 ECO 流程（HyperScale ECO）
+  \item 第~\ref{chap:hier}~章 HyperScale 与 Context 特征化
+\end{itemize}
+\end{seeAlsoBox}
+
+\subsection{从 ETM 层次化流程迁移}
+\subsubsection*{Moving From an ETM Hierarchical Flow}
+
+若当前使用传统 ETM/ILM 自底向上流程，迁移到 HyperScale 可获得更接近扁平分析的精度，同时保留层次化运行时间与内存优势。迁移步骤概览：
+\begin{enumerate}
+  \item 在块级完成布局布线并关闭块内部时序。
+  \item 运行顶层 HyperScale 分析，characterize_context 并 write_context。
+  \item 块级读入 context 进行 signoff 级块分析。
+  \item 迭代顶层与块级直至收敛。
+  \item 逐步用 HyperScale 块模型替代 ETM 用于顶层 signoff。
+\end{enumerate}
+
+\subsubsection{MIM 悲观度}
+\paragraph*{MIM Pessimism}
+
+多重实例化模块（MIM）中，各实例的时钟到达时间可能不同。HyperScale 在顶层分析时对 MIM 输出路径施加 mim_pessimism 修正，将实际时钟到达与最差到达实例之间的差值加回，消除不必要悲观。
+
+可查询时序路径对象的 mim_pessimism 属性。
+\begin{lstlisting}
+pt_shell> report_timing -path_type full_clock -delay_type max \
+  -input_pins -max_paths 1 -sort_by slack
+\section{... 报告中显示 clock reconvergence pessimism 与 MIM pessimism ...}
+\end{lstlisting}
+
+\subsubsection{时序降额（Derating）}
+\paragraph*{Timing Derating}
+
+层次化分析中 OCV/AOCV/POCV 降额在块边界传递须保持一致。HyperScale 在 write_context/read_context 时保留降额信息；块级与顶层须使用兼容的降额策略。
+
+\subsubsection{CRPR 与块边界}
+\paragraph*{CRPR at Block Boundaries}
+
+时钟重汇悲观度移除（CRPR）在 HyperScale 顶层分析中跨块边界计算。块模型保留接口 CRPR 信息，使顶层 CRPR 信用与扁平分析一致。
+
+\subsubsection{边界检查与违例报告}
+\paragraph*{Boundary Checks and Violation Reporting}
+
+\cmd{report\_hyperscale\_constraints} 报告块边界上的约束检查，包括 setup/hold/DRC 在块与顶层的对比、降额窗口类型、时钟映射引用等。用于调试块/顶层不一致。
+
+\begin{table}[htbp]
+\centering
+\caption{HyperScale 边界检查违例类型}
+\small
+\begin{tabular}{@{}ll@{}}
+\toprule
+违例类型 & 边界检查名称 \\
+\midrule
+Setup & boundary\_setup\_check \\
+Hold & boundary\_hold\_check \\
+Max transition & boundary\_transition\_check \\
+Max capacitance & boundary\_capacitance\_check \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{约束提取器限制}
+\paragraph*{Constraint Extractor Limitations}
+
+约束提取器不支持：UPF 命令、set_ocvm_table_group -type pocvm、set_si_delay_disable_statistical；SDC 格式不支持 set_clock_sense（.pt 格式写为 set_sense -type clock）。
+
+常见错误：HCEXT-004（块内生成时钟定义问题）、UITE-461（生成时钟不可满足）、PTE-004（生成时钟 pin 在环中或在两个时钟源 fanout 中）。
+
+\subsubsection{反相时钟提取}
+\paragraph*{Inverted Clock Extraction}
+
+约束提取器识别反相时钟关系并在块级约束中正确写出，确保块级时钟定义与顶层一致。
+
+\subsubsection{生成块约束与块边界 Context 数据}
+\paragraph*{Generating Block Constraint and Block Boundary Context Data}
+
+characterize_context 与 write_context 组合可一次性生成块级 SDC 约束与边界 context，供 HyperScale 块级运行使用。
+
+\subsubsection{在较少主机上并行运行 HyperScale}
+\paragraph*{Running HyperScale on Fewer Hosts}
+
+大型设计的顶层与多块分析可分布式运行；通过合理调度块级作业与共享 HyperScale 数据目录降低硬件需求。
+
+\subsection{Context 特征化工作流详解}
+\subsubsection*{Context Characterization Workflow Details}
+
+特征化在 update_timing 期间执行，将顶层时序环境映射到块边界：
+\begin{itemize}
+  \item 输入端口：到达时间、转换时间、case 值、串扰 delta
+  \item 输出端口：要求时间、转换时间、外部负载
+  \item 时钟端口：时钟定义映射、source latency、网络延迟
+  \item 侧输入/stub pin：关键路径到达/要求时间
+\end{itemize}
+
+\subsection{Context 文件格式}
+\subsubsection*{Context File Formats}
+
+\cmd{write\_context} 支持 ptsh 与 sdc 格式。ptsh 格式保留完整 PrimeTime 语义；sdc 格式便于第三方工具读入。
+
+\subsection{多块 Context 特征化}
+\subsubsection*{Characterizing Multiple Blocks}
+
+一次顶层运行可对多个块 characterize_context；update_timing 后分别 write_context 到各块目录。
+
+\subsection{Budgeting 流程示例}
+\subsubsection*{Context Budgeting Flow Example}
+
+典型三块设计（BLK1—MID—BLK2）中，顶层负 slack 通过 update_budget 按段延迟比例分配到各块接口，生成块级 input/output delay 预算。
+
+\subsubsection{设置块段目标 Slack}
+\paragraph*{Setting the Target Slack of a Block Segment}
+
+\cmd{set\_timing\_budget} 支持为特定块段指定目标 slack，覆盖默认比例分配。
+
+\subsubsection{设置块段精确延迟}
+\paragraph*{Setting the Exact Delay of a Block Segment}
+
+可为块接口指定固定预算延迟，用于已知延迟的互连或硬约束通道。
+
+\subsubsection{设置时钟周期百分比}
+\paragraph*{Setting the Clock Period Percentage of a Block Segment}
+
+按时钟周期百分比分配段预算，适用于均匀分配时钟周期预算的场景。
+
+\subsubsection{设置最小块段延迟}
+\paragraph*{Setting a Minimum Block Segment Delay}
+
+保证每段获得最小延迟预算，避免小段被分配过少预算。
+
+\subsubsection{预算规范优先级}
+\paragraph*{Precedence of Context Budget Specifications}
+
+显式段规范优先于全局 slack_margin；pin_slack 模式为默认。多种规范同时存在时按文档优先级应用。
+
+\subsection{Budgeting 与层次化块模型}
+\subsubsection*{Hierarchical Analysis Using Block Models With Budgeting}
+
+预算后的 context 可与 ETM/QTM/HyperScale 块模型配合：先 update_budget，再 write_context，块级读入后获得带预算的 I/O 约束。
+
+\subsection{ETM 分析流程详解}
+\subsubsection*{ETM Analysis Flow in Detail}
+
+\figplaceholder{Figure 429}{提取时序模型分析}{fig:etm-analysis-flow}
+
+\subsubsection{False Path 与 ETM}
+\paragraph*{False Paths and ETM}
+
+接口逻辑上的 false path 在提取时被尊重；被例外命令标记的路径不生成对应弧。块内部 register-to-register false path 不影响 ETM（ETM 仅覆盖接口）。
+
+\subsubsection{时钟门控检查}
+\paragraph*{Clock-Gating Checks}
+
+extract_model 将时钟门控 setup/hold 检查传播到提取模型的时钟 pin 属性上，供顶层分析使用。
+
+\subsubsection{反标延迟}
+\paragraph*{Back-Annotated Delays}
+
+若内部 net 反标了延迟或电容，提取使用反标值而非计算值。这影响弧延迟精度，须确保块分析时寄生数据完整。
+
+\subsubsection{噪声特性提取}
+\paragraph*{Noise Characteristics Extraction}
+
+ETM 可包含噪声裕量表，描述块输出在不同负载与转换时间下的噪声容限。
+
+\subsection{ETM 表与变量控制}
+\subsubsection*{ETM Table and Variable Control}
+
+\begin{table}[htbp]
+\centering
+\caption{控制 ETM 提取表大小的变量}
+\small
+\begin{tabular}{@{}p{0.45\textwidth} p{0.45\textwidth}@{}}
+\toprule
+变量 & 说明 \\
+\midrule
+extract\_model\_capacitance\_limit & 输出负载电容扫描上限 \\
+extract\_model\_transition\_limit & 输入转换时间扫描上限 \\
+extract\_model\_number\_of\_capacitance\_points & 电容索引点数 \\
+extract\_model\_number\_of\_transition\_points & 转换时间索引点数 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{ETM 裕量与角}
+\subsubsection*{Margin for Block Analysis and Model}
+
+可在提取前对块分析应用裕量，使 ETM 内置保守度。不同工艺角与模式应分别分析与提取模型。
+
+\subsection{工作条件与分析模式}
+\subsubsection*{Operating Conditions and Analysis Modes}
+
+\begin{noteBox}
+每个工艺角与模式须单独执行 update_timing 与 extract_model；顶层须读入对应角的 ETM 库。
+\end{noteBox}
+
+\subsection{包装设计与验证}
+\subsubsection*{Wrapper Design Effects}
+
+extract_model -test_design 创建的包装设计中，须在全部 net 上反标零电阻与零电容以消除线负载延迟：
+\begin{lstlisting}
+set_resistance 0 [get_nets *]
+set_load 0 [get_nets *]
+\end{lstlisting}
+
+\subsection{ETM 的 Derating 与 AOCV}
+\subsubsection*{Derating and AOCV in ETM}
+
+若网表分析中应用了降额并纳入 ETM 时序弧，验证时包装设计与 ETM 不得再次应用相同降额，避免双重降额。
+
+启用 AOCV 时，验证流程须与提取时 AOCV 设置一致。
+
+\subsection{层次化 Signoff 使用 ETM 的最佳实践}
+\subsubsection*{Best Practices for Hierarchical Signoff With ETMs}
+
+\begin{itemize}
+  \item 块内部时序必须在提取前关闭。
+  \item IP 块周边布置缓冲环，控制端口转换时间范围。
+  \item 对输入使用 set_driving_cell 与适当 set_load 建模外部环境。
+  \item 对输出使用保守 load 范围。
+  \item 使用 write_interface_timing/compare_interface_timing 验证。
+  \item 最终 signoff 考虑迁移到 HyperScale 或扁平分析确认。
+\end{itemize}
+
+\subsection{定义快速时序模型}
+\subsubsection*{Defining a Quick Timing Model}
+
+\figplaceholder{Figure 451}{块的快速时序模型表示}{fig:qtm-repr}
+
+\figplaceholder{Figure 452}{快速时序模型分析}{fig:qtm-analysis}
+
+定义 QTM 步骤：
+1. create_qtm_model 创建模型。
+2. create_qtm_port 定义输入/输出/时钟端口。
+3. create_qtm_drive_type 与 set_qtm_port_drive 设置驱动。
+4. create_qtm_delay_arc 定义组合/时序延迟弧。
+5. create_qtm_constraint_arc 定义 setup/hold 约束弧。
+6. save_qtm_model 保存为 .lib 或 .db。
+
+\subsection{在设计中实例化 QTM}
+\subsubsection*{Instantiating a Quick Timing Model in a Design}
+
+\begin{lstlisting}
+read_qtm_model my_block_qtm.lib
+set_link_library "* my_block_qtm.lib"
+link_design top
+\end{lstlisting}
+
+链接后块实例使用 QTM 替代完整网表，顶层可快速评估接口时序。
+
+\subsection{QTM 全局参数命令}
+\subsubsection*{QTM Global Model Parameters}
+
+\begin{table}[htbp]
+\centering
+\caption{QTM 全局模型参数命令}
+\begin{tabular}{@{}ll@{}}
+\toprule
+命令 & 全局模型参数 \\
+\midrule
+set\_qtm\_global\_parameter & 设置工艺、温度、电压等 \\
+report\_qtm\_model & 报告已定义弧与端口 \\
+remove\_qtm\_model & 删除 QTM 定义 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{HyperScale ECO 流程细节}
+\subsubsection*{HyperScale ECO Flow Details}
+
+PrimeTime ECO 与 HyperScale 集成支持顶层 fix_eco_* 与块级 ECO 协同。顶层 ECO 后须 write_hier_data 更新块 context；块级 ECO 使用最新 context 独立修复。MIM 实例须一致应用 ECO 变更。可与 IC Compiler、StarRC 增量寄生接口做 signoff ECO。
+
+并行 ECO：多块可同时运行 ECO 脚本以缩短收敛时间；各块 write_hier_data 后顶层统一 link_design 与 update_timing。
+
+\subsection{HyperScale 路径类型标记}
+\subsubsection*{HyperScale Path Type Markers}
+
+report_timing 路径点标记：``@'' 表示顶层施加的约束；``\&'' 表示块内计算延时；``I'' 表示 ideal network；``H'' 表示 HyperScale context override。块级报告跨边界路径时，input external delay 行后的 ``@'' 表示该延时来自顶层分析。
+
+\subsection{跨块内电源域合并 ETM}
+\subsubsection*{Merging ETMs Across Block-Internal Power Supplies}
+
+多电源域块可按域分别 extract_model 再合并，或单次提取合并模型；合并时须保证各域接口弧与电平转换器行为正确抽象。UPF 意图须在块分析中正确加载（load_upf）后再提取。
+
+\subsection{QTM 约束弧类型}
+\subsubsection*{QTM Constraint Arc Types}
+
+create_qtm_constraint_arc 支持 setup、hold、recovery、removal、min_pulse_width、minimum_period 等 path_type。时钟端口与数据端口组合定义寄存器接口约束；可与 create_qtm_delay_arc 的 max/min 路径类型配合建模建立/保持时间。
+
+\subsection{Context 预算模式}
+\subsubsection*{Context Budget Modes}
+
+set_timing_budget -mode 支持 pin_slack（默认，按 pin 段 slack 比例分配）、path_slack（整条路径 slack 分配）等模式。update_budget 在 update_timing 之后运行一次，根据顶层违例路径调整块边界 input/output delay。
+
+\subsection{ETM 与 CCS 数据提取}
+\subsubsection*{Extracting Models With CCS Data}
+
+extract_model 可生成含 CCS 时序表的 ETM，提高顶层使用 CCS 延时计算时的精度。须块分析启用 CCS 且库含 CCS 数据；格式仍可为 .db/.lib。与 NLDM-only ETM 相比，CCS ETM 文件更大但顶层 RC 分析更准确。
+
+\subsection{层次化分析选型指南}
+\subsubsection*{Hierarchical Analysis Selection Guide}
+
+流程选型参考：
+\begin{itemize}
+  \item 早期 RTL/规划 — QTM 或预算约束 + ETM
+  \item 块布局后独立收敛 — Context 特征化 + 块级 signoff
+  \item 全芯片 signoff — HyperScale 自顶向下或扁平分析
+  \item IP 交付 — 保守 ETM + 接口验证脚本
+  \item 内存受限大芯片 — HyperScale 多块分治
+\end{itemize}
+
+\subsection{HyperScale 块 Context 数据类型}
+\subsubsection*{HyperScale Block Context Data Types}
+
+\begin{table}[htbp]
+\centering
+\caption{Context 数据类型与合并策略（表 66 摘要）}
+\small
+\begin{tabular}{@{}ll@{}}
+\toprule
+数据类型 & MIM 合并取值 \\
+\midrule
+到达时间 & 各实例最早到达 \\
+要求时间 & 各实例最晚要求 \\
+转换时间 & 最坏转换 \\
+Case 值 & 一致则保留，否则 X \\
+串扰 delta & 各实例最坏 \\
+时钟映射 & 合并时钟定义 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+write_hier_data 写出全部 context 类型；read_context 在块级恢复。块级分析可禁用部分 context 调整：set_dont_override -include arc_delay/case_value/pin_transition。
+
+\subsection{时钟映射检查与修复}
+\subsubsection*{Clock Mapping Check and Fixes}
+
+report_constraint -boundary_check -all_violators 列出 clock_mapping、clock_attributes、clock_uncertainty 等可修复违例。常见修复：块级 create_clock 与顶层周期一致；set_propagated_clock 匹配 is_propagated 属性；添加 set_clock_uncertainty 匹配顶层。HyperScale 约束提取器可从扁平约束生成一致块级时钟定义，减少手工映射错误。
+
+\subsection{ETM 输入到寄存器与寄存器到输出路径}
+\subsubsection*{ETM Input-to-Register and Register-to-Output Paths}
+
+输入到寄存器：提取 setup 弧（最长数据路径+setup）与 hold 弧（最短数据路径+hold）。寄存器到输出：提取 max/min 两条延迟弧，延时为时钟到输出 pin 的延迟。输入到输出：组合路径提取 max/min 延迟弧，为输入转换与输出负载的函数。寄存器到寄存器路径不进入 ETM（仅遍历接口逻辑中的寄存器）。
+
+\subsection{ETM 透明锁存器与时间借用}
+\subsubsection*{ETM Transparent Latches and Time Borrowing}
+
+extract_model -latch_levels 0/1/2 控制接口透明锁存器级数（默认 2）。含锁存器接口时须用 write_interface_timing 与 compare_interface_timing 验证借用行为。顶层使用 ETM 时锁存器借用由模型内约束弧表达。
+
+\subsection{ETM 模型验证流程}
+\subsubsection*{ETM Model Validation Flow}
+
+推荐验证步骤：
+\begin{enumerate}
+  \item 块网表 update\_timing 后 write\_interface\_timing 作黄金参考
+  \item extract\_model -test\_design 生成含 ETM 实例的包装器
+  \item 包装器应用与块分析相同工作条件与约束
+  \item compare\_interface\_timing 比较各接口 pin slack（容差约 20 ps）
+\end{enumerate}
+
+不匹配排查：工作条件/分析模式不一致；接口 multicycle；set_max_delay 不支持提取；包装器未零反标边界 net；driving cell 与集总电容差异；双重 derating。
+
+\subsection{QTM 驱动类型与负载}
+\subsubsection*{QTM Drive Types and Loads}
+
+create_qtm_drive_type 定义输入驱动（-lib_cell）或输出负载模板；set_qtm_port_drive 将驱动类型关联到端口。create_qtm_port -type bidirectional 建模 inout；时钟端口用于约束弧 reference。save_qtm_model -format lib 生成 Liberty 供 link_design 使用。
+
+\subsection{Context 预算自定义示例}
+\subsubsection*{Context Budget Customization Example}
+
+\begin{lstlisting}
+characterize_context -block block1 -instances BLK1
+characterize_context -block block2 -instances BLK2
+update_timing
+set_timing_budget -mode pin_slack -slack_margin 0.1
+set_timing_budget -through BLK1/Z -target_slack 0.5
+update_budget
+report_budget -through BLK1/Z
+write_context -format ptsh -output BLK1_budgeted
+\end{lstlisting}
+
+\subsection{HyperScale 与 SI 分析}
+\subsubsection*{HyperScale and SI Analysis}
+
+HyperScale 顶层与块级均支持 update_noise 与耦合延时分析。块 context 包含端口级串扰 aggressor 信息；块级读入 context 后 SI 分析与顶层一致。写 context 时保留无限窗口 aggressor 设置以确保保守 SI 边界。
+
+\subsection{report_hier_analysis 报告}
+\subsubsection*{Reporting HyperScale Configuration}
+
+\cmd{report\_hier\_analysis} 默认报告块名、时间戳、HyperScale 路径。可报告额外信息：链接状态、MIM 配置、context 时间戳等。若路径或数据错误，须退出会话、修正 set_hier_config 后重新 link_design。
+
+\subsection{块边界自动调整机制}
+\subsubsection*{Block Boundary Automatic Adjustment}
+
+顶层 HyperScale 分析后，块级 read_context 可自动调整用户边界约束：输入/输出 delay、set_case_analysis、端口转换时间、时钟不确定性等。不可解析的违例须用户修正块约束；set_dont_override 可抑制特定类型自动调整。该机制使块级在顶层真实环境下收敛，无需手工复制顶层到达/要求时间。
+
+\subsection{ETM 噪声与功耗选项}
+\subsubsection*{ETM Noise and Power Options}
+
+\cmd{extract\_model -noise} 在模型中包含噪声特性；\cmd{-power} 包含功耗信息。\cmd{-format db} 供 Synopsys 工具直接使用；\cmd{-format lib} 便于审阅与第三方兼容。提取前 check_timing 与 report_constraint 确保无违例；多模式设计按 mode 分别提取后合并或分角使用。
+
+\subsection{QTM 与 HyperScale/ETM 选型}
+\subsubsection*{When to Use QTM Versus ETM Versus HyperScale}
+
+QTM 适用于早期架构探索与接口预算估算，创建快但精度低。ETM 适用于 IP 交付与顶层集成，须完整实现网表与保守边界约束。HyperScale 适用于 signoff 级层次化分析，保留块内部网表精度并降低顶层容量。成熟流程通常：QTM（早期）→ ETM（中期）→ HyperScale（signoff）或扁平分析。
+
+无论采用何种块抽象，块内部时序必须在抽象前闭合；顶层仅对块接口施加环境约束，不能替代块内 signoff。层次化团队应约定 HyperScale 数据目录命名、时间戳检查与 context 版本管理规范。块级与顶层脚本应分离但共享 characterize_context 写出目录，避免时钟映射与约束漂移。signoff 前建议对关键跨块路径做扁平与 HyperScale 结果对比抽样验证，确认块模型与 context 未引入系统性悲观或乐观。对含多电源域与 DVFS 的设计，须在块与顶层使用一致的 SMVA 电压场景与二进制 context 格式。
+

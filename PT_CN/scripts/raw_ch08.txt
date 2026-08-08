@@ -1,0 +1,1832 @@
+                                                                                       Feedback
+
+
+
+
+8
+Timing Paths and Exceptions
+     A timing path is a point-to-point sequence through a design that starts at a register clock
+     pin or an input port, passes through combinational logic elements, and ends at a register
+     data input pin or an output port.
+     For basic information about path startpoints and endpoints, delay calculation, setup and
+     hold constraints, time borrowing, and timing exceptions, see Overview of Static Timing
+     Analysis. To learn more about timing paths, see
+     •   Timing Path Groups
+     •   Path Timing Reports
+     •   Path Timing Calculation
+     •   Specifying Timing Paths
+     •   Timing Exceptions
+     •   Saving and Restoring Timing Path Collections
+
+
+Timing Path Groups
+     PrimeTime organizes paths into groups. This path grouping can affect the generation of
+     timing analysis reports. For example, the report_timing command, when used with the
+     -group option, reports the worst path in each of the listed path groups.
+
+     In Design Compiler, path grouping also affects design optimization. Each path group can
+     be assigned a weight (also called cost function). The higher the weight, the more effort
+     Design Compiler uses to optimize the paths in that group. You can assign weights to path
+     groups in PrimeTime, but this weight information is not used in PrimeTime.
+     PrimeTime implicitly creates a path group each time you create a new clock with the
+     create_clock command. The name of the path group is the same as the clock name.
+
+
+
+
+PrimeTime® User Guide                                                                         266
+T-2022.03
+                                                                                         Feedback
+Chapter 8: Timing Paths and Exceptions
+Path Timing Reports
+
+
+     PrimeTime assigns a path to that path group if the endpoint of the path is a flip-flop
+     clocked by that clock. PrimeTime also creates the following path groups implicitly:
+     •   **clock_gating_default** – The group of paths that end on combinational elements
+         used for clock gating.
+     •   **async_default** – The group of paths that end on asynchronous preset/clear inputs of
+         flip-flops.
+     •   **default** – The group of constrained paths that do not fall into any of the other implicit
+         categories; for example, a path that ends on an output port.
+     In addition to these implicit path groups, you can create your own user-defined path
+     groups by using the group_path command. This command also lets you assign any
+     particular path to a specific path group. To get information about the current set of path
+     groups, use the report_path_group command. Note that the group_path command is
+     not compatible with hierarchical model extraction.
+     To remove a path group, use the remove_path_group command. Paths in that group are
+     implicitly assigned to the default path group. For example, to place all paths to ports with
+     names matching OUT_1* into their own group called out1bus, enter
+     pt_shell> group_path -name out1bus -to [get_ports OUT_1*]
+
+     Unconstrained paths do not belong to any path group. To report unconstrained paths,
+     set the timing_report_unconstrained_paths variable to true. The report_timing
+     command reports unconstrained paths as belonging to a path group called “(none)”.
+
+
+Path Timing Reports
+     You can use path timing reports to focus on particular timing violations and to determine
+     the cause of a violation. By default, the report_timing command reports the path with
+     the worst setup slack among all path groups.
+     A path timing report provides detailed timing information about specific paths. You can
+     specify the details provided in the output. For example:
+     •   Gate levels in the logic path
+     •   Incremental delay value of each gate level
+     •   Sum of the total path delays
+     •   Amount of slack in the path
+     •   Source and destination clock name, latency, and uncertainty
+     •   OCV with clock reconvergence pessimism removed
+
+
+
+PrimeTime® User Guide                                                                            267
+T-2022.03
+                                                                                     Feedback
+Chapter 8: Timing Paths and Exceptions
+Path Timing Reports
+
+
+     Use the options of the report_timing command to control reporting of the following types
+     of information:
+     •   Number of paths
+     •   Types of paths
+     •   Amount of detail
+     •   Startpoints, endpoints, and intermediate points along the path
+     The report_timing command by itself, without any options, is the same as the following
+     command:
+     pt_shell> report_timing -path_type full -delay_type max -max_paths 1
+
+     PrimeTime generates a maximum-delay (setup constraint) report on the full path, showing
+     only the single worst path. For example:
+     pt_shell> report_timing
+     ...
+       Startpoint: a (input port)
+       Endpoint: c_d (output port)
+       Path Group: default
+       Path Type: max
+       Point                            Incr       Path
+     ----------------------------------------------------
+       input external delay             10.00      10.00 r
+       a (in)                            0.00      10.00 r
+       m1/Z (MUX21H)                     1.00      11.00 r
+       u1/S (FA1)                        1.00      12.00 r
+       c_d/Z (AN2)                       1.00      13.00 r
+       c_d (out)                         0.00      13.00 r
+       data arrival time                           13.00
+
+       max_delay                        15.00      15.00
+       output external delay           -10.00       5.00
+       data required time                           5.00
+     ----------------------------------------------------
+       data required time                           5.00
+       data arrival time                          -13.00
+     ----------------------------------------------------
+       slack (VIOLATED)                 -8.00
+
+     To report the four worst setup paths among all path groups, enter
+     pt_shell> report_timing -max_paths 4
+
+     When the -max_paths option is set to any value larger than 1, the command only reports
+     paths that have negative slack. To include positive-slack paths in multiple-paths reports,
+     use the -slack_lesser_than option, as in the following example:
+     pt_shell> report_timing -slack_lesser_than 100 -max_paths 40
+
+
+PrimeTime® User Guide                                                                        268
+T-2022.03
+                                                                                         Feedback
+Chapter 8: Timing Paths and Exceptions
+Path Timing Calculation
+
+
+     To report the worst setup path in each path group, enter
+     pt_shell> report_timing -group [get_path_groups *]
+
+     To show the transition time and capacitance, enter
+     pt_shell> report_timing -transition_time -capacitance
+     ...
+       Startpoint: ffa (rising edge-triggered flip-flop clocked by CLK)
+       Endpoint: ffd (rising edge-triggered flip-flop clocked by CLK)
+       Path Group: CLK
+       Path Type: max
+
+        Point                             Cap    Trans     Incr     Path
+        ----------------------------------------------------------------
+        clock CLK (rise edge)                              0.00     0.00
+        clock network delay (ideal)                        0.00     0.00
+        ffa/CLK (DTC10)                           0.00     0.00     0.00 r
+        ffa/Q (DTC10)                    3.85     0.57     1.70     1.70 f
+        U7/Y (IV110)                     6.59     1.32     0.84     2.55 r
+        U12/Y (NA310)                    8.87     2.47     2.04     4.58 f
+        ...
+        U17/Y (NA211)                    4.87     1.01     1.35     5.94 f
+        ffd/D (DTN10)                             0.46     0.00     9.15 r
+        data arrival time                                           9.15
+
+       clock CLK (rise edge)                              10.00    10.00
+        clock network delay (ideal)                        0.00    10.00
+        ffd/CLK (DTN10)                                            10.00 r
+        library setup time                                -1.33     8.67
+        data required time                                          8.67
+        ----------------------------------------------------------------
+        data required time                                          8.67
+        data arrival time                                          -9.15
+        ----------------------------------------------------------------
+        slack (VIOLATED)                                           -0.48
+
+
+
+Path Timing Calculation
+     The report_delay_calculation command reports the detailed calculation of delay from
+     the input to the output of a cell or from the driver to a load on a net. The type of information
+     you see depends on the delay model you are using.
+     Many ASIC vendors consider detailed information about cell delay calculation to be
+     proprietary. To protect this information, the report_delay_calculation command
+     shows cell delay details only if the library vendor has enabled this feature with the
+     library_features attribute in Library Compiler.
+
+
+
+
+PrimeTime® User Guide                                                                            269
+T-2022.03
+                                                                                         Feedback
+Chapter 8: Timing Paths and Exceptions
+Specifying Timing Paths
+
+
+
+Specifying Timing Paths
+     The report_timing command, the timing exception commands (such as
+     set_false_path), and several other commands allow a variety of methods to specify
+     a single path or multiple paths for a timing report or for applying timing exceptions. One
+     way is to explicitly specify the -from $startpoint and -to $endpoint options in the
+     report_timing command for the path, as in the following examples:
+     pt_shell> report_timing -from PORTA -to PORTZ
+     pt_shell> set_false_path -from FFB1/CP -to FFB2/D
+     pt_shell> set_max_delay -from REGA -to REGB 12
+     pt_shell> set_multicycle_path -setup 2 -from FF4 -to FF5
+
+     Each specified startpoint can be a clock, a primary input port, a sequential cell, a clock
+     input pin of a sequential cell, a data pin of a level-sensitive latch, or a pin that has an
+     input delay specified. If you specify a clock, all registers and primary inputs related to that
+     clock are used as path startpoints. If you specify a cell, the command applies to one path
+     startpoint on that cell.
+     Each specified endpoint can be a clock, a primary output port, a sequential cell, a data
+     input pin of a sequential cell, or a pin that has an output delay specified. If you specify a
+     clock, all registers and primary outputs related to that clock are used as path endpoints. If
+     you specify a cell, the command applies to one path endpoint on that cell.
+     PrimeTime also supports a special form where the startpoint or endpoint becomes a
+     -through pin, and a clock object becomes the -from or -to object. You can use this
+     method with all valid startpoint and endpoint types, such as input ports, output ports, clock
+     flip-flop pins, data flip-flop pins, or clock-gating check pins. For example:
+     pt_shell> report_timing -from [get_clocks ...] -through $startpoint
+     pt_shell> report_timing -through $endpoint -to [get_clocks ...]
+
+     Note:
+         This method is more computationally intensive, especially in larger designs.
+         Whenever possible, use -from and -to to specify the paths.
+     You can restrict the report_timing command to only rising edges or only falling edges by
+     using the command arguments -rise_from , -fall_from , -rise_to , -fall_through ,
+     and so on.
+
+
+     Multiple Through Arguments
+     You can use multiple -through , -rise_through , and -fall_through arguments in a
+     single command to specify a group of paths. For example:
+     pt_shell> report_timing -from A1 -through B1 -through C1 -to D1
+
+
+
+PrimeTime® User Guide                                                                             270
+T-2022.03
+                                                                                          Feedback
+Chapter 8: Timing Paths and Exceptions
+Specifying Timing Paths
+
+
+     This means any path that starts at A1, passes through B1 and C1 in that order, and ends
+     at D1. For example:
+     pt_shell> report_timing -from A1 -through {B1 B2} -through {C1 C2} -to D1
+
+     This means any path that starts at A1, passes through either B1 or B2, then passes
+     through either C1 or C2, and ends at D1.
+
+
+     Rise/Fall From/To Clock
+     You can restrict the command to only to rising edges or only falling edges by using the
+     command arguments -rise_from , -fall_to , and so on. When the “from” or “to” object
+     is a clock, the command specifies paths based on the launch of data at startpoints or the
+     capture of data at endpoints for a specific edge of the source clock. The path selection
+     considers any logical inversions along the clock path. For example, the -rise_to clock
+     option specifies each path clocked by the specified clock at the endpoint, where a rising
+     edge of the source clock captures data at the path endpoint. This can be a rising-edge-
+     sensitive flip-flop without an inversion along the clock path, or a falling-edge-sensitive flip-
+     flop with an inversion along the clock path. The data being captured at the path endpoint
+     does not matter.
+     The following examples demonstrate the behavior with the set_false_path command.
+     Consider the circuit shown in Figure 71. FF1, FF2, FF5, and FF6 are rising-edge-triggered
+     flip-flops; and FF3, FF4, FF7, and FF8 are falling-edge-triggered flip-flops. FF1 through
+     FF4 are clocked directly, whereas the FF5 through FF8 are clocked by an inverted clock
+     signal.
+
+
+
+
+PrimeTime® User Guide                                                                             271
+T-2022.03
+                                                                                        Feedback
+Chapter 8: Timing Paths and Exceptions
+Specifying Timing Paths
+
+
+Figure 71     Circuit for path specification in examples 1 to 3
+
+                                                       Path A
+
+                                            D      Q                                D      Q
+
+
+                                             FF1                                     FF2
+
+
+                                                       Path B
+
+                                            D      Q                                D      Q
+
+
+                                             FF3                                     FF4
+
+        ck1
+                                                       Path C
+        CLK
+                                            D      Q                                D      Q
+
+
+                                             FF5                                     FF6
+
+
+                                                       Path D
+
+                                            D      Q                                D      Q
+
+
+                                             FF7                                     FF8
+
+
+
+
+     Example 1
+     pt_shell> set_false_path -to [get_clocks CLK]
+
+     In Figure 71, all paths clocked by CLK at the path endpoint (all four paths) are declared to
+     be false.
+     Example 2
+     pt_shell> set_false_path -rise_from [get_clocks CLK]
+
+     In Figure 71, all paths clocked by CLK at the startpoint that have data launched by a rising
+     edge of the source clock are declared to be false, so Path A and Path D are false.
+
+
+
+
+PrimeTime® User Guide                                                                          272
+T-2022.03
+                                                                                       Feedback
+Chapter 8: Timing Paths and Exceptions
+Specifying Timing Paths
+
+
+     Example 3
+     pt_shell> set_false_path -fall_to [get_clocks CLK]
+
+     In Figure 71, all paths clocked by CLK at the endpoint that capture data on a falling edge
+     of the source clock are declared to be false, so Path B and Path C are false.
+     Example 4
+     Consider the circuit shown in Figure 72. The two flip-flops latch data on the positive-going
+     edge of the clock. The level-sensitive latch opens on the rising edge and closes on the
+     falling edge of the clock.
+
+Figure 72     Circuit for path specification in example 4
+      data                                                                                         out
+                      D       Q                      D       Q                     D      Q
+                                     U0                             U1
+                                                     G
+
+                        FF0                           LAT1                          FF1
+      clk
+
+
+     Using -rise_from clock option of the report_timing command reports the paths with
+     data launched by a rising edge of the clock, from data to FF0, from FF0 to LAT1, from
+     LAT1/D to FF1, from LAT1/G to FF1, and from FF1 to out:
+     pt_shell> report_timing -rise_from [get_clocks clk] -nworst 100
+
+     Using the -fall_to option of the command instead reports the path with data captured by
+     a falling edge of the clock, which is from FF0 to LAT1:
+     pt_shell> report_timing -fall_to [get_clocks clk] -nworst 100
+
+     Example 5
+     The circuit shown in Figure 73 is the same as in the previous example, except that the
+     level-sensitive latch opens on the falling edge and closes on the rising edge of the clock.
+
+
+
+
+PrimeTime® User Guide                                                                          273
+T-2022.03
+                                                                                     Feedback
+Chapter 8: Timing Paths and Exceptions
+Specifying Timing Paths
+
+
+Figure 73     Circuit for path specification in example 5
+
+
+      data                                                                                      out
+                          D     Q                      D      Q                  D         Q
+                                         U0                            U1
+                                                       G
+
+                          FF0                          LAT1                       FF1
+      clk
+
+
+
+     Using the -fall_from clock option of the report_timing command reports the paths
+     from LAT1/D to FF1 and from LAT1/G to FF1:
+     pt_shell> report_timing -fall_from [get_clocks clk] -nworst 100
+
+     Using the -rise_to option of the command reports the paths from data to FF0, from FF0
+     to LAT1, from LAT1 to FF1, and from FF1 to out:
+     pt_shell> report_timing -rise_to [get_clocks clk] -nworst 100
+
+     Example 6
+     The circuit shown in Figure 74 is the same as in Example 4 (Figure 72), except that the
+     clock signal is inverted.
+
+Figure 74     Circuit for path specification in example 6
+                   data                                                                         out
+                                    D         Q             D      Q             D         Q
+                                                  U0                        U1
+                                                            G
+
+                                        FF0                     LAT1                 FF1
+             clk
+
+
+
+     Using the -fall_from clock option of the report_timing command reports the paths
+     with data launched by a falling edge of the clock: from FF0 to LAT1, from LAT1/D to FF1,
+     from LAT1/G to FF1, and from FF1 to out:
+     pt_shell> report_timing -fall_from [get_clocks clk] -nworst 100
+
+
+
+
+PrimeTime® User Guide                                                                          274
+T-2022.03
+                                                                                        Feedback
+Chapter 8: Timing Paths and Exceptions
+Specifying Timing Paths
+
+
+     Using the -rise_to option of the command reports the path with data captured by a rising
+     edge of the clock, which is from FF0 to LAT1 and from FF1 to out:
+     pt_shell> report_timing -rise_to [get_clocks clk] -nworst 100
+
+     Example 7
+     The circuit shown in Figure 75 is the same as in Example 5 (Figure 73), except that the
+     clock signal is inverted.
+
+Figure 75     Circuit for path specification in example 7
+                  data                                                                         out
+                                D        Q                   D       Q              D     Q
+                                                       U0                      U1
+                                                              G
+
+
+            clk                  FF0                          LAT1                  FF1
+
+
+
+
+     Using the -rise_from clock option of the report_timing command reports the paths
+     with data launched by a rising edge of the clock: from data to FF0 and from LAT1/G to
+     FF1:
+     pt_shell> report_timing -rise_from [get_clocks clk] -nworst 100
+
+     Using the -fall_to option of the command reports the paths from data to FF0, from FF0
+     to LAT1, from LAT1/D to FF1, and from LAT1/G to FF1:
+     pt_shell> report_timing -fall_to [get_clocks clk] -nworst 100
+
+     Example 8
+     In the circuit shown in Figure 76, multiple clocks reach the flip-flop.
+
+Figure 76     Circuit for path specification in example 8
+
+
+                                         D         Q
+                  clk1   0
+
+                  clk2   1
+                                             FF1
+
+
+
+
+PrimeTime® User Guide                                                                          275
+T-2022.03
+                                                                                         Feedback
+Chapter 8: Timing Paths and Exceptions
+Timing Exceptions
+
+
+     Suppose that you want to set false path ending at the D pin of the flip-flop, but only for
+     clk1, not for clk2. You can do this by using the -through and -to options:
+     pt_shell> set_false_path -through FF1/D -to [get_clocks clk1]
+
+     To set false path ending at the D pin of the flip-flop, but only paths that capture data on the
+     rising edge of clk1:
+     pt_shell> set_false_path -through FF1/D -rise_to [get_clocks clk1]
+
+
+     Reporting of Invalid Startpoints or Endpoints
+     The timing_report_always_use_valid_start_end_points variable specifies
+     how PrimeTime reports invalid startpoints and endpoints. This variable specifies how
+     report_timing, report_bottleneck, and get_timing_paths commands handle
+     invalid startpoints when you use the -from, -rise_from, and -fall_from options. It
+     also specifies how they handle invalid endpoints when you use the -to, -rise_to, or
+     -fall_to options.
+
+     When the timing_report_always_use_valid_start_end_points variable is set to
+     false (the default), the from_list is interpreted as all pins within the specified scope of
+     the listed objects. Objects specified in a general way can include many invalid startpoints
+     or endpoints. For example, -from [get_pins FF/*] includes input, output, and
+     asynchronous pins. By default, PrimeTime considers these invalid startpoints and
+     endpoints as through points, and continues path searching. It is easy to specify objects
+     this way, but it wastes runtime on useless searching. When this variable is set to true,
+     each reporting command ignores invalid startpoints and invalid endpoints.
+     Irrespective of this variable setting, it is recommended that you always specify valid
+     startpoints (input ports and register clock pins) in the from_list and valid endpoints (output
+     ports and register data pins) in the to_list.
+
+
+Timing Exceptions
+     By default, PrimeTime assumes that data launched at a path startpoint is captured at
+     the path endpoint by the very next occurrence of a clock edge at the endpoint. For paths
+     that are not intended to operate in this manner, you need to specify a timing exception.
+     Otherwise, the timing analysis does not match the behavior of the real circuit.
+     To learn more about timing exceptions, see
+     •   Overview of Timing Exceptions
+     •   Single-Cycle (Default) Path Delay Constraints
+     •   Setting False Paths
+
+
+
+PrimeTime® User Guide                                                                             276
+T-2022.03
+                                                                                          Feedback
+Chapter 8: Timing Paths and Exceptions
+Timing Exceptions
+
+
+     •   Setting Maximum and Minimum Path Delays
+     •   Setting Multicycle Paths
+     •   Specifying Timing Margins
+     •   Specifying Exceptions Efficiently
+     •   Exception Order of Precedence
+     •   Reporting Exceptions
+     •   Reporting Timing Exceptions
+     •   Reporting Exceptions Source File and Line Number Information
+     •   Checking Ignored Exceptions
+     •   Removing Exceptions
+
+
+     Overview of Timing Exceptions
+     You can set the following timing exceptions:
+
+Timing exception         Command                    Description
+
+False paths              set_false_path             Prevents analysis of the specified path; removes
+                                                    timing constraints on the path
+
+Minimum and maximum      set_max_delay and          Overrides the default setup and hold constraints
+path delays              set_min_delay              with specific maximum and minimum time values
+
+Multicycle paths         set_multicycle_path        Specifies the number of clock cycles required to
+                                                    propagate data from the start to the end of the
+                                                    path
+
+
+     Each timing exception command can apply to a single path or to a group of related paths,
+     such as all paths from one clock domain to another, or all paths that pass through a
+     specified point. For more information, see Specifying Timing Paths.
+     When you specify a path by its startpoint and endpoint, be sure to specify a timing path
+     that is valid in PrimeTime. A path startpoint must be either a register clock pin or an input
+     port. A path endpoint must be either a register data input pin or an output port.
+     To view a list of timing exceptions that have been applied to a design, use the
+     report_exceptions command. You can also preserve source location information,
+     namely the source file and line number when tracking and reporting information for
+     constraints. For more information, see Reporting Exceptions Source File and Line Number
+     Information.
+
+
+PrimeTime® User Guide                                                                             277
+T-2022.03
+                                                                                        Feedback
+Chapter 8: Timing Paths and Exceptions
+Timing Exceptions
+
+
+     To restore the default timing constraints on a path, use the reset_path command.
+
+
+     Single-Cycle (Default) Path Delay Constraints
+     To determine whether you need to set a timing exception, you must understand how
+     PrimeTime calculates maximum and minimum delay times for paths. You must also
+     understand how this calculation is similar or dissimilar to the operation of the design that
+     is being analyzed. For an introduction to static timing analysis principles, see Overview of
+     Static Timing Analysis.
+
+     Path Delay for Flip-Flops Using a Single Clock
+     The following figure shows how PrimeTime determines the setup and hold constraints for a
+     path that begins and ends on rising-edge-triggered flip-flops. In this example, the two flip-
+     flops are triggered by the same clock. The clock period is 10 ns.
+
+Figure 77     Single-Cycle Setup and Hold for Flip-Flops
+
+                                FF1                        Timing path       FF2
+
+                                                   Combinational
+                            D         Q                                  D         Q
+                                                      logic
+            CLK1
+
+            CLK2
+
+
+
+
+            CLKFF1
+
+             Hold                     Setup
+
+            CLKFF2
+
+
+                        0                     10                   20              30
+
+
+     PrimeTime performs a setup check to verify that the data launched from FF1 at time=0
+     arrives at the D input of FF2 in time for the capture edge at time=10. If the data takes too
+     long to arrive, it is reported as a setup violation.
+     Similarly, PrimeTime performs a hold check to verify that the data launched from FF1 at
+     time 0 does not get propagated so soon that it gets captured at FF2 at the clock edge at
+     time 0. If the data arrives too soon, it is reported as a hold violation.
+
+
+PrimeTime® User Guide                                                                          278
+T-2022.03
+                                                                                         Feedback
+Chapter 8: Timing Paths and Exceptions
+Timing Exceptions
+
+
+     The setup and hold requirements determined by PrimeTime for sequential elements take
+     into account all relevant parameters such as the delay of the combinational logic elements
+     in the path, the setup and hold requirements of the flip-flop elements as defined in the
+     logic library, and the net delays between the flip-flops.
+
+     Path Delay for Flip-Flops Using Different Clocks
+     The algorithm for calculating path delays is more complicated when the launch and
+     capture flip-flops belong to different clock domains.
+     In the following figure, the CLK1 and CLK2 clocks control the flip-flops at the beginning
+     and end of the timing path. The create_clock commands define the two clocks.
+
+Figure 78     Setup Constraints for Flip-Flops With Different Clocks
+
+                              FF1                     Timing path           FF2
+
+                                              Combinational
+                          D         Q                                   D         Q
+                                                 logic
+            CLK1
+
+            CLK2
+
+            pt_shell> create_clock -period 10 -waveform {0 5} CLK1
+            pt_shell> create_clock -period 25 -waveform {5 12.5} CLK2
+
+
+        CLK1FF1
+
+
+            Setup 1                             Setup 2
+        CLK2FF2
+
+
+
+                   0      5         10   15      20       25     30     35        40    45      50
+
+
+
+     By default, PrimeTime assumes that the two clocks are synchronous to each other, with a
+     fixed phase relationship. If this is not the case for the real circuit (for example, because the
+     two clocks are never active at the same time or because they operate asynchronously),
+     then you need to declare this fact by using any of several methods. Otherwise, PrimeTime
+     spends time checking constraints and reporting violations that do not exist in the actual
+     circuit.
+
+
+
+
+PrimeTime® User Guide                                                                            279
+T-2022.03
+                                                                                      Feedback
+Chapter 8: Timing Paths and Exceptions
+Timing Exceptions
+
+
+     Setup Analysis
+     PrimeTime looks at the relationship between the active clock edges over a full repeating
+     cycle, equal to the least common multiple of the two clock periods. For each capture
+     (latch) edge at the destination flip-flop, PrimeTime assumes that the corresponding launch
+     edge is the nearest source clock edge occurring before the capture edge.
+     In Figure 78, there are two capture edges in the period under consideration. For
+     the capture edge at time=5, the nearest preceding launch edge is at time=0. The
+     corresponding setup relationship is labeled Setup 1.
+     For the capture edge at time=30, the nearest preceding launch edge is at time=20. This
+     setup relationship is labeled Setup 2. The source clock edge at time=30 occurs at the
+     same time as the capture edge, not earlier, so it is not considered the corresponding
+     launch edge.
+     Setup 1 allows less time between launch and capture, so it is the more restrictive
+     constraint. It determines the maximum allowed delay for the path, which is 5 ns for this
+     example.
+     Hold Analysis
+     The hold relationships checked by PrimeTime are based on the clock edges adjacent to
+     those used to determine the setup relationships. To determine the most restrictive hold
+     relationship, PrimeTime considers all valid setup relationships, including both Setup 1 and
+     Setup 2 in Figure 78.
+     For each setup relationship, PrimeTime performs two different hold checks:
+     •   The data launched by the setup launch edge must not be captured by the previous
+         capture edge.
+     •   The data launched by the next launch edge must not be captured by the setup capture
+         edge.
+     In the following example, PrimeTime performs these hold checks:
+     •   Hold 2a – PrimeTime checks that the data launched by the Setup 2 launch edge is not
+         captured by the previous capture edge.
+     •   Hold 2b – PrimeTime checks that the data launched by the next clock edge at the
+         source is not captured by the setup capture edge.
+
+
+
+
+PrimeTime® User Guide                                                                           280
+T-2022.03
+                                                                                               Feedback
+Chapter 8: Timing Paths and Exceptions
+Timing Exceptions
+
+
+Figure 79     Hold Constraints for Flip-Flops With Different Clocks
+
+                                    FF1                       Timing path            FF2
+
+                                                   Combinational
+                                D         Q                                      D         Q
+                                                      logic
+              CLK1
+
+              CLK2
+
+                        Setup 1                          Setup 2
+                        launch edge                      launch edge
+
+
+       CLK1FF1
+
+
+         Hold 1a                                                          Hold 2b
+                               Hold 1b        Hold 2a
+
+       CLK2FF2                                      Setup 2
+                                                                            Setup 2
+                                                                            capture edge
+
+                   0       5         10       15    20     25        30        35      40      45   50
+
+
+     PrimeTime similarly checks the hold relationships relative to the clock edges of Setup 1, as
+     indicated in the figure. The most restrictive hold check is the one where the capture edge
+     occurs latest relative to the launch edge, which is Hold 2b in this example. Therefore, Hold
+     2b determines the minimum allowed delay for this path, 0 ns.
+     Single-Cycle Path Analysis Examples
+     The following examples further show how PrimeTime calculates the delay requirements for
+     edge-triggered flip-flops in the absence of timing exceptions.
+     In the following figure, CLK1 has a period of 20 ns and CLK2 has a period of 10 ns. The
+     most restrictive setup relationship is the launch edge at time=0 to the capture edge at
+     time=10. The most restrictive hold relationship is the launch edge at time=0 to the capture
+     edge at time=0.
+
+
+
+
+PrimeTime® User Guide                                                                                281
+T-2022.03
+                                                                                       Feedback
+Chapter 8: Timing Paths and Exceptions
+Timing Exceptions
+
+
+Figure 80     Delay Requirements With 20ns/10ns Clocks
+
+                                    FF1                    Timing path       FF2
+
+                                                   Combinational
+                                D         Q                              D         Q
+                                                      logic
+            CLK1
+
+            CLK2
+
+            pt_shell> create_clock -period 20 -waveform {0 10} CLK1
+            pt_shell> create_clock -period 10 -waveform {0 5} CLK2
+
+
+            CLK1   FF1
+
+
+
+
+                                          Setup
+                     Hold
+
+            CLK2 FF2
+
+
+
+
+                            0        5        10    15     20
+
+
+
+     In the following figure, CLK1 has a period of 4 ns and CLK2 has a period of 3 ns. The most
+     restrictive setup relationship is the launch edge at time=3 to the capture edge at time=4.
+     The most restrictive hold relationship is the launch edge at time=7 to the capture edge
+     at time=7, based on the setup relationship shown by the dashed-line arrow in the timing
+     diagram.
+
+
+
+
+PrimeTime® User Guide                                                                        282
+T-2022.03
+                                                                                                    Feedback
+Chapter 8: Timing Paths and Exceptions
+Timing Exceptions
+
+
+Figure 81     Delay Requirements With 4ns/3ns Clocks
+
+                                  FF1                         Timing path           FF2
+
+                                                      Combinational
+                              D         Q                                       D         Q
+                                                         logic
+            CLK1
+
+            CLK2
+
+            pt_shell> create_clock -period 4 -waveform {3 4} CLK1
+            pt_shell> create_clock -period 3 -waveform {1 2} CLK2
+
+
+
+            CLK1FF1
+
+                                                Setup           Hold            Setup
+
+
+            CLK2FF2
+
+
+                      0   1        2        3     4      5     6       7    8       9         10   11   12
+
+
+
+
+     Setting False Paths
+     A false path is a logic path that exists but should not be analyzed for timing. For example,
+     a path can exist between two multiplexed logic blocks that are never selected at the same
+     time, so that path is not valid for timing analysis.
+     For example, to declare a false path from pin FFB1/CP to pin FFB2/D:
+     pt_shell> set_false_path -from [get_pins FFB1/CP] \
+                 -to [get_pins FFB2/D]
+
+     Declaring a path to be false removes all timing constraints from the path. PrimeTime still
+     calculates the path delay, but does not report it to be an error, no matter how long or short
+     the delay.
+     Setting a false path is a point-to-point timing exception. This is different from using the
+     set_disable_timing command, which disables timing analysis for a specified pin, cell, or
+     port. Using the set_disable_timing command removes the affected objects from timing
+     analysis, rather than removing the timing constraints from the paths. If all paths through a
+     pin are false, using set_disable_timing [get_pins pin_name] is more efficient than
+     using set_false_path -through [get_pins pin_name] .
+
+
+
+PrimeTime® User Guide                                                                                        283
+T-2022.03
+                                                                                        Feedback
+Chapter 8: Timing Paths and Exceptions
+Timing Exceptions
+
+
+     Another example of a false path is a path between flip-flops belonging to two clock
+     domains that are asynchronous with respect to each other.
+     To declare all paths between two clock domains to be false, you can use a set of two
+     commands such as the following:
+     pt_shell> set_false_path -from [get_clocks ck1] \
+               -to [get_clocks ck2]
+
+     pt_shell> set_false_path -from [get_clocks ck2] \
+                 -to [get_clocks ck1]
+
+     For efficiency, be sure to specify each clock by its clock name, not by the pin name (use
+     get_clocks, not get_pins).
+
+     An alternative is to use the set_clock_groups command to exclude paths from
+     consideration that are launched by one clock and captured by another. Although this has
+     the same effect as declaring a false path between the two clocks, it is not considered a
+     timing exception and is not reported by the report_exceptions command.
+
+
+     Setting Maximum and Minimum Path Delays
+     By default, PrimeTime calculates the maximum and minimum path delays by considering
+     the clock edge times. To override the default maximum or minimum time with your own
+     specific time value, use the set_max_delay or set_min_delay command. For example,
+     to set the maximum path delay between registers REGA and REGB to 12, use this
+     command:
+     pt_shell> set_max_delay 12.0 -from [get_cells REGA] -to [get_cells REGB]
+
+     With this timing exception, PrimeTime ignores the clock relationships. A path delay
+     between these registers that exceeds 12 time units minus the setup requirement of the
+     endpoint register is reported as a timing violation. Similarly, to set the minimum path delay
+     between registers REGA and REGB to 2, use this command:
+     pt_shell> set_min_delay 2.0 -from [get_cells REGA] -to [get_cells REGB]
+
+     Again, PrimeTime ignores the clock relationships. A path delay between these registers
+     that is less than 2 time units plus the hold requirement of the endpoint register is reported
+     as a timing violation. You can optionally specify that the delay value apply only to rising
+     edges or only to falling edges at the endpoint.
+     Be sure to select a valid path startpoint with the -from or similar option and a valid path
+     endpoint with the -to or similar option unless you want to override the paths checked by
+     PrimeTime. If you specify an invalid startpoint or endpoint, PrimeTime performs the timing
+     check exactly as specified and ignores the remaining valid portion of the timing path.
+     Applying such an exception on a clock path prevents propagation of the clock forward from
+
+
+
+PrimeTime® User Guide                                                                           284
+T-2022.03
+                                                                                      Feedback
+Chapter 8: Timing Paths and Exceptions
+Timing Exceptions
+
+
+     the point where the exception is applied for all timing paths. PrimeTime issues a UITE-217
+     warning message when you specify an invalid startpoint or endpoint.
+     To set a timing endpoint for a maximum delay constraint without forcing an endpoint for
+     other timing paths, use the -probe option:
+     pt_shell> set_max_delay 4.5 -to I_TOP/MEM/U133/Z -probe
+     Information: Forcing pin 'I_TOP/MEM/U133/Z' to be a timing endpoint only
+     for this probe-type timing exception. Existing timing paths are not
+     affected. (UITE-618)
+
+     If you specify a sequential cell as the argument of the -from option, the command is
+     automatically expanded to apply to each clock input pin of the cell. Similarly, if you
+     specify a sequential cell as the argument of the -to option, the command is automatically
+     expanded to apply to each data input pin of the cell. You can see the expanded pin-by-pin
+     exceptions by using the report_exceptions or write_sdc command. The expansion of
+     an exception set on a cell to the individual pins of the cell does not occur in some other
+     tools such as IC Compiler II. In those tools, the exception is maintained at the cell level.
+     This can cause different tools to resolve overlapping exceptions in different ways.
+
+
+     Setting Multicycle Paths
+     To specify the number of clock cycles required to propagate data from the start of a path to
+     the end of the path, use the set_multicycle_path command. PrimeTime calculates the
+     setup or hold constraint according to the specified number of cycles.
+     In the following example, the path from FF4 to FF5 is designed to take two clock cycles
+     rather than one. However, by default, PrimeTime assumes single-cycle timing for all paths.
+     Therefore, you need to specify a timing exception for this path.
+
+
+
+
+PrimeTime® User Guide                                                                          285
+T-2022.03
+                                                                                            Feedback
+Chapter 8: Timing Paths and Exceptions
+Timing Exceptions
+
+
+Figure 82     Multicycle Path Example
+
+
+      IN       Logic             D         Q   Logic      D       Q     Logic         D         Q
+
+
+
+
+                                     FF1                    FF2                           FF3
+      CLK
+                                                                                                    Logic
+
+
+                                 D         Q            Slow logic                    D         Q
+
+
+
+
+                                     FF4                                                  FF5
+
+
+                                                       ENABLE
+
+
+
+     Although you could specify an explicit maximum delay value with the set_max_delay
+     command, it is better to use the set_multicycle_path command, which automatically
+     adjusts the maximum delay value if you change the clock period.
+     To set the multicycle path for the preceding example, use this command:
+     pt_shell> set_multicycle_path -setup 2 \
+               -from [get_cells FF4] -to [get_cells FF5]
+
+     This command specifies that the path takes two clock cycles rather than one, establishing
+     the new setup relationship shown in Figure 83. The second capture edge (rather than the
+     first) following the launch edge becomes the applicable edge for the end of the path.
+
+Figure 83     Multicycle path setup relationship
+
+
+            CLKFF4
+
+                 Default setup                          New setup relationship with
+                 relationship                           multicycle path setting
+
+            CLKFF5
+
+
+
+
+PrimeTime® User Guide                                                                               286
+T-2022.03
+                                                                                      Feedback
+Chapter 8: Timing Paths and Exceptions
+Timing Exceptions
+
+
+     Changing the setup relationship implicitly changes the hold relationship as well because all
+     hold relationships are based on the valid setup relationships. PrimeTime verifies that the
+     data launched by the setup launch edge is not captured by the previous capture edge. The
+     new hold relationship is shown in the following figure.
+
+Figure 84     Multicycle path hold relationship based on new setup
+
+
+            CLKFF4
+
+                         Hold                   Setup
+
+
+            CLKFF5
+
+
+
+
+     The new hold relationship is probably not the correct relationship for the design. If FF4
+     does not need to hold the data beyond the first clock edge, you need to specify another
+     timing exception.
+     Although you could use the set_min_delay command to specify an explicit hold time, it is
+     better to use another set_multicycle_path command to move the capture edge for the
+     hold relationship backward by one clock cycle. For example:
+     pt_shell> set_multicycle_path -setup 2 \
+               -from [get_cells FF4] -to [get_cells FF5]
+
+     pt_shell> set_multicycle_path -hold 1 \
+               -from [get_cells FF4] -to [get_cells FF5]
+
+     Figure 85 shows the setup and hold relationships set correctly with two
+     set_multicycle_path commands. The second set_multicycle_path command moves
+     the capture edge of the hold relationship backward by one clock cycle, from the dashed-
+     line arrow to the solid-line arrow.
+
+
+
+
+PrimeTime® User Guide                                                                            287
+T-2022.03
+                                                                                      Feedback
+Chapter 8: Timing Paths and Exceptions
+Timing Exceptions
+
+
+Figure 85     Multicycle path hold set correctly
+
+
+
+            CLKFF4
+
+                   Hold                            Setup
+
+
+            CLKFF5
+
+
+     PrimeTime interprets the -setup and -hold options in the set_multicycle_path
+     command differently:
+     •   The integer value for the -setup option specifies the number of clock cycles for the
+         multicycle path. In the absence of a timing exception, the default is 1.
+     •   The integer value for the -hold option specifies the number of clock cycles to move the
+         capture edge backward with respect to the default position (relative to the valid setup
+         relationship); the default is 0.
+     The following figure further demonstrates the setting of multicycle paths. In the absence
+     of timing exceptions, the setup relationship is from time=0 to time=10, as indicated by the
+     dashed-line arrow, and the hold relationship is from time=0 to time=0.
+
+
+
+
+PrimeTime® User Guide                                                                           288
+T-2022.03
+                                                                                               Feedback
+Chapter 8: Timing Paths and Exceptions
+Timing Exceptions
+
+
+Figure 86      Multicycle path taking five clock cycles
+
+                                                              Timing path            FF2
+                                     FF1
+                                                          Slow
+                                 D         Q              logic                  D         Q
+
+
+
+                   CLK
+
+                   pt_shell>    create_clock -period 10 -waveform {0 5} CLK1
+
+
+
+         CLKFF1
+
+
+                                                                                                Setup
+            Hold
+
+         CLKFF2
+
+
+                   0       5       10          15   20     25      30       35       40        45   50
+
+                   pt_shell> set_multicycle_path -setup 5 \
+                             -from [get_cells FF1] -to [get_cells FF2]
+
+                   pt_shell> set_multicycle_path -hold 4 \
+                             -from [get_cells FF1] -to [get_cells FF2]
+
+
+     With set_multicycle_path -setup 5 , the setup relationship spans five clock cycles
+     rather than one, from time=0 to time=50, as shown by the long solid-line arrow. This
+     implicitly changes the hold relationship to the prior capture edge at time=40, as shown by
+     the long dashed-line arrow.
+     To move the capture edge for the hold relationship back to time=0, you need to use
+     set_multicycle_path -hold 4 to move the capture edge back by four clock cycles .
+
+     To summarize, PrimeTime determines the number of hold cycles as follows:
+     (hold cycles) = (setup option value) – 1 – (hold option value)
+     By default, hold cycles = 1 – 1 – 0 = 0. For Figure 85, hold cycles = 2 – 1 – 1 = 0. For
+     Figure 86, hold cycles = 5 – 1 – 4 = 0.
+     You can optionally specify that the multicycle path exception apply only to rising edges
+     or only to falling edges at the path endpoint. If the startpoint and endpoint are clocked by
+
+
+PrimeTime® User Guide                                                                                   289
+T-2022.03
+                                                                                        Feedback
+Chapter 8: Timing Paths and Exceptions
+Timing Exceptions
+
+
+     different clocks, you can specify which of the two clocks is considered for adjusting the
+     number of clock cycles for the path.
+
+
+     Specifying Timing Margins
+     You can make any timing check more or less restrictive by a specified amount of time by
+     using the set_path_margin command. For example,
+     pt_shell> set_path_margin -setup 1.2 -to I_BL/reg30a/D
+
+     This example makes all setup checks arriving at a specified register pin more restrictive by
+     1.2 time units. The reported setup slack is 1.2 time units less (more negative) than without
+     the path margin. In a report generated by the report_timing command, the margin
+     appears as a “path margin” adjustment in the “data required time” calculation.
+     For all types of timing paths, specifying a positive margin results in a more restrictive
+     or tighter check. Conversely, specifying a negative margin results in a less restrictive or
+     looser check.
+     The path margin setting is a timing exception, much like an exception set with the
+     set_max_delay or set_multicycle_path command. The specified margin applies to
+     a timing check in addition to any minimum-delay, maximum-delay, and multicycle path
+     exceptions that apply to the same path.
+
+
+     Specifying Exceptions Efficiently
+     In many cases, you can specify the exception paths many different ways. Choosing an
+     efficient method can reduce the analysis runtime. In the following figure, the three 16-
+     bit registers are clocked by three different clocks. Each register represents 16 flip-flops.
+     Register REG2 is only used for test purposes, so all paths from REG2 to REG3 are false
+     paths during normal operation of the circuit.
+
+
+
+
+PrimeTime® User Guide                                                                              290
+T-2022.03
+                                                                                      Feedback
+Chapter 8: Timing Paths and Exceptions
+Timing Exceptions
+
+
+Figure 87     Multiplexed register paths
+
+                         REG1
+                                     16
+                        D     Q
+                                                                         REG3
+                                                              16
+             CLK1                                 0
+                                                                        D     Q
+                                                  1
+                         REG2                                CLK3
+                                    16
+                        D     Q
+
+             CLK2
+
+
+             TEST_ENABLE
+
+
+     To prevent timing analysis from REG2 to REG3, use one of the following methods:
+     •   Use case analysis to consider the case when the test enable signal is 0. (See Case
+         and Mode Analysis.)
+     •   Set an exclusive relationship between the CLK1 and CLK2 clock domains. (See
+         Exclusive Clocks.)
+     •   Declare the paths between clock domains CLK2 and CLK3 to be false.
+         pt_shell> set_false_path \
+                   -from [get_clocks CLK2] -to [get_clocks CLK3]
+
+         This method is an efficient way to specify the false paths because PrimeTime only
+         needs to keep track of the specified clock domains. It does not have to keep track of
+         exceptions on registers, pins, nets, and so on.
+     •   Declare the 16 individual paths from REG2 to REG3 to be false.
+         pt_shell> set_false_path -from [get_pins REG2[0]/CP] \
+                   -to [get_pins REG3[0]/D]
+
+         pt_shell> set_false_path -from [get_pins REG2[1]/CP] \
+                   -to [get_pins REG3[1]/D]
+
+         pt_shell> ...
+
+         This method is less efficient because PrimeTime must keep track of timing exceptions
+         for 16 different paths.
+
+
+
+
+PrimeTime® User Guide                                                                         291
+T-2022.03
+                                                                                      Feedback
+Chapter 8: Timing Paths and Exceptions
+Timing Exceptions
+
+
+     •   Declare all paths from REG2 to REG3 to be false.
+         pt_shell> set_false_path -from [get_pins REG2[*]/CP] \
+                   -to [get_pins REG3[*]/D]
+
+         This method is even less efficient because PrimeTime must keep track of paths from
+         each clock pin of REG2 to each data pin of REG3, a total of 256 paths.
+     •   Declare all paths from REG2 to be false.
+         pt_shell> set_false_path -from [get_pins REG2[*]/CP]
+
+         This method is similar to the previous one. PrimeTime must keep track of all paths
+         originating from each clock pin of REG2, a total of 256 paths.
+     In summary, look at the root cause that is making the exceptions necessary, and find
+     the simplest way to control the timing analysis for the affected paths. Before using false
+     paths, consider using case analysis (set_case_analysis), declaring an exclusive
+     relationship between clocks (set_clock_groups), or disabling analysis of part of the
+     design (set_disable_timing). These alternatives can be more efficient than using the
+     set_false_path command. If you must set false paths, avoid specifying a large number
+     of paths using the -through argument, by using wildcards, or by listing the paths one at a
+     time.
+
+
+     Exception Order of Precedence
+     If different timing exception commands are in conflict for a particular path, the exception
+     PrimeTime uses for that path depends on the exception types or the path specification
+     methods used in the conflicting commands. A set of rules establishes the order of priority
+     for different exception-setting situations.
+     PrimeTime applies the exception precedence rules independently on each path (not each
+     command). For example, suppose that you use these commands:
+     pt_shell> set_max_delay -from A 5.1
+     pt_shell> set_false_path -to B
+
+     The set_false_path command has priority over the set_max_delay command, so
+     any paths that begin at A and end at B are false paths. However, the set_max_delay
+     command still applies to paths that begin at A but do not end at B.
+
+
+
+
+PrimeTime® User Guide                                                                         292
+T-2022.03
+                                                                                       Feedback
+Chapter 8: Timing Paths and Exceptions
+Timing Exceptions
+
+
+     Exception Type Priority
+     The following pairs of timing exception types are not considered to be in conflict, so both
+     settings can be valid for a path:
+     •   Two set_false_path settings
+     •   set_min_delay and set_max_delay settings
+
+     •   set_multicycle_path -setup and -hold settings
+
+     In case of conflicting exceptions for a particular path, the timing exception types have the
+     following order of priority, from highest to lowest:
+     1. set_false_path
+     2. set_max_delay and set_min_delay
+     3. set_multicycle_path
+     For example, if you declare a path to be false and also set its maximum delay to some
+     value, the false path declaration has priority. The maximum delay setting is ignored. You
+     can list ignored timing exceptions by using the report_exceptions -ignored command.
+
+     Path Specification Priority
+     If you apply the same type of timing exception using commands with different path
+     specifications, the more specific command has priority over the more general one.
+     Exceptions of any type on more specific objects, such as pins or ports, take precedence
+     over exceptions applied to more general objects, such as clocks. For example:
+     pt_shell> set_max_delay 12 -from [get_clocks CLK1]
+
+     pt_shell> set_max_delay 15 -from [get_clocks CLK1] -to [get_clocks CLK2]
+
+     The first command sets the maximum delay of all paths starting from CLK1. However, the
+     second command is more specific, so it overrides the first command for paths starting at
+     CLK1 and ending at CLK2. The remaining paths starting from CLK1 are still controlled by
+     the first command.
+     The various -from/-to path specification methods have the following order of priority,
+     from highest to lowest:
+     1. -from pin, -rise_from pin, -fall_from pin
+     2. -to pin, -rise_to pin, -fall_to pin
+     3. -through, -rise_through, -fall_through
+
+
+
+
+PrimeTime® User Guide                                                                          293
+T-2022.03
+                                                                                      Feedback
+Chapter 8: Timing Paths and Exceptions
+Timing Exceptions
+
+
+     4. -from clock, -rise_from clock, -fall_from clock
+     5. -to clock, -rise_to clock, -fall_to clock
+     Use the preceding list to determine which of two conflicting timing exception commands
+     has priority (for example, two set_max_delay commands). Starting from the top of the list:
+     1. A command containing -from pin, -rise_from pin, or -fall_from pin has priority
+        over a command that does not contain -from pin, -rise_from pin, or -fall_from
+        pin .
+
+     2. A command containing -to pin, -rise_to pin, or -fall_to pin has priority over a
+        command that does not contain -to pin, -rise_to pin, or -fall_to pin .
+     ... and so on down the list until the priority is resolved.
+     Here are some possible path specification combinations, listed in order of priority from
+     highest to lowest, according to the preceding priority rules:
+     1. -from pin -to pin
+     2. -from pin -to clock
+     3. -from pin
+     4. -from clock -to pin
+     5. -to pin
+     6. -from clock -to clock
+     7. -from clock
+     8. -to clock
+
+
+     Reporting Exceptions
+     To report timing exceptions that have been set, use the report_exceptions command.
+     You can reduce the scope of the report by using the path specification arguments -from ,
+     -to , -through , -rise_from , -fall_to , and so on, to match the path specifiers used
+     when the original exceptions were created.
+     The report_exceptions command causes a complete timing update, so be sure to use it
+     only after you have set up all timing assertions and you are ready to receive the report.
+     Exception-setting commands are sometimes partially or fully ignored for a number of
+     reasons. For example, a command that specifies a broad range of paths can be partially
+     overridden by another exception-setting command that specifies a subset of those paths.
+     For a partially ignored command, the exception report shows the reason that some part of
+     the command is being ignored.
+
+
+PrimeTime® User Guide                                                                           294
+T-2022.03
+                                                                                          Feedback
+Chapter 8: Timing Paths and Exceptions
+Timing Exceptions
+
+
+     By default, a command that is fully ignored is not reported by the report_exceptions
+     command. To report the commands that are fully ignored, use the -ignored option with
+     the report_exceptions command.
+     Consider the design shown in Figure 88 and the following exception-setting and exception-
+     reporting commands.
+
+Figure 88     Design to demonstrate ignored exceptions
+
+
+
+
+             A              u0                              False path           C
+
+
+
+                                              u1
+
+                                                                 u2
+             B                                                                   D
+                                         Valid multicycle path
+
+
+
+     pt_shell> set_false_path -from A -to D
+     pt_shell> set_multicycle_path 2 -from A -to D
+     pt_shell> set_multicycle_path 2 -from {A B C} -to D
+     pt_shell> report_exceptions
+     ...
+     Reasons:
+     f - invalid startpoint(s)
+     t - invalid endpoint(s)
+     p - non-existent paths
+     o - overridden paths
+
+     From         To      Setup      Hold       Ignored
+     --------------------------------------------------
+     A            D       FALSE      FALSE
+     { A B C }    D       2          *          f,o
+
+     pt_shell> report_exceptions -ignored
+     ...
+     From         To      Setup      Hold       Ignored
+     --------------------------------------------------
+     A            D       2          *          o
+
+     The first exception-setting command sets a false path from port A to port D. This is the
+     highest-priority command, so it is fully enforced by PrimeTime.
+     The second exception-setting command attempts to set a multicycle path from port
+     A to port D. It is fully ignored because it is overridden by the higher-priority false path
+
+
+PrimeTime® User Guide                                                                              295
+T-2022.03
+                                                                                       Feedback
+Chapter 8: Timing Paths and Exceptions
+Timing Exceptions
+
+
+     command. Because this command is fully ignored, it is reported only when you use the
+     -ignored option of the report_exceptions command. In the report, the letter code “o” in
+     the “Ignored” column shows the reason the command is being ignored.
+     The third exception-setting command attempts to set multicycle paths from ports A
+     to D, B to D, and C to D. It is partially valid (not fully ignored), so it is reported by the
+     report_exceptions command without the -ignored option. The path from A to D is
+     ignored because it is overridden by the false path command. The path from B to D is valid,
+     so that multicycle path is enforced by PrimeTime. The path from C to D is invalid because
+     port C is not a valid startpoint for a path. In the report, the letter codes in the “Ignored”
+     column indicate the reasons that some of the paths specified in the command are being
+     ignored.
+
+
+     Reporting Timing Exceptions
+     The report_timing command has an -exceptions option that allows you to report the
+     timing exceptions that apply to an individual path. You can choose to report the following:
+     •   Exceptions that apply to a path
+     •   Exceptions that were overridden by higher-priority exceptions
+     •   Unconstrained path debugging that includes unconstrained startpoint and
+         unconstrained endpoint
+     •   Timing path attributes that show the unconstrained reasons
+     When using either the report_timing -exceptions all or get_timing_paths
+     command to report why timing paths are unconstrained, you must first set the
+     timing_report_unconstrained_paths variable to true. As shown earlier, to report the
+     unconstrained reasons, you can use the report_timing command with the three options:
+     pt_shell> report_timing -exceptions dominant
+     pt_shell> report_timing -exceptions overridden
+     pt_shell> report_timing -exceptions all
+
+     In the following example where you specify conflicting exceptions, the maximum-delay
+     exception has higher priority:
+     pt_shell> set_multicycle_path -through buf1/Z -setup 2
+     pt_shell> set_max_delay -through buf1/Z 1
+
+     If you use report_timing -exceptions dominant report the timing of the path
+     containing buf1/Z, the report includes a section showing the dominant timing exception
+     that affected the path:
+     The dominant exceptions are:
+     From        Through        To              Setup              Hold
+
+
+
+
+PrimeTime® User Guide                                                                         296
+T-2022.03
+                                                                                          Feedback
+Chapter 8: Timing Paths and Exceptions
+Timing Exceptions
+
+
+     -------------------------------------------------------
+     *           buf1/Z         *      max=1
+
+     If you use report_timing -exceptions overridden, the report includes a section
+     showing the overridden timing exception that had no effect on the timing calculation:
+     The overridden exceptions are:
+     From        Through        To     Setup          Hold
+     -------------------------------------------------------
+     *           buf1/Z         *      cycles=2       *
+
+     If you use report_timing -exceptions all, the timing report includes a section
+     showing both the dominant and overridden timing exceptions. Alternatively, you can
+     use the get_timing_paths command to create a collection of timing paths for custom
+     reporting or for other processing purposes. You can then pass this timing path collection to
+     the report_timing command. By adding the -exceptions all argument, you obtain the
+     additional debugging information. For example:
+     report_timing -from A -through B -to C -exceptions all
+     set x [get_timing_paths -from A -through B -to C]
+     report_timing $x -exceptions all
+
+     With the get_timing_paths command, you can access the path attributes that show
+     the reasons why the path is unconstrained. The following table shows the timing path
+     attributes along with their possible values, in relation to unconstrained paths:
+Table 15      Timing path attributes and values
+
+      Timing path attribute        Reason code            Reason code description
+
+      dominant_exception           false_path             False paths that are not considered.
+
+                                   min_delay, max_delay   Timing path is a minimum or maximum
+                                                          delay.
+
+                                   multicycle_path        Multicycle path.
+
+      endpoint_unconstrained_r no_capture_clock           No clock is capturing the data at the
+      eason                                               endpoint.
+
+                                   dangling_end_point     Timing path is broken by a disabled
+                                                          timing component because it ends at a
+                                                          dangling (floating) point that has no timing
+                                                          constraints information.
+
+                                   fanin_of_disabled      Path ending at a fanin of a disabled timing
+                                                          arc or component. The internal pin is
+                                                          either without constrains, pin connected
+                                                          to a black box, or there are unconnected
+                                                          pins. The endpoint of the timing path is
+                                                          part of the fanin of a disabled timing arc or
+                                                          component.
+
+
+
+PrimeTime® User Guide                                                                              297
+T-2022.03
+                                                                                           Feedback
+Chapter 8: Timing Paths and Exceptions
+Timing Exceptions
+
+
+Table 15      Timing path attributes and values (Continued)
+
+      Timing path attribute        Reason code             Reason code description
+
+      startpoint_unconstrained no_launch_clock             No clock is launching the data from the
+      _reason                                              startpoint.
+
+                                   dangling_start_point    Path starting from a dangling pin. The
+                                                           timing path is broken by a disabled timing
+                                                           component because it starts from a
+                                                           dangling (floating) point that has no timing
+                                                           constraints information.
+
+                                   fanout_of_disabled      Path starting from a fanout of a disabled
+                                                           timing arc or component. The internal pin
+                                                           is without constrains, pin connected to a
+                                                           black box, or there are unconnected pins.
+                                                           The startpoint of the timing path is part
+                                                           of the fanout of a disabled timing arc or
+                                                           component.
+
+
+     The report_timing -exceptions command always shows three categories: the
+     dominant exception, startpoint unconstrained reason, and endpoint unconstrained reason.
+     If no exception information is present in a category, that section is empty.
+     The exception attributes on the timing_path objects (dominant_exception,
+     startpoint_unconstrained_reason, and endpoint_unconstrained_reason) are only
+     present on a path if information is present in that category. This makes it easy to filter for
+     the presence or absence of exception information affecting a path. For example, to filter all
+     paths from a collection that are affected by exceptions:
+     filter_collection $paths {defined(dominant_exception)}
+     filter_collection $paths {undefined(dominant_exception)}
+
+     The following report shows the output of report_timing -exceptions all:
+     pt_shell> report_timing -exceptions all
+     ****************************************
+     Report : timing
+             -path_type full_clock_expanded
+     ...
+       (Path is unconstrained)
+
+     The dominant exceptions are:
+     From          To           Setup         Hold
+     -----------------------------------------------------------------
+     lr6_ff/CP     cr6_ff/D     FALSE         FALSE
+
+     The overridden exceptions are:
+     From          To           Setup                     Hold
+
+
+
+PrimeTime® User Guide                                                                              298
+T-2022.03
+                                                                                        Feedback
+Chapter 8: Timing Paths and Exceptions
+Timing Exceptions
+
+
+     -----------------------------------------------------------------
+     F1/CP         F2/D         cycles=3     cycles=0
+
+     The unconstrained reasons (except for false path) are:
+     Reason                     Startpoint              Endpoint
+     -----------------------------------------------------------------
+     no_launch_clock            F1/CP                       -
+
+
+     Reporting Exceptions Source File and Line Number Information
+     For some constraints, PrimeTime can track and report the source file and line number
+     information for the constraints. Source files are read into the PrimeTime shell using the
+     source or read_sdc commands or the -f command line option.
+     To enable the source file name and line number information for the current design
+     constraints, set the sdc_save_source_file_information variable to true. By default,
+     this variable is set to false.
+     Note:
+         You can modify the value of this variable only if you have not yet input
+         exceptions.
+     This implies that you can set the variable to true in the setup file or inside pt_shell
+     before applying a timing exception. If at least one exception command has already been
+     successfully input when you try to set this variable, you receive an error and the value
+     remains unchanged. For example:
+     pt_shell> echo $sdc_save_source_file_information
+     false
+     pt_shell> set_max_delay -to port1 0.7
+     pt_shell> set sdc_save_source_file_information true
+     Error: can't set "sdc_save_source_file_information":
+             Use error_info for more info. (CMD-013)
+     pt_shell> echo $sdc_save_source_file_information
+     false
+
+     The scope of source-location tracking applies to the following timing exceptions
+     commands:
+     •   set_false_path
+
+     •   set_multicycle_path
+
+     •   set_max_delay
+
+     •   set_min_delay
+
+
+
+
+PrimeTime® User Guide                                                                            299
+T-2022.03
+                                                                                    Feedback
+Chapter 8: Timing Paths and Exceptions
+Timing Exceptions
+
+
+     To report the source of the constraints, use the report_exceptions or report_timing
+     -exceptions commands. Consider the following:
+
+     •   Commands entered interactively do not have source location information.
+     •   For commands that are input inside control structures, such as if statements and
+         foreach loops, the line number of the closing bracket is reported.
+
+     •   For commands that are input inside procedure calls, the line number invoking the
+         procedure is reported.
+     The following examples show exception reports that contain the source file and line
+     number information.
+
+Example 10 Exceptions Report
+     pt_shell> report_exceptions
+     ...
+
+     Reasons :      invalid start points
+                     f
+                    invalid endpoints
+                     t
+                    non-existent paths
+                     p
+                    overridden paths
+                     o
+     From     To          Setup      Hold  Ignored
+     -------------------------------------------------------------------------
+     a[1]     lar5_ff1/D cycles=3 *       [ location = multi.tcl:17 ]
+     a[2]     lar5_ff2/D cycles=4 *       [ location = multi.tcl:18 ]
+     data[16] lr16_ff/D   FALSE    FALSE [location=scripts/false_path.tcl:11]
+
+Example 11 Timing Report With the -exceptions Option
+     pt_shell> report_timing -exceptions all -from a[1] -to lar5_ff1/D
+     ...
+
+     The dominant exceptions are:
+     From To           Setup      Hold      Ignored
+     --------------------------------------------------------------------
+     a[1] lar5_ff1/D cycles=3 cycles=0 [ location = multi.tcl:17 ]
+
+     The overridden exceptions are:
+        None
+
+
+
+
+PrimeTime® User Guide                                                                       300
+T-2022.03
+                                                                                         Feedback
+Chapter 8: Timing Paths and Exceptions
+Timing Exceptions
+
+
+
+     Checking Ignored Exceptions
+     A timing exception that you specified but is not accepted by PrimeTime is called an
+     ignored exception. PrimeTime ignores an exception for the following reasons:
+     •   Specified startpoint or endpoint is not valid. The startpoint must be a register clock pin
+         or input port. The endpoint must be a register data input pin or output port.
+     •   Specified path is not constrained (for example, the startpoint is an input port with no
+         input delay set, or the capture flip-flop at the endpoint is not clocked by a defined clock
+         signal).
+     •   Path is invalid because of set_disable_timing , constant propagation, loop breaking,
+         or case analysis.
+     •   Exception has a lower priority than another exception applied to the same path.
+     To report exceptions that are fully and partially valid, use the report_exceptions
+     command. To report all fully ignored exceptions, use report_exceptions -ignored . It
+     is a good idea to examine these reports to confirm that you have specified all exceptions
+     correctly.
+     If ignored exceptions are reported, determine the cause and correct them by changing
+     the path specifications or removing the exception-setting commands. Large numbers of
+     ignored exceptions can increase memory usage and analysis runtime.
+     If the reason that an exception is partially or fully ignored is not immediately apparent,
+     check the reasons listed in the “Ignored” column of the exception report and consider
+     the possible causes listed earlier. It might be helpful to get more information using the
+     report_exceptions -ignored command.
+
+     To find out if there is a logical path between two points, use this command:
+     all_fanout -from point_a -to point_b
+
+     After a timing update, to examine the path timing, use this command:
+     report_timing -from point_a -to point_b
+
+
+     Removing Exceptions
+     To remove a timing exception previously set with set_false_path , set_max_delay ,
+     set_min_delay , or set_multicycle_path , use the reset_path command.
+
+     To control the scope of exception removal, use the reset_path command with options
+     such as -from , -to , -through , -rise_from , or -fall_to . The path specification
+     and object (such as pin, port, or clock) must match the original path specification and
+
+
+
+
+PrimeTime® User Guide                                                                             301
+T-2022.03
+                                                                                      Feedback
+Chapter 8: Timing Paths and Exceptions
+Saving and Restoring Timing Path Collections
+
+
+     object used to set the exception. Otherwise, the reset_path command has no effect. For
+     example:
+     pt_shell> set_false_path -from [get_clocks CLK]
+     pt_shell> reset_path -from [get_pins ff1/CP]
+                  # ff1 clocked by CLK
+
+     pt_shell> set_false_path -through [get_pins {d/Z g/Z}]
+     pt_shell> reset_path -through [get_pins a/Z]
+                  # where a fans out to d
+
+     In the preceding examples, the object in the reset_path command does not match
+     the original object, so the paths are not reset, even though they might have exceptions
+     applied.
+     To reset all exceptions set on a path before applying a new exception, use the exception-
+     setting command with the -reset_path option. For example:
+     pt_shell> set_false_path -through [get_pins d/Z] -reset_path
+
+     This example first resets all timing exceptions previously applied to the paths through the
+     specified point, then applies the false path exception to these paths.
+     To remove all exceptions from the design, use the reset_design command, which
+     removes all user-specified clocks, path groups, exceptions, and attributes (except those
+     defined with the set_user_attribute command).
+
+
+Saving and Restoring Timing Path Collections
+     You can save a timing path collection to a disk directory and restore the collection in a new
+     tool session. Saving and restoring a path collection is much faster than regenerating the
+     collection with a new get_timing_paths command.
+     For example,
+     pt_shell> set my_paths [get_timing_paths -nworst 20 -max_paths 500]
+      ...
+     pt_shell> save_timing_paths $my_paths -output paths1
+      ...
+
+     The save_timing_paths command must specify a timing path collection and the name of
+     a directory in which to store the collection.
+     You can quickly restore the collection in another PrimeTime session by using the
+     restore_timing_paths command:
+     pt_shell> set my_paths [restore_timing_paths paths1]
+      ...
+     pt_shell> report_timing $my_paths
+
+
+
+PrimeTime® User Guide                                                                          302
+T-2022.03
+                                                                                    Feedback
+Chapter 8: Timing Paths and Exceptions
+Saving and Restoring Timing Path Collections
+
+
+     You must specify the name of the directory where the path collection was stored. The
+     design, constraints, and PrimeTime tool version must be the same as when the collection
+     was stored.
+     For information about analyzing the paths in a collection using the GUI, see Analyzing
+     Timing Path Collections.
+
+
+
+
+PrimeTime® User Guide                                                                         303
+T-2022.03
+

@@ -1,0 +1,2468 @@
+\bichapter{物理综合}{Physical Synthesis}
+\label{chap:physyn}
+
+Fusion Compiler 工具将 RTL 描述综合为优化后的门级设计，并对其进行优化，以在速度、面积与功耗方面取得最佳结果质量（quality of results，QoR），同时支持早期设计探索与原型（prototyping）。
+
+本节主题包括：
+\begin{itemize}
+  \item 执行统一物理综合（Performing Unified Physical Synthesis）
+  \item 控制映射与优化（Controlling Mapping and Optimization）
+  \item 执行多比特优化（Performing Multibit Optimization）
+  \item 运行并发时钟与数据优化（Running Concurrent Clock and Data Optimization）
+  \item 执行测试插入与扫描综合（Performing Test Insertion and Scan Synthesis）
+  \item 指定性能、功耗与面积改善设置（Specifying Settings for Performance, Power, and Area Improvement）
+  \item 执行设计分析（Performing Design Analysis）
+\end{itemize}
+
+% ============================================================
+\section{执行统一物理综合}
+\subsection*{Performing Unified Physical Synthesis}
+
+Fusion Compiler 工具执行统一物理综合（unified physical synthesis）。其收益包括：
+\begin{itemize}
+  \item \textbf{缩短运行时间}\\
+    统一物理综合精简布局与优化的迭代，并利用综合期间构建的初始布局与缓冲树，以获得最佳运行时间。
+  \item \textbf{改善结果质量（QoR）}\\
+    统一的布线前（preroute）优化框架在优化算法中使用一致的代价（cost），从而改善 QoR。逻辑重构（logic restructuring）、并发时钟与数据优化（concurrent clock and data optimization）、多比特映射（multibit mapping）以及高级合法化器（advanced legalizer）等最佳技术，在整个布线前流程中共享。
+\end{itemize}
+
+Fusion Compiler 编译同时支持自顶向下（top-down）与自底向上（bottom-up，层次化）编译策略。在自顶向下编译中，所有环境与约束设置均相对于顶层设计定义。自顶向下编译提供一键式（push-button）方法，并自动处理块间依赖，但要求所有设计必须同时驻留在内存中。在层次化编译流程中，先对设计子块采用自顶向下方式开始优化，再将子块逐级并入更高层块，直至顶层设计完成。
+
+以下主题说明如何执行统一物理综合：
+\begin{itemize}
+  \item 使用 \cmd{compile\_fusion} 命令
+  \item 执行预检查（Performing Prechecks）
+  \item 编译期间生成验证检查点（Generating Verification Checkpoints During Compilation）
+\end{itemize}
+
+% ------------------------------------------------------------
+\subsection{使用 compile\_fusion 命令}
+\subsubsection*{Using the compile\_fusion Command}
+
+要执行统一物理综合，使用 \cmd{compile\_fusion} 命令。
+
+\cmd{compile\_fusion} 命令包含以下阶段：
+\begin{enumerate}
+  \item \textbf{\cmd{initial\_map}}\\
+    此阶段工具映射设计并执行面积优化。
+  \item \textbf{\cmd{logic\_opt}}\\
+    此阶段工具执行基于逻辑的延迟优化。
+  \item \textbf{\cmd{initial\_place}}\\
+    此阶段工具合并时钟门控（clock-gating）逻辑并执行粗布局（coarse placement）。
+  \item \textbf{\cmd{initial\_drc}}\\
+    此阶段工具移除已有缓冲树，并执行高扇出 net 综合（high-fanout-net synthesis）与电气 DRC 违例修复。
+  \item \textbf{\cmd{initial\_opto}}\\
+    此阶段工具执行物理优化与增量布局。
+  \item \textbf{\cmd{final\_place}}\\
+    此阶段工具执行最终布局以改善时序与拥塞。
+  \item \textbf{\cmd{final\_opto}}\\
+    此阶段工具执行最终优化与合法化，以改善时序、功耗与逻辑 DRC。
+\end{enumerate}
+
+运行 \cmd{compile\_fusion} 时，默认执行全部阶段。若只运行其中部分阶段，用 \opt{-from} 指定起始阶段，用 \opt{-to} 指定结束阶段（之后停止）。若不指定 \opt{-from}，工具从 \cmd{initial\_place} 阶段开始；若不指定 \opt{-to}，工具一直运行到 \cmd{final\_opto} 阶段完成。
+
+将 \cmd{compile\_fusion} 拆分为多个阶段，可在阶段之间执行不同任务，例如更改约束或设置、生成分析报告、执行设计规划（design planning）或 DFT 插入等其他实现任务。若在阶段之间对手工修改设计，请确保修改符合该阶段所期望的设计状态。例如，\cmd{initial\_map} 之后设计应已映射，因此不要在该阶段之后向设计引入未映射逻辑。
+
+可以重复某一阶段；但请确保按正确顺序运行所有阶段。下例运行 \cmd{compile\_fusion} 直至完成 \cmd{initial\_opto}，进行分析并更改应用选项设置，然后从 \cmd{initial\_opto} 再次启动：
+\begin{lstlisting}
+fc_shell> compile_fusion -to initial_opto
+fc_shell> report_qor
+fc_shell> set_app_option \
+   -name opt.common.advanced_logic_restructuring_mode -value timing
+fc_shell> compile_fusion -from initial_opto
+\end{lstlisting}
+
+在下列情况下，\cmd{compile\_fusion} 之后设计中可能仍含未映射单元（unmapped cells）：
+\begin{itemize}
+  \item 库中缺少所需单元
+  \item 用户对所需库单元施加了限制
+\end{itemize}
+
+当设计含未映射单元时，\cmd{compile\_fusion} 会继续编译，并为未映射单元提供估计面积。
+
+未映射单元标有 \appopt{is\_unmapped} 属性。要在网表中查询未映射单元，使用：
+\begin{lstlisting}
+fc_shell> get_cells -hierarchical -filter "is_unmapped==true"
+\end{lstlisting}
+
+注意下列限制：
+\begin{itemize}
+  \item DesignWare 算子（operators）不会被缓解（mitigated）。
+  \item 缓解后仅布局信息保存在数据库中；布线信息不保存。
+\end{itemize}
+
+% ------------------------------------------------------------
+\subsection{执行预检查}
+\subsubsection*{Performing Prechecks}
+
+Fusion Compiler 可执行编译预检查（compile prechecks），以防止编译失败，并在遇到不完整（或不一致）的设置或约束问题时，使 \cmd{compile\_fusion} 能快速以错误消息退出。该能力默认开启；也可用 \cmd{compile\_fusion -check\_only} 启用这些检查。
+
+\cmd{compile\_fusion} 与 \cmd{compile\_fusion -check\_only} 执行下表所列预检查，并据此发出错误消息。勾选标记（X）表示执行该预检查。
+
+\begin{table}[htbp]
+\centering
+\caption{编译流程期间执行的预检查}
+\label{tab:compile-prechecks}
+\small
+\begin{tabularx}{\textwidth}{@{}l X c c@{}}
+\toprule
+\textbf{代码} & \textbf{消息} & \textbf{默认编译预检查} & \textbf{\cmd{compile\_fusion -check\_only}} \\
+\midrule
+OPT-3000 & 设计未链接或存在链接问题。 & X & X \\
+OPT-3001 & 链接后单元未解析。 & X & X \\
+OPT-3002 & 单元为物理层次，不允许用于编译。 & X & X \\
+OPT-3003 & 单元为逻辑层次，不允许用于编译。 & X & X \\
+OPT-3005 & 设计不存在。 & X & X \\
+OPT-3006 & 当前实例层次不是顶层。 & X & X \\
+OPT-2001 & 无法初始化 scenario 设置。 & X &  \\
+OPT-2002 & corner 缺少寄生信息或缺少 TLUPlus 信息。 & X &  \\
+OPT-4000 & 设计没有 floorplan 或有效 floorplan。 & X & X \\
+OPT-4001 & 设计没有有效 die area。 & X & X \\
+OPT-4002 & Macro 没有布局信息。 & X & X \\
+OPT-4004 & 设计 port 没有布局信息。 & X & X \\
+OPT-4010 & 连接到 port 的 pad 没有布局信息。 & X & X \\
+OPT-4008 & 设计未定义 site rows。 & X & X \\
+OPT-4009 & 设计未定义 tracks。 & X & X \\
+OPT-1008 & 层没有首选方向（preferred direction）。 & X &  \\
+OPT-1006 & 库分析失败——找不到 buffer 与 inverter。 & X & X \\
+OPT-1007 & 库分析失败——无工艺数据。 & X & X \\
+OPT-4012 & 设计有 1 个重复项。运行 \cmd{check\_duplicates} 获取更多细节。 & X &  \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsubsection{编译预检查示例}
+\subsubsection*{Compile Precheck Examples}
+
+以下两例分别展示启用与未启用编译预检查时的编译日志。设置 \opt{-check\_only} 时，\cmd{compile\_fusion} 对任何失败的预检查条件发出错误消息。
+
+\begin{lstlisting}[caption={启用编译预检查的编译日志（原书 Example 14）}]
+------------------------- Begin compile flow -----------------------
+ (FLW-3001)
+->Compile in progress:    1.0%                 (FLW-3778)
+Error: Layer M1 does not have a preferred direction (OPT-1008)
+...
+Error: Layer MRDL does not have a preferred direction (OPT-1008)
+...
+Warning: Technology layer 'M1' setting 'routing-direction' is not valid
+ (NEX-001)
+...
+Warning: Technology layer 'MRDL' setting 'routing-direction' is not valid
+ (NEX-001)
+\end{lstlisting}
+
+\begin{lstlisting}[caption={未启用编译预检查的编译日志（原书 Example 15）}]
+---------------------- End logic optimization --------------------
+ (FLW-3001)
+->Compile in progress:   27.0%                 (FLW-3778)
+->Compile in progress:   28.0%                 (FLW-3778)
+->Compile in progress:   28.5%                 (FLW-3778)
+Information: Corner max_corner: no PVT mismatches. (PVT-032)
+Warning: Technology layer 'M1' setting 'routing-direction' is not valid
+ (NEX-001)...
+Warning: Technology layer 'MRDL' setting 'routing-direction' is not valid
+ (NEX-001)
+Information: Design Average RC for design top  (NEX-011)
+\end{lstlisting}
+
+% ------------------------------------------------------------
+\subsection{编译期间生成验证检查点}
+\subsubsection*{Generating Verification Checkpoints During Compilation}
+
+可在 \cmd{compile\_fusion} 期间生成中间验证检查点（verification checkpoints），供 Formality 工具使用，以提供综合设计状态的网表快照并验证中间网表。验证检查点使 Fusion Compiler 与 Formality 能在中间网表上同步，从而提高完成率并改善 QoR。
+
+要启用验证检查点，使用 \cmd{set\_verification\_checkpoints} 命令，如下例：
+\begin{lstlisting}
+fc_shell> set_verification_checkpoints
+Enabling checkpoint "ckpt_logic_opt"
+Enabling checkpoint "ckpt_pre_map"
+\end{lstlisting}
+
+启用该功能后，默认情况下 \cmd{compile\_fusion} 在映射前与逻辑优化期间生成验证检查点，对应阶段名为 \cmd{ckpt\_pre\_map} 与 \cmd{ckpt\_logic\_opt}。也可仅在一个阶段启用验证检查点，如下例：
+\begin{lstlisting}
+fc_shell> set_verification_checkpoints {ckpt_logic_opt}
+Disabling checkpoint "ckpt_pre_map"
+Enabling checkpoint "ckpt_logic_opt"
+\end{lstlisting}
+
+在每个验证检查点，工具自动生成检查点网表，并在 Formality 验证所用的 \texttt{.svf} 文件中写入 \cmd{guide\_checkpoint} 命令。
+
+% ============================================================
+\section{控制映射与优化}
+\subsection*{Controlling Mapping and Optimization}
+
+以下主题说明如何定制并控制 \cmd{compile\_fusion} 命令在 \cmd{initial\_map}、\cmd{logic\_opt} 与 \cmd{initial\_drc} 阶段所执行的映射与优化：
+\begin{itemize}
+  \item 优化期间取消分组或保留层次（Ungrouping or Preserving Hierarchies During Optimization）
+  \item 控制边界优化（Controlling Boundary Optimization）
+  \item 控制数据通路优化（Controlling Datapath Optimization）
+  \item 控制 MUX 优化（Controlling MUX Optimization）
+  \item 控制时序映射（Controlling Sequential Mapping）
+  \item 控制寄存器复制（Controlling Register Replication）
+  \item 控制寄存器合并（Controlling Register Merging）
+  \item 选择性移除或保留常量与无负载寄存器
+  \item 报告优化寄存器的交叉探测信息
+  \item 控制高扇出 net 综合
+\end{itemize}
+
+% ------------------------------------------------------------
+\subsection{优化期间取消分组或保留层次}
+\subsubsection*{Ungrouping or Preserving Hierarchies During Optimization}
+
+取消分组（ungrouping）将给定层次级别的子设计合并到父单元或父设计中。它移除层次边界，使 Fusion Compiler 能通过减少逻辑级数改善时序，并通过共享逻辑改善面积。默认情况下，\cmd{compile\_fusion} 自动取消分组未设置 \appopt{dont\_touch} 属性的逻辑层次。
+
+优化期间，\cmd{compile\_fusion} 执行下列类型的自动分组：
+\begin{itemize}
+  \item \textbf{基于面积的自动取消分组（area-based automatic ungrouping）}\\
+    在初始映射之前，命令估计未映射层次的面积并移除小的子设计。由于自动取消分组在早期阶段执行，优化上下文更好；此外，跨已取消分组的层次可启用数据通路提取（datapath extraction）。这些因素改善面积与时序 QoR。
+  \item \textbf{基于延迟的自动取消分组（delay-based automatic ungrouping）}\\
+    命令沿关键路径取消分组层次，主要用于时序优化。
+\end{itemize}
+
+关于 DesignWare 与数据通路单元的取消分组，见「数据通路实现」（Datapath Implementation）。
+
+可通过将 \appopt{compile.flow.autoungroup} 应用选项设为 \texttt{false} 禁用自动取消分组；默认为 \texttt{true}。但这样做可能影响 QoR。因此，更好的做法是限制取消分组，而非禁用它，可采用下列方法：
+
+\subsubsection{控制特定类型层次的自动取消分组}
+\subsubsection*{Controlling the Automatic Ungrouping of Specific Types of Hierarchies}
+
+要控制特定类型层次的自动取消分组，使用 \cmd{set\_autoungroup\_options} 命令。
+
+下例指定：带 UPF 与 SDC 约束的块的父层次应保留，且其他层次的自动取消分组从第三级开始：
+\begin{lstlisting}
+fc_shell> set_autoungroup_options -keep_parent_hierarchies UPF
+fc_shell> set_autoungroup_options -keep_parent_hierarchies SDC
+fc_shell> set_autoungroup_options -start_level 3
+\end{lstlisting}
+
+\cmd{set\_autoungroup\_options} 命令是累积的，设置保存在设计库中。
+
+要报告自动取消分组或保留的层次信息，使用 \cmd{report\_ungroup} 命令。
+
+\subsubsection{控制特定对象的自动取消分组}
+\subsubsection*{Controlling the Automatic Ungrouping of Specific Objects}
+
+要强制或阻止特定单元实例或模块在优化期间被取消分组，对 \cmd{set\_ungroup} 使用 \texttt{true} 或 \texttt{false}。该命令为指定对象设置相应的 \appopt{ungroup} 属性。若对模块设置该属性，则引用该模块的所有单元均受影响。
+
+\begin{noteBox}
+\cmd{set\_ungroup} 的优先级高于 \cmd{set\_autoungroup\_options}。
+\end{noteBox}
+
+下例脚本设置特定模块在优化期间取消分组，并保留特定单元实例：
+\begin{lstlisting}
+# Set modules A and B to be ungrouped
+set_ungroup [get_modules {A B}] true
+# Set cells u_C and u_D to be preserved
+set_ungroup [get_cells {u_C u_D}] false
+# Query the ungroup attribute
+get_attribute -name ungroup -objects [get_modules {A B}]
+get_attribute -name ungroup -objects [get_cells {u_C u_D}]
+compile_fusion
+\end{lstlisting}
+
+% ------------------------------------------------------------
+\subsection{控制边界优化}
+\subsubsection*{Controlling Boundary Optimization}
+
+可跨用户指定的逻辑边界控制边界优化（boundary optimization），并使物理块的接口边界与 RTL 模块接口匹配。边界优化允许在块实现期间使用 RTL floorplanning DEF 文件。
+
+下图示出：在禁用与启用边界优化时，常量、相等-相反逻辑（equal-opposite logic）、逻辑相位（logic phase）以及无负载 port 如何穿越逻辑边界传播。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书示意：Constant / Phase inversion / Unloaded / Equal-opposite logic propagation；Disabled vs Enabled）}\\[0.3em]
+\small 无边界优化（Disabled）与有边界优化（Enabled）时的传播对比；请参阅原版 PDF。
+\vspace{1.5cm}}}
+\caption{边界优化启用与禁用时的传播行为}
+\label{fig:boundary-opt-prop}
+\end{figure}
+
+\subsubsection{全局控制}
+\subsubsection*{Global Control}
+
+默认情况下，编译期间启用所有类型的边界优化。要全局控制边界优化，使用 \appopt{compile.flow.boundary\_optimization} 应用选项。
+
+将 \appopt{compile.flow.boundary\_optimization} 设为 \texttt{false} 时：
+\begin{itemize}
+  \item 工具禁用相等-相反逻辑传播与相位反转（phase inversion）；
+  \item 常量与无负载 port 仍继续跨层次传播。
+\end{itemize}
+
+要全局禁用常量传播与无负载传播，将 \appopt{compile.flow.constant\_and\_unloaded\_propagation\_with\_no\_boundary\_opt} 设为 \texttt{false}；默认为 \texttt{true}。该设置不影响对象级规范。
+
+\subsubsection{控制特定类型的边界优化}
+\subsubsection*{Controlling Specific Types of Boundary Optimization}
+
+要控制层次单元 pin、层次单元或块的边界优化级别，使用 \cmd{set\_boundary\_optimization} 命令。工具按下列优先级顺序确定优化期间使用的设置：
+\begin{enumerate}
+  \item 施加在层次单元实例 pin 上的设置
+  \item 施加在层次单元实例上的设置（同时作用于其 pin）
+  \item 施加在模块上的设置（同时作用于其全部单元与 pin）
+\end{enumerate}
+
+下表列出可用 \cmd{set\_boundary\_optimization} 指定的边界优化级别，以及各级别启用的边界优化类型。
+
+\begin{table}[htbp]
+\centering
+\caption{边界优化级别与对应执行的边界优化类型}
+\label{tab:boundary-opt-levels}
+\small
+\begin{tabularx}{\textwidth}{@{}l cccc@{}}
+\toprule
+\textbf{边界优化级别} & \textbf{常量传播} & \textbf{无负载传播} & \textbf{相等-相反逻辑传播} & \textbf{相位反转} \\
+\midrule
+\texttt{all}  & Enabled & Enabled & Enabled & Enabled \\
+\texttt{auto} & Enabled & Enabled & Disabled & Disabled \\
+\texttt{none} & Disabled & Disabled & Disabled & Disabled \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+可用 \opt{-constant\_propagation}、\opt{-unloaded\_propagation}、\opt{-equal\_opposite\_propagation} 与 \opt{-phase\_inversion} 选项控制对象允许的具体边界优化类型。这些选项与用 \texttt{all}、\texttt{auto} 或 \texttt{none} 指定的边界优化级别互斥，不能在同一次命令调用中对同一对象混用。若对同一对象多次使用 \cmd{set\_boundary\_optimization}，效果为累加。
+
+根据启用或禁用的边界优化类型，工具将指定对象的只读属性 \appopt{constant\_propagation}、\appopt{unloaded\_propagation}、\appopt{equal\_opposite\_propagation} 与 \appopt{phase\_inversion} 设为 \texttt{true} 或 \texttt{false}。若你：
+\begin{itemize}
+  \item 启用全部四种类型，工具将只读属性 \appopt{boundary\_optimization} 设为 \texttt{true}；
+  \item 至少禁用一种类型，工具将只读属性 \appopt{boundary\_optimization} 设为 \texttt{false}。
+\end{itemize}
+
+要报告边界优化设置，使用 \cmd{report\_boundary\_optimization}；要移除它们，使用 \cmd{remove\_boundary\_optimization}。
+
+下例：
+\begin{itemize}
+  \item 禁用 U1 单元实例的全部边界优化；
+  \item 禁用 U2 单元实例的相等-相反逻辑传播与相位反转；
+  \item 禁用 U3/in1 单元 pin 的常量传播与相位反转。
+\end{itemize}
+\begin{lstlisting}
+fc_shell> set_boundary_optimization [get_cells U1] none
+fc_shell> set_boundary_optimization [get_cells U2] auto
+fc_shell> set_boundary_optimization [get_pins U3/in1] \
+   -constant_propagation false
+fc_shell> set_boundary_optimization [get_pins U3/in1] \
+   -phase_inversion false
+\end{lstlisting}
+
+\subsubsection{控制相位反转}
+\subsubsection*{Controlling Phase Inversion}
+
+要防止边界优化将 inverter 移过层次边界，将 \appopt{compile.optimization.enable\_hierarchical\_inverter} 设为 \texttt{false}。默认该应用选项为 \texttt{true}，允许相位反转。仅当边界优化启用时，该应用选项才有效。
+
+% ------------------------------------------------------------
+\subsection{控制数据通路优化}
+\subsubsection*{Controlling Datapath Optimization}
+
+数据通路设计常用于含大量数据处理的应用，如 3-D、多媒体与数字信号处理（DSP）。默认运行 \cmd{compile\_fusion} 时启用数据通路优化，并自动链接标准库与 DesignWare Foundation 库。
+
+数据通路优化期间，工具执行下列任务：
+\begin{itemize}
+  \item 共享（或撤销共享）数据通路算子
+  \item 使用进位存储算术（carry-save arithmetic）技术
+  \item 提取数据通路
+  \item 对提取的数据通路执行高层算术优化
+  \item 探索可能涉及不同资源共享配置的更优解
+  \item 在资源共享与数据通路优化之间权衡
+\end{itemize}
+
+本节主题：
+\begin{itemize}
+  \item \textbf{数据通路提取（Datapath Extraction）}\\
+    将加法、减法与乘法等算术算子变换为数据通路块。
+  \item \textbf{数据通路实现（Datapath Implementation）}\\
+    用数据通路生成器为提取的组件生成最佳实现。
+  \item \textbf{优化数据通路（Optimizing Datapaths）}
+\end{itemize}
+
+\subsubsection{数据通路提取}
+\subsubsection*{Datapath Extraction}
+
+数据通路提取将加法、减法与乘法等算术算子变换为数据通路块，供数据通路生成器实现。该变换通过使用进位存储算术改善 QoR。
+
+进位存储算术不完全传播进位，而以中间形式存储结果。进位存储加法器（carry-save adder）比传统进位传播加法器（carry-propagate adder）更快，因为其延迟与位宽无关。这些加法器面积也显著小于进位传播加法器，因为进位不使用全加器。
+
+下例给出表达式 \texttt{a * b + c + d = z} 的代码。如图~\ref{fig:cpa-vs-csa} 所示，该表达式的传统实现使用三个进位传播加法器，而进位存储算术仅需一个进位传播加法器与两个进位存储加法器。图中还给出两种实现的时序与面积数字。
+\begin{lstlisting}
+module dp (a, b, c, d, e);   input  [15:0] a, b;
+   input  [31:0] c, d;
+   output [31:0] Z;
+assign Z = (a * b) + c + d;
+endmodule
+\end{lstlisting}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 30：Conventional Carry-Propagate Adder Versus Carry-Save Adder）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{传统进位传播加法器与进位存储加法器对比}
+\label{fig:cpa-vs-csa}
+\end{figure}
+
+工具支持提取下列组件：
+\begin{itemize}
+  \item 可合并到同一进位存储算术树中的算术算子
+  \item 作为数据通路一部分提取的算子：\texttt{*}、\texttt{+}、\texttt{-}、\texttt{>}、\texttt{<}、\texttt{<=}、\texttt{>=}、\texttt{==}、\texttt{!=} 以及 MUX
+  \item 可变移位算子（Verilog 的 \texttt{<<}、\texttt{>>}、\texttt{<<<}、\texttt{>>>}；VHDL 的 \texttt{sll}、\texttt{srl}、\texttt{sla}、\texttt{sra}、\texttt{rol}、\texttt{ror}）
+  \item 带位截断的运算
+\end{itemize}
+
+仅当这些组件彼此直接相连（即组件之间无非算术逻辑）时，数据通路流程才能提取它们。请注意：
+\begin{itemize}
+  \item 有符号与无符号算子混合提取仅允许用于加法器树；
+  \item 已实例化的 DesignWare 组件不能被提取。
+\end{itemize}
+
+\subsubsection{数据通路实现}
+\subsubsection*{Datapath Implementation}
+
+所有提取的数据通路元素与综合算子（synthetic operators）均由 Fusion Compiler 中的 DesignWare 数据通路生成器实现。该生成器使用智能生成技术执行下列任务：
+\begin{itemize}
+  \item 使用上下文驱动优化实现数据通路块
+  \item 针对给定时序上下文重新审视高层优化决策
+  \item 考虑逻辑库特性
+\end{itemize}
+
+数据通路实现可使用下列命令与应用选项：
+\begin{itemize}
+  \item \cmd{set\_datapath\_architecture\_options}\\
+    该命令控制为算术与移位算子生成数据通路单元所用的策略。下例指定使用 Booth 编码架构生成多路选择器：
+\begin{lstlisting}
+fc_shell> set_datapath_architecture_options -booth_encoding true
+\end{lstlisting}
+  \item \cmd{set\_implementation}\\
+    该命令为除法器及具有指定名称的综合库单元实例指定所用实现。下例为已实例化的 DesignWare 单元 U1 指定使用 \texttt{cla3} 实现：
+\begin{lstlisting}
+fc_shell> set_implementation cla3 U1
+\end{lstlisting}
+  \item \cmd{set\_synlib\_dont\_use}\\
+    该命令阻止使用特定实现。下例指定不使用 \texttt{rpl} 实现：
+\begin{lstlisting}
+fc_shell> set_synlib_dont_use \
+   {dw_foundation/DW_div/cla standard/DW_div/rpl}
+\end{lstlisting}
+  \item \appopt{compile.datapath.ungroup}\\
+    默认情况下，时序优化期间所有 DesignWare 单元与数据通路块均被取消分组。要禁用取消分组，将 \appopt{compile.datapath.ungroup} 从默认的 \texttt{true} 改为 \texttt{false}。例如：
+\begin{lstlisting}
+fc_shell> set_app_options \
+   -name compile.datapath.ungroup -value false
+\end{lstlisting}
+\end{itemize}
+
+\subsubsection{优化数据通路}
+\subsubsection*{Optimizing Datapaths}
+
+下列脚本禁用带数据通路门控元素 \texttt{add\_3} 的 DP\_OP 单元的取消分组：
+\begin{lstlisting}
+# Disable ungrouping of DP_OP with datapath gating
+set_datapath_gating_options -ungroup false [get_cells add_3]
+\end{lstlisting}
+
+\subsubsection{分析数据通路提取}
+\subsubsection*{Analyzing Datapath Extraction}
+
+要从数据通路优化获得最佳 QoR，应确保编译期间从 RTL 代码提取尽可能大的数据通路块。要在编译前检查数据通路块将如何从 RTL 提取，使用 \cmd{analyze\_datapath\_extraction} 命令。该命令分析设计的算术内容并提供反馈，以便按需改进 RTL 代码。
+
+下例显示数据通路报告：
+\begin{lstlisting}
+Cell : DP_OP_123_2304_10297_J1
+--------------------------------
+   Current Implementation :  str(area,speed)
+   Contained Operations  :  add_30(test.v:30) add_30_2(test.v:30)
+       mult_36(test.v:36)
+   Multiplier Arch       :  benc_radix4
+
+               Data
+ Var     Type  Class     Width  Expression
+-------------------------------------------------------------------------
+ PI_0    PI    Unsigned      6
+ PI_1    PI    Unsigned      1
+ PI_2    PI    Unsigned     24
+ T16     IFO   Unsigned      7  PI_0 + PI_1  (test.v:30)
+ PO_0    PO    Unsigned     30  PI_2 * T16 (test.v:36)
+\end{lstlisting}
+
+要报告设计中使用的资源与数据通路块，使用 \cmd{report\_resources}。要报告实现概览，对 \cmd{report\_resources} 指定 \opt{-summary}。例如：
+\begin{lstlisting}
+fc_shell> report_resources -hierarchy
+\end{lstlisting}
+
+\subsubsection{控制数据通路门控}
+\subsubsection*{Controlling Datapath Gating}
+
+下图示出数据通路门控优化期间生成的 DP\_OP 单元输入的信号跳变。要控制数据通路门控，使用 \cmd{set\_datapath\_gating\_options} 命令。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.2cm}
+\textit{（原书示意：DP\_OP 单元输入信号跳变）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.2cm}}}
+\caption{数据通路门控优化中 DP\_OP 单元的输入信号跳变}
+\label{fig:datapath-gating}
+\end{figure}
+
+下列脚本禁用数据通路元素 \texttt{add\_3} 上的数据通路门控：
+\begin{lstlisting}
+# Disable datapath gating on particular operator
+set_datapath_gating_options -enable false [get_cells add_3]
+\end{lstlisting}
+
+% ------------------------------------------------------------
+\subsection{控制 MUX 优化}
+\subsubsection*{Controlling MUX Optimization}
+
+Fusion Compiler 可将 HDL 代码中表示多路选择器的组合逻辑直接映射到目标逻辑库中的单个多路选择器（MUX）或 MUX 单元树。
+
+多路选择器通常用 \texttt{if} 与 \texttt{case} 语句建模。为实现多路选择器逻辑，HDL Compiler 使用 SELECT\_OP 单元，再由 Fusion Compiler 映射到逻辑库中的组合逻辑或多路选择器。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书示意：User-specified / Tool evaluated；MUX gates vs area-costed MUX or non-MUX；analyze/elaborate $\rightarrow$ Infers Select\_OP $\rightarrow$ compile\_fusion）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{MUX 优化流程示意}
+\label{fig:mux-opt-flow}
+\end{figure}
+
+\subsubsection{选择与多路复用逻辑}
+\subsubsection*{Selecting and Multiplexing Logic}
+
+Fusion Compiler 对基于控制信号选择数据信号的逻辑推断 SELECT\_OP 单元。SELECT\_OP 单元映射到组合逻辑。
+
+以下主题说明 SELECT\_OP 推断：
+\begin{itemize}
+  \item 推断 SELECT\_OP（Inferring SELECT\_OPs）
+\end{itemize}
+
+\paragraph{推断 SELECT\_OP}
+\subparagraph*{Inferring SELECT\_OPs}
+
+HDL Compiler 使用 SELECT\_OP 组件实现由 \texttt{if} 与 \texttt{case} 语句隐含的条件运算。图~\ref{fig:select-op-8bit} 示出 8-bit 数据信号的 SELECT\_OP 单元实现示例。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 31：SELECT\_OP Implementation for an 8-bit Data Signal）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{8-bit 数据信号的 SELECT\_OP 实现}
+\label{fig:select-op-8bit}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 32：Verilog Output—SELECT\_OP and Selection Logic）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{Verilog 输出——SELECT\_OP 与选择逻辑}
+\label{fig:select-op-verilog}
+\end{figure}
+
+取决于设计约束，Fusion Compiler 用组合逻辑或逻辑库中的多路选择器单元实现 SELECT\_OP。关于 SELECT\_OP 推断的更多信息，见 HDL Compiler 文档。
+
+\subsubsection{库要求}
+\subsubsection*{Library Requirements}
+
+逻辑库中需要有多路选择器单元，并且需要使用单元库中的多路复用逻辑。
+
+以下各节说明为实现多路选择器优化所需的库单元要求，或为实现来自单元库的多路复用逻辑以控制 MUX 映射：
+\begin{itemize}
+  \item 理解多路选择器优化的库单元要求
+  \item 从单元库实现多路复用逻辑
+\end{itemize}
+
+\paragraph{理解多路选择器优化的库单元要求}
+\subparagraph*{Understanding Library Cell Requirements for Multiplexer Optimization}
+
+多路选择器优化要求逻辑库中至少存在一个 2:1 多路选择器单元。该单元的输入或输出可以反相。若库中不存在 2:1 多路选择器原语单元，将看到下列警告：
+\begin{lstlisting}
+Warning: Target library does not contain any 2-1 multiplexer.
+(OPT-853)
+\end{lstlisting}
+
+将创建来自目标库的 MUX\_OP 单元实现，但未必是最佳实现。目标库中除下列情况外的所有多路选择器单元都可用于构造 MUX\_OP 实现：
+\begin{itemize}
+  \item 带使能的多路选择器单元
+  \item 总线输出多路选择器
+  \item 大于 32:1 的多路选择器
+\end{itemize}
+
+为使 Fusion Compiler 充分利用逻辑库中的多路选择器单元，请重新编译库，或向 ASIC 供应商获取用 V3.4a 或更高版本编译的库。
+
+\paragraph{从单元库实现多路复用逻辑}
+\subparagraph*{Implementing Multiplexing Logic From Cell Library}
+
+逻辑综合期间，工具用下列方法之一从单元库实现多路复用逻辑：
+\begin{itemize}
+  \item AND、OR 与 INV 门
+  \item MUX 门
+\end{itemize}
+
+工具评估两种方法的面积影响，并选择面积最小的方案。
+
+可通过在块中对应的 SELECT\_OP WVGTECH 单元上施加 \appopt{map\_to\_mux} 属性，指定工具用 MUX 门实现特定多路复用逻辑，如例~\ref{ex:map-to-mux} 所示。
+
+\begin{lstlisting}[caption={使用 map\_to\_mux 属性实现特定多路复用逻辑（原书 Example 16）},label={ex:map-to-mux}]
+# Apply the map_to_mux attribute on the SELECT_OP cell named C10
+set_attribute -objects [get_cells C10] -name map_to_mux -value true
+
+# Query if the attribute is set as required on C10
+get_attribute -objects [get_cells C10] -name map_to_mux
+
+#Run the compile step
+compile_fusion
+
+#Identify the cell created using the map_to_mux attribute
+get_cells -hier -filter "map_to_mux==true && !infer_mux_override"
+\end{lstlisting}
+
+% ------------------------------------------------------------
+\subsection{控制时序映射}
+\subsubsection*{Controlling Sequential Mapping}
+
+时序映射（sequential mapping）阶段包含两步：寄存器推断（register inferencing）与工艺映射（technology mapping）。术语寄存器同时指边沿触发寄存器与电平敏感锁存器。
+
+寄存器推断是将寄存器的 RTL 描述翻译为称为 SEQGEN 的与工艺无关表示的过程。SEQGEN 在 elaboration 期间创建，通常在编译期间映射到触发器。工艺映射是将 SEQGEN 映射到指定目标逻辑库门的过程。这两步均由 \cmd{compile\_fusion} 执行。
+
+寄存器与锁存器均由 SEQGEN 单元表示，它是时序元件的与工艺无关模型，如下图所示：
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书示意：SEQGEN——clear / preset / next\_state / clocked\_on / data\_in / enable / synch\_* $\rightarrow$ Q / QN）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{SEQGEN 单元模型}
+\label{fig:seqgen}
+\end{figure}
+
+下表列出 SEQGEN 单元的引脚。仅使用其中一部分，取决于所推断的单元类型。未使用的引脚接到零。
+
+\begin{table}[htbp]
+\centering
+\caption{SEQGEN 单元引脚}
+\label{tab:seqgen-pins}
+\small
+\begin{tabularx}{\textwidth}{@{}l l X l@{}}
+\toprule
+\textbf{方向} & \textbf{名称} & \textbf{描述} & \textbf{单元类型} \\
+\midrule
+Input & \texttt{clear} & 异步复位 & Flip-flop 或 latch \\
+ & \texttt{preset} & 异步置位 & Flip-flop 或 latch \\
+ & \texttt{next\_state} & 同步数据 & Flip-flop \\
+ & \texttt{clocked\_on} & 时钟 & Flip-flop \\
+ & \texttt{data\_in} & 异步数据 & Latch \\
+ & \texttt{enable} & 时钟或异步使能 & Latch \\
+ & \texttt{synch\_clear} & 同步复位 & Flip-flop \\
+ & \texttt{synch\_preset} & 同步置位 & Flip-flop \\
+ & \texttt{synch\_toggle} & 同步翻转 & Flip-flop \\
+ & \texttt{synch\_enable} & 同步使能 & Flip-flop \\
+Output & \texttt{Q} & 同相输出 & Flip-flop 或 latch \\
+ & \texttt{QN} & 反相输出 & Flip-flop 或 latch \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+工艺映射期间，工具以 SEQGEN 为映射起点。时序映射器检查引脚连接以及库单元描述中的信息，以映射到逻辑库寄存器。
+
+本节主题：
+\begin{itemize}
+  \item 按 RTL 所述精确映射时序元件
+  \item 扫描单元映射
+  \item 同步复位或置位寄存器的映射
+  \item 为库单元引脚指定同步输入类型
+  \item 控制时序输出反相
+  \item 阻止连接到寄存器 QN 引脚
+  \item 将同步使能逻辑映射到 MUX
+  \item 移位寄存器识别
+\end{itemize}
+
+\subsubsection{按 RTL 所述精确映射时序元件}
+\subsubsection*{Mapping Sequential Elements Exactly as Described in RTL}
+
+要指定工具按 RTL 所述精确映射时序元件，将 \appopt{compile.seqmap.exact\_map} 设为 \texttt{true}。启用该功能时，工具禁用映射到带反相输出或未使用端口的时序库单元。
+
+\subsubsection{扫描单元映射}
+\subsubsection*{Mapping of Scan Cells}
+
+在 test-ready 编译期间，工具用含可测性逻辑的触发器替换普通触发器。下图示出 test-ready 编译期间 D 触发器被替换为扫描寄存器的示例。这类架构（多路选择触发器，multiplexed flip-flop）在 D 触发器输入端加入 2 输入 MUX。MUX 的选择线启用两种模式——功能模式（正常数据输入）与测试模式（扫描数据输入）。本例中，扫描输入引脚为 \texttt{si}，扫描使能引脚为 \texttt{se}，扫描输出引脚 \texttt{so} 与功能输出引脚 \texttt{Q} 共享。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书示意：D / si / Clk / se $\rightarrow$ MUX $\rightarrow$ Q/so）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{Test-ready 编译中的扫描寄存器示例}
+\label{fig:scan-mux-ff}
+\end{figure}
+
+运行 \cmd{compile\_fusion} 时：
+\begin{itemize}
+  \item 工具将所有时序单元直接映射到库中的扫描寄存器；
+  \item 扫描引脚（如 scan enable 与 scan out）保持未连接；
+  \item 扫描寄存器的扫描输出引脚用于扫描连接。
+\end{itemize}
+
+使用 \appopt{seqmap.bind\_scan\_pins} 应用选项可使扫描使能引脚保持无效。
+
+若库中无扫描寄存器，工具用非扫描单元映射并发出警告。要对所有扫描寄存器设置 \appopt{dont\_use} 属性以映射到非扫描单元。
+
+\subsubsection{同步复位或置位寄存器的映射}
+\subsubsection*{Mapping of Synchronous Reset or Preset Registers}
+
+Fusion Compiler 默认不推断同步复位或置位触发器。要推断带同步复位或置位引脚的寄存器，在 RTL 中使用 \texttt{sync\_set\_reset} Synopsys compiler 指令。HDL Compiler 随后将这些信号连接到 SEQGEN WVGTECH 单元的 \texttt{synch\_clear} 与 \texttt{synch\_preset} 引脚，以告知映射器这些是同步控制信号，并应尽可能靠近寄存器保留。
+
+要启用工具推断同步复位/置位触发器，或将同步复位/置位逻辑保留在触发器附近，使用下列两种方法之一：
+\begin{itemize}
+  \item \texttt{sync\_set\_reset} 指令\\
+    在 RTL 中指定 \texttt{//synopsys sync\_set\_reset} 指令。
+  \item \appopt{hdlin.elaborate.ff\_infer\_sync\_set\_reset} 应用选项\\
+    当 RTL 不含该指令时，将该应用选项设为 \texttt{true}；默认为 \texttt{false}。
+\end{itemize}
+
+编译期间，工具根据库中的寄存器执行下列映射：
+\begin{itemize}
+  \item \textbf{库含带同步复位（或置位）引脚的寄存器}\\
+    工具将复位（或置位）net 连接到带专用复位引脚的寄存器的复位（或置位）引脚。
+  \item \textbf{库不含带同步复位（或置位）引脚的寄存器}\\
+    工具在数据输入端增加额外逻辑，以在无复位（或置位）引脚的寄存器上产生复位（或置位）条件。工具还尽量将该逻辑映射得尽可能靠近数据引脚。
+\end{itemize}
+
+下图示出映射到带与不带同步复位引脚的寄存器的示例。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书示意：Using a reset pin vs Using a gate on the data pin）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{带/不带同步复位引脚的寄存器映射}
+\label{fig:sync-reset-map}
+\end{figure}
+
+即使库有带同步复位（或置位）引脚的寄存器，仍须在 RTL 中使用 \texttt{sync\_set\_reset} 指令，以便工具区分复位（或置位）信号与其他数据信号，并将复位信号尽可能靠近寄存器连接。要将复位信号靠近寄存器连接，将 \appopt{compile.seqmap.honor\_sync\_set\_reset} 设为 \texttt{true}。
+
+\begin{noteBox}
+电平敏感锁存器不会推断同步复位与置位信号。即使库有带同步复位或置位引脚的锁存器，锁存器上的同步复位或置位编码风格也始终导致数据信号上的组合逻辑。
+\end{noteBox}
+
+\subsubsection{异步复位或置位寄存器的映射}
+\subsubsection*{Mapping of Asynchronous Reset or Preset Registers}
+
+要启用工具映射带异步复位或置位信号的寄存器，必须：
+\begin{itemize}
+  \item 在 RTL 中正确描述寄存器；
+  \item 确保库含对应单元；
+  \item 确保 \appopt{hdlin.elaborate.ff\_infer\_async\_set\_reset} 设为 \texttt{true}（默认）。
+\end{itemize}
+
+若库不含此类寄存器，工具将单元保留为未映射。
+
+\subsubsection{为库单元引脚指定同步输入类型}
+\subsubsection*{Specifying Synchronous Input Types for Library Cell Pins}
+
+映射时序单元时，工具使用库单元引脚的 \appopt{nextstate\_type} 属性识别其同步引脚类型。该属性的有效值为 \texttt{data}、\texttt{preset}、\texttt{clear}、\texttt{load}、\texttt{scan\_in} 与 \texttt{scan\_enable}。
+
+若逻辑库中未指定或不正确指定该属性，可用 \cmd{set\_attribute} 手动指定，如下例：
+\begin{lstlisting}
+fc_shell> set_attribute [get_lib_pins my_lib/dffsrst/RN] \
+   nextstate_type clear
+\end{lstlisting}
+
+\subsubsection{控制时序输出反相}
+\subsubsection*{Controlling Sequential Output Inversion}
+
+默认情况下，若能改善 QoR，\cmd{compile\_fusion} 可将寄存器映射到输出极性与寄存器相反的时序库单元。这称为时序输出反相（sequential output inversion）。
+
+当映射到仅有一类异步输入（set 或 reset）的目标库时，时序输出反相也很有用。此时，映射使用缺失异步输入的寄存器的唯一方法，是使用带相反类型异步输入的库单元并反相该单元输出，如下图所示。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书示意：sequential output inversion——SET 寄存器映射到 RST + QN）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{映射期间的时序输出反相示例}
+\label{fig:seq-out-inv}
+\end{figure}
+
+\begin{noteBox}
+反相寄存器的信息写入验证指导（\texttt{.svf}）文件。验证带时序输出反相的块时，必须在 Formality 中包含该 \texttt{.svf} 文件。
+\end{noteBox}
+
+要控制时序输出反相：
+\begin{itemize}
+  \item 对整个块，使用 \appopt{compile.seqmap.enable\_output\_inversion} 应用选项（默认为 \texttt{true}）；
+  \item 对特定层次或叶子单元，使用 \cmd{set\_register\_output\_inversion} 命令。
+\end{itemize}
+
+用 \cmd{set\_register\_output\_inversion} 指定的实例级设置会覆盖用 \appopt{compile.seqmap.enable\_output\_inversion} 指定的块级设置。
+
+\cmd{compile\_fusion} 允许将设计中的时序元件映射到输出相位反相的时序库单元。在某些情况下，工具可能推断出具有某一类异步控制的寄存器，而库中只有相反类型的引脚。此时，工具映射到相反类型的寄存器，并反相所有数据输入与输出。
+
+\subsubsection{阻止连接到寄存器 QN 引脚}
+\subsubsection*{Preventing Connections to Register QN Pins}
+
+时序映射期间，若能改善 QoR，工具可将寄存器映射到同时具有 Q 与 QN 引脚的库单元。但可通过将 \appopt{compile.seqmap.disable\_qn\_usage} 设为 \texttt{true}，阻止工具使用此类寄存器的 QN 引脚。
+
+\subsubsection{将同步使能逻辑映射到 MUX}
+\subsubsection*{Mapping of Synchronous Enable Logic to a MUX}
+
+当 RTL 含同步使能逻辑时，\cmd{compile\_fusion} 将使能逻辑映射到带同步使能引脚的库单元。当此类库单元不可用时，\cmd{compile\_fusion} 将推出的同步逻辑映射到 MUX，如下图所示。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.2cm}
+\textit{（原书示意：同步使能逻辑映射到 MUX）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.2cm}}}
+\caption{同步使能逻辑映射到 MUX}
+\label{fig:sync-en-mux}
+\end{figure}
+
+要启用映射到 MUX，在编译前对 SEQGEN 单元设置 \appopt{map\_sync\_enable\_to\_mux} 属性。例如：
+\begin{lstlisting}
+fc_shell> set_attribute "A1/B/reg[30] mid/sub1/Q_reg[0]" \
+   -name map_sync_enable_to_mux -value true
+fc_shell> set_attribute "mid3/apbif_reg/Q_reg[4]" \
+   -name map_sync_enable_to_mux -value true
+fc_shell> compile_fusion
+\end{lstlisting}
+
+\subsubsection{移位寄存器识别}
+\subsubsection*{Identification of Shift Registers}
+
+编译期间，工具可自动识别设计中的移位寄存器。\cmd{compile\_fusion -to initial\_opto} 将第一个寄存器映射到扫描单元，其余映射到非扫描单元，如下图所示。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书示意：shift register——首寄存器为 scan，其余为 nonscan）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{移位寄存器识别与映射}
+\label{fig:shift-reg}
+\end{figure}
+
+该能力因扫描信号更少而改善时序设计面积并降低拥塞。要禁用该能力，将 \appopt{compile.seqmap.identify\_shift\_registers} 设为 \texttt{false}；默认为 \texttt{true}。
+
+% ------------------------------------------------------------
+\subsection{控制寄存器复制}
+\subsubsection*{Controlling Register Replication}
+
+可通过运行 \cmd{compile\_fusion -to logic\_opt} 执行逻辑优化。要用 \cmd{set\_register\_replication} 标识希望工具在逻辑优化期间复制的寄存器。该命令在指定寄存器上设置 \appopt{register\_replication} 属性，并通过平衡扇出改善时序。逻辑优化期间，指定寄存器被复制；使用 \opt{-num\_copies} 时，原寄存器的负载在新复制的寄存器间均匀分配。使用 \opt{-max\_fanout} 时，工具计算副本数，并尝试在不违反最大扇出约束的前提下均匀分配负载。
+
+可用下列方法之一控制创建的副本数：
+\begin{itemize}
+  \item 用 \opt{-num\_copies} 指定复制后（含原件）的寄存器总数；
+  \item 用 \opt{-max\_fanout} 指定复制后寄存器的最大扇出。
+\end{itemize}
+
+若同时指定两个选项，则忽略 \opt{-max\_fanout}。
+
+下例指定工具应复制 \texttt{regA} 与 \texttt{regB}，并为每个寄存器再创建一份副本：
+\begin{lstlisting}
+fc_shell> set_register_replication -num_copies 2 regA
+fc_shell> set_register_replication -num_copies 2 regB
+\end{lstlisting}
+
+图~\ref{fig:reg-replication} 示出优化前后的 \texttt{regA} 与 \texttt{regB}。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 33：Before and After Register Replication）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{寄存器复制前后对比}
+\label{fig:reg-replication}
+\end{figure}
+
+可用 \opt{-include\_fanin\_logic} 或 \opt{-include\_fanout\_logic} 将指定寄存器扇入或扇出中的逻辑一并包含。可指定寄存器扇入中的任一起点，或扇出中的任一终点。
+
+下例指定工具应复制 \texttt{A\_reg} 以及从该寄存器到 U1 单元路径上的逻辑：
+\begin{lstlisting}
+fc_shell> set_register_replication -num_copies 2 A_reg \
+   -include_fanout_logic U1
+\end{lstlisting}
+
+要指定复制后必须仍由原寄存器驱动的终点寄存器或主输出 port（如图~\ref{fig:driven-by-orig}），使用 \opt{-driven\_by\_original\_register} 选项。
+
+下例指定复制后 \texttt{r0} 必须驱动 \texttt{r1}、\texttt{r2} 与 \texttt{r3}：
+\begin{lstlisting}
+fc_shell> set_register_replication -num_copies 3  r0 \
+    -driven_by_original_register {r1 r2 r3}
+\end{lstlisting}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 34：Using the -driven\_by\_original\_register Option）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{使用 \texttt{-driven\_by\_original\_register} 选项}
+\label{fig:driven-by-orig}
+\end{figure}
+
+% ------------------------------------------------------------
+\subsection{控制寄存器合并}
+\subsubsection*{Controlling Register Merging}
+
+默认情况下，工具在优化期间执行寄存器合并（register merging）。要禁用寄存器合并，将 \appopt{compile.seqmap.enable\_register\_merging} 设为 \texttt{false}；默认为 \texttt{true}。哪些寄存器被合并的信息存储在 \texttt{.svf} 文件中，输出日志会显示关于寄存器合并的信息消息。
+
+也可用 \cmd{set\_register\_merging} 基于属性设置控制寄存器合并。要在优化期间启用寄存器合并，对指定对象列表指定 \texttt{true} 以设置寄存器合并属性；要禁用，对指定对象列表指定 \texttt{false}。对象可包括叶子单元、层次单元与模块。
+
+下例指定不合并实例名含 \texttt{u1/count\_reg} 的寄存器：
+\begin{lstlisting}
+fc_shell> set_register_merging "u1/count_reg*" false
+\end{lstlisting}
+
+下例指定不合并名为 \texttt{u1} 的实例的全部触发器：
+\begin{lstlisting}
+fc_shell> set_register_merging "u1" false
+\end{lstlisting}
+
+% ------------------------------------------------------------
+\subsection{选择性移除或保留常量与无负载寄存器}
+\subsubsection*{Selectively Removing or Preserving Constant and Unloaded Registers}
+
+为通过减小面积优化设计，工具可自动检测并移除常量寄存器与无负载寄存器。可按下列主题控制该行为：
+
+\subsubsection{移除常量寄存器}
+\subsubsection*{Removing Constant Registers}
+
+设计中某些寄存器可能因一个或多个输入引脚为常量而永不改变状态。这些常量可直接出现在输入端，也可由扇入逻辑优化后最终导致寄存器输入为常量。消除此类寄存器可显著改善面积。
+
+默认情况下，\cmd{compile\_fusion} 移除常量寄存器，并在编译日志中打印信息消息。下表列出可消除时序元件的情形。
+
+\begin{table}[htbp]
+\centering
+\caption{可消除的常量寄存器情形}
+\label{tab:const-reg-elim}
+\small
+\begin{tabularx}{\textwidth}{@{}X ccc@{}}
+\toprule
+\textbf{寄存器类型} & \textbf{Data} & \textbf{Preset} & \textbf{Reset} \\
+\midrule
+简单常量数据 & 1 或 0 &  &  \\
+Preset 与常量数据 1 & 1 & X &  \\
+常量 preset & X & 1 &  \\
+Reset 与常量数据 0 & 0 &  & X \\
+常量 reset & X &  & 1 \\
+Preset、reset 与常量数据 1；reset 始终无效 & 1 & X & 0 \\
+Preset、reset 与常量数据 0；preset 始终无效 & 0 & 0 & X \\
+一个输入为 0 的 2 输入 XOR 门 & X &  &  \\
+D 与 Q 引脚直接相连的 retention 寄存器 & 1 或 0 &  &  \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+要为正在综合的整个块禁用常量寄存器移除，将 \appopt{compile.seqmap.remove\_constant\_registers} 从默认的 \texttt{true} 改为 \texttt{false}。要针对特定单元或模块控制常量寄存器移除，使用 \cmd{set\_constant\_register\_removal}。
+
+例如，下列设置阻止工具移除名为 \texttt{reg11} 的常量寄存器：
+\begin{lstlisting}
+fc_shell> set_constant_register_removal reg11 false
+\end{lstlisting}
+
+下列设置全局禁用整个块的常量寄存器移除，但对名为 \texttt{sub5} 的模块除外：
+\begin{lstlisting}
+fc_shell> set_app_option -name compile.seqmap.remove_constant_registers \
+   -value false
+
+fc_shell> set_constant_register_removal [get_module sub5] true
+\end{lstlisting}
+
+已移除常量寄存器的信息写入验证指导 \texttt{.svf} 文件与编译日志。要报告编译期间移除的常量寄存器，使用 \cmd{report\_constant\_registers}。
+
+\subsubsection{移除无负载寄存器}
+\subsubsection*{Removing Unloaded Registers}
+
+优化期间，工具删除输出不驱动任何负载的寄存器。若单元未在设计中使用，与寄存器输入相关联的组合逻辑锥也可被删除。寄存器输出可能因电路冗余或常量传播而变为无负载。在某些已实例化寄存器的设计中，输出可能本来就无负载。
+
+默认情况下，\cmd{compile\_fusion} 移除设计中的无负载寄存器，并在编译日志中打印信息消息。要为正在综合的块禁用该能力，将 \appopt{compile.seqmap.remove\_unloaded\_registers} 从默认的 \texttt{true} 改为 \texttt{false}。要针对特定单元或模块控制无负载寄存器移除，使用 \cmd{set\_unloaded\_register\_removal}。
+
+例如，下列设置阻止工具移除名为 \texttt{reg22} 的无负载寄存器：
+\begin{lstlisting}
+fc_shell> set_unloaded_register_removal reg22 false
+\end{lstlisting}
+
+下列设置全局禁用整个块的无负载寄存器移除，但对名为 \texttt{sub5} 的模块除外：
+\begin{lstlisting}
+fc_shell> set_app_option -name compile.seqmap.remove_unloaded_registers \
+   -value false
+
+fc_shell> set_unloaded_register_removal [get_module sub5] true
+\end{lstlisting}
+
+要报告编译期间移除的无负载寄存器，使用 \cmd{report\_unloaded\_registers}。
+
+% ------------------------------------------------------------
+\subsection{报告优化寄存器的交叉探测信息}
+\subsubsection*{Reporting Cross-Probing Information for Optimized Registers}
+
+\cmd{compile\_fusion} 在寄存器优化期间合并寄存器，并移除常量与无负载寄存器。要在 \cmd{compile\_fusion} 命令日志与 \cmd{report\_transformed\_registers} 命令输出中打印这些优化寄存器的 RTL 文件名与行号，将 \appopt{compile.seqmap.print\_cross\_probing\_info\_for\_removed\_registers} 设为 \texttt{true}。
+
+下表显示不同类型寄存器优化期间打印的消息。
+
+\begin{table}[htbp]
+\centering
+\caption{寄存器优化期间打印的交叉探测信息消息}
+\label{tab:cross-probe-msg}
+\small
+\begin{tabularx}{\textwidth}{@{}l X@{}}
+\toprule
+\textbf{寄存器优化} & \textbf{信息消息} \\
+\midrule
+常量寄存器移除
+  & \texttt{Information: The register 'a/b\_reg \{ \{/user/test/design.v:49\} \}' is removed as constant 0 (SQM-4100)} \\
+无负载寄存器移除
+  & \texttt{Information: The register 'a/c\_reg\{ \{/user/test/design.v:193\} \}' is removed because it is unloaded. (SQM-4101)} \\
+寄存器合并
+  & \texttt{Information: The register 'a\_reg[1] \{ \{/user/testcases/top.v:113\} \}' is removed because it is merged to 'a\_reg[0]'. (SQM-4102)} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+下例输出显示 \cmd{report\_transformed\_registers} 报告的交叉探测信息：
+\begin{lstlisting}
+Legend:
+        c0r - Constant 0 Register Removed
+        c1r - Constant 1 Register Removed
+        ul  - Unloaded Removed
+        inv - Inverted
+        rep - Replicated
+        mrg - Merged register
+        mb  - Mutibit
+        mbd - Mutibit debanked
+Register                         Transformation                 Filename:
+ Line number
+-------------------------------------------------------------------------
+-------
+mega_shift_reg                   c0r
+ {{a/b/test1.v:112}}
+Carry_Flag_reg                   ul
+ {{a/b/test2.v:117}}
+mega_shift_reg[10]               mrg (mega_shift_reg[31])
+ {{a/b/test3.v:121 }}
+\end{lstlisting}
+
+% ------------------------------------------------------------
+\subsection{控制高扇出 net 综合}
+\subsubsection*{Controlling High-Fanout-Net Synthesis}
+
+工具在 \cmd{compile\_fusion} 的 \cmd{initial\_drc} 阶段执行高扇出 net 综合。要用全局布线 net 确定高扇出综合期间插入 buffer 的拓扑，将 \appopt{compile.initial\_drc.global\_route\_based} 设为 \texttt{true}。在 \cmd{compile\_fusion} 的 DRC 修复阶段完成高扇出综合之后，全局布线被删除。
+
+基于全局布线的缓冲有利于路由通道高度拥塞的设计，例如 macro bank 之间的通道。该功能会增加 \cmd{compile\_fusion} 的运行时间，因此仅应在路由通道高度拥塞的设计上启用。
+
+% ============================================================
+\section{执行多比特优化}
+\subsection*{Performing Multibit Optimization}
+
+Fusion Compiler 可将单比特寄存器或较小的多比特寄存器组合（bank），并替换为等效的更大多比特寄存器。例如，工具可将八个 1-bit 寄存器或四个 2-bit 寄存器 bank 组合，替换为一个 8-bit 寄存器 bank 或两个 4-bit 寄存器 bank。工具仅在单比特寄存器具有相同时序约束时才合并它们，并将时序约束复制到结果多比特寄存器。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 35：Replacing Multiple Single-Bit Register Cells With a Multibit Register Cell）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{用多比特寄存器单元替换多个单比特寄存器单元}
+\label{fig:multibit-replace}
+\end{figure}
+
+用多比特寄存器替换单比特寄存器可减少：
+\begin{itemize}
+  \item 因共享晶体管与优化的晶体管级版图而减少的面积；
+  \item 时钟树总网线长度；
+  \item 时钟树 buffer 数量与时钟树功耗。
+\end{itemize}
+
+若能改善总负松弛（total negative slack），工具也可将大多比特寄存器拆分（debank）为较小的多比特寄存器或单比特寄存器。
+
+某些逻辑库具有混合驱动强度（mixed-drive-strength）的多比特寄存器，部分 bit 驱动强度高于其他 bit。对此类单元，若违例路径经过较低驱动强度的 bit，工具可对混合驱动强度多比特单元重新布线（rewire），使违例路径经过较高驱动强度的 bit。
+
+% ------------------------------------------------------------
+\subsection{执行集成多比特寄存器优化}
+\subsubsection*{Performing Integrated Multibit-Register Optimization}
+
+要在 \cmd{compile\_fusion} 期间执行集成多比特寄存器优化：
+\begin{enumerate}
+  \item 将 \appopt{compile.flow.enable\_multibit} 设为 \texttt{true}，启用多比特寄存器优化。\\
+    启用后，默认情况下工具在 \cmd{compile\_fusion} 的不同阶段执行下列多比特优化：
+    \begin{itemize}
+      \item 在 \cmd{initial\_map} 阶段于 RTL 级组合单寄存器或较小寄存器 bank，以创建更大寄存器 bank。\\
+        要禁用，将 \appopt{compile.flow.enable\_rtl\_multibit\_banking} 设为 \texttt{false}。
+      \item 在 \cmd{logic\_opt} 阶段拆分 RTL 级创建的多比特寄存器 bank（若 bank 中包含关键时序路径上的寄存器）。\\
+        要禁用，将 \appopt{compile.flow.enable\_rtl\_multibit\_debanking} 设为 \texttt{false}。
+      \item 在 \cmd{initial\_opto} 阶段考虑布局创建多比特寄存器 bank。\\
+        要禁用，将 \appopt{compile.flow.enable\_physical\_multibit\_banking} 设为 \texttt{false}。\\
+        可将 \appopt{compile.flow.enable\_second\_pass\_multibit\_banking} 设为 \texttt{true}，并将 \appopt{compile.flow.enable\_physical\_multibit\_banking} 设为 \texttt{false}，从而在 \cmd{final\_place} 而非 \cmd{initial\_opto} 阶段启用基于布局的多比特 banking。\\
+        应仅在 \cmd{initial\_opto} 或 \cmd{final\_place} 之一启用基于布局的多比特 banking，不要两者都启用。
+      \item 在 \cmd{initial\_opto} 与 \cmd{final\_opto} 阶段拆分多比特寄存器 bank（若能改善 TNS）。\\
+        要禁用，将 \appopt{compile.flow.enable\_multibit\_debanking} 设为 \texttt{false}。
+    \end{itemize}
+  \item （可选）。
+  \item 用 \cmd{set\_multibit\_options} 指定多比特寄存器 banking 设置。\\
+    例如，下列命令在 RTL-banking 阶段将 \texttt{reg[1]} 排除在多比特优化之外：
+\begin{lstlisting}
+fc_shell> set_multibit_options -exclude [get_cells "reg[1]"] \
+   -stage rtl
+\end{lstlisting}
+    下列命令指定在 physical-banking 阶段，工具仅对连接到同一总线的寄存器做 banking：
+\begin{lstlisting}
+fc_shell> set_multibit_options  -bus_registers_only \
+   -stage physical
+\end{lstlisting}
+  \item （可选）按下表用应用选项控制多比特寄存器优化。
+
+\begin{table}[htbp]
+\centering
+\caption{控制多比特寄存器优化的通用应用选项}
+\label{tab:multibit-appopt-fc}
+\small
+\begin{tabularx}{\textwidth}{@{}X X@{}}
+\toprule
+\textbf{目的} & \textbf{设置此应用选项} \\
+\midrule
+Banking 时忽略未包含在 SCANDEF 信息中的 scan flip-flop
+  & \appopt{multibit.banking.enable\_strict\_scan\_check} 设为 \texttt{true} \\
+Banking 时考虑带多个 scan-in 引脚与内部 scan-in 引脚的多比特寄存器库单元
+  & \appopt{multibit.banking.lcs\_consider\_multi\_si\_cells} 设为 \texttt{true} \\
+启用由等效 integrated-clock-gating（ICG）单元驱动的寄存器 banking\\
+启用后，工具可能丢失施加在连接至 clock-gating 单元的 net 上的非默认布线规则。因此优化后请检查并重新应用这些规则。
+  & \appopt{multibit.banking.across\_equivalent\_icg} 设为 \texttt{true} \\
+启用功耗管理单元的时序驱动 banking\\
+工具跳过 fixed 单元以及标有 \appopt{dont\_touch}、\appopt{legalize\_only} 与用户指定 \appopt{size\_only} 属性的单元
+  & \appopt{mv.cells.enable\_multibit\_pm\_cells} 设为 \texttt{true} \\
+在物理 banking 与 debanking 期间包含带用户指定 \appopt{size\_only} 设置的单元
+  & \appopt{multibit.common.exclude\_size\_only\_cells} 设为 \texttt{false} \\
+为 \cmd{compile\_fusion} 启用多比特寄存器 rewiring
+  & \appopt{compile.flow.enable\_multibit\_rewiring} 设为 \texttt{true} \\
+在 \cmd{logic\_opt} 阶段执行 RTL-based 多比特重排时考虑翻转率（toggle rate）
+  & \appopt{compile.flow.enable\_toggle\_aware\_rtl\_multibit\_reordering} 设为 \texttt{true} \\
+启用 site-aware debanking、时钟 useful skew（CUS）、driver sizing，以及对瓶颈多比特寄存器的早期 debanking\\
+多比特 debanking 功能影响 \cmd{initial\_opto}（\cmd{compile\_fusion}）、\cmd{final\_place} 以及 \cmd{final\_opto}（\cmd{compile\_fusion}/\cmd{place\_opt}）阶段的 debanking。\\
+多比特 debanking 不影响 RTL debanking（在 \cmd{compile\_fusion} 的 \cmd{logic\_opt} 阶段启用）。
+  & \appopt{opt.common.enable\_multibit\_feature} 设为 \texttt{true} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+  \item （可选）按「从特定单比特寄存器创建多比特寄存器 bank」所述，从特定单比特寄存器创建多比特寄存器 bank。
+  \item （可选）按「指定多比特寄存器命名风格」所述，控制多比特 banking 所用命名风格。
+  \item 用 \cmd{compile\_fusion} 执行优化。
+  \item （可选）报告多比特信息。\\
+    要用 \cmd{report\_transformed\_registers -multibit} 报告工具推断的多比特寄存器 bank，见「报告多比特寄存器」。\\
+    要用 \cmd{report\_multibit} 报告多比特统计信息，例如单比特与多比特寄存器总数、多比特 banking 比率等。\\
+    关于如何确定为何未对特定单元执行多比特寄存器 banking，见「识别为何未执行多比特 Banking」。
+  \item （可选）按「在 GUI 中查看多比特组件」所述，在 GUI 中分析多比特 banking 组件。
+\end{enumerate}
+
+% ------------------------------------------------------------
+\subsection{从特定单比特寄存器创建多比特寄存器 bank}
+\subsubsection*{Creating a Multibit Register Bank From Specific Single-Bit Registers}
+
+在对 RTL 设计运行 \cmd{compile\_fusion} 之前，可用 \cmd{create\_multibit} 从特定未映射的单比特寄存器创建多比特总线。随后运行 \cmd{compile\_fusion} 时，在 \cmd{initial\_map} 阶段，工具将 \cmd{create\_multibit} 创建的总线中的单比特单元映射为多比特寄存器 bank。
+
+用 \cmd{create\_multibit -sort} 指定的单比特寄存器必须：
+\begin{itemize}
+  \item 未映射；
+  \item 类型相同；
+  \item 位于同一逻辑层次；
+  \item 不属于已有总线。
+\end{itemize}
+
+下例中，单比特单元按字母数字降序组合，即 \texttt{reg4}、\texttt{reg3}、\texttt{reg2}、\texttt{reg1}：
+\begin{lstlisting}
+fc_shell> set_app_option -name compile.flow.enable_multibit -value true
+fc_shell> create_multibit {reg2 reg4 reg1 reg3} -sort descending
+fc_shell> compile_fusion
+\end{lstlisting}
+
+下例中，单比特单元按字母数字升序组合，即 \texttt{reg1}、\texttt{reg2}、\texttt{reg3}、\texttt{reg4}：
+\begin{lstlisting}
+fc_shell> set_app_option -name compile.flow.enable_multibit -value true
+fc_shell> create_multibit {reg2 reg4 reg1 reg3} -sort ascending
+fc_shell> compile_fusion
+\end{lstlisting}
+
+下例中，单比特单元按指定顺序组合，即 \texttt{reg2}、\texttt{reg4}、\texttt{reg1}、\texttt{reg3}：
+\begin{lstlisting}
+fc_shell> set_app_option -name compile.flow.enable_multibit -value true
+fc_shell> create_multibit {reg2 reg4 reg1 reg3} -sort none
+fc_shell> compile_fusion
+\end{lstlisting}
+
+\begin{noteBox}
+必须先将 \appopt{compile.flow.enable\_multibit} 设为 \texttt{true}，再对未映射单比特寄存器运行 \cmd{create\_multibit}。否则工具发出下列错误：
+\begin{lstlisting}
+Error: create_multibit command failed: multibit flow is
+ disabled. (MBIT-068)
+\end{lstlisting}
+\end{noteBox}
+
+% ------------------------------------------------------------
+\subsection{指定多比特寄存器命名风格}
+\subsubsection*{Specifying Naming Styles for Multibit Registers}
+
+Fusion Compiler 允许定制多比特寄存器的命名风格。可用本节所述应用选项修改默认命名风格，以匹配设计流程或第三方工具的要求。
+
+\subsubsection{指定名称分隔符}
+\subsubsection*{Specifying a Name Separator}
+
+创建多比特寄存器名称时，工具拼接单比特寄存器名称，并以 \texttt{\_} 字符作为名称分隔符。例如，组合名为 \texttt{reg1} 与 \texttt{reg2} 的单比特寄存器时，多比特寄存器名为 \texttt{reg1\_reg2}。
+
+要更改默认名称分隔符，使用 \appopt{multibit.naming.multiple\_name\_separator\_style}。
+
+\subsubsection{指定名称前缀}
+\subsubsection*{Specifying a Name Prefix}
+
+要为多比特寄存器名称指定前缀，使用 \appopt{multibit.naming.name\_prefix}。
+
+\subsubsection{压缩层次名}
+\subsubsection*{Compacting Hierarchical Names}
+
+组合带层次名的单比特寄存器时，工具用单比特寄存器的完整层次名拼接多比特寄存器名。例如，组合 \texttt{A/B/P/reg1} 与 \texttt{A/B/Q/reg2} 时，多比特寄存器名为 \texttt{A/B/P/reg1\_A/B/Q/reg2}。
+
+要使多比特寄存器名更紧凑，将 \appopt{multibit.naming.compact\_hierarchical\_name} 设为 \texttt{true}，指定公共层次名不重复。此时组合 \texttt{A/B/P/reg1} 与 \texttt{A/B/Q/reg2}，多比特寄存器名为 \texttt{A/B/P/reg1\_Q/reg2}。
+
+\subsubsection{为总线寄存器的连续位指定范围分隔符}
+\subsubsection*{Specifying a Range Separator for Contiguous Bits of a Bused Register}
+
+组合总线寄存器的连续位时，工具用 \texttt{:} 字符作为范围分隔符。例如，组合 \texttt{regA[0]}、\texttt{regA[1]} 与 \texttt{regA[2]} 时，多比特寄存器名为 \texttt{regA[2:0]}。
+
+要更改范围分隔符，使用 \appopt{multibit.naming.range\_separator\_style}。
+
+\subsubsection{为总线寄存器的非连续位指定元素分隔符}
+\subsubsection*{Specifying an Element Separator for Noncontiguous Bits of a Bused Register}
+
+组合总线寄存器的非连续位时，工具用 \texttt{,} 字符作为元素分隔符。例如，组合 \texttt{regA[1]} 与 \texttt{regA[3]} 时，多比特寄存器名为 \texttt{regA[3,1]}。
+
+要更改元素分隔符，使用 \appopt{multibit.naming.element\_separator\_style}。
+
+\subsubsection{指定组合多维寄存器数组元素时的展开命名风格}
+\subsubsection*{Specifying the Expanded Naming Styles When Combining Elements of a Multidimensional Register Array}
+
+要为组合多维寄存器数组元素所创建的多比特寄存器指定展开命名风格，使用 \appopt{multibit.naming.expanded\_name\_style}。更多信息见该应用选项的 man page。
+
+% ------------------------------------------------------------
+\subsection{报告多比特寄存器}
+\subsubsection*{Reporting Multibit Registers}
+
+运行 \cmd{compile\_fusion} 之后，可用 \cmd{report\_transformed\_registers -multibit} 报告因多比特 banking 与 debanking 而变换的寄存器。
+
+下例显示该命令生成的报告片段：
+\begin{lstlisting}
+fc_shell> report_transformed_registers -multibit
+...
+****************************************
+Attributes:
+mb  - multibit
+mbd - multibit debanked
+...
+Register      Optimization
+-----------------------------------
+MB_2_MB_1     mb (source:MB_2, MB_1)
+MB_0_MB_3     mb (source:MB_0, MB_3)
+MB_5, MB_6    mbd (source: MB_5_MB_6)
+\end{lstlisting}
+
+% ------------------------------------------------------------
+\subsection{识别为何未执行多比特 Banking}
+\subsubsection*{Identifying Why Multibit Banking Is Not Performed}
+
+要用 \cmd{report\_multibit} 报告多比特 banking 比率摘要、未 banking 或 debanking 单元的原因列表，以及每种原因的单元数，如下例：
+\begin{lstlisting}
+fc_shell> report_multibit
+****************************************
+Report : report_multibit
+...
+...
+
+****************************************
+
+Total number of sequential cells:                       4020
+Number of single-bit flip-flops:                        3149
+Number of single-bit latches:                           29
+Number of multi-bit flip-flops:                         842
+Number of multi-bit latches:                            0
+
+Total number of single-bit equivalent cells:            853
+(A)   Single-bit flip-flops:                            3149
+(B)   Single-bit latches:                               29
+(C)   Multi-bit flip-flops:                             5352
+(D)   Multi-bit latches:                                0
+
+Sequential cells banking ratio ((C+D)/(A+B+C+D)):       62.74%
+Flip-flop cells banking ratio ((C)/(A+C)):              62.96%
+BitsPerflop:                                            2.13
+
+Reasons for sequential cells not mapping to multibit during RTL Banking:
+
+Explanations:
+   r12: Cell is single bit because its parent multibit cell was debanked
+ due to improve timing (Number of cells: 91)
+   r31: Cell cannot be banked to multibit because it is assigned to use
+ single-bit lib cell (Number of cells: 63)
+
+
+Reasons for multibit sequential cells not debanking to single bit cells
+ during RTL Debanking:
+
+Explanations::
+   r45: Multibit cell cannot be debanked because it is not critical
+ enough (Number of cells: 478)
+\end{lstlisting}
+
+要报告 banking 与 debanking 期间被忽略的全部单元，对 \cmd{report\_multibit} 使用 \opt{-ignored\_cells} 选项。
+
+要报告可用于 banking 与 debanking 的兼容多比特与单比特库单元，使用 \cmd{check\_multibit\_library} 命令。
+
+下例生成 RTL banking 与 debanking 的兼容库单元报告：
+\begin{lstlisting}
+fc_shell> check_multibit_library -stage RTL \
+   -banking -debanking
+****************************************
+Report : check_multibit_library
+Flow   : RTL BANKING
+****************************************
+----------------------------------------------------------------
+Single bit Lib cell      Compatibility       Multi bit Lib cell
+----------------------------------------------------------------
+SB_reg1       PIN ORDER MISMATCH  MB_reg1
+SB_reg2                  COMPATIBLE          MB_reg2
+----------------------------------------------------------------
+Singlebit with NO Multibit Equivalents
+----------------------------------------------------------------
+SB_reg3
+
+****************************************
+Report : check_multibit_library
+Flow   : RTL DEBANKING
+****************************************
+----------------------------------------------------------------
+Multi bit Lib cell      Compatibility       Single bit Lib cell
+----------------------------------------------------------------
+MB_reg2                 COMPATIBLE          SB_reg2
+MB_reg1                 PIN ORDER MISMATCH  SB_reg1
+----------------------------------------------------------------
+Multibit with NO Singlebit Equivalents
+----------------------------------------------------------------
+MB_reg3
+\end{lstlisting}
+
+% ------------------------------------------------------------
+\subsection{改善 Banking 比率}
+\subsubsection*{Improving the Banking Ratio}
+
+在 \cmd{initial\_map} 阶段，工具可优先使用具有功能等效多比特库单元的时序库单元。运行 \cmd{compile\_fusion} 之后，若 \cmd{report\_multibit -ignored\_cells} 表明许多单元因库中缺少多比特单元而未被 banking，可将 \appopt{compile.seqmap.prefer\_registers\_with\_multibit\_equivalent} 设为 \texttt{true} 并重新运行 \cmd{compile\_fusion} 以启用该功能。但启用该功能可能降低设计 QoR。
+
+% ------------------------------------------------------------
+\subsection{在 GUI 中查看多比特组件}
+\subsubsection*{Viewing Multibit Components in the GUI}
+
+Fusion Compiler 使用 WordView 基础设施映射多比特组件。要在 GUI 中查看多比特组件，必须满足下列要求：
+\begin{itemize}
+  \item 确保库以 \texttt{.ndm} 格式包含多比特组件；
+  \item 通过设置 \appopt{compile.flow.enable\_multibit} 启用多比特组件映射，如下：
+\begin{lstlisting}
+fc_shell> set_app_options -name compile.flow.enable_multibit \
+ -value true
+\end{lstlisting}
+\end{itemize}
+
+在 WordView 中查看多比特组件的步骤如下：
+\begin{enumerate}
+  \item 用 \cmd{analyze} 与 \cmd{elaborate} 读取 RTL。
+  \item 运行 \cmd{compile\_fusion -to initial\_opto}。\\
+    工具在编译期间将总线寄存器映射到多比特组件。
+  \item （可选）用 \cmd{report\_cells} 检查多比特组件映射信息。例如，RTL 含 \texttt{reg\_state} 总线寄存器：
+\begin{lstlisting}
+module top (...);
+output [2:0] reg_state;
+always @(posedge clk)
+   reg_state <= next_reg_state;
+endmodule
+\end{lstlisting}
+    报告显示 \texttt{reg\_state} 总线寄存器被映射到 \texttt{MB\_DFF} 多比特组件：
+\begin{lstlisting}
+fc_shell> report_cells [get_cells *reg_state_reg* -hierarchical]
+...
+Cell                 Reference     Library        Attributes
+---------------------------------------------------------------
+reg_state_reg[2:0]   MB_DFF        my_mb_lib      n
+\end{lstlisting}
+\end{enumerate}
+
+% ------------------------------------------------------------
+\subsection{映射组合多比特单元}
+\subsubsection*{Mapping Combinational Multibit Cells}
+
+组合多比特单元（combinational multibit cells）是库单元，单个单元实现多个逻辑功能。Fusion Compiler 工具：
+\begin{itemize}
+  \item 将单比特组合单元 banking 到多比特组合单元；
+  \item 按需 debank 多比特组合单元以改善 QoR。
+\end{itemize}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 36：Combinational Multibit Library Cells）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{组合多比特库单元}
+\label{fig:combo-mbit-cells}
+\end{figure}
+
+要在 \cmd{initial\_opto} 与 \cmd{final\_opto} 阶段启用组合多比特映射，用 \cmd{set\_app\_options} 设置 \appopt{opt.common.enable\_multibit\_combinational\_cells}：
+\begin{lstlisting}
+fc_shell> set_app_options -name \
+   opt.common.enable_multibit_combinational_cells -value true
+\end{lstlisting}
+
+\begin{noteBox}
+默认情况下，工具会对多比特组合单元执行 debanking。
+\end{noteBox}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 37：Combinational Multibit Library Cell Flow）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{组合多比特库单元流程}
+\label{fig:combo-mbit-flow}
+\end{figure}
+
+要打印为每个库 reference 创建的组合多比特单元，对 \cmd{report\_multibit} 使用 \opt{-combinational} 选项，如下例：
+\begin{lstlisting}
+fc_shell> report_multibit -combinational
+---------------------------------------------------------------------
+#Outputs  Reference            Number of instances   Single-bit
+                                                     Equivalent
+---------------------------------------------------------------------
+2        combo_mbit_lib_cell1       257                 514
+4        combo_mbit_lib_cell2        57                 228
+---------------------------------------------------------------------
+\end{lstlisting}
+
+要检查组合多比特库单元的兼容单比特等效单元，对 \cmd{check\_multibit\_library} 使用 \opt{-combinational} 选项，如下例：
+\begin{lstlisting}
+fc_shell> check_multibit_library -combinational
+------------------------------------------------------------------------
+Combinational          Compatibility         Equivalent Singlebit
+Multibit LibCell                                    LibCell
+------------------------------------------------------------------------
+combo_mbit_lib_cell1    Compatible              combo_sbit_lib_cell1
+                        Don't use Mismatch      combo_sbit_lib_cell2
+combo_mbit_lib_cell2    PVT mismatch            combo_sbit_lib_cell3
+------------------------------------------------------------------------
+\end{lstlisting}
+
+% ============================================================
+\section{运行并发时钟与数据优化}
+\subsection*{Running Concurrent Clock and Data Optimization}
+
+更改时钟 latency 可平衡相继时序路径级的松弛，从而优化时钟与数据路径。该能力称为并发时钟与数据（concurrent clock and data，CCD）优化，可减少总负松弛（TNS）、最差负松弛（WNS）、面积与漏电功耗，并改善物理综合与布局布线之间的相关性。
+
+\subsection{Useful Skew}
+\subsubsection*{Useful Skew}
+
+下图示出并发时钟与数据优化如何允许用时钟偏斜（clock skew）消除负松弛，并可能实现面积与漏电回收。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书示意：CCD / Useful Skew——用时钟偏斜消除负松弛）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{并发时钟与数据优化中的 Useful Skew}
+\label{fig:ccd-useful-skew}
+\end{figure}
+
+% ------------------------------------------------------------
+\subsection{控制并发时钟与数据优化}
+\subsubsection*{Controlling Concurrent Clock and Data Optimization}
+
+默认情况下，工具在 \cmd{compile\_fusion} 期间执行并发时钟与数据优化。可通过将 \appopt{compile.flow.enable\_ccd} 设为 \texttt{false} 禁用；默认为 \texttt{true}。
+
+并发时钟与数据优化期间：
+\begin{itemize}
+  \item 工具使用理想时钟树，并为所有活动 scenario 更新时钟 latency 与 balance points；
+  \item 工具在 delayed 与 advanced latency 设置范围内，调整设计中最关键时序元件的寄存器 latency。\\
+    默认最大 delayed latency 为 100~ps，最大 advanced latency 为 300~ps；
+  \item 所有 path group 均参与 useful skew 计算；
+  \item 并发时钟与数据优化期间考虑所有边界时序路径。
+\end{itemize}
+
+\begin{noteBox}
+在增量编译（incremental compile）中，启用并发时钟与数据优化无效。
+\end{noteBox}
+
+为获得最佳结果，还应：
+\begin{itemize}
+  \item 即使在编译期间也启用 hold scenario，以减少因并发时钟与数据优化插入时钟 latency 而导致的 hold 违例。\\
+    工具仅在并发时钟与数据优化中考虑 hold scenario，而不用于其他优化步骤；
+  \item 为 \cmd{clock\_opt} 命令启用并发时钟与数据优化。
+\end{itemize}
+
+\subsubsection{控制时钟 Latency、Path Group 与边界路径}
+\subsubsection*{Controlling Clock Latencies, Path Groups, and Boundary Paths}
+
+要为 useful skew 计算指定最大 delayed latency，将 \appopt{ccd.max\_postpone} 设为特定值，如下例：
+\begin{lstlisting}
+fc_shell> set_app_options \
+   ccd.max_postpone 50
+\end{lstlisting}
+
+要为 useful skew 计算指定最大 advanced latency，将 \appopt{ccd.max\_prepone} 设为特定值，如下例：
+\begin{lstlisting}
+fc_shell> set_app_options \
+   ccd.max_prepone 100
+\end{lstlisting}
+
+要省略特定 path group 的 useful skew 计算，用 \appopt{ccd.skip\_path\_groups} 指定一个或多个 path group，如下：
+\begin{lstlisting}
+fc_shell> set_app_options ccd.skip_path_groups path_group_list
+\end{lstlisting}
+
+要禁用边界时序路径的并发时钟与数据优化，将 \appopt{ccd.optimize\_boundary\_timing} 从默认的 \texttt{true} 改为 \texttt{false}。此后不会调整 I/O 路径上的优化以及边界寄存器的 latency，以改善寄存器到寄存器时序。
+\begin{lstlisting}
+fc_shell> set_app_options ccd.optimize_boundary_timing false
+\end{lstlisting}
+
+\subsubsection{降低动态压降}
+\subsubsection*{Reducing Dynamic Voltage Drop}
+
+运行 \cmd{compile\_fusion} 时，可通过将 \appopt{compile.flow.enable\_dps} 设为 \texttt{true} 启用动态功耗整形（dynamic power shaping）优化，以降低块上的动态压降（dynamic voltage drop）。工具在 \cmd{compile\_fusion} 的 \cmd{final\_opto} 阶段执行动态功耗整形优化。
+
+启用该功能时，工具执行功耗分析，并用 useful skew 技术降低动态压降。可选地，可用 \appopt{ccd.dps.use\_case} 定制动态功耗整形优化期间的功耗分析。
+
+\subsubsection{在布线前阶段指定优化目标}
+\subsubsection*{Specifying Optimization Targets at the Preroute Stage}
+
+用 \cmd{compile\_fusion} 执行并发时钟与数据优化时，可为下列对象的 WNS 优化赋予更高优先级：
+\begin{itemize}
+  \item 某些 path group——用 \appopt{ccd.targeted\_ccd\_path\_groups} 指定，如下例：
+\begin{lstlisting}
+fc_shell> set_app_options -name ccd.targeted_ccd_path_groups \
+   -value {PG1 PG2}
+\end{lstlisting}
+    若用该应用选项指定的 path group 同时也被 \appopt{ccd.skip\_path\_groups} 指定为跳过，则该 path group 在并发时钟与数据优化期间被跳过。
+  \item 某些终点——用 \appopt{ccd.targeted\_ccd\_end\_points\_file} 指定包含终点的文件，如下例：
+\begin{lstlisting}
+fc_shell> set_app_options \
+   -name ccd.targeted_ccd_end_points_file \
+   -value endpoint_targets.tcl
+\end{lstlisting}
+    若同时指定 path group 与终点，工具仅优化指定 path group 中的指定终点。
+  \item 最差的 300 条时序路径——将 \appopt{ccd.enable\_top\_wns\_optimization} 设为 \texttt{true}。
+\end{itemize}
+
+\subsubsection{传递到后端}
+\subsubsection*{Transferring to Back End}
+
+要将时钟 latency 与 balance points 从前端工具传递到后端工具，使用 \cmd{write\_ascii\_files} 命令。该命令写入 \texttt{design.MCMM} 目录，其中包含 Tcl 文件形式的时序上下文。例如，\texttt{design.MCMM/scenario\_scenario.tcl} 文件含下列时钟 latency 设置：
+\begin{lstlisting}
+set_clock_latency -clock [get_clocks {CLK}] -0.3 [get_pins {d_reg[4]/CP}]
+set_clock_latency -clock [get_clocks {CLK}] 0.1 [get_pins {d_reg[7]/CP}]
+\end{lstlisting}
+
+\texttt{design.MCMM/mode\_mode.tcl} 文件含下列 balance points：
+\begin{lstlisting}
+set_clock_balance_points -clock [get_clocks {CLK}] \
+   -balance_points [get_pins {d_reg[4]/CP}] \
+   -consider_for_balancing true \
+   -rise -delay 0.3 -corners [get_corners {default}]
+set_clock_balance_points -clock [get_clocks {CLK}] \
+   -balance_points [get_pins {d_reg[7]/CP}] \
+   -consider_for_balancing true \
+   -rise -delay -0.1 -corners [get_corners {default}]
+\end{lstlisting}
+
+% ============================================================
+\section{执行测试插入与扫描综合}
+\subsection*{Performing Test Insertion and Scan Synthesis}
+
+Fusion Compiler 测试综合方案可将 DFT 能力透明地实现到 Synopsys 综合流程中，而不干扰功能、时序、信号完整性或功耗要求。
+
+Fusion Compiler 的测试解决方案包含两个阶段：
+\begin{itemize}
+  \item 扫描综合流程（Scan Synthesis Flow）
+  \item 最小化扫描寄存器异步置位与复位线上的毛刺
+\end{itemize}
+
+两阶段测试插入的收益包括：
+\begin{itemize}
+  \item 同时为逻辑与 DFT 综合获得更好的时序、面积、功耗与拥塞 QoR；
+  \item 功耗意图（power intent）与 DFT 逻辑更好集成；
+  \item 改善的拥塞优化，考虑 compressor 与 decompressor（codec）测试逻辑的布局；
+  \item 消除为综合并布局 DFT 逻辑而进行的增量编译步骤。
+\end{itemize}
+
+% ------------------------------------------------------------
+\subsection{扫描综合流程}
+\subsubsection*{Scan Synthesis Flow}
+
+为某些寄存器指定 DFT 插入相关的综合约束时，这些寄存器必须映射到非扫描版本，并涉及 core wrapper reuse 阈值。要指定 DFT 配置：
+\begin{enumerate}
+  \item 执行 \cmd{compile\_fusion -from initial\_map -to logic\_opt}。
+  \item 指定 DFT 配置，如 DFT 信号、链数、测试模式等。
+  \item 完成 DFT 插入。关于 DFT 插入的更多信息，见 \textit{TestMAX DFT User Guide}。
+  \item 执行 \cmd{compile\_fusion -from initial\_place}。
+\end{enumerate}
+
+\begin{noteBox}
+必须在导入 floorplan 信息之前创建扫描测试以及 scan-in 与 scan-out port。此外，floorplan 必须包含测试与扫描 port 的物理位置。
+\end{noteBox}
+
+\subsubsection{仅扫描脚本示例}
+\subsubsection*{Scan-Only Script Example}
+
+\begin{lstlisting}
+# Set up the library
+...
+# Read the design
+...
+# Specify any registers that should not be mapped to scan equivalent, and
+# also to be excluded from any scan chains
+set_scan_element false <registers that should not be mapped to scan
+ equivalent>
+# Run compile_fusion to logic_opto step
+compile_fusion -to logic_opto
+# DFT Specifications:
+# Scan chain setup
+set_scan_configuration -chain_count sc
+# DFT signals
+# Clocks and asynchronous resets
+set_dft_signal -view existing -type ScanClock \
+   -port clk -timing [list 45 55]
+set_dft_signal -view existing -type Reset \
+   -port reset_n -active_state 0
+# Scan in, scan out, scan enable
+set_dft_signal -view spec -type ScanDataIn -port SI
+set_dft_signal -view spec -type ScanDataOut -port SO
+set_dft_signal -view spec -type ScanEnable -port SE
+# Scan Synthesis steps
+create_test_protocol
+dft_drc
+preview_dft
+insert_dft
+# Continue from initial_place step
+compile_fusion -from initial_place -to initial_opto
+# Perform post dft_drc
+dft_drc -test_mode Internal_scan
+# Generate post dft_drc verbose report
+report_dft_drc_violations -test_mode Internal_scan -rule all
+# Write out Scandef
+write_scan_def design.scan.def
+# Write out test model
+write_test_model -output design.ctl
+# Save output for TetraMAX
+write_test_protocol -output design.scan.spf \
+   -test_mode Internal_scan
+write_verilog -hierarchy all design.v
+\end{lstlisting}
+
+% ------------------------------------------------------------
+\subsection{最小化扫描寄存器异步置位与复位线上的毛刺}
+\subsubsection*{Minimizing Glitches on Asynchronous Set and Reset Lines of Scan Registers}
+
+当设计在功能模式与扫描模式之间切换时，扫描寄存器的异步置位与复位线上可能出现毛刺（glitch），从而复位这些寄存器的状态。工具可通过在异步置位与复位线上添加门控逻辑来防止。
+
+要启用该功能，必须用 \cmd{set\_register\_async\_gating\_pin -port} 指定控制门控逻辑的顶层 port。该控制 port 必须是 RTL 中预定义、且未连接到任何其他 net 的 port。要获取此类门控扫描寄存器的信息，在物理综合之后运行 \cmd{report\_async\_gated\_registers}。
+
+所添加的门控逻辑可以是 AND 或 OR 门，取决于扫描寄存器异步引脚的极性。添加门控逻辑后，Formality 需要额外信息以验证设计，Fusion Compiler 会生成相应的 \texttt{.svf} 文件，在功能模式下禁用门控逻辑。
+
+\begin{noteBox}
+该功能仅支持 in-compile DFT 流程。
+\end{noteBox}
+
+% ============================================================
+\section{指定性能、功耗与面积改善设置}
+\subsection*{Specifying Settings for Performance, Power, and Area Improvement}
+
+以下主题说明可用于改善设计性能、功耗与面积（PPA）的设置：
+\begin{itemize}
+  \item 启用高努力时序模式（Enabling High-Effort Timing Mode）
+  \item 启用增强延迟优化以改善总负松弛
+  \item 启用高努力面积模式（Enabling High-Effort Area Mode）
+  \item 启用嵌入式面积优化流程
+\end{itemize}
+
+% ------------------------------------------------------------
+\subsection{启用高努力时序模式}
+\subsubsection*{Enabling High-Effort Timing Mode}
+
+多数情况下，为编译启用高努力时序模式可获得更好的时序 QoR。要启用该模式，将 \appopt{compile.flow.high\_effort\_timing} 设为 \texttt{1}。
+
+在编译期间运行高努力时序模式可能增加运行时间，因为工具会执行多轮布局与优化以获得最优时序结果。
+
+% ------------------------------------------------------------
+\subsection{启用增强延迟优化以改善总负松弛}
+\subsubsection*{Enabling Enhanced Delay Optimization to Improve Total Negative Slack}
+
+可通过 path group 让工具在优化期间专注修复更多违例路径，以改善块的总负松弛。但该技术可能增加运行时间并降低面积与功耗 QoR。
+
+要启用改善总负松弛的增强延迟优化技术，将 \appopt{compile.flow.enhanced\_delay\_opto\_for\_pg} 设为 \texttt{1}。与大量使用 path group 改善总负松弛相比，该功能具有更好的运行时间以及更好的面积与功耗 QoR。
+
+% ------------------------------------------------------------
+\subsection{启用高努力面积模式}
+\subsubsection*{Enabling High-Effort Area Mode}
+
+对需要进一步减小面积的设计，将 \appopt{compile.flow.high\_effort\_area} 设为 \texttt{true}。
+
+在编译期间运行高努力面积模式可能增加运行时间，因为工具会执行多轮布局与优化以获得最优面积结果。
+
+% ------------------------------------------------------------
+\subsection{启用嵌入式面积优化流程}
+\subsubsection*{Enabling the Embedded Area Optimization Flow}
+
+在 \cmd{compile\_fusion} 的 \cmd{logic\_opt} 阶段，作为初始步骤，工具执行时序优化以及 DesignWare 重选与取消分组。该初始步骤之后，工具可在继续 \cmd{logic\_opt} 阶段其他优化技术之前，执行可选的嵌入式面积优化流程。
+
+嵌入式面积优化流程包括专用取消分组、快速面积驱动逻辑重构，以及轻量时序优化。要启用该功能，将 \appopt{compile.flow.areaResynthesis} 设为 \texttt{true}。
+
+该功能可减小含许多 DesignWare 层次的块的面积。
+
+% ============================================================
+\section{执行设计分析}
+\subsection*{Performing Design Analysis}
+
+使用 Fusion Compiler 生成的报告分析并调试设计。可在编译前后生成报告：编译前生成报告以检查属性、约束与设计规则是否正确设置；编译后生成报告以分析结果并调试设计。
+
+本节包含下列主题：
+\begin{itemize}
+  \item 报告命令与示例（Reporting Commands and Examples）
+  \item 衡量结果质量（Measuring Quality of Results）
+  \item 对比 QoR 数据（Comparing QoR Data）
+  \item 在批处理模式下报告逻辑级数
+  \item 查询特定消息 ID
+\end{itemize}
+
+% ------------------------------------------------------------
+\subsection{报告命令与示例}
+\subsubsection*{Reporting Commands and Examples}
+
+下表列出部分用于报告 QoR、时序、面积等的报告命令。
+
+\begin{table}[htbp]
+\centering
+\caption{常用报告命令}
+\label{tab:rpt-cmds}
+\begin{tabularx}{\textwidth}{@{}l X@{}}
+\toprule
+\textbf{使用此命令} & \textbf{用途} \\
+\midrule
+\cmd{report\_area}
+  & 报告当前设计的面积信息。\\
+  & - 面积基于物理库。\\
+  & - 不报告 port 与 net 数量。 \\
+\cmd{report\_qor}
+  & 报告当前设计的 QoR 信息与统计。\\
+  & - 信息基于物理库。 \\
+\cmd{report\_timing}
+  & 报告当前设计的时序信息。 \\
+\cmd{report\_power}
+  & 计算并报告设计或实例的动态与静态功耗。 \\
+\cmd{report\_clock\_gating}
+  & 报告设计的总时钟门控统计。 \\
+\cmd{report\_logic\_levels}
+  & 报告设计的逻辑级数。 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsubsection{report\_area 示例}
+\subsubsection*{report\_area Example}
+
+\begin{lstlisting}
+fc_shell> report_area -designware -hierarchy -physical
+****************************************
+Report : area
+Design : test
+...
+****************************************
+Information: Base Cell (com): cell XNOR2ELL, w=3300, h=6270 (npin=3)
+Information: Base Cell (seq): cell LPSDFE2, w=10560, h=6270 (npin=5)
+Number of cells:                      8
+Number of combinational cells:        4
+Number of sequential cells:           4
+Number of macros/black boxes:         0
+Number of buf/inv                     0
+Number of references                  2
+Combinational area:               49.66
+Buf/Inv area:                      0.00
+Noncombinational area:           231.74
+Macro/Black box area:              0.00
+Total cell area:                 281.40
+____________________________________________________________________
+
+Hierarchical area distribution
+------------------------------
+                       Global cell area            Local cell area
+                       ---------------------------------------------
+Hierarchical cell      Absolute  Percent  Combi-   Noncombi-  Black-
+                       Total     Total    national national   boxes
+Design
+--------------------------------------------------------------------
+test                   281.40    100.0    37.24    231.74     0.00
+test
+mult_10                 12.41      4.4    12.41      0.00     0.00
+DW_mult_uns_J1_H3_D1
+--------------------------------------------------------------------
+Total                                 49.66    231.74     0.00
+
+Area of detected synthetic parts
+----------------------------------
+                                            Perc.of
+Module       Implem.   Count       Area   cell area
+----------------------------------------------------
+DW_mult_uns  pparch        1       12.41       4.4%
+----------------------------------------------------
+Total:                     1       12.41       4.4%
+
+Estimated area of ungrouped synthetic parts
+-------------------------------------------
+                               Estimated   Perc. of
+Module       Implem.   Count        area  cell area
+----------------------------------------------------
+DW_mult_uns  pparch        3       48.28      17.2%
+----------------------------------------------------
+Total:                     3       48.28      17.2%
+
+Total synthetic cell area:         60.69   21.6% (estimated)
+____________________________________________________________
+
+Core Area:                          1767
+Aspect Ratio:                     1.0902
+Utilization Ratio:                0.1593
+
+The above information was from the logic library.
+The following information was from the physical library:
+
+Total moveable cell area:          281.4
+Total fixed cell area:               0.0
+Total physical cell area:          281.4
+Core area:                         0.000, 0.000, 40.260, 43.890
+\end{lstlisting}
+
+\subsubsection{report\_qor 示例}
+\subsubsection*{report\_qor Example}
+
+\begin{lstlisting}
+fc_shell> report_qor
+***********************************************
+Report : qor
+Design : top
+...
+***********************************************
+Scenario              'SC1'
+Timing Path Group     'clk'
+-----------------------------------------------
+Levels of Logic:                             6
+Critical Path Length:                     0.28
+Critical Path Slack:                     -0.19
+Critical Path Clk Period:                 0.30
+Total Negative Slack:                    -0.80
+No. of Violating Paths:                     11
+Worst Hold Violation:                    -0.07
+Total Hold Violation:                    -0.13
+No. of Hold Violations:                  32.00
+-----------------------------------------------
+
+Cell Count
+-----------------------------------------------
+Hierarchical Cell Count:                     2
+Hierarchical Port Count:                    24
+Leaf Cell Count:                           287
+Buf/Inv Cell Count:                         45
+Buf Cell Count:                              4
+Inv Cell Count:                             41
+CT Buf/Inv Cell Count:                       0
+Combinational Cell Count:                  208
+Sequential Cell Count:                      79
+Macro Count:                                 1
+-----------------------------------------------
+
+Area
+-----------------------------------------------
+Combinational Area:                     419.34
+Noncombinational Area:                  736.26
+Buf/Inv Area:                            67.60
+Total Buffer Area:                        9.66
+Total Inverter Area:                     57.94
+Macro/Black Box Area:                  2337.90
+Net Area:                                    0
+Net XLength:                                 0
+Net YLength:                                 0
+-----------------------------------------------
+Cell Area (netlist):                   3493.49
+Cell Area (netlist and physical only): 3493.49
+Net Length:                                  0
+
+Design Rules
+-----------------------------------------------
+Total Number of Nets:                      363
+Nets With Violations:                        0
+Max Trans Violations:                        0
+Max Cap Violations:                          0
+-----------------------------------------------
+\end{lstlisting}
+
+\subsubsection{report\_transformed\_registers 示例}
+\subsubsection*{report\_transformed\_registers Example}
+
+\cmd{report\_transformed\_registers} 命令报告编译期间被修改或移除的寄存器的下列信息：
+\begin{itemize}
+  \item 时序输出端口反相
+  \item 被移除的常量寄存器及其常量值
+  \item 用户保留的常量寄存器
+  \item 被移除的无负载寄存器
+  \item 用户保留的无负载寄存器
+  \item 寄存器合并
+  \item 寄存器复制
+  \item 移位寄存器
+  \item 多比特寄存器
+  \item 寄存器优化摘要
+\end{itemize}
+
+仅对由编译或增量编译生成的已映射设计使用 \cmd{report\_transformed\_registers}。若对未映射设计运行该命令，则不报告任何信息。变换或优化寄存器的信息存储在设计库中，因此可在不同会话中用该命令查询相同信息。
+
+例如：
+\begin{lstlisting}
+fc_shell> report_transformed_registers
+****************************************
+Report: report_transformed_registers
+Version: ...
+Date: ...
+****************************************
+Legend:
+C0p - constant 0 register preserved
+C1p - constant 1 register preserved
+C0r - constant 0 register removed
+C1r - constant 1 register removed
+ulp - preserved unloaded register
+ulr - removed unloaded register
+mrg - merged register
+srh - shift register head
+srf - shift register flop
+mb  - multibit
+rep - replicated
+inv - inverted
+
+
+Register                                                  Optimization
+--------------------------------------------------------- ------------
+I_RISC_CORE/I_DATA_PATH/PSWL_Carry_reg                    C0r
+I_RISC_CORE/I_STACK_TOP/I3_STACK_MEM/Stack_Mem_reg[0][0]  C0r
+I_RISC_CORE/I_STACK_TOP/I3_STACK_MEM/Stack_Mem_reg[1][0]  C0r
+\end{lstlisting}
+
+要报告每种寄存器变换类型的计数，指定 \opt{-summary} 选项，如下例：
+\begin{lstlisting}
+fc_shell> report_transformed_registers -summary
+****************************************
+Report: report_transformed_registers
+Version: ...
+Date: ...
+****************************************
+Legend:
+C0p - constant 0 register preserved
+C1p - constant 1 register preserved
+C0r - constant 0 register removed
+C1r - constant 1 register removed
+ulp - preserved unloaded register
+ulr - removed unloaded register
+mrg - merged register
+srh - shift register head
+srf - shift register flop
+mb  - multibit
+rep - replicated
+inv - inverted
+
+Register                                Count
+----------------------------------------------------------------------
+Constant Registers Deleted              12
+Constant Registers Preserved            1
+Unloaded Registers Deleted              101
+Unloaded Registers Preserved            38
+Shift Registers                         170
+Merged                                  12
+Multibit                                10
+Inverted                                15
+Replicated                              4
+\end{lstlisting}
+
+% ------------------------------------------------------------
+\subsection{衡量结果质量}
+\subsubsection*{Measuring Quality of Results}
+
+要用 \cmd{create\_qor\_snapshot} 衡量设计当前状态的结果质量（QoR），并将质量信息存储到一组报告文件中。可用不同优化策略或在设计的不同阶段捕获 QoR 信息并对比结果质量。
+
+\cmd{create\_qor\_snapshot} 从时序、设计规则、面积、功耗、拥塞等方面衡量并报告设计质量，并将质量信息存储到当前工作目录下名为 \texttt{snapshot} 的目录中的一组快照文件。要存储到不同目录，使用 \appopt{time.snapshot\_storage\_location}。
+
+下例在 \texttt{snapshot} 目录中生成名为 \texttt{r1}、时序路径使用零线负载（zero wire load）的 QoR 快照：
+\begin{lstlisting}
+fc_shell> create_qor_snapshot -name r1 -zero_wire_load
+...
+No. of scenario = 4
+s1 = function
+s2 = function_min
+s3 = test
+s4 = test_min
+------------------------------------------------------------------------
+---
+WNS of each timing group:       s1       s2       s3       s4
+-------------------------------------------------------------------------
+REGIN                        -0.34        -        -        -
+fref_clk0                     2.34     3.25        -        -
+pld_clk                       0.65     1.65        -        -
+pll_fixed_clk_central         0.61     1.65        -        -
+REGOUT                        0.39     0.44     1.18     1.72
+...
+-------------------------------------------------------------------------
+Setup WNS:                   -0.34     0.44     1.02     1.10     -0.34
+Setup TNS:                 -130.82     0.00     0.00     0.00   -130.82
+Number of setup violations:   1152        0        0        0      1152
+Hold WNS:                    -0.55    -0.78    -0.30    -1.28     -1.28
+...
+-------------------------------------------------------------------------
+Area:                                                       1200539.606
+Cell count:                                                      562504
+Buf/inv cell count:                                              145920
+Std cell utilization:                                              0.24
+...
+\end{lstlisting}
+
+\subsubsection{查询 QoR 快照}
+\subsubsection*{Querying QoR Snapshots}
+
+要检索并报告由 \cmd{create\_qor\_snapshot} 创建的快照，使用 \cmd{query\_qor\_snapshot}。该命令分析先前生成的 QoR 时序报告，并按指定过滤器以 HTML 格式显示结果。
+
+下例中，\cmd{query\_qor\_snapshot} 分析存储在 \texttt{snapshot} 目录中的 \texttt{placeopt} 快照，然后报告最差负松弛介于 $-2.0$~ns 与 $-1.0$~ns 之间的时序路径：
+\begin{lstlisting}
+fc_shell> create_qor_snapshot -name placeopt
+fc_shell> query_qor_snapshot -name placeopt -filters "-wns -2.0,-1.0"
+\end{lstlisting}
+
+\subsubsection{报告 QoR 快照}
+\subsubsection*{Reporting QoR Snapshots}
+
+要显示当前设计的 QoR 信息与统计，使用 \cmd{report\_qor}。例如，下列命令显示存储在 \texttt{snapshot} 目录中的 \texttt{r1} QoR 快照：
+\begin{lstlisting}
+fc_shell> report_qor_snapshot -name r1 -display
+\end{lstlisting}
+
+\subsubsection{移除 QoR 快照}
+\subsubsection*{Removing QoR Snapshots}
+
+要从 \appopt{time.snapshot\_storage\_location} 指定的目录移除已有 QoR 快照，使用 \cmd{remove\_qor\_snapshot}。例如，下列命令移除存储在 \texttt{snapshot} 目录中的 \texttt{preroute} QoR 快照：
+\begin{lstlisting}
+fc_shell> remove_qor_snapshot -name preroute
+\end{lstlisting}
+
+% ------------------------------------------------------------
+\subsection{对比 QoR 数据}
+\subsubsection*{Comparing QoR Data}
+
+可按下列步骤生成基于 Web 的报告，以查看并用 QORsum 报告对比 QoR 数据：
+\begin{enumerate}
+  \item （可选）用 \cmd{set\_qor\_data\_options} 配置后续步骤捕获并显示的 QoR 数据。
+    \begin{itemize}
+      \item 要用 \opt{-leakage\_scenario} 与 \opt{-dynamic\_scenario} 指定设计中最关键的功耗 scenario。\\
+        工具用你指定的功耗 scenario 生成 QORsum 报告中功耗 QoR 的高层摘要。若不指定这些选项，则对漏电与动态 scenario 均使用总功耗最高的活动功耗 scenario。\\
+        这些设置仅用于功耗 QoR 摘要。工具使用所有活动功耗 scenario 的功耗信息捕获并报告 QORsum 报告中的详细功耗信息。
+      \item 要用 \opt{-clock\_name} 与 \opt{-clock\_scenario} 指定最关键的时钟名与时钟 scenario。\\
+        工具用你指定的时钟名与 scenario 生成 QORsum 报告中时钟 QoR 的高层摘要。若不指定这些选项，工具识别最关键时钟并用于时钟 QoR 摘要。\\
+        这些设置仅用于时钟 QoR 摘要。工具使用所有时钟生成 QORsum 报告中的详细时钟 QoR 信息。
+      \item 要用 \opt{-run\_name} 指定在 QORsum 报告中标识该次运行的名称。\\
+        默认情况下，工具用数字命名每次运行，如 Run1、Run2 等。可用该选项为每次运行指定更有意义的名称。也可在步骤~3 用 \cmd{compare\_qor\_data} 生成 QORsum 报告时通过 \opt{-run\_names} 指定运行名称；若如此，工具忽略 \cmd{set\_qor\_data\_options -run\_name} 指定的运行名称。
+    \end{itemize}
+    下例指定漏电功耗 scenario、动态功耗 scenario、时钟 scenario 以及用于 QORsum 报告对应摘要的时钟：
+\begin{lstlisting}
+fc_shell> set_qor_data_options \
+   -leakage_scenario S1 -dynamic_scenario S2 \
+   -clock_scenario S3 -clock_name sys_clk
+\end{lstlisting}
+  \item 用 \cmd{write\_qor\_data} 为报告收集 QoR 数据。该命令捕获与时序、功耗、运行时间及其他度量相关的 QoR 数据。\\
+    可在希望捕获 QoR 数据的设计流程各阶段多次运行 \cmd{write\_qor\_data}。用 \opt{-label} 并指定一个值，以标明在流程的哪个阶段捕获数据。\\
+    默认情况下，\cmd{write\_qor\_data} 捕获与已布局并优化设计相关的数据。可用 \opt{-report\_group} 指定五个支持值之一（\texttt{unmapped}、\texttt{mapped}、\texttt{placed}、\texttt{cts}、\texttt{routed}），以根据捕获数据时的流程状态调整所捕获的报告集。要更细粒度控制，用 \opt{-report\_list} 显式指定要生成的每个报告。\\
+    \cmd{write\_qor\_data} 从多数常用工具报告（如 \cmd{report\_qor} 与 \cmd{report\_power}）捕获标准 QoR 数据集到磁盘。若有不属于该命令集合的额外自定义数据要捕获，用 \cmd{capture\_qor\_data} 捕获完全自定义的 QoR 数据或 GUI 布局图像，以包含在基于 Web 的 QORsum 报告中。这可用于补充 \cmd{write\_qor\_data} 捕获的标准 QoR 数据，或创建完全自定义的 QORsum 报告。相关命令包括：\cmd{define\_qor\_data\_panel}（可在 QORsum 报告中创建用于查看 QoR 数据的新面板），以及 \cmd{set\_qor\_data\_metric\_properties}（可定制任一 QORsum 报告面板中任一度量列的属性，从而控制着色风格或对比数据时的着色阈值等）。
+  \item 用 \cmd{compare\_qor\_data} 生成 QORsum 报告。\\
+    该命令取得一次或多次 \cmd{write\_qor\_data} 运行所捕获的数据，并创建基于 Web 的报告以查看和对比这些结果。\\
+    必须用 \opt{-run\_locations} 指定上一步每次 \cmd{write\_qor\_data} 运行输出的位置。每个路径位置对应要对比的运行结果。\\
+    可用 \opt{-run\_names} 为 QORsum 报告中的运行指定特定名称。若如此，工具忽略用 \cmd{set\_qor\_data\_options -run\_name} 指定的运行名称。默认情况下，工具用数字命名每次运行，如 run1、run2 等。\\
+    可用 \opt{-output} 指定输出目录。默认写入名为 \texttt{compare\_qor\_data} 的目录。要用 \opt{-force} 覆盖已有输出数据；默认不覆盖。
+  \item 用 \cmd{view\_qor\_data} 查看生成的 QORsum 报告。
+\end{enumerate}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 38：QORsum Report）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{QORsum 报告}
+\label{fig:qorsum-report}
+\end{figure}
+
+关于探索对比数据的更多信息，见下列主题：
+\begin{itemize}
+  \item 设置基线运行（Setting Your Baseline Run）
+  \item 更改 QoR 显示风格
+  \item 排序与过滤数据
+  \item 探索详细对比数据
+\end{itemize}
+
+\subsubsection{设置基线运行}
+\subsubsection*{Setting Your Baseline Run}
+
+默认情况下，第一行数据是基线运行（baseline run），其他所有运行均与之对比。基线运行的名称以金色高亮，以标记为“golden”或基线结果。
+
+非基线单元格的着色表示相对基线的差异方向与程度：
+\begin{itemize}
+  \item 红色表示相对基线变差；绿色表示相对基线改善；
+  \item 较浅着色表示相对基线差异较小；较深着色表示相对基线差异较大。
+\end{itemize}
+
+要将光标悬停在列标题上，可查看各着色对应的 delta 阈值。
+
+要更改基线运行，点击 Runs 按钮，并从 Baseline Run 列选择新的基线运行，如下图所示：
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.2cm}
+\textit{（原书示意：选择 Baseline Run）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.2cm}}}
+\caption{更改基线运行}
+\label{fig:baseline-run}
+\end{figure}
+
+\begin{seeAlsoBox}
+更改 QoR 显示风格；排序与过滤数据；探索详细对比数据。
+\end{seeAlsoBox}
+
+\subsubsection{更改 QoR 显示风格}
+\subsubsection*{Changing the QoR Display Style}
+
+默认情况下，对比表显示所有运行的 QoR 值。例如，下列运行的 NVE 数为 2374。
+
+在表中任意处右键单击，可循环切换不同数据显示风格。可按下列方式查看数据：
+\begin{itemize}
+  \item 相对基线的百分比 delta；
+  \item 相对基线的绝对 delta（以斜体显示）。
+\end{itemize}
+
+例如，作为百分比 delta，NVE 数显示比基线少 2.7\% 的失败终点；作为绝对 delta，NVE 数显示比基线少 65 个失败终点。
+
+\begin{seeAlsoBox}
+排序与过滤数据；探索详细对比数据。
+\end{seeAlsoBox}
+
+\subsubsection{排序与过滤数据}
+\subsubsection*{Sorting and Filtering the Data}
+
+可对运行数据排序与过滤，以揭示结果中的模式并确定要进一步探索的参数。
+
+关于排序与过滤数据，见下列主题：
+\begin{itemize}
+  \item 排序数据（Sorting the Data）
+  \item 过滤度量（Filtering Metrics）
+  \item 过滤运行（Filtering Runs）
+  \item 分析示例（Example Analysis）
+\end{itemize}
+
+\begin{seeAlsoBox}
+探索详细对比数据。
+\end{seeAlsoBox}
+
+\paragraph{排序数据}
+\subparagraph*{Sorting the Data}
+
+点击任一列标题，按该度量排序数据。第一次点击升序，第二次点击降序。
+
+例如，要在表顶部显示最差 TNS、底部显示最佳 TNS，点击 TNS 列标题；再点一次则顶部为最佳、底部为最差。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.2cm}
+\textit{（原书示意：按 TNS 升序/降序排序）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.2cm}}}
+\caption{按 TNS 排序}
+\label{fig:sort-tns}
+\end{figure}
+
+\paragraph{过滤度量}
+\subparagraph*{Filtering Metrics}
+
+要控制表中显示哪些度量，点击 Metrics 按钮，并在 Metrics 对话框中相应勾选或取消度量。
+
+例如，要仅显示 setup 时序、网表面积与单元计数，按图~\ref{fig:metrics-dialog} 选择度量。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.2cm}
+\textit{（原书 Figure 39：Metrics Dialog Box）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.2cm}}}
+\caption{Metrics 对话框}
+\label{fig:metrics-dialog}
+\end{figure}
+
+\paragraph{过滤运行}
+\subparagraph*{Filtering Runs}
+
+要控制表中显示哪些运行，点击 Runs 按钮，并从 Visible Runs (Summary) 列相应勾选或取消探索运行。
+
+例如，要在表中仅显示前四个运行，按图~\ref{fig:choose-runs} 选择运行。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.2cm}
+\textit{（原书 Figure 40：Choose Baseline and Visible Runs Dialog Box）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.2cm}}}
+\caption{选择基线与可见运行对话框}
+\label{fig:choose-runs}
+\end{figure}
+
+\paragraph{分析示例}
+\subparagraph*{Example Analysis}
+
+下例演示如何对数据排序与过滤，以缩小希望进一步探索的运行范围。
+
+假设打开图~\ref{fig:cmp-report} 所示对比报告，并将 \texttt{util60\_aspect1\%1\_layerM9} 运行设为基线运行。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.2cm}
+\textit{（原书 Figure 41：Comparison Report）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.2cm}}}
+\caption{对比报告}
+\label{fig:cmp-report}
+\end{figure}
+
+可先查看 TNS，并将数据按最佳到最差 TNS 排序，如下图所示。注意最佳 TNS 运行具有 M9 顶层金属，最差具有 M7 顶层金属。这表明限制金属层对时序有显著影响。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.2cm}
+\textit{（原书示意：按 TNS 排序后的 M9/M7 对比）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.2cm}}}
+\caption{按 TNS 排序后的结果}
+\label{fig:tns-m9-m7}
+\end{figure}
+
+然后可通过关闭 M7 运行的可见性，将分析限制到 M9 运行，如下图所示。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.2cm}
+\textit{（原书示意：仅显示 M9 运行）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.2cm}}}
+\caption{限制到 M9 运行}
+\label{fig:m9-only}
+\end{figure}
+
+在获得最佳 TNS 运行后，可通过按 GRCOverflow 列排序（最差溢出在顶部）对比其拥塞，如下图所示。注意较高利用率运行比低利用率运行更拥塞。可关闭较高利用率运行的可见性，将分析限制到低利用率运行，如图~\ref{fig:lower-util} 所示，从而得到更好满足时序与拥塞目标、且规模可控的探索运行子集。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.2cm}
+\textit{（原书示意：按 GRCOverflow 排序）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.2cm}}}
+\caption{按拥塞排序}
+\label{fig:grc-overflow}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.2cm}
+\textit{（原书 Figure 42：Displaying Lower-Utilization Runs）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.2cm}}}
+\caption{显示低利用率运行}
+\label{fig:lower-util}
+\end{figure}
+
+\subsubsection{探索详细对比数据}
+\subsubsection*{Exploring the Detailed Comparison Data}
+
+启动 QORsum 报告时，应用打开 QOR Summary 表，汇总各运行的高层时序、功耗与拥塞度量。该视图及其他摘要视图帮助你排序与过滤数据，以定位要进一步探索的运行。
+
+详细表面板提供比摘要表更深的数据洞察。例如，摘要表可能给出流程各主要阶段设计时序（WNS、TNS、NVE）的高层概览；详细表可能显示基于 path group 的更深入时序信息，给出设计中每个 scenario 与 path group 的时序数字。这只是一例。QORsum 报告中还有许多详细表面板，可显示设计中每个库单元实例的统计（实例数、单元类型、总面积），或每条已布线金属层上的线长等信息。
+
+详细表可一次查看最多六个不同数据集。数据集是为特定运行与流程阶段/标签捕获的一组数据。例如，可同时查看三次不同运行的 \cmd{route\_opt} 结果；或查看一次运行，但观察设计流程不同阶段（\cmd{place\_opt}、\cmd{clock\_opt}、\cmd{route\_opt}）结果的进展，如下图所示。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 43：Path Group Details）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{Path Group Details}
+\label{fig:path-group-details}
+\end{figure}
+
+流程以各度量下的列并排显示。例如，WNS 列组（以及每个度量的列组）显示同样的六列，标记为 1、2、5、6、9、10。这些列代表各流程的结果，并赋予流程 ID 号（而非完整流程名），以免列过宽。每个度量下的第一列是基线，其余五列为与之对比的测试流程。表上方显示图例：流程 ID 在金色框（基线）或蓝色框（测试流程）中，后跟流程名。点击 Legend 按钮可展开或折叠图例。也可在点击 Runs 按钮打开的 “Choose Baseline and Visible Runs” 对话框中看到流程 ID。
+
+详细表视图一次最多显示六个运行（基线运行，加上 Choose Baseline and Visible Runs 对话框中选中的另外前五个运行）。要更改所显示的运行：
+\begin{enumerate}
+  \item 点击 Runs 按钮，打开 Choose Baseline and Visible Runs 对话框。
+  \item 从 Visible Runs (Summary) 列相应勾选或取消运行。这会同步选择或取消 Visible flows (Detailed) 列中的对应项。
+\end{enumerate}
+
+由于详细表可能显示数百甚至数千行数据，一次无法查看超过六个数据集。但若希望查看加载到 QORsum 报告中的所有运行与所有流程阶段/标签上这些度量的更多细节，有一种称为 Focused View（聚焦视图）的交替视图。可通过点击报告顶部的 Focused View 切换按钮，或点击详细表左侧冻结列来访问。在聚焦视图中，可查看详细表某一行数据在所有运行与所有流程阶段上的结果。例如，在基于 path group 的时序详细表中，可能只想聚焦 \texttt{scenarioA} 中 \texttt{path\_group1} 的信息。点击该 path group 与 scenario 对应行即可打开其 Focused View。
+
+沿用同一 path-group 时序示例，聚焦视图一次显示一个 path group。可通过报告顶部下拉菜单选择不同 scenario 或 path group 名称来更改焦点。见图~\ref{fig:focused-view}。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.2cm}
+\textit{（原书 Figure 44：Focused View Drop-down Menu）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.2cm}}}
+\caption{Focused View 下拉菜单}
+\label{fig:focused-view}
+\end{figure}
+
+\paragraph{过滤详细数据}
+\subparagraph*{Filtering the Detailed Data}
+
+详细视图提供过滤器以聚焦特定数据。某些视图有自动显示的默认过滤器。例如，下列详细视图有默认的 scenario 与 path group 过滤器：Path Type Details、Path Group Details 与 Logic Level Details。
+
+可通过下列方式修改默认过滤器：
+\begin{itemize}
+  \item 点击过滤器名称前的 X 符号移除过滤器；
+  \item 更改过滤器值；
+  \item 点击过滤器上除 X 符号或值字段外的任意处，以启用或禁用过滤器。
+\end{itemize}
+
+也可对详细数据应用自定义过滤器。要创建自定义过滤器：
+\begin{enumerate}
+  \item 点击 Filter 按钮显示 Add Filter 字段。
+  \item 通过定义过滤条件并选择要包含在结果中的数据集来定义过滤器。\\
+    要定义过滤器，选择列与比较类型，然后指定比较值。
+    \begin{itemize}
+      \item 数值比较：选择 \texttt{=}、\texttt{!=}、\texttt{<}、\texttt{<=}、\texttt{>} 或 \texttt{>=}，并在 Value 字段指定数值；
+      \item 字符串比较：选择 \texttt{contains}，并在 Value 字段指定字符串；
+      \item 正则表达式比较：选择 \texttt{regexp}，并在 Value 字段指定正则表达式；
+      \item 基于所选列可用值过滤：选择 \texttt{enum}，Value 字段会填充含可用值的下拉菜单，然后启用一个或多个显示值。启用时值前显示勾选。要启用或禁用某值，点击或用上下箭头导航高亮该值，再按 Enter 切换状态。也可在 Value 字段输入字符串以过滤下拉菜单中的可用值。要点击 X 符号取消已选值。
+    \end{itemize}
+  \item 点击绿色勾选标记应用过滤器。
+\end{enumerate}
+
+例如，要按显示 \texttt{func@cworst} scenario 中的 path group 过滤 Path Group Details 视图，按下列方式定义过滤器（原书有对应示意图）。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.2cm}
+\textit{（原书示意：按 scenario 过滤 Path Group Details）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.2cm}}}
+\caption{过滤 Path Group Details}
+\label{fig:filter-path-group}
+\end{figure}
+
+% ------------------------------------------------------------
+\subsection{在批处理模式下报告逻辑级数}
+\subsubsection*{Reporting Logic Levels in Batch Mode}
+
+作为在 GUI 中显示逻辑级数直方图的替代，可在命令行或脚本（批处理模式）中用 \cmd{report\_logic\_levels} 报告逻辑级数。
+
+\begin{noteBox}
+必须有已映射设计才能运行逻辑级数报告。
+\end{noteBox}
+
+可用该命令报告：
+\begin{itemize}
+  \item 整个设计或选定 path group 的逻辑级数；
+  \item 所有类型路径的逻辑级数，包括所有 scenario 中的同时钟路径、跨时钟路径、不可行路径与多周期路径。
+\end{itemize}
+
+报告在摘要、逻辑级数分布与逻辑级数路径报告各节中包含逻辑分布与时序信息。默认不报告 buffer 与 inverter。
+
+要报告逻辑级数：
+\begin{enumerate}
+  \item （可选）用 \cmd{set\_analyze\_rtl\_logic\_level\_threshold} 设置不同于默认的逻辑级数阈值。\\
+    默认情况下，工具根据路径所需延迟值推导逻辑级数阈值。
+    \begin{itemize}
+      \item 为整个设计设置逻辑级数阈值：
+\begin{lstlisting}
+fc_shell> set_analyze_rtl_logic_level_threshold threshold_value
+\end{lstlisting}
+      \item 为特定 path group 设置逻辑级数阈值：
+\begin{lstlisting}
+fc_shell> set_analyze_rtl_logic_level_threshold \
+   -group path_group threshold_value
+\end{lstlisting}
+        path group 设置覆盖整个设计的全局阈值。
+      \item 重置所有阈值：
+\begin{lstlisting}
+fc_shell> set_analyze_rtl_logic_level_threshold -reset
+\end{lstlisting}
+      \item 重置特定 group 设置：
+\begin{lstlisting}
+fc_shell> set_analyze_rtl_logic_level_threshold \
+   -group path_group -reset
+\end{lstlisting}
+    \end{itemize}
+  \item （可选）通过设置 \appopt{shell.synthesis.logic\_level\_report\_summary\_format} 指定报告摘要节中的字段。默认含五个字段：\texttt{"group period wns num\_paths max\_level"}。最多可指定八个字段。例如：
+\begin{lstlisting}
+fc_shell> set_app_options \
+   -name shell.synthesis.logic_level_report_summary_format \
+   -value "group num_paths max_level min_level avg_level"
+...
+\end{lstlisting}
+  \item （可选）通过设置 \appopt{shell.synthesis.logic\_level\_report\_group\_format} 指定报告 path group 节中的字段。默认含五个字段：\texttt{"slack ll llthreshold startpoint endpoint"}。最多可指定十个字段。例如：
+\begin{lstlisting}
+fc_shell> set_app_options \
+   -name shell.synthesis.logic_level_report_group_format \
+   -value "slack ll ll_buf_inv clockcycles startclk endclk"
+...
+\end{lstlisting}
+  \item 用 \cmd{report\_logic\_levels} 报告逻辑级数。下例生成 \texttt{clk\_i} path group 的逻辑级数报告：
+\begin{lstlisting}
+fc_shell> report_logic_levels -group clk_i
+\end{lstlisting}
+\end{enumerate}
+
+% ------------------------------------------------------------
+\subsection{查询特定消息 ID}
+\subsubsection*{Querying Specific Message IDs}
+
+要查询上一步命令期间出现的特定信息、警告或错误消息 ID，可使用 \cmd{check\_error} 命令。
+
+按下列步骤设置并查询消息 ID：
+\begin{enumerate}
+  \item 用全局作用域应用选项 \appopt{shell.common.check\_error\_list} 指定要查询的消息 ID：
+\begin{lstlisting}
+fc_shell> set_app_options -name shell.common.check_error_list \
+   -value {DES-001 CMD-005}
+shell.common.check_error_list {DES-001 CMD-005}
+\end{lstlisting}
+  \item 以 \cmd{link} 命令作为上一步命令的示例：
+\begin{lstlisting}
+fc_shell> link
+Error: Current block is not defined. (DES-001)
+\end{lstlisting}
+  \item 用 \cmd{check\_error} 查询 \cmd{link} 命令步骤期间发出的指定消息 ID：
+\begin{lstlisting}
+fc_shell> check_error -verbose
+{DES-001}
+1
+\end{lstlisting}
+\end{enumerate}
+
+结果显示 \cmd{link} 命令步骤期间发出了 DES-001 消息 ID。若未发出任何指定消息 ID，\cmd{check\_error} 返回 0。

@@ -1,0 +1,1704 @@
+% 第 9 章 Using Floorplan Physical Constraints
+\bichapter{使用 Floorplan 物理约束}{Using Floorplan Physical Constraints}
+\label{chap:floorplan}
+
+使用 floorplan 物理约束的主要原因，是在优化期间考虑这些约束，从而改善与 IC Compiler 等布局后工具的时序相关性。
+可通过下列方法之一向 DC Explorer 提供 floorplan 物理约束：
+\begin{itemize}
+  \item 从 IC Compiler 以 DEF 文件或 Tcl 脚本导出 floorplan 信息，并导入 DC Explorer
+  \item 手动创建这些约束
+\end{itemize}
+
+本章包括以下主题：
+\begin{itemize}
+  \item 导入 Floorplan 信息
+  \item 物理约束概览
+  \item 保存物理约束
+  \item 以 ASCII 格式保存供 IC Compiler II 使用
+  \item 包含仅物理单元（Physical-Only Cells）
+  \item 相对布局（Relative Placement）
+\end{itemize}
+
+% ============================================================
+\section{导入 Floorplan 信息}
+\subsection*{Importing Floorplan Information}
+
+可通过下列方法之一将 floorplan 信息导入 DC Explorer：
+\begin{itemize}
+  \item \textbf{使用 DEF 文件}\\
+        在 IC Compiler 中用 \cmd{write\_def} 导出 floorplan，再用 \cmd{extract\_physical\_constraints} 导入 DC Explorer。
+        \begin{itemize}
+          \item 在 IC Compiler 中使用 \cmd{write\_def}
+          \item 在 DC Explorer 中读取 DEF 信息
+        \end{itemize}
+  \item \textbf{使用 Tcl 脚本}
+        \begin{itemize}
+          \item 在 IC Compiler 中保存 Floorplan 信息
+          \item 在 DC Explorer 中读取 Floorplan 脚本
+        \end{itemize}
+\end{itemize}
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 导入的 DEF 信息
+  \item 导入的物理约束
+\end{itemize}
+\end{seeAlsoBox}
+
+\subsection{在 IC Compiler 中使用 write\_def 命令}
+\subsubsection*{Using the write\_def Command in IC Compiler}
+
+为改善 DC Explorer 与 IC Compiler 之间的时序、面积与功耗相关性，可将已映射的 DC Explorer 网表读入 IC Compiler，在 IC Compiler 中创建基本 floorplan，再导出该 floorplan 并读回 DC Explorer。
+
+在 IC Compiler 中使用 \cmd{write\_def} 将 floorplan 导出为 Design Exchange Format（DEF）文件，以便读入 DC Explorer。
+下例将 floorplan 写入 \texttt{my\_physical\_data.def}：
+\begin{lstlisting}
+icc_shell> write_def -version 5.7 -rows_tracks_gcells -macro -pins \
+   -blockages -specialnets -vias -regions_groups -verbose \
+   -output my_physical_data.def
+\end{lstlisting}
+
+\subsection{在 DC Explorer 中读取 DEF 信息}
+\subsubsection*{Reading DEF Information in DC Explorer}
+
+要从 DEF 文件导入 floorplan，使用 \cmd{extract\_physical\_constraints} 命令。
+该命令从指定 DEF 导入 floorplan 并施加到设计；已施加的 floorplan 会保存在 \texttt{.ddc} 中，后续 \cmd{de\_shell} 会话读入该 \texttt{.ddc} 时无需重新施加。
+
+从多个 DEF 导入物理约束：
+\begin{lstlisting}
+de_shell> extract_physical_constraints {des_1.def des2.def … des_N.def}
+\end{lstlisting}
+
+默认以增量模式运行：处理多个 DEF 时保留设计上已有物理注释。
+增量模式下，布局区域基于当前 core area 与 DEF 中的 site row 导入；禁用增量模式时，布局区域仅基于 DEF 中的 site row。
+冲突按下列方式解决：
+\begin{itemize}
+  \item 只能有一个取值的物理约束会被最新 DEF 的值覆盖（如端口位置、宏位置）。
+  \item 可累加取值的物理约束会重新计算（如 core area 可基于已有值与最新 DEF 的 site row 定义重算）。不同 DEF 的 placement keepout 会累加，最终 keepout 几何在综合期间内部计算。
+\end{itemize}
+
+图~\ref{fig:dce-incr-extract} 给出 \cmd{extract\_physical\_constraints} 增量提取示例。
+
+\figplaceholder{Figure 37: Incremental Extraction With the extract\_physical\_constraints Command}{用 extract\_physical\_constraints 进行增量提取}{fig:dce-incr-extract}
+
+\begin{lstlisting}
+de_shell> extract_physical_constraints DEF1.def DEF2.def
+\end{lstlisting}
+
+要禁用增量模式，对 \cmd{extract\_physical\_constraints} 指定 \opt{-no\_incremental}。
+
+有关导入的 DEF 信息以及端口与宏名称匹配，见：
+\begin{itemize}
+  \item 导入的 DEF 信息
+  \item \cmd{extract\_physical\_constraints} 的名称匹配
+  \item 解决 Site 名称不匹配
+\end{itemize}
+
+\subsection{导入的 DEF 信息}
+\subsubsection*{Imported DEF Information}
+
+DC Explorer 支持高层 floorplan 物理约束，例如 die area、core area 与形状、端口位置、宏位置与方向、keepout margin、placement blockage、preroute、bound、via、track、voltage area 与 wiring keepout：
+\begin{itemize}
+  \item Die Area
+  \item Placement Area
+  \item Macro Location and Orientation
+  \item Hard、Soft 与 Partial Placement Blockage
+  \item Wiring Keepout
+  \item Placement Bound
+  \item Port Location
+  \item Preroute
+  \item Site Array Information
+  \item Via
+  \item Routing Track
+  \item Keepout Margin
+\end{itemize}
+
+要直观检查提取的物理约束，使用 Design Vision layout 窗口中的 layout 视图；从 DEF 提取的全部物理约束会自动加入 layout 视图。
+
+\begin{noteBox}
+Voltage area 不在 DEF 中定义。因此对多电压设计，须用 \cmd{create\_voltage\_area} 定义 voltage area。
+若以 IC Compiler 做 floorplanning，可用 \cmd{write\_floorplan} 与 \cmd{read\_floorplan} 获取自动包含 voltage area 的 floorplan，无需手动定义。
+\end{noteBox}
+
+\subsubsection{Die Area}
+\subsubsection*{Die Area}
+
+\cmd{extract\_physical\_constraints} 支持从 DEF 自动提取 die area。DEF 由 floorplanning 工具生成，供 DC Explorer 导入物理约束。
+工具可提取 DEF 中定义的矩形与折线形 die area。Die area 亦称 cell boundary，表示芯片硅边界，包围焊盘、I/O 引脚与单元等全部对象。
+
+例~\ref{ex:dce-die-def} 给出 DEF 中的 die area 定义；例~\ref{ex:dce-die-tcl} 给出用 \cmd{write\_floorplan -all} 写出时 DC Explorer 译成的 Tcl。
+
+\begin{lstlisting}[caption={DEF 中的 Die Area 定义},label={ex:dce-die-def}]
+UNITS DISTANCE MICRONS 1000 ;
+DIEAREA ( 0 0 ) ( 0 60000 ) ( 39680 60000 ) ( 39680 40000 ) \
+        ( 59360 40000 ) ( 59360 0 ) ;
+\end{lstlisting}
+
+\begin{lstlisting}[caption={写出物理约束时的等价 Tcl},label={ex:dce-die-tcl}]
+de_shell> create_die_area -polygon { { 0.000 0.000 } { 0.000 60.000 } \
+   { 39.680 60.000 } { 39.680 40.000 } { 59.360 40.000 } \
+   { 59.360 0.000 } { 0.000 0.000 } }
+\end{lstlisting}
+
+\subsubsection{Placement Area}
+\subsubsection*{Placement Area}
+
+Placement area 计算为 site row 的矩形包围盒。
+
+\subsubsection{宏位置与方向}
+\subsubsection*{Macro Location and Orientation}
+
+使用 \cmd{extract\_physical\_constraints} 时，对 DEF 中带位置且指定 \texttt{FIXED} 属性的每个单元，DC Explorer 在设计中对应单元上设置位置。
+例~\ref{ex:dce-macro-def} 中 \texttt{E}/\texttt{W} 分别表示东/西旋转；等价 Tcl 见例~\ref{ex:dce-macro-tcl}。
+
+\begin{lstlisting}[caption={DEF 宏位置与方向},label={ex:dce-macro-def}]
+COMPONENTS 2 ;
+   - macro_cell_abx2 + FIXED ( 4350720 8160 ) E ;
+   - macro_cell_cdy1 + FIXED ( 4800 8160 ) W ;
+END COMPONENTS
+\end{lstlisting}
+
+\begin{lstlisting}[caption={等价 Tcl},label={ex:dce-macro-tcl}]
+de_shell> set_cell_location macro_cell_abx2 \
+   -coordinates { 4350.720 8.160 } -orientation E -fixed
+de_shell> set_cell_location macro_cell_cdy1 \
+   -coordinates { 4.800 8.160 } -orientation W -fixed
+\end{lstlisting}
+
+\subsubsection{Hard、Soft 与 Partial Placement Blockage}
+\subsubsection*{Hard, Soft, and Partial Placement Blockages}
+
+\cmd{extract\_physical\_constraints} 可导入 DEF 中定义的 hard、soft 与 partial placement blockage。
+
+\begin{noteBox}
+DEF 5.7 之前的版本不支持 partial blockage。此外，若 floorplanning 工具生成 DEF 5.6，需手动添加 \texttt{\#SNPS\_SOFT\_BLOCKAGE} pragma 以指定 soft blockage。
+\end{noteBox}
+
+例~\ref{ex:dce-hard-blk-def} 为 hard blockage 的 DEF；例~\ref{ex:dce-hard-blk-tcl} 为等价 Tcl。
+
+\begin{lstlisting}[caption={DEF hard placement blockage},label={ex:dce-hard-blk-def}]
+BLOCKAGES 50 ;
+...
+   - PLACEMENT RECT ( 970460 7500 ) ( 3247660 129940 )
+...
+END BLOCKAGES
+\end{lstlisting}
+
+\begin{lstlisting}[caption={等价 Tcl},label={ex:dce-hard-blk-tcl}]
+de_shell> create_placement_blockage -name def_obstruction_23 \
+   -bbox { 970.460 7.500 3247.660 129.940 }
+\end{lstlisting}
+
+对 soft blockage：DEF 5.7 见例~\ref{ex:dce-soft57}；DEF 5.6 见例~\ref{ex:dce-soft56}；等价 Tcl 见例~\ref{ex:dce-soft-tcl}。
+
+\begin{lstlisting}[caption={DEF 5.7 soft placement blockage},label={ex:dce-soft57}]
+BLOCKAGES 50 ;
+...
+   - PLACEMENT + SOFT RECT ( 970460 7500 ) ( 3247660 129940 ) ;
+...
+END BLOCKAGES
+\end{lstlisting}
+
+\begin{lstlisting}[caption={DEF 5.6 soft placement blockage},label={ex:dce-soft56}]
+BLOCKAGES 50 ;
+...
+   - PLACEMENT RECT ( 970460 7500 ) ( 3247660 129940 ) ;
+ #SNPS_SOFT_BLOCKAGE
+...
+END BLOCKAGES
+\end{lstlisting}
+
+\begin{lstlisting}[caption={soft blockage 等价 Tcl},label={ex:dce-soft-tcl}]
+de_shell> create_placement_blockage -name def_obstruction_23 \
+   -bbox { 970.460 7.500 3247.660 129.940 } -type soft
+\end{lstlisting}
+
+对 partial blockage（例~\ref{ex:dce-partial-def}），等价 Tcl 见例~\ref{ex:dce-partial-tcl}。
+
+\begin{lstlisting}[caption={DEF partial placement blockage},label={ex:dce-partial-def}]
+BLOCKAGES 50 ;
+...
+   - PLACEMENT + PARTIAL 80 RECT ( 970460 7500 ) ( 3247660 129940 ) ;
+...
+END BLOCKAGES
+\end{lstlisting}
+
+\begin{lstlisting}[caption={partial blockage 等价 Tcl},label={ex:dce-partial-tcl}]
+de_shell> create_placement_blockage -name def_obstruction_23 \
+   -bbox { 970.460 7.500 3247.660 129.940 } -type partial \
+   -blocked_percentage 80
+\end{lstlisting}
+
+\subsubsection{Wiring Keepout}
+\subsubsection*{Wiring Keepouts}
+
+对 DEF 中定义的 wiring keepout，DC Explorer 在设计上创建 wiring keepout。例~\ref{ex:dce-wire-keep} 给出 DEF 信息。
+
+\begin{lstlisting}[caption={DEF wiring keepout},label={ex:dce-wire-keep}]
+BLOCKAGES 30 ;
+...
+    - LAYER METAL6 RECT ( 0 495720 ) ( 4050 1419120 );
+...
+END BLOCKAGES
+\end{lstlisting}
+
+\subsubsection{Placement Bound}
+\subsubsection*{Placement Bounds}
+
+若 DEF 中存在定义 bound 的 \texttt{REGIONS}，\cmd{extract\_physical\_constraints} 会导入 placement bound。
+若相关 \texttt{GROUP} 中有单元附着到该 region，则在这些单元与设计中的单元之间进行模糊名称匹配，并以两种方式附着到 bound：
+\begin{itemize}
+  \item 若设计中已有与 DEF 同名的 region，则以增量模式用 \cmd{update\_bounds} 将相关 group 中的单元附着到该 region。
+  \item 若设计中不存在该 region，则用 \cmd{create\_bounds} 按 DEF 同名创建，并附着匹配单元。
+\end{itemize}
+
+\begin{lstlisting}[caption={导入的 placement bound 信息},label={ex:dce-bound-def}]
+REGIONS 1 ;
+- c20_group ( 201970 40040 ) ( 237914 75984 ) + TYPE FENCE ;
+END REGIONS
+GROUPS 1 ;
+- c20_group
+     cell_abc1
+     cell_sm1
+     cell_sm2
+     + SOFT
+     + REGION c20_group ;
+END GROUPS
+\end{lstlisting}
+
+\begin{lstlisting}[caption={等价 Tcl},label={ex:dce-bound-tcl}]
+de_shell> create_bounds -name "c20_group" \
+   -coordinate {201970 40040 237914 75984} \
+   -exclusive {cell_abc1 cell_sm1 cell_sm2}
+\end{lstlisting}
+
+\subsubsection{端口位置}
+\subsubsection*{Port Location}
+
+对 DEF 中指定位置的每个端口，DC Explorer 在设计对应端口上设置位置。
+
+\begin{lstlisting}[caption={导入的端口位置},label={ex:dce-port-def}]
+PINS 2 ;
+   -Out1 + NET Out1 + DIRECTION OUTPUT + USE SIGNAL +
+      LAYER M3 (0 0) (4200 200) + PLACED (80875 0) N;
+   -Sel0 + NET Sel0 + DIRECTION INPUT + USE SIGNAL +
+      LAYER M4 (0 0)(200 200) + PLACED (135920 42475) N;
+END PINS
+\end{lstlisting}
+
+\begin{lstlisting}[caption={等价 Tcl},label={ex:dce-port-tcl}]
+de_shell> set_port_location Out1 -coordinate {80.875 0.000} \
+   -layer_name M3 -layer_area {0.000 0.000 4.200 0.200}
+de_shell> set_port_location Sel0 -coordinate {135.920 0.000} \
+   -layer_name M4 -layer_area {0.000 0.000 0.200 0.200}
+\end{lstlisting}
+
+支持更名端口与多层端口。例~\ref{ex:dce-port-ml-def} 与例~\ref{ex:dce-port-ml-tcl} 给出此类情况；也支持端口方向（例~\ref{ex:dce-port-orient}）。
+
+\begin{lstlisting}[caption={更名与多层端口的 DEF},label={ex:dce-port-ml-def}]
+PINS 2 ;
+- sys_addr\[23\].extra2 + NET sys_addr[23] + DIRECTION INPUT +USE SIGNAL
++ LAYER METAL4 ( 0 0 ) ( 820 5820 ) + FIXED ( 1587825 2744180 ) N ;
+- sys_addr[23] + NET sys_addr[23] + DIRECTION INPUT + USE SIGNAL + LAYER
+  METAL3 ( 0 0 ) ( 820 5820 ) + FIXED ( 1587825 2744180 ) N ;
+END PINS
+\end{lstlisting}
+
+\begin{lstlisting}[caption={多层端口等价 Tcl},label={ex:dce-port-ml-tcl}]
+de_shell> set_port_location sys_addr[23] \
+   -coordinate { 1587.825 2744.180 } \
+   -layer_name METAL3 -layer_area {0.000 0.000 0.820 5.820}
+de_shell> set_port_location sys_addr[23] \
+   -coordinate { 1587.825 2744.180 } \
+   -layer_name METAL4 -layer_area {0.000 0.000 0.820 5.820} -append
+\end{lstlisting}
+
+\begin{lstlisting}[caption={带方向的端口 DEF 与 Tcl},label={ex:dce-port-orient}]
+PINS 1;
+   - OUT + NET OUT + DIRECTION INPUT + USE SIGNAL
+      + LAYER m4 ( -120 0 ) ( 120 240 )
+      + FIXED ( 4557120 1726080 ) S ;
+END PINS
+de_shell> set_port_location OUT -coordinate { 4557.120 1726.080 } \
+   -layer_name m4 -layer_area {-0.120 -0.240 0.120 0.000}
+\end{lstlisting}
+
+\subsubsection{Preroute}
+\subsubsection*{Preroutes}
+
+DC Explorer 提取 DEF 中定义的 preroute。
+
+\begin{lstlisting}[caption={导入的 preroute},label={ex:dce-preroute-def}]
+SPECIALNETS 2 ;
+- vdd
+   + ROUTED METAL3 10000 + SHAPE STRIPE ( 10000 150000 ) ( 50000 * )
+   + USE POWER ;
+...
+END SPECIALNETS
+\end{lstlisting}
+
+\begin{lstlisting}[caption={等价 Tcl},label={ex:dce-preroute-tcl}]
+de_shell> create_net_shape -type path -net vdd -datatype 0 -path_type 0 \
+   -route_type pg_strap -layer METAL3 -width 10.000 \
+   -points {{10.000 150.000} {50.000 150.000}}
+\end{lstlisting}
+
+\subsubsection{Site Array 信息}
+\subsubsection*{Site Array Information}
+
+DC Explorer 导入 DEF 中定义的 site array；site array 定义布局区域。
+
+\begin{lstlisting}[caption={Site array DEF 与等价 Tcl},label={ex:dce-site}]
+ROW ROW_0 core 0 0 N DO 838 BY 1 STEP 560 0;
+de_shell> create_site_row -name ROW_0 -coordinate {0.000 0.000} \
+   -kind core -orient 0 -dir H -space 0.560 -count 838
+\end{lstlisting}
+
+\subsubsection{Via}
+\subsubsection*{Vias}
+
+\cmd{extract\_physical\_constraints} 提取 DEF 中定义的 via，并以与其他物理约束相同的方式存入 \texttt{.ddc}。
+用 \cmd{write\_floorplan -all} 写出时的 Tcl 示例如下：
+
+\begin{lstlisting}
+de_shell> create_via -type via -net VDD -master VIA67 \
+   -route_type pg_strap -at {746.61 2279} -orient N
+de_shell> create_via -type via_array -net VDD -master FATVIA45 \
+   -route_type pg_strap -at {1491.79 2127.8} -orient N -col 5 -row 2 \
+   -x_pitch 0.23 -y_pitch 0.23
+\end{lstlisting}
+
+\subsubsection{布线 Track}
+\subsubsection*{Routing Tracks}
+
+\cmd{extract\_physical\_constraints} 提取 DEF 中的 track 信息。Track 定义基于标准单元设计的布线网格，可用于布线；track 支持可增强 DC Explorer 中的拥塞评估与报告，使拥塞布线更精确并与 IC Compiler 更接近。
+Track 信息以与其他物理约束相同方式存入 \texttt{.ddc}。若 floorplan 含 track 类型与位置等信息，在 floorplan exploration 期间会传给 IC Compiler。
+
+DEF 中的 track 数据示例：
+\begin{lstlisting}
+TRACKS X 330 DO 457 STEP 660 LAYER METAL1 ;
+TRACKS Y 280 DO 540 STEP 560 LAYER METAL1 ;
+\end{lstlisting}
+
+\begin{lstlisting}
+de_shell> create_track -layer metal1 -dir X -coord 0.100 -space 0.200 \
+   -count 11577 -bounding_box {{0.000 0.000} {2315.400 2315.200}}
+de_shell> create_track -layer metal1 -dir Y -coord 0.200 -space 0.200 \
+   -count 11575 -bounding_box {{0.000 0.000} {2315.400 2315.200}}
+\end{lstlisting}
+
+\subsubsection{Keepout Margin}
+\subsubsection*{Keepout Margins}
+
+\cmd{extract\_physical\_constraints} 提取 DEF 中定义的 keepout margin，并以与其他物理约束相同方式存入 \texttt{.ddc}。
+
+\begin{lstlisting}
+COMPONENTS 2 ;
+- U542 OAI21XL + FIXED( 80000 80000 ) FN + HALO 10000 10000 50000 50000 ;
+- U543 OAI21XL + FIXED( 10000 20000 ) FN + HALO SOFT 15000 15000 15000
+ 15000 ;
+END COMPONENTS
+\end{lstlisting}
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 在 DC Explorer 中读取 DEF 信息
+  \item 定义物理约束
+\end{itemize}
+\end{seeAlsoBox}
+
+\subsection{extract\_physical\_constraints 的名称匹配}
+\subsubsection*{Name Matching of extract\_physical\_constraints}
+
+\cmd{extract\_physical\_constraints} 施加物理约束时，将 DEF 中的宏与端口与内存中的宏与端口匹配；找不到精确匹配时使用智能名称匹配。
+
+该命令读取的 DEF 可能来自与内存网表对象名不同的网表；名称不匹配可能由自动 ungrouping 与 \cmd{change\_names} 引起，常见来源是层次分隔符与总线记号。
+
+例如，\cmd{compile\_exploration} 自动 ungrouping 后再执行 \cmd{change\_names}，可能把正斜杠（\texttt{/}）分隔符替换为下划线（\texttt{\_}）。因此 RTL 中名为 \texttt{a/b/c/macro\_name} 的宏在已映射网表中可能变为 \texttt{a/b\_c\_macro\_name}。从 DEF 提取时，命令通过智能名称匹配自动消解这些差异。
+
+默认下列字符视为等价：
+\begin{itemize}
+  \item 层次分隔符 \texttt{\{ / \_ . \}}\\
+        例如单元 \texttt{a.b\_c/d\_e} 自动匹配 DEF 中的 \texttt{a/b\_c.d/e}。
+  \item 总线记号 \texttt{\{ [ ] \_\_ ( ) \}}\\
+        例如单元 \texttt{a [4] [5]} 自动匹配 DEF 中的 \texttt{a\_4\_\_5\_}。
+\end{itemize}
+
+要禁用智能名称匹配，可对 \cmd{extract\_physical\_constraints} 指定 \opt{-exact}，要求内存网表对象与 DEF 中对应对象精确匹配。
+
+使用 \opt{-verbose} 时，工具显示如下信息消息：
+\begin{lstlisting}
+Information: Fuzzy match cell %s in netlist with instance
+%s in DEF.
+\end{lstlisting}
+
+要用 \cmd{set\_query\_rules} 定义智能名称匹配所用规则。
+
+\begin{seeAlsoBox}
+解决 Site 名称不匹配（下文）。
+\end{seeAlsoBox}
+
+\subsection{解决 Site 名称不匹配}
+\subsubsection*{Resolving Site Names Mismatches}
+
+用 \cmd{extract\_physical\_constraints} 读取 DEF 时，DC Explorer 自动将 floorplan 中的 site 名与 Milkyway 参考库中的 tile 名匹配。
+Milkyway 参考库通常默认将 site 名设为 \texttt{unit}。但若 site 尺寸与 \texttt{unit} 不匹配，或 DEF 使用多种 site 类型，仍需定义名称映射。
+使用 \varname{mw\_site\_name\_mapping} 变量，例如：
+\begin{lstlisting}
+de_shell> set mw_site_name_mapping \
+{{def_site_name1 mw_ref_lib_site_name} \
+{def_site_name2 mw_ref_lib_site_name} }
+\end{lstlisting}
+
+可为该变量指定多对取值。
+
+\begin{seeAlsoBox}
+\cmd{extract\_physical\_constraints} 的名称匹配（上文）。
+\end{seeAlsoBox}
+
+\subsection{在 IC Compiler 中保存 Floorplan 信息}
+\subsubsection*{Saving the Floorplan Information in IC Compiler}
+
+为改善相关性，可将已映射网表读入 IC Compiler、创建基本 floorplan、导出后再读回 DC Explorer。
+
+可在 IC Compiler 中用 \cmd{write\_floorplan} 导出 floorplan，写成可读入 DC Explorer 以重建指定设计 floorplan 的 Tcl 脚本。
+下例写出所有已布局标准单元到 \texttt{placed\_std.fp} 风格文件：
+\begin{lstlisting}
+icc_shell> write_floorplan \
+   -placement {io terminal hard_macro soft_macro} -create_terminal \
+   -row -create_bound -preroute -track floorplan_for_DC.fp
+\end{lstlisting}
+
+\subsection{在 DC Explorer 中读取 Floorplan 脚本}
+\subsubsection*{Reading the Floorplan Script in DC Explorer}
+
+使用 \cmd{read\_floorplan} 读入由 \cmd{write\_floorplan} 生成、包含描述 floorplan 命令的脚本文件。
+也可用 \cmd{source} 导入，但 \cmd{source} 会报告对 DC Explorer 不适用的错误与警告；\cmd{read\_floorplan} 会去除这些不必要消息。
+此外，使用 \cmd{source} 时需手动启用模糊名称匹配；\cmd{read\_floorplan} 会自动启用。
+
+要直观检查导入的物理约束，使用 Design Vision layout 窗口中的 layout 视图。
+
+导入的物理约束会自动保存到 \texttt{.ddc}。要单独保存，提取后使用 \cmd{write\_floorplan}，以便再次读回 DC Explorer。
+
+\textbf{不应}用 \cmd{read\_floorplan} 做增量 floorplan 修改：它导入从 IC Compiler 用 \cmd{write\_floorplan} 导出的完整 floorplan，并覆盖任何现有 floorplan；\cmd{write\_floorplan} 输出通常包含移除现有 floorplan 的命令。
+
+有关导入的物理约束、floorplan 修改问题以及端口与宏名称匹配，见：
+\begin{itemize}
+  \item 导入的物理约束
+  \item \cmd{read\_floorplan} 的名称匹配
+\end{itemize}
+
+\subsection{导入的物理约束}
+\subsubsection*{Imported Physical Constraints}
+
+从 floorplan 文件导入的部分物理约束包括：
+\begin{itemize}
+  \item Voltage area
+  \item Die Area — 芯片硅边界，包围焊盘、I/O 引脚与单元等
+  \item Placement Area
+  \item Macro Location and Orientation — 对带位置且指定 \texttt{FIXED} 的单元设置位置
+  \item Hard 与 Soft Placement Blockage — 在设计上创建 placement blockage
+  \item Wiring Keepout — 由 \cmd{create\_route\_guide} 创建
+  \item Placement Bound — 按与 DEF 导入类似的两种方式提取（\cmd{update\_bounds} 增量附着，或 \cmd{create\_bounds} 新建）
+  \item Port Location — 支持更名与多层端口
+  \item Preroute — 以 \cmd{create\_net\_shape} 表示
+  \item User Shape — 导入并包含在 preroute 段
+  \item Site Array Information — 定义布局区域
+  \item Via — 导入并包含在 preroute 段
+  \item Track
+\end{itemize}
+
+\subsection{read\_floorplan 的名称匹配}
+\subsubsection*{Name Matching of read\_floorplan}
+
+在 topographical 模式下，\cmd{read\_floorplan} 施加物理约束时自动匹配 floorplan 文件与内存中的宏与端口；找不到精确匹配时使用智能名称匹配。
+名称不匹配原因及默认等价字符与 \cmd{extract\_physical\_constraints} 相同（层次分隔符与总线记号）。
+
+要用 \cmd{set\_query\_rules} 定义智能名称匹配规则。
+
+\begin{noteBox}
+不推荐使用 \cmd{source}。若仍用 \cmd{source} 导入 floorplan，须在 source 之前将 \varname{enable\_rule\_based\_query} 设为 \texttt{true} 以手动启用模糊名称匹配，例如：
+\begin{lstlisting}
+de_shell> set enable_rule_based_query true
+de_shell> source design.fp
+de_shell> set enable_rule_based_query false
+\end{lstlisting}
+\end{noteBox}
+
+% ============================================================
+\section{物理约束概览}
+\subsection*{Physical Constraints Overview}
+
+无法从 DEF 或 \cmd{read\_floorplan} 获得信息时，可手动定义物理约束。
+在 Tcl 脚本中定义后，用 \cmd{source} 施加；应在施加用户指定物理约束之前先读入设计。
+
+要了解如何手动定义物理约束，见：
+\begin{itemize}
+  \item 定义物理约束
+  \item 用于定义物理约束的命令
+\end{itemize}
+
+要报告施加到设计的任何物理约束，使用 \cmd{report\_physical\_constraints}。
+读入新的或已修改的 floorplan 之前，用 \cmd{reset\_physical\_constraints} 重置全部物理约束。
+要用 \cmd{compute\_polygons} 报告恰好覆盖对输入多边形执行布尔运算后所得区域的多边形集合。
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 在 DC Explorer 中读取 DEF 信息
+  \item 在 DC Explorer 中读取 Floorplan 脚本
+\end{itemize}
+\end{seeAlsoBox}
+
+\subsection{定义物理约束}
+\subsubsection*{Defining Physical Constraints}
+
+若未通过 floorplanning 工具提供任何 floorplan 物理约束，DC Explorer 使用下列默认物理约束：
+\begin{itemize}
+  \item 纵横比（aspect ratio）1.0（正方形布局区域）
+  \item 利用率（utilization）0.6（core area 中百分之四十为空闲空间）
+\end{itemize}
+
+也可按下列主题手动定义物理约束：
+\begin{itemize}
+  \item 定义 Die Area
+  \item 定义 Placement Area
+  \item 定义 Core Placement Area
+  \item 定义端口位置
+  \item 定义宏位置
+  \item 定义 Placement Blockage
+  \item 定义 Voltage Area
+  \item 创建 Placement Bound
+  \item 创建 Wiring Keepout
+  \item 创建 Preroute
+  \item 创建 User Shape
+  \item 为引脚定义物理约束
+  \item 创建 Via
+  \item 创建布线 Track
+  \item 创建 Keepout Margin
+  \item Placement Bound 概览
+\end{itemize}
+
+\subsubsection{定义 Die Area}
+\subsubsection*{Defining the Die Area}
+
+可用 \cmd{create\_die\_area} 在 DC Explorer 内定义 die area（cell boundary）。设计中应只有一个 die area。
+矩形可用 \opt{-coordinate}；折线形必须用 \opt{-polygon}（\opt{-polygon} 也可指定矩形，但不能用 \opt{-coordinate} 指定折线形）。
+下列命令创建相同矩形 die area：
+\begin{lstlisting}
+de_shell> create_die_area -coordinate { 0 0 100 100 }
+de_shell> create_die_area -coordinate { {0 0} {100 100} }
+de_shell> create_die_area -polygon { {0 0} {100 0} {100 100} {0 100} }
+\end{lstlisting}
+
+\cmd{get\_die\_area} 返回包含当前设计 die area 的集合；未定义则返回空字符串。
+用 \cmd{get\_attribute} 获取 \texttt{object\_class}、\texttt{bbox}、\texttt{boundary}、\texttt{name} 等；也可用 \cmd{report\_attribute} 浏览属性。
+
+\begin{lstlisting}
+de_shell> create_die_area -polygon {{0 0} {0 400} {200 400} {200 200} \
+{400 200} {400 0}}
+de_shell> get_attribute [get_die_area] object_class
+die_area
+de_shell> get_attribute [get_die_area] bbox
+{0.000 0.000} {400.000 400.000}
+de_shell> get_attribute [get_die_area] boundary
+{0.000 0.000} {0.000 400.000} {200.000 400.000} {200.000 200.000}
+{400.000 200.000} {400.000 0.000} {0.000 0.000}
+de_shell> get_attribute [get_die_area] name
+{my_design_die_area}
+\end{lstlisting}
+
+\subsubsection{定义 Placement Area}
+\subsubsection*{Defining Placement Area}
+
+若尚未用 \cmd{create\_die\_area} 定义 die area、用 \cmd{create\_site\_row} 定义 floorplan 区域，或从 floorplanning 工具导入 floorplan，可用 \cmd{set\_aspect\_ratio} 与 \cmd{set\_utilization} 估算布局区域。
+纵横比是块的高宽比，定义块形状；利用率指定希望单元在块内放置的密度。提高利用率会减小 core area。
+
+\figplaceholder{Figure 38: Using the set\_aspect\_ratio and set\_utilization Commands}{使用 set\_aspect\_ratio 与 set\_utilization}{fig:dce-aspect-util}
+
+\subsubsection{定义 Core Placement Area}
+\subsubsection*{Defining the Core Placement Area}
+
+用 \cmd{create\_site\_row} 定义 core placement area：包含所有 row、表示标准单元可放置区域的盒子。Core area 小于 cell boundary（die area）。
+焊盘、I/O 引脚与顶层电源/地环通常在 core 外；标准单元、宏与线轨通常在 core 内。设计中应只有一个 core area。
+
+Site 是叶单元可放置的预定义有效位置；site array 是布局 site 的阵列，定义布局 core area。
+创建左下角位于 (10,10)、间距 5、含 100 个 \texttt{CORE\_2H} site 的水平行：
+\begin{lstlisting}
+de_shell> create_site_row -count 100 -kind CORE_2H \
+-space 5 -coordinate {10 10}
+\end{lstlisting}
+
+用 \cmd{report\_area -physical} 报告 floorplan 信息（core area、纵横比、利用率、固定/可移动单元总面积等）。
+
+\subsubsection{定义端口位置}
+\subsubsection*{Defining Port Locations}
+
+可用 \cmd{set\_port\_side} 或 \cmd{set\_port\_location} 限制端口布局与尺寸；可指定相对或精确约束。
+
+\paragraph{定义相对端口位置}
+\paragraph*{Defining Relative Port Locations}
+
+\begin{lstlisting}
+de_shell> set_port_side port_name -side port_side
+\end{lstlisting}
+
+有效边为 left（L）、right（R）、top（T）或 bottom（B）。端口可置于指定边任意位置；若提供 port side 约束则吸附到该边，否则默认吸附到粗布局器分配位置最近的边。
+
+\figplaceholder{Figure 39: Setting Relative Port Sides}{设置相对端口边}{fig:dce-port-side}
+
+\paragraph{定义精确端口位置}
+\paragraph*{Defining Exact Port Locations}
+
+\begin{lstlisting}
+de_shell> set_port_location port_name -coordinate {x y}
+de_shell> set_port_location -coordinate {100 5000} Z
+de_shell> set_port_location -layer_name METAL1 \
+   -layer_area {-5 -10 5 10} Z
+\end{lstlisting}
+
+\opt{-layer\_name} 与 \opt{-layer\_area} 可定义金属层几何，从而定义长端口（long port），使基于虚拟布局的优化可在指定金属层任意点连接。
+长端口可以是输入、输出或双向端口；用大于最小金属面积的尺寸指定。
+
+图~\ref{fig:dce-port-dim} 说明不同类型：
+\begin{itemize}
+  \item \textbf{Long port} — 单层金属面积，仅触及块 core 边界一侧
+  \item \textbf{Flushed port} — 单层金属面积，触及边界两侧
+  \item \textbf{Multiple port} — 对块有多个连接，可触及两边或更多边，可用一层或多层；用 \cmd{set\_port\_location} 的 \opt{-append} 添加多个形状
+\end{itemize}
+
+\figplaceholder{Figure 40: Types of Port Dimension Specifications}{端口尺寸规格类型}{fig:dce-port-dim}
+
+\subsubsection{定义宏位置}
+\subsubsection*{Defining Macro Locations}
+
+\begin{lstlisting}
+de_shell> set_cell_location cell_name -coordinates {x y} -fixed \
+-orientation orientation_value
+\end{lstlisting}
+
+\opt{-coordinates} 为单元包围盒左下角坐标（微米，相对块方向）。方向取值为旋转：N（默认）、S、E、W、FN、FS、FE、FW。
+
+\subsubsection{定义 Placement Blockage}
+\subsubsection*{Defining Placement Blockages}
+
+用 \cmd{create\_placement\_blockage} 定义 placement blockage：
+\begin{lstlisting}
+de_shell> create_placement_blockage -name Blockage1 \
+   -type hard -bbox {50 160 300 280}
+\end{lstlisting}
+
+\figplaceholder{Figure 41: Defining a Hard Placement Blockage}{定义 hard placement blockage}{fig:dce-hard-blk}
+
+\cmd{get\_placement\_blockages} 返回当前设计中的 blockage 集合；可用 \opt{-within} 指定矩形或多边形区域，或用 \opt{-filter} 过滤：
+\begin{lstlisting}
+de_shell> get_placement_blockages * -within {{2 2} {25 25}}
+{"PB#5389"}
+de_shell> get_placement_blockages * -filter "area > 900"
+{"PB#4683"}
+\end{lstlisting}
+
+\subsubsection{定义 Voltage Area}
+\subsubsection*{Defining Voltage Area}
+
+用 \cmd{create\_voltage\_area} 在芯片 core 上创建 voltage area，并与层次单元关联。
+工具将 voltage area 视为独占的 hard move bound，尽量把关联单元放在 voltage area 内，并把未关联单元放在其外。
+
+\begin{lstlisting}[caption={约束实例到 voltage area}]
+de_shell> create_voltage_area -name my_area \
+   -coordinate {100 100 200 200} INST_1
+\end{lstlisting}
+
+\begin{lstlisting}[caption={约束电源域单元到 voltage area}]
+de_shell> create_voltage_area -power_domain PD1 \
+   -coordinate {100 100 200 200}
+\end{lstlisting}
+
+用 \cmd{read\_floorplan} 从 IC Compiler 导入 floorplan 时会自动定义 voltage area；从 DEF 导入时需手动定义。
+可在 Design Vision layout 窗口的 visual mode 中检查。
+
+\begin{seeAlsoBox}
+在 DC Explorer 中读取 Floorplan 脚本。
+\end{seeAlsoBox}
+
+\subsubsection{创建 Placement Bound}
+\subsubsection*{Creating Placement Bounds}
+
+为有效使用 placement bound，bound 中定义的单元数应相对设计总单元数较少；定义 bound 会缩小布局器可达最优结果的解空间。
+
+建议按下列顺序创建：
+\begin{enumerate}
+  \item 浮动 group bound（位置与尺寸由工具优化；不指定尺寸）
+  \item 固定尺寸的浮动 group bound（指定尺寸）
+  \item 固定位置与尺寸的 fixed move bound（指定坐标）
+\end{enumerate}
+
+指南：
+\begin{itemize}
+  \item 少用 soft/hard move bound
+  \item 避免将单元放入多个 bound
+  \item 注意 group bound 中少量固定单元可能移动 bound
+  \item 不要把 placement bound 当作 keepout
+  \item 在芯片上保持均匀单元密度分布
+\end{itemize}
+
+用 \cmd{create\_bounds} 指定各类 bound：
+\begin{lstlisting}
+# Soft group bound
+de_shell> create_bounds -dimension {100 100} -name temp1 INST1
+# Soft move bound
+de_shell> create_bounds -coordinate {0 0 10 10} -name temp2 INST2
+# Hard group bound
+de_shell> create_bounds -dimension {100 100} \
+   -type hard -name temp3 INST3
+# Hard move bound
+de_shell> create_bounds -coordinate {0 0 10 10} \
+   -type hard -name temp4 INST4
+# Exclusive move bound
+de_shell> create_bounds -coordinate {0 0 10 10} \
+   -type hard -exclusive -name temp5 INST5
+\end{lstlisting}
+
+\cmd{get\_bounds} 返回 bound 集合；默认最多显示 100 个对象（可用 \varname{collection\_result\_display\_limit} 更改）：
+\begin{lstlisting}
+de_shell> get_bounds my_bound*
+\end{lstlisting}
+
+\begin{seeAlsoBox}
+Placement Bound 概览（下文）。
+\end{seeAlsoBox}
+
+\subsubsection{创建 Wiring Keepout}
+\subsubsection*{Creating Wiring Keepouts}
+
+\begin{lstlisting}
+de_shell> create_route_guide -name "my_keepout_1" \
+   -no_signal_layers "METAL1" -coordinate {12 12 100 100}
+\end{lstlisting}
+
+\subsubsection{创建 Preroute}
+\subsubsection*{Creating Preroutes}
+
+可在布线其余网络之前对时钟网等做 preroute。全局布线时工具在计算拥塞图时考虑这些 preroute；该图与 IC Compiler 一致，有助于缓解因 floorplan 信息不一致导致的相关性问题。
+
+用 \cmd{create\_net\_shape} 定义 preroute。图~\ref{fig:dce-preroute-types} 给出三类 net shape：path、wire（水平/垂直）与 rectangle。
+
+\figplaceholder{Figure 42: Types of Preroutes}{Preroute 类型}{fig:dce-preroute-types}
+
+\begin{lstlisting}[caption={创建 wire net shape}]
+de_shell> create_net_shape -type wire -net VSS \
+   -bbox {0 60 80 80} -layer METAL5 -route_type pg_strap \
+   -net_type ground
+de_shell> create_net_shape -type wire -net VSS \
+   -origin {50 100} -width 20 -length 80 -layer METAL4 \
+   -route_type pg_strap -vertical
+\end{lstlisting}
+
+\begin{lstlisting}[caption={创建 path net shape}]
+de_shell> create_net_shape -type path -net VSS \
+   -points {70 30 110 30 110 90 150 90 150 110} \
+   -width 0.20 -layer M3 -route_type pg_std_cell_pin_conn
+\end{lstlisting}
+
+\begin{lstlisting}[caption={创建 rectangle net shape}]
+de_shell> create_net_shape -type rect -net VSS \
+   -bbox {{80 140} {160 180}} -layer METAL1 -route_type pg_strap
+\end{lstlisting}
+
+\subsubsection{创建 User Shape}
+\subsubsection*{Creating User Shapes}
+
+用 \cmd{create\_user\_shape} 创建不与网络关联的金属形状。\opt{-type} 可为 wire（水平/垂直）、path、rectangle、polygon、trapezoid。
+未指定 \opt{-type} 时按优先级判定：\opt{-origin} $\rightarrow$ wire；\opt{-bbox} 且带 \opt{-path\_type}/\opt{-route\_type}/\opt{-vertical} $\rightarrow$ wire，否则 rectangle；\opt{-points} $\rightarrow$ path。
+
+\begin{lstlisting}
+de_shell> create_user_shape -type wire \
+   -origin {0 0} -length 10 -width 2 -layer M1
+\end{lstlisting}
+
+用 \cmd{write\_floorplan -user\_shape} 保存 user shape；或用 \cmd{write\_floorplan -preroute} 同时保存 user shape 与 net shape。
+\cmd{create\_user\_shape} 命令保存在 floorplan 文件的 Preroute 段。用 \cmd{remove\_user\_shape *} 移除全部 user shape。
+
+可在 DC Explorer Graphical 的 layout 窗口中查看；在 View Settings 面板控制可见性。详见 Design Vision Help/User Guide 中 ``Examining Preroutes''。
+
+\subsubsection{为引脚定义物理约束}
+\subsubsection*{Defining Physical Constraints for Pins}
+
+可用 \cmd{set\_pin\_physical\_constraints} 与 \cmd{create\_pin\_guide} 控制 I/O 单元与 terminal 的布局。
+
+\begin{noteBox}
+DC Explorer 仅支持顶层设计端口布局，不支持 IC Compiler design planning 所支持的 plan group 或宏引脚布局。
+\end{noteBox}
+
+\begin{lstlisting}
+de_shell> set_pin_physical_constraints -pin_name {CCEN} -width 1.2 \
+   -depth 1.0 -side 1 -offset 10 -order 2
+de_shell> create_pin_guide -bbox {{-20 50} {20 800}} \
+   [get_ports xyz*] -name abc
+\end{lstlisting}
+
+\cmd{compile\_exploration} 会遵守这些约束。
+默认布局引脚时将端口吸附到 track；将 \varname{dct\_port\_dont\_snap\_onto\_tracks} 设为 \texttt{true} 可禁止吸附。
+
+引脚约束保存在 \texttt{.ddc} 中，新会话读入后恢复。
+\cmd{write\_floorplan} 与 \cmd{report\_physical\_constraints} 不报告引脚约束；可在 layout 窗口 View Settings 中选择 Pin Guide 可见性验证。
+DC Explorer 与 floorplan exploration 之间不互相传递引脚约束。
+
+\subsubsection{创建 Via}
+\subsubsection*{Creating Vias}
+
+若工艺文件中已定义 master via，可用 \cmd{create\_via} 创建 via：
+\begin{lstlisting}
+de_shell> create_via -type via -net vdd -master via1 \
+   -route_type pg_strap -at {213 215} -orient E
+de_shell> create_via -type via_array -net vdd -master via4 \
+   -route_type signal_route -at {215 215} -orient W -col 4 -row 3 \
+   -x_pitch 0.4 -y_pitch 0.5
+\end{lstlisting}
+
+若 via 在 DEF 中定义但不在工艺文件中，会在 Milkyway 设计库中创建 FRAM 视图保存 via master；实例化为 preroute 时保存为引用该 master 的 via cell。用 \cmd{remove\_via} 移除。
+
+\begin{noteBox}
+\cmd{write\_floorplan} 无法写出供新会话使用的 via master 定义；FRAM 中的 via master 不会传到新会话，因此 IC Compiler 与 DC Explorer 无法 source 使用工艺文件中未定义 via master 的 \cmd{create\_via}。
+\end{noteBox}
+
+可在 Design Vision layout 窗口查看 preroute via（默认可见）。
+
+\subsubsection{创建布线 Track}
+\subsubsection*{Creating Routing Tracks}
+
+用 \cmd{create\_track} 为布线层与 polygon 层创建 track。Track 覆盖整个 die area；若 die area 为多边形，track 以矩形覆盖并可能伸出多边形外。
+必须为 track 指定 polygon 层或布线层；在 polygon 层上创建 track 并不支持在该层布线。
+
+\begin{lstlisting}
+de_shell> create_track -layer MET3 -dir Y -coord 0.000 -space 0.290 \
+   -count 4827 -bounding_box {{0.000 0.000} {1460.000 1400.000}}
+de_shell> create_track -layer MET3 -dir X -coord 0.000 -space 0.290 \
+   -count 5034 -bounding_box {{0.000 0.000} {1460.000 1400.000}}
+\end{lstlisting}
+
+\cmd{get\_tracks} 按条件返回 track 集合；\cmd{report\_track}（无选项）报告金属层、方向、起点、数量、pitch 与属性来源。
+
+表~\ref{tab:dce-track-cmds} 汇总 track 相关命令。\cmd{create\_track} 与 \cmd{remove\_track} 由 \cmd{write\_floorplan} 写出；表中其他命令不会。
+
+\begin{table}[htbp]
+\centering
+\caption{布线 Track 命令摘要}
+\label{tab:dce-track-cmds}
+\begin{tabular}{@{}ll@{}}
+\toprule
+命令 & 说明 \\
+\midrule
+\cmd{create\_track} & 为布线层与 polygon 层创建 track \\
+\cmd{remove\_track} & 从当前设计移除 track \\
+\cmd{report\_track} & 报告指定层或全部层的布线 track \\
+\cmd{get\_tracks} & 返回满足选择条件的 track 集合 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{创建 Keepout Margin}
+\subsubsection*{Creating Keepout Margins}
+
+用 \cmd{set\_keepout\_margin} 为指定单元或库单元创建 keepout margin；也可指定 \opt{-tracks\_per\_macro\_pin} 自动推导：
+\begin{lstlisting}
+de_shell> set_keepout_margin -tracks_per_macro_pin .6 \
+   -min_padding_per_macro .1 -max_padding_per_macro 0.2
+\end{lstlisting}
+
+推导的 keepout margin 始终为 hard（忽略 \opt{-type}）；\opt{-all\_macros}、\opt{-macro\_masters}、\opt{-macro\_instances} 不允许用于推导 margin。
+推导 margin 受 \opt{-min\_padding\_per\_macro} 与 \opt{-max\_padding\_per\_macro} 限制。
+
+用 \cmd{remove\_keepout\_margin} 移除；用 \cmd{report\_physical\_constraints} 或 \cmd{report\_keepout\_margin} 报告：
+\begin{lstlisting}
+de_shell> report_keepout_margin -type hard MY_CELL
+\end{lstlisting}
+
+\subsection{Placement Bound 概览}
+\subsubsection*{Placement Bounds Overview}
+
+Placement bound 是在其内放置单元与层次单元的矩形或折线形区域，用于将时钟门控单元或其他时序关键单元组聚在一起。布局期间工具确保所分组的单元保持在一起、不被其他逻辑拆开。
+
+建议尽量不强加 bound 约束，以便工具充分优化时序与可布线性；当 QoR 不满足要求时，可用 \cmd{create\_bounds} 改善。
+
+可指定 move bound 与 group bound。Move bound 可为 soft、hard 或 exclusive；group bound 可为 soft 或 hard：
+\begin{itemize}
+  \item \textbf{Soft} — 指定布局目标，不保证单元落在 bound 内；时序或拥塞代价过高时可能放在区域外（默认）
+  \item \textbf{Hard} — 强制指定单元放在 bound 内
+  \item \textbf{Exclusive} — 强制指定单元在 bound 内，所有其他单元必须在外
+\end{itemize}
+
+\begin{table}[htbp]
+\centering
+\caption{Bound 命令摘要}
+\label{tab:dce-bounds-cmds}
+\begin{tabular}{@{}ll@{}}
+\toprule
+命令 & 说明 \\
+\midrule
+\cmd{create\_bounds} & 创建矩形与折线形 move/group bound \\
+\cmd{update\_bounds} & 通过添加或移除内容更新 bound \\
+\cmd{get\_bounds} & 返回当前设计中的 bound 集合 \\
+\cmd{remove\_bounds} & 移除用 \cmd{create\_bounds} 设置的 bound \\
+\cmd{report\_bounds} & 报告 bound 与 bound ID \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{seeAlsoBox}
+创建 Placement Bound（上文）。
+\end{seeAlsoBox}
+
+\subsection{用于定义物理约束的命令}
+\subsubsection*{Commands for Defining Physical Constraints}
+
+表~\ref{tab:dce-phys-cmds} 列出用于定义物理约束的命令。
+
+\begin{table}[htbp]
+\centering
+\caption{定义物理约束的命令}
+\label{tab:dce-phys-cmds}
+\small
+\begin{tabular}{@{}p{0.52\textwidth}p{0.38\textwidth}@{}}
+\toprule
+要定义的物理约束 & 使用的命令 \\
+\midrule
+Die Area & \cmd{create\_die\_area} \\
+未知精确面积时的 floorplan 估算 & \cmd{set\_aspect\_ratio} 与 \cmd{set\_utilization} \\
+精确 core area & \cmd{create\_site\_row} \\
+相对端口位置 & \cmd{set\_port\_side} \\
+精确端口位置 & \cmd{set\_port\_location} \\
+宏位置与方向 & \cmd{set\_cell\_location} \\
+Placement keepout（blockage） & \cmd{create\_placement\_blockage} \\
+Voltage area & \cmd{create\_voltage\_area} \\
+Placement bound & \cmd{create\_bounds} \\
+Wiring keepout & \cmd{create\_route\_guide} \\
+Preroute & \cmd{create\_net\_shape} \\
+User shape & \cmd{create\_user\_shape} \\
+引脚物理约束 & \cmd{set\_pin\_physical\_constraints} 与 \cmd{create\_pin\_guide} \\
+Via & \cmd{create\_via} \\
+Track & \cmd{create\_track} \\
+Keepout margin & \cmd{set\_keepout\_margin} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+要用 \cmd{report\_physical\_constraints} 报告已施加约束；用 \cmd{reset\_physical\_constraints} 在读入新/修改 floorplan 前重置；用 \cmd{compute\_polygons} 报告布尔运算后的多边形集合。
+
+\begin{seeAlsoBox}
+物理约束概览（上文）。
+\end{seeAlsoBox}
+
+% ============================================================
+\section{保存物理约束}
+\subsection*{Saving Physical Constraints}
+
+可用 \cmd{write\_floorplan} 以 IC Compiler 或 IC Compiler II 格式保存 floorplan 信息。
+
+\subsection{IC Compiler 格式}
+\subsubsection*{IC Compiler Format}
+
+默认情况下，\cmd{write\_floorplan} 以 IC Compiler 格式写出物理约束信息。输出为包含 bound、placement blockage、route guide、plan group、voltage area 等 floorplan 信息的命令脚本文件。
+
+从 DC Explorer 写出 floorplan 时，应使用 \opt{-all} 写出完整 floorplan。该命令也提供写出部分 floorplan 的选项。
+
+要在 IC Compiler 中用该输出创建 floorplan，必须从设计顶层用 \cmd{read\_floorplan} 读入。也可用 \cmd{source}，但会报告对 DC Explorer 不适用的错误与警告；\cmd{read\_floorplan} 会去除这些消息，并自动启用模糊名称匹配（\cmd{source} 需手动启用）。
+
+\subsection{IC Compiler II 格式}
+\subsubsection*{IC Compiler II Format}
+
+要以 IC Compiler II 格式保存，使用 \cmd{write\_floorplan -format icc2}。输出为包含 Tcl 与 DEF 格式文件的文件夹。
+
+指定 \opt{-format icc2} 时，工具写出完整 floorplan；允许写出部分 floorplan 的选项会被忽略。
+要在 IC Compiler II 中使用，须从顶层设计 source 输出文件夹中的 \texttt{floorplan.tcl}，以将全部约束加载到 IC Compiler II 会话。
+
+下列文件由该命令生成并传递约束：
+\begin{itemize}
+  \item \texttt{floorplan.def} — Die area、row、track、component、pin、via、special net、keepout margin 等
+  \item \texttt{floorplan.tcl} — Route guide、placement blockage、bound、层布线方向
+  \item \texttt{voltage\_area.tcl} — Voltage area
+  \item \texttt{rp.tcl} — Relative placement group
+  \item \texttt{routing\_rule.layer.tcl} — 网络上的布线层约束
+  \item \texttt{routing\_rule.tcl} — 非默认布线规则定义
+  \item \texttt{routing\_rule.net.tcl} — 网络上的布线规则
+\end{itemize}
+
+% ============================================================
+\section{以 ASCII 格式保存供 IC Compiler II 使用}
+\subsection*{Saving in ASCII Format for IC Compiler II}
+
+可用 \cmd{write\_icc2\_files} 生成将设计加载到 IC Compiler II 所需的全部文件。
+该命令将当前设计的设计文件与 Tcl 脚本写入 \opt{-output} 指定的目录，可包括：
+\begin{itemize}
+  \item Verilog 格式网表
+  \item 传播的开关活动信息（backward SAIF）
+  \item Tcl floorplan 与 DEF 文件
+  \item 设计功耗意图（UPF 命令脚本）
+  \item SCANDEF 格式扫描链信息
+  \item SDC 格式约束
+  \item 时序上下文（scenario）
+\end{itemize}
+
+此外还写出：
+\begin{itemize}
+  \item 以 IC Compiler II 格式表示的 DC Explorer 设置
+  \item 在 IC Compiler II 中加载全部所生成数据的顶层脚本
+\end{itemize}
+
+\cmd{write\_icc2\_files} 以可被 IC Compiler II 读入、用以创建与 DC Explorer 中相同 scenario 集的格式写出时序上下文（scenario）。
+
+所生成脚本\textbf{不包含}在 IC Compiler II 中创建库的脚本；需先创建与 DC Explorer 所用库一致的库，再 source 顶层脚本。
+
+与 \cmd{set\_host\_options} 配合时，\cmd{write\_icc2\_files} 可在同一计算机上最多使用用户指定数量的 CPU 核并行执行。详见「使用多核技术」。
+
+\begin{lstlisting}[caption={从 DC Explorer 以 IC Compiler II 格式写出设计信息}]
+# Perform synthesis
+de_shell> compile_exploration -scan -gate_clock
+# Change names if needed
+de_shell> change_names -rules verilog -hierarchy
+# Save the file for IC Compiler II
+de_shell> write_icc2_files -output ./icc2_files
+de_shell> quit
+\end{lstlisting}
+
+\begin{lstlisting}[caption={将设计读入 IC Compiler II}]
+# Perform library setting in IC Compiler II
+icc2_shell> source -echo -verbose icc2_lib_setting.tcl
+# Load the design using script created by write_icc2_files
+icc2_shell> source -echo -verbose icc2_files/ORCA.icc2_script.tcl
+# Continue with the flow
+icc2_shell> commit_upf
+icc2_shell> place_opt
+\end{lstlisting}
+
+若运行命令时出现警告或错误，工具发出信息消息指向含警告/错误信息的日志：
+\begin{lstlisting}
+de_shell> write_icc2_files -output ./icc2_files
+Information: During the execution of write_icc2_files error messages were
+issued, please check ./icc2_files/write_icc2_files.log files. (DCT-228)
+\end{lstlisting}
+
+\subsection{限制}
+\subsubsection*{Limitations}
+
+\cmd{write\_icc2\_files} 当前有下列限制：
+\begin{itemize}
+  \item 不支持层次化流程。
+  \item 仅包含下列施加在库单元上的约束：
+  \begin{itemize}
+    \item SDC：\cmd{set\_timing\_derate} 与 \cmd{set\_driving\_cell}
+    \item UPF：\cmd{map\_isolation\_cell}、\cmd{map\_retention\_cell} 等
+  \end{itemize}
+  \item 下列命令部分支持：
+  \begin{itemize}
+    \item \cmd{set\_congestion\_options} — \opt{-max\_util} 仅对全局设置包含，不对区域设置包含
+    \item \cmd{set\_multi\_vth\_constraint} — 仅传递库中定义的阈值电压组；用户自定义组的设置不包含
+  \end{itemize}
+  \item 下列变量部分支持：
+  \begin{itemize}
+    \item \varname{power\_default\_toggle\_rate\_type} — 等价 IC Compiler II 变量仅支持 \texttt{fastest\_clock}；\texttt{absolute} 设置不传递
+    \item \varname{placer\_channel\_detect\_mode} — 等价变量仅支持 \texttt{true}/\texttt{false}；\texttt{auto} 不传递
+    \item \varname{bus\_naming\_style} — 仅支持 IC Compiler II 中定义的分隔符：\texttt{[ ]}、\texttt{\{ \}}、\texttt{( )}、\texttt{< >}
+  \end{itemize}
+\end{itemize}
+
+% ============================================================
+\section{包含仅物理单元}
+\subsection*{Including Physical-Only Cells}
+
+可在 floorplan 中包含无逻辑功能的物理单元，称为仅物理单元（physical-only cell），例如 filler、tap、flip-chip pad、endcap、decap。
+虽无逻辑功能，它们会创建工具在优化与拥塞分析中考虑的 placement blockage。
+
+下列各节描述对仅物理单元的支持：
+\begin{itemize}
+  \item 指定仅物理单元
+  \item 从 DEF 提取仅物理单元
+  \item 报告仅物理单元
+\end{itemize}
+
+\subsection{指定仅物理单元}
+\subsubsection*{Specifying Physical-Only Cells}
+
+手动指定仅物理单元的步骤：
+\begin{enumerate}
+  \item 对 \cmd{create\_cell} 使用 \opt{-only\_physical} 创建仅物理单元，例如：
+\begin{lstlisting}
+de_shell> create_cell -only_physical MY_U_PO_CELL MY_FILL_CELL
+Information: create physical-only cell 'MY_U_PO_CELL'
+Warning: The newly created cell does not have location.
+         Timing will be inaccurate. (DCT-004)
+\end{lstlisting}
+        这会创建引用物理库单元 \texttt{MY\_FILL\_CELL} 的 \texttt{MY\_U\_PO\_CELL}，并在其上设置 \texttt{is\_physical\_only} 属性。
+  \item 为单元分配位置。与有逻辑功能的物理单元不同，综合期间 DC Explorer 不会为仅物理单元分配位置。可用下列方法之一：
+  \begin{itemize}
+    \item \textbf{通过 DEF 分配位置} — 在 DEF 中定义位置后，用 \cmd{extract\_physical\_constraints} 施加：
+\begin{lstlisting}
+COMPONENTS 1 ;
+- MY_U_PO_CELL MY_FILL_CELL + FIXED ( 3100000 700000 ) N ;
+END COMPONENTS
+\end{lstlisting}
+    \item \textbf{通过 Tcl 命令分配位置} — 在 Tcl floorplan 文件中定义，并用 \cmd{read\_floorplan} 读入。必须设置 \texttt{is\_fixed}，否则工具忽略位置：
+\begin{lstlisting}
+de_shell> set obj [get_cells {"MY_U_PO_CELL"} -all]
+de_shell> set_attribute -quiet $obj orientation N
+de_shell> set_attribute -quiet $obj origin {3100.000 700.000}
+de_shell> set_attribute -quiet $obj is_fixed TRUE
+\end{lstlisting}
+    \item \textbf{使用 \cmd{set\_cell\_location}}：
+\begin{lstlisting}
+de_shell> set_cell_location -coordinates {3100.00 700.00} \
+   -orientation N -fixed MY_U_PO_CELL
+\end{lstlisting}
+  \end{itemize}
+\end{enumerate}
+
+\begin{seeAlsoBox}
+\begin{itemize}
+  \item 从 DEF 提取仅物理单元
+  \item 报告仅物理单元
+\end{itemize}
+\end{seeAlsoBox}
+
+\subsection{从 DEF 提取仅物理单元}
+\subsubsection*{Extracting Physical-Only Cells From a DEF File}
+
+要对 \cmd{extract\_physical\_constraints} 使用 \opt{-allow\_physical\_cells}。DEF 中的仅物理单元定义必须包含 \texttt{+FIXED} 属性，否则工具忽略位置。
+
+\begin{lstlisting}
+de_shell> extract_physical_constraints \
+   -allow_physical_cells my_design.def
+\end{lstlisting}
+
+\begin{lstlisting}[caption={两个 filler 单元的 DEF 定义}]
+COMPONENTS 2 ;
+- fill_1 FILL_CELL + FIXED ( 3100000 700000 ) N ;
+- fill_2 FILL_CELL + FIXED ( 3000000 600000 ) N ;
+END COMPONENTS
+\end{lstlisting}
+
+下列类型视为仅物理单元；使用 \opt{-allow\_physical\_cells} 时工具以 \texttt{is\_physical\_only} 标记：
+\begin{itemize}
+  \item 标准单元 filler
+  \item Pad filler
+  \item Corner cell
+  \item Chip cell
+  \item Cover cell
+  \item Tap cell
+  \item 仅含电源与地端口的单元
+\end{itemize}
+
+此外，该选项还会提取 DEF 中未被识别为仅物理单元的某些单元（如 ROM/RAM 等逻辑单元）；工具用这些新逻辑单元更新当前设计，并包含在 Verilog 网表中。
+
+\begin{noteBox}
+DEF 中的仅物理单元定义必须包含单元位置。综合期间 DC Explorer 不会为仅物理单元分配位置。
+\end{noteBox}
+
+\subsection{报告仅物理单元}
+\subsubsection*{Reporting Physical-Only Cells}
+
+默认工具在所有仅物理单元上设置 \texttt{is\_physical\_only}。检查某单元是否为仅物理单元：
+\begin{lstlisting}
+de_shell> get_attribute [get_cells -all $cell_name] is_physical_only
+\end{lstlisting}
+
+报告方式：
+\begin{itemize}
+  \item \cmd{report\_cell -only\_physical} — 报告当前设计的仅物理单元
+  \item \cmd{report\_physical\_constraints} — 报告含仅物理单元信息的 floorplan
+  \item \cmd{all\_physical\_only\_cells} — 返回设计中全部仅物理单元的集合
+\end{itemize}
+
+\subsection{保存仅物理单元}
+\subsubsection*{Saving Physical-Only Cells}
+
+用 \cmd{write\_floorplan} 保存（含仅物理单元信息）；用 \cmd{read\_floorplan} 读回。
+仅物理单元信息及其他约束（如时序）保存在 \texttt{.ddc} 中，可再次读入 DC Explorer。
+
+\begin{noteBox}
+与所有其他 floorplan 信息类似，仅物理单元信息不写出到 ASCII 网表或 Milkyway 接口，也不能通过 \texttt{.ddc} 传给 IC Compiler。将 floorplan 传给 IC Compiler 的唯一方式是使用 DC Explorer 中的 floorplan exploration。
+\end{noteBox}
+
+% ============================================================
+\section{相对布局}
+\subsection*{Relative Placement}
+
+DC Explorer 的相对布局能力允许创建指定实例相对列/行位置的结构，称为相对布局结构（relative placement structure），属于布局约束。
+在布局与合法化期间这些结构被保留，结构中的单元作为单一实体放置。相对布局亦称物理 datapath 或结构化布局。
+
+下列主题描述相对布局流程及如何执行相对布局：
+\begin{itemize}
+  \item 相对布局概览
+  \item 运行相对布局流程
+  \item 指定相对布局约束
+  \item 使用 HDL Compiler 指令创建相对布局
+\end{itemize}
+
+\subsection{相对布局概览}
+\subsubsection*{Relative Placement Overview}
+
+相对布局常用于 datapath 与寄存器，但也可用于任何单元，以控制门级逻辑组的精确相对布局拓扑并定义电路版图。
+可用相对布局探索更短线长、更低拥塞、更好时序、skew 控制、更少 via、更好良率以及更低动态/漏电功耗等 QoR 收益。
+
+\subsubsection{相对布局约束}
+\subsubsection*{Relative Placement Constraints}
+
+可用下列方式之一指定相对布局约束：
+\begin{itemize}
+  \item \textbf{指定相对布局约束} — 使用与 IC Compiler 类似的专用 Tcl 命令集
+  \item \textbf{使用 HDL Compiler 指令} — 在 RTL、GTECH 网表或已映射门级网表中使用 HDL compiler directive
+\end{itemize}
+
+创建并注释相对布局约束以生成实例矩阵结构并控制其布局。在物理优化中使用已注释网表时，工具保留该结构并将其作为单一实体或组放置，如图~\ref{fig:dce-rp-fp}。
+
+\figplaceholder{Figure 43: Relative Placement in a Floorplan}{Floorplan 中的相对布局}{fig:dce-rp-fp}
+
+\subsubsection{相对布局的收益}
+\subsubsection*{Benefits of Relative Placement}
+
+\begin{itemize}
+  \item 为遗留或 IP 设计维持结构化布局的方法
+  \item 缩小设计关键区域的布局搜索空间，提高 QoR（线长、时序、功耗）可预测性
+  \item 与 IC Compiler 更好相关
+  \item 可最小化拥塞并改善可布线性
+\end{itemize}
+
+\subsubsection{相对布局注意事项}
+\subsubsection*{Considerations for Relative Placement}
+
+\begin{itemize}
+  \item 相对布局约束由 \cmd{uniquify} 与 \cmd{ungroup} 保留。
+  \item DC Explorer 自动在每个相对布局单元上放置 \texttt{size\_only} 属性以保留相对布局结构。
+  \item 确保相对布局适用于您的设计。设计可同时含结构化与非结构化元素；datapath 与流水线设计更适合结构化布局。对更适合由工具布局的单元指定相对布局约束可能产生差结果。
+  \item 相对布局约束保留在 \texttt{.ddc} 中，不会自动传到 IC Compiler。可用 \cmd{write\_rp\_groups} 写出可读入 IC Compiler 的 Tcl 脚本。另见 \textit{IC Compiler Implementation User Guide}。
+\end{itemize}
+
+\begin{seeAlsoBox}
+指定相对布局约束（下文）。
+\end{seeAlsoBox}
+
+\subsection{运行相对布局流程}
+\subsubsection*{Running the Relative Placement Flow}
+
+图~\ref{fig:dce-rp-flow} 给出 DC Explorer 中相对布局流程概览。
+
+\figplaceholder{Figure 44: Overview of the Relative Placement Flow}{相对布局流程概览}{fig:dce-rp-flow}
+
+步骤如下：
+\begin{enumerate}
+  \item 在 DC Explorer 中读入下列文件之一或多项：
+  \begin{itemize}
+    \item 带 HDL compiler directive 相对布局约束的 RTL、GTECH 或已映射门级网表
+    \item 无相对布局约束的已映射门级网表（在步骤 2 用 Tcl 指定）
+  \end{itemize}
+  \item 对无相对布局约束的已映射门级网表，用 Tcl 定义约束：
+  \begin{enumerate}
+    \item 用 \cmd{create\_rp\_group} 创建相对布局组
+    \item 用 \cmd{add\_to\_rp\_group} 向组添加相对布局对象\\
+          工具用相对布局约束注释网表，并对这些单元施加隐式 \texttt{size\_only}。
+  \end{enumerate}
+  \item 读入 floorplan 信息，例如：
+\begin{lstlisting}
+de_shell> extract_physical_constraints floorplan.def
+\end{lstlisting}
+  \item 用 \cmd{check\_rp\_groups} 检查相对布局。\\
+        该命令仅报告步骤 2 中定义的约束；由 HDL compiler directive 指定的相对布局数据在 \cmd{compile\_exploration} 之后才会报告。
+  \item 用 \cmd{compile\_exploration} 编译并优化设计。
+  \item 在 Design Vision layout 视图中直观验证布局。\\
+        Layout 视图显示用 \cmd{extract\_physical\_constraints} 或其他 Tcl 读入的 floorplan 约束。需链接全部适用设计与库以获得准确 floorplan。
+\begin{noteBox}
+必须将 \varname{de\_enable\_physical\_flow} 设为 \texttt{true} 以启用物理流程能力。
+\end{noteBox}
+  \item 用 \cmd{write\_rp\_groups} 将相对布局约束与数据写出到文件。\\
+        要导入 IC Compiler，source 该文件，或对 \cmd{import\_designs} 使用 \opt{-rp\_constraint}。
+\end{enumerate}
+
+更多信息另见 \textit{HDL Compiler for SystemVerilog User Guide}、\textit{HDL Compiler for VHDL User Guide}，以及 \textit{Design Vision User Guide} 中的 Viewing the Floorplan 主题。
+
+\begin{seeAlsoBox}
+指定相对布局约束（下文）。
+\end{seeAlsoBox}
+
+\subsection{指定相对布局约束}
+\subsubsection*{Specifying Relative Placement Constraints}
+
+相对布局允许创建指定实例相对列/行位置的结构；布局与优化期间这些结构被保留，结构中的单元作为单一实体放置。
+
+要了解如何指定，见：
+\begin{itemize}
+  \item 相对布局命令摘要
+  \item 创建相对布局组
+  \item 锚定相对布局组
+  \item 向组添加对象
+  \item 在列内对齐叶单元
+  \item 查询相对布局组
+  \item 检查相对布局约束
+  \item 保存相对布局信息
+  \item 移除相对布局组、对象与属性
+\end{itemize}
+
+\subsubsection{相对布局命令摘要}
+\subsubsection*{Summary of Relative Placement Commands}
+
+表~\ref{tab:dce-rp-cmds} 汇总 DC Explorer 中可用的相对布局命令。
+
+\begin{table}[htbp]
+\centering
+\caption{相对布局命令}
+\label{tab:dce-rp-cmds}
+\small
+\begin{tabular}{@{}lp{0.55\textwidth}@{}}
+\toprule
+命令 & 说明 \\
+\midrule
+\cmd{create\_rp\_group} & 创建新的相对布局组 \\
+\cmd{add\_to\_rp\_group} & 向相对布局组添加项 \\
+\cmd{set\_rp\_group\_options} & 设置相对布局组属性 \\
+\cmd{report\_rp\_group\_options} & 报告相对布局组属性 \\
+\cmd{get\_rp\_groups} & 创建匹配条件的相对布局组集合 \\
+\cmd{write\_rp\_groups} & 写出指定组的相对布局信息 \\
+\cmd{all\_rp\_groups} & 返回指定相对布局组及其层次中全部子组的集合 \\
+\cmd{all\_rp\_hierarchicals} & 返回作为指定组祖先的层次相对布局组集合 \\
+\cmd{all\_rp\_inclusions} & 返回包含指定组的层次相对布局组集合 \\
+\cmd{all\_rp\_instantiations} & 返回实例化指定组的层次相对布局组集合 \\
+\cmd{all\_rp\_references} & 返回包含指定单元（叶单元或含已实例化相对布局组的层次单元）的相对布局组集合 \\
+\cmd{check\_rp\_groups} & 检查相对布局约束并报告失败 \\
+\cmd{remove\_rp\_groups} & 移除相对布局组列表 \\
+\cmd{remove\_rp\_group\_options} & 移除指定相对布局组的属性 \\
+\cmd{remove\_from\_rp\_group} & 从指定相对布局组移除单元、组或 keepout \\
+\cmd{rp\_group\_inclusions} & 返回直接包含的组（用 \cmd{add\_to\_rp\_group -hierarchy} 添加）的集合 \\
+\cmd{rp\_group\_instantiations} & 返回直接实例化的组（用 \cmd{add\_to\_rp\_group -hierarchy -instance} 添加）的集合 \\
+\cmd{rp\_group\_references} & 返回直接嵌入的叶单元、直接包含且含层次实例化单元的单元，或二者 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{创建相对布局组}
+\subsubsection*{Creating Relative Placement Groups}
+
+相对布局组是单元、组与 keepout 的关联，由所用行数与列数定义。用 \cmd{create\_rp\_group} 创建。
+
+命令创建名为 \texttt{design\_name::group\_name} 的组（\texttt{design\_name} 由 \opt{-design} 指定）。在其他相对布局命令中引用该组时必须使用此名称或相对布局组集合。
+未使用 \opt{-design} 时默认为当前设计；未指定任何选项时创建一列一行且无对象的组。用 \cmd{add\_to\_rp\_group} 添加对象。
+
+创建六列六行的 \texttt{designA::rp1}：
+\begin{lstlisting}
+de_shell> create_rp_group rp1 -design designA -columns 6 -rows 6
+\end{lstlisting}
+
+\figplaceholder{Figure 45: Relative Placement Column and Row Positions}{相对布局的列与行位置}{fig:dce-rp-col-row}
+
+在该图中：
+\begin{itemize}
+  \item 列从列 0（最左列）计数
+  \item 行从行 0（最底行）计数
+  \item 列宽由该列最宽单元决定
+  \item 行高由该行最高单元决定
+  \item 不必使用结构中的全部位置（例如位置 0 3 与 4 1 未使用）
+\end{itemize}
+
+\subsubsection{锚定相对布局组}
+\subsubsection*{Anchoring Relative Placement Groups}
+
+默认工具可将相对布局组放在 core area 内任意位置。可通过锚定控制顶层相对布局组的布局。
+
+对 \cmd{create\_rp\_group} 或 \cmd{set\_rp\_group\_options} 使用 \opt{-x\_offset} 与 \opt{-y\_offset}（微米浮点值，相对芯片原点）。
+若同时指定 x 与 y，组锚定在该位置；若只指定一个坐标，工具可沿未指定坐标滑动组以确定布局。
+
+\begin{lstlisting}
+de_shell> create_rp_group misc1 -design block1 \
+   -columns 3 -rows 10 -x_offset 100 -y_offset 100
+\end{lstlisting}
+
+\subsubsection{向组添加对象}
+\subsubsection*{Adding Objects to a Group}
+
+可向用 \cmd{create\_rp\_group} 创建的组添加叶单元、其他相对布局组与 keepout。添加时确保：目标组已存在；对象必须添加到组中的空位置。
+
+\paragraph{添加叶单元}
+\paragraph*{Adding Leaf Cells}
+
+在相对布局组中，占据多列或多行位置的叶单元称为 leaf cell straddling。通过 \cmd{add\_to\_rp\_group} 的 \opt{-num\_columns} 或 \opt{-num\_rows}（默认各为 1）指定：
+\begin{lstlisting}
+de_shell> add_to_rp_group rp_group_name -leaf cell_name \
+   -column 0 -num_columns 2 -row 0 -num_rows 1
+\end{lstlisting}
+
+限制：
+\begin{itemize}
+  \item 不应在 straddling 叶单元同一位置放置相对布局 keepout；straddling 仅用于叶单元，不用于层次组或 keepout
+  \item 不应向具有多列、多行或两者的 straddling 叶单元施加 compression；可对多行 straddling 叶单元施加右对齐或引脚对齐，但不能对多列单元施加
+\end{itemize}
+
+用 \opt{-orientation} 指定叶单元布局方向；用 \opt{-alignment} 或 \opt{-pin\_align\_name} 指定列内对齐方法。
+
+\begin{seeAlsoBox}
+在列内对齐叶单元（下文）。
+\end{seeAlsoBox}
+
+\paragraph{添加相对布局组}
+\paragraph*{Adding Relative Placement Groups}
+
+层次相对布局允许将相对布局组嵌入其他相对布局组，以简化约束，无需为重复模式多次提供相对布局信息。嵌入组像叶单元一样处理。用 \cmd{add\_to\_rp\_group} 时有两种方法：
+\begin{itemize}
+  \item \textbf{包含（include）相对布局组} — 若组与其父组在同一设计中，则为 included group。可在平坦或层次设计中包含。包含后如同直接嵌入父组。同一设计的同一组中，某个 included group 只能使用一次；但包含 included group 的组可进一步包含在同设计另一组中，或实例化到不同设计的组中。
+  \item \textbf{实例化（instantiate）相对布局组} — 若待添加组位于其父组的子设计实例中，则为 instantiated group。只能在层次设计中实例化。使用 \opt{-hierarchy} 指定组时，必须用 \opt{-instance} 指定参考设计实例，且该实例必须与正在实例化指定组的层次组位于同一设计。实例化组可跨设计的多个实例复制相对布局信息，并在这些实例之间创建相对布局关系。
+\end{itemize}
+
+例~\ref{ex:dce-rp-hier} 创建包含 \texttt{rp1} 三个实例的层次组 \texttt{rp2}。\texttt{rp1} 在 \texttt{pair\_design} 中并含叶单元 U1、U2；\texttt{rp2} 在 \texttt{mid\_design} 中三次实例化 \texttt{rp1}（\texttt{mid\_design} 必须至少含三个 \texttt{pair\_design} 实例）。\texttt{rp2} 当作叶单元处理，可按 \texttt{mid\_design} 在网表中的实例化次数再实例化。结果见图~\ref{fig:dce-rp-hier}。
+
+\begin{lstlisting}[caption={在层次组中实例化组},label={ex:dce-rp-hier}]
+create_rp_group rp1 -design pair_design -columns 2 -rows 1
+   add_to_rp_group pair_design::rp1 -leaf U1 -column 0 -row 0
+   add_to_rp_group pair_design::rp1 -leaf U2 -column 1 -row 0
+create_rp_group rp2 -design mid_design -columns 1 -rows 3
+    add_to_rp_group mid_design::rp2 \
+   -hierarchy pair_design::rp1 -instance I1 -column 0 -row 0
+    add_to_rp_group mid_design::rp2 \
+   -hierarchy pair_design::rp1 -instance I2 -column 0 -row 1
+    add_to_rp_group mid_design::rp2 \
+   -hierarchy pair_design::rp1 -instance I3 -column 0 -row 2
+\end{lstlisting}
+
+\figplaceholder{Figure 46: Instantiating Groups in a Hierarchical Group}{在层次组中实例化组}{fig:dce-rp-hier}
+
+\paragraph{添加 Keepout}
+\paragraph*{Adding Keepouts}
+
+\begin{lstlisting}
+de_shell> add_to_rp_group TOP::misc -keepout gap1 \
+   -column 0 -row 2 -width 15 -height 1
+\end{lstlisting}
+
+\subsubsection{在列内对齐叶单元}
+\subsubsection*{Aligning Leaf Cells Within a Column}
+
+控制单元对齐可改善时序与可布线性。可用下列对齐方法：
+\begin{itemize}
+  \item 对齐到左下角
+  \item 对齐到右下角
+  \item 对齐到引脚位置
+  \item 覆盖引脚对齐
+\end{itemize}
+
+\paragraph{对齐到左下角}
+\paragraph*{Aligning to the Bottom-Left Corner}
+
+对 \cmd{create\_rp\_group} 或 \cmd{set\_rp\_group\_options} 使用 \opt{-alignment bottom-left}（未指定对齐方法时的默认）：
+\begin{lstlisting}
+de_shell> set_rp_group_options -alignment bottom-left [get_rp_groups *]
+\end{lstlisting}
+
+\begin{lstlisting}
+create_rp_group rp1 -design pair_design -columns 1 -rows 4
+ add_to_rp_group pair_design::rp1 -leaf U1 -column 0 -row 0
+add_to_rp_group pair_design::rp1 -leaf U2 -column 0 -row 1
+add_to_rp_group pair_design::rp1 -leaf U3 -column 0 -row 2
+add_to_rp_group pair_design::rp1 -leaf U4 -column 0 -row 3
+\end{lstlisting}
+
+\figplaceholder{Figure 47: Bottom-Left Aligned Relative Placement Group}{左下对齐的相对布局组}{fig:dce-rp-bl}
+
+\paragraph{对齐到右下角}
+\paragraph*{Aligning to the Bottom-Right Corner}
+
+使用 \opt{-alignment bottom-right}：
+\begin{lstlisting}
+de_shell> set_rp_group_options -alignment bottom-right \
+   [get_rp_groups *]
+\end{lstlisting}
+
+\begin{noteBox}
+对层次相对布局组，右下对齐不会沿层次传播。
+\end{noteBox}
+
+\begin{lstlisting}
+create_rp_group rp1 -design pair_design -columns 1 -rows 4 \
+   -alignment bottom-right
+      add_to_rp_group pair_design::rp1 -leaf U1 -column 0 -row 0
+      add_to_rp_group pair_design::rp1 -leaf U2 -column 0 -row 1
+      add_to_rp_group pair_design::rp1 -leaf U3 -column 0 -row 2
+      add_to_rp_group pair_design::rp1 -leaf U4 -column 0 -row 3
+\end{lstlisting}
+
+\figplaceholder{Figure 48: Bottom-Right Aligned Relative Placement Group}{右下对齐的相对布局组}{fig:dce-rp-br}
+
+\paragraph{对齐到引脚位置}
+\paragraph*{Aligning to a Pin Location}
+
+使用 \opt{-alignment bottom-pin} 与 \opt{-pin\_align\_name}：
+\begin{lstlisting}
+de_shell> set_rp_group_options -alignment bottom-pin \
+   -pin_align_name align_pin
+\end{lstlisting}
+
+工具在列内每个单元中查找指定对齐引脚：
+\begin{itemize}
+  \item 找到则对齐到该引脚位置
+  \item 未在该单元中找到则对齐到左下角并发出信息消息
+  \item 在任何单元中都未找到则发出警告
+\end{itemize}
+
+若同时指定引脚对齐与单元方向，冲突解决如下：
+\begin{itemize}
+  \item 用户指定的单元方向优先于 DC Explorer 所做的引脚对齐
+  \item DC Explorer 所做的引脚对齐优先于 DC Explorer 所做的单元方向优化
+\end{itemize}
+
+\begin{lstlisting}
+create_rp_group rp1 -design pair_design -columns 1 -rows 4 \
+   -pin_align_name A
+      add_to_rp_group pair_design::rp1 -leaf U1 -column 0 -row 0
+      add_to_rp_group pair_design::rp1 -leaf U2 -column 0 -row 1
+      add_to_rp_group pair_design::rp1 -leaf U3 -column 0 -row 2
+      add_to_rp_group pair_design::rp1 -leaf U4 -column 0 -row 3
+\end{lstlisting}
+
+\figplaceholder{Figure 49: Relative Placement Group Aligned by Pin A}{按引脚 A 对齐的相对布局组}{fig:dce-rp-pin-a}
+
+\paragraph{覆盖引脚对齐}
+\paragraph*{Overriding Pin Alignment}
+
+为组指定对齐引脚时，该方法适用于列中全部单元。要对组中特定单元覆盖，在 \cmd{add\_to\_rp\_group} 上使用 \opt{-pin\_align\_name} 指定另一引脚。
+
+\begin{noteBox}
+从相对布局层次浏览器添加叶单元时，不能指定单元专用对齐引脚。
+\end{noteBox}
+
+\begin{lstlisting}
+create_rp_group misc1 -design block1 -columns 3 -rows 10 \
+   -pin_align_name A
+      add_to_rp_group block1::misc1 -leaf I3 -column 0 -row 0
+      add_to_rp_group block1::misc1 -leaf I4 -column 0 -row 1
+      add_to_rp_group block1::misc1 -leaf I5 -column 0 -row 2 \
+         -pin_align_name B
+      add_to_rp_group block1::misc1 -leaf I6 -column 0 -row 3 \
+         -pin_align_name B
+      add_to_rp_group block1::misc1 -leaf I7 -column 0 -row 4
+      add_to_rp_group block1::misc1 -leaf I8 -column 0 -row 5
+\end{lstlisting}
+
+\figplaceholder{Figure 50: Relative Placement Group Aligned by Pins}{按引脚对齐的相对布局组}{fig:dce-rp-pins}
+
+\subsubsection{查询相对布局组}
+\subsubsection*{Querying Relative Placement Groups}
+
+表~\ref{tab:dce-rp-query} 列出用于查询相对布局组以注释、编辑与查看的命令。
+
+\begin{table}[htbp]
+\centering
+\caption{查询相对布局组的命令}
+\label{tab:dce-rp-query}
+\small
+\begin{tabular}{@{}p{0.55\textwidth}l@{}}
+\toprule
+要返回的集合 & 使用的命令 \\
+\midrule
+匹配某些条件的相对布局组 & \cmd{get\_rp\_groups} \\
+全部或指定相对布局组及其层次中包含与实例化的组 & \cmd{all\_rp\_groups} \\
+含 included 或 instantiated 组的相对布局组 & \cmd{all\_rp\_hierarchicals} \\
+含 included 组的相对布局组 & \cmd{all\_rp\_inclusions} \\
+含 instantiated 组的相对布局组 & \cmd{all\_rp\_instantiations} \\
+直接嵌入叶单元或实例化组的相对布局组 & \cmd{all\_rp\_references} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{lstlisting}
+de_shell> get_rp_groups r*::g*
+{ripple::grp_ripple}
+de_shell> set_rp_group_options [all_rp_groups] -utilization 0.95
+\end{lstlisting}
+
+\subsubsection{检查相对布局约束}
+\subsubsection*{Checking Relative Placement Constraints}
+
+用 \cmd{check\_rp\_groups} 检查相对布局约束并报告失败。检查下列失败：
+\begin{itemize}
+  \item 相对布局组不能作为单一实体放置
+  \item 相对布局组的高度或宽度大于 core area 的高度或宽度
+  \item 无法满足用户指定的方向
+\end{itemize}
+
+该命令不检查相对布局组中 keepout 未正确创建时的失败。
+
+生成的报告将关键与非关键失败分节列出：若失败阻止组按相对布局约束作为单一实体放置，则为关键；若不阻止布局但导致相对布局约束违例，则为非关键。
+
+用 \opt{-all} 检查全部组，或指定组名；默认显示到屏幕，用 \opt{-output} 保存到文件；用 \opt{-verbose} 显示详细报告：
+\begin{lstlisting}
+de_shell> check_rp_groups "compare17::seg7 compare17::rp_group3" \
+    -output rp_failures.log
+de_shell> check_rp_groups -all -verbose
+\end{lstlisting}
+
+\subsubsection{保存相对布局信息}
+\subsubsection*{Saving Relative Placement Information}
+
+用 \cmd{write\_rp\_groups} 写出相对布局约束：
+\begin{lstlisting}
+de_shell> get_rp_groups
+{mul::grp_mul ripple::grp_ripple example3::top_group}
+de_shell> write_rp_groups -all -output my_groups.tcl
+1
+de_shell> remove_rp_groups -all -quiet
+1
+de_shell> get_rp_groups
+Error: Can't find objects matching '*'. (UID-109)
+de_shell> source my_groups.tcl
+{example3::top_group}
+de_shell> get_rp_groups
+{example3::top_group ripple::grp_ripple mul::grp_mul}
+\end{lstlisting}
+
+默认写出创建指定相对布局组以及向这些组添加叶单元、层次组与 keepout 的命令，但不写出在层次组内生成子组的命令。命令写出更新后的相对布局约束，并包含 uniquification 或 ungrouping 带来的名称变更。
+
+若用 \opt{-num\_columns} 或 \opt{-num\_rows} 为单元指定多个列/行位置，\cmd{write\_rp\_groups} 会写出该多位置单元。
+
+\subsubsection{移除相对布局组、对象与属性}
+\subsubsection*{Removing Relative Placement Groups, Objects, and Attributes}
+
+\paragraph{移除相对布局组}
+\paragraph*{Removing Relative Placement Groups}
+
+用 \cmd{remove\_rp\_groups} 的 \opt{-all} 或指定组名移除。指定要移除的组列表时，工具仅移除指定组，不移除其中包含或实例化的组；要一并移除，须指定 \opt{-hierarchy}。
+
+\begin{lstlisting}
+de_shell> remove_rp_groups ripple::grp_ripple
+Removing rp group 'ripple::grp_ripple'
+1
+de_shell> remove_rp_groups -all
+\end{lstlisting}
+
+\paragraph{从相对布局组移除对象}
+\paragraph*{Removing Objects From a Relative Placement Group}
+
+用 \cmd{remove\_from\_rp\_group} 移除叶单元（\opt{-leaf}）、included 组（\opt{-hierarchy}）、instantiated 组（\opt{-hierarchy -instance}）与 keepout（\opt{-keepout}）：
+\begin{lstlisting}
+de_shell> remove_from_rp_group ripple::grp_ripple -leaf carry_in_1
+\end{lstlisting}
+
+若单元占据多个列/行位置，该命令从全部位置移除该单元。
+
+\paragraph{移除相对布局组属性}
+\paragraph*{Removing Relative Placement Group Attributes}
+
+用 \cmd{remove\_rp\_group\_options}；必须指定组名与至少一个选项，否则无效：
+\begin{lstlisting}
+de_shell> remove_rp_group_options block1::misc1 -x_offset
+{block1::misc1}
+\end{lstlisting}
+
+命令返回属性已更改的相对布局组集合；若无更改则返回空字符串。
+
+\subsection{使用 HDL Compiler 指令创建相对布局}
+\subsubsection*{Creating Relative Placement Using HDL Compiler Directives}
+
+DC Explorer 支持嵌入在 Verilog 或 VHDL 描述中的相对布局信息。该能力由可指定与修改相对布局信息的 HDL compiler directive 启用。
+使用这些指令指定相对布局可增加设计灵活性并简化相对布局，因为无需再更新设计中许多单元的位置。
+
+利用嵌入的 HDL compiler directive，可在 RTL、GTECH 网表或已映射网表中放置相对布局约束。
+有关在 Verilog 与 VHDL 中用 HDL compiler directive 指定相对布局（含指南与限制），见 HDL Compiler 文档。
+
+更多信息另见：
+\begin{itemize}
+  \item \textit{HDL Compiler for SystemVerilog User Guide}
+  \item \textit{HDL Compiler for VHDL User Guide}
+\end{itemize}

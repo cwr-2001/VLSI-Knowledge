@@ -1,0 +1,936 @@
+﻿% 第 4 章 Power Calculation, Static IR Drop and EM Analysis（原书 4-33 … 4-78）
+\bichapter{功耗计算、静态 IR Drop 与 EM 分析}{Power Calculation, Static IR Drop and EM Analysis}
+\label{chap:static}
+
+\section{引言}
+\subsection*{Introduction}
+
+本章说明如何在完成第~\ref{chap:ui}~章数据准备后，于 RedHawk-S 中运行功耗计算、静态 IR 压降与电迁移（electromigration，EM）分析。静态 IR/EM 流程概览见图~\ref{fig:rh-s-static-flow}。
+
+\figplaceholder{Figure 4-1}{RedHawk-S 静态 IR 压降流程}
+\label{fig:rh-s-static-flow}
+
+关键步骤：
+\begin{enumerate}
+  \item 准备设计数据（第~\ref{chap:ui}~章）
+  \item 用自动化脚本或 GSR 导入设计
+  \item 功耗计算（本节）
+  \item 电源网格 R 提取（「电源网格电阻提取」）
+  \item 评估电源/地网格薄弱点（「检查电源/地网格薄弱性」）
+  \item 定义 pad 与封装参数（「定义 Pad 与封装参数」）
+  \item 运行静态 IR/EM 分析（「运行 RedHawk-S」）
+  \item 查看摘要报告并评估是否需要更多信息
+  \item 用网格修复与优化工具缓解静态 IR 热点（第 7 章）
+\end{enumerate}
+
+导入全部设计数据后应显示全芯片视图，再按以下各节继续。
+
+\section{功耗计算}
+\subsection*{Power Calculation}
+
+功耗计算利用多种设计文件评估平坦或层次设计中各实例的平均周期功耗，结果用于静态与动态分析，并以功耗分布「地图」显示。通常每个设计计算一次，汇总于若干功耗报告。
+
+报告为基于 GSR \gsr{VDD_NETS} 或 LIB 标称电压的「理想」功耗。RedHawk 尊重 \texttt{.lib} 负 internal energy。总功耗含未接电源网或接到非 Vdd 网的实例，故与实际硅片功耗可能不同。
+
+建模芯片活动有三种思路：无 VCD 时的 \textbf{vectorless}（基于翻转率的状态传播）；有全芯片 VCD 的 \textbf{event-propagation}。两种传播均经 flip-flop。方法选择见图~\ref{fig:pw-method-select}、图~\ref{fig:pw-prop-flows}。
+
+\figplaceholder{Figure 4-2}{功耗计算方法选择}
+\label{fig:pw-method-select}
+\figplaceholder{Figure 4-3}{Event 传播与 State 传播流程}
+\label{fig:pw-prop-flows}
+
+\subsection{Vectorless 功耗计算设置}
+\subsubsection*{Setup for Vectorless Power Calculation}
+
+无 VCD 时须用一组 GSR 关键字估计翻转率（toggle rate）。
+
+\subsubsection{频率与时钟参数}
+\paragraph*{Setting Frequency and Clock Parameters}
+
+\begin{itemize}
+  \item \gsr{STA_FILE}：用 STA 中各 pin 的 slew 与 clock 域计算功耗；未覆盖实例频率为 0，可用 \gsr{FREQ_OF_MISSING_INSTANCES} 指定。\gsr{EXTRACT_CLOCK_NETWORK 1} 时从 STA 时钟段提取 clock root 而非 STA 标识的时钟实例。动态必需；静态可选。
+\begin{lstlisting}
+STA_FILE {
+     FREQ_OF_MISSING_INSTANCES <Hz>
+     EXTRACT_CLOCK_NETWORK [0|1]
+     <top_block> <sta_file>
+}
+\end{lstlisting}
+  \item \gsr{CLOCK_ROOTS}：从指定时钟根追踪时钟域；若已设 \gsr{STA_FILE} 则不用。语法：\texttt{<clock\_root> <freq\_Hz>}。
+  \item \gsr{FREQUENCY}（必需）：芯片主工作频率，或「低于该频率的功耗合计 $<$10\%」的最低显著频率。例：100\,MHz 5\,mW、200\,MHz 20\,mW、400\,MHz 70\,mW 时应填 200\,MHz。
+\end{itemize}
+
+\subsubsection{实例与块的开关状态}
+\paragraph*{Setting the Switching State of Instances and Blocks}
+
+Global Switching Configuration（GSC）文件经 \gsr{GSC_FILE <gsc_filename>} 指定，语法：
+\begin{lstlisting}
+[<blockName>|<instanceName>] ?<domain_name>?
+[UNDECIDED|TOGGLE|HIGH|LOW|POWERUP|POWERDOWN|STANDBY|DISABLE|OFF|<custom_state>]
+\end{lstlisting}
+
+仅 \texttt{HIGH}、\texttt{LOW}、\texttt{TOGGLE}、\texttt{STANDBY}、\texttt{DISABLE}、\texttt{OFF} 影响功耗。若实例在 \gsr{INSTANCE_POWER_FILE} 或 \gsr{BLOCK_POWER_FOR_SCALING} 中已指定功耗，优先于 GSC；设 \gsr{GSC_OVERRIDE_IPF 1} 可让 GSC 覆盖 IPF（默认 0）。
+GSC 文件语法与用法详见附录 C「Global Switching Configuration (GSC) File」。通过 \gsr{GSC_FILE} 可为功耗计算建立实例与块的开关状态。
+
+
+\subsubsection{翻转率设置}
+\paragraph*{Setting the Toggle Rate}
+
+翻转率定义为时钟域内每周期 0$\rightarrow$1 与 1$\rightarrow$0 跳变次数的平均和。优先级（高到低，详见附录 C）：
+\begin{enumerate}
+  \item \gsr{INSTANCE_POWER_FILE}
+  \item \gsr{BLOCK_POWER_FOR_SCALING} / \gsr{BLOCK_POWER_FOR_SCALING_FILE}
+  \item \gsr{GSC_FILE}（\gsr{GSC_OVERRIDE_IPF 1} 且无 VCD 时高于 IPF/BPFS；有 VCD 时 GSC 覆盖 VCD 中指定实例）
+  \item \gsr{INSTANCE_TOGGLE_RATE} / \gsr{INSTANCE_TOGGLE_RATE_FILE}（\gsr{ITR_OVERRIDE_BPFS 1} 时高于 BPFS）
+  \item \gsr{NET_TOGGLE_RATE} / \gsr{NET_TOGGLE_RATE_FILE} / \gsr{SAIF_FILE}
+  \item \gsr{VCD_FILE}（\gsr{POWER_VCD_OVERRIDE_IPF 1} 时高于 IPF）
+  \item \gsr{BLOCK_TOGGLE_RATE} / \gsr{BLOCK_TOGGLE_RATE_FILE} / \gsr{CELL_TOGGLE_RATE}
+  \item \gsr{STATE_PROPAGATION}（VCD 模式从 VCD 推导；vectorless 综合 3--7、9--11 项）
+  \item STA 中 \texttt{CONST <pin>} $\rightarrow$ 翻转率 0
+  \item \gsr{CLOCK_DOMAIN_TOGGLE_RATE}、\gsr{POWER_DOMAIN_TOGGLE_RATE}
+  \item \gsr{TOGGLE_RATE_RATIO_COMB_FF}
+  \item \gsr{TOGGLE_RATE}（默认 0.3；时钟网默认 2.0）
+\end{enumerate}
+
+一般对某实例采用最高优先级且非空的翻转率；VCD 中已指定的关键字估计值被忽略。注意：VCD 文件中已指定的实例，其由关键字估计的翻转率值会被忽略（见下文 VCD 功耗计算设置）。
+\paragraph{\gsr{NET_TOGGLE_RATE} / \gsr{NET_TOGGLE_RATE_FILE} / \gsr{SAIF_FILE}}
+为设计中未另行指定的网络指定翻转率。\gsr{NET_TOGGLE_RATE_FILE} 指向含网络翻转率列表的文件；\gsr{SAIF_FILE} 可导入 SAIF 格式开关活动。可选。默认：无。
+
+\paragraph{\gsr{CELL_TOGGLE_RATE}}
+按单元类型（cell type）为未另行指定的实例定义默认翻转率。可选。默认：无。
+
+\paragraph{\gsr{CLOCK_DOMAIN_TOGGLE_RATE} / \gsr{POWER_DOMAIN_TOGGLE_RATE}}
+分别为各时钟域或电源域指定默认翻转率，用于未在更高优先级关键字中覆盖的实例/网络。可选。
+
+\paragraph{\gsr{TOGGLE_RATE_RATIO_COMB_FF}}
+指定组合逻辑相对触发器/锁存器翻转率的比值，用于 vectorless 状态传播中推导组合网活动。可选。
+
+
+\paragraph{\gsr{INSTANCE_TOGGLE_RATE_FILE}}
+指定实例翻转率文件，格式同 \gsr{INSTANCE_TOGGLE_RATE} 关键字语法。可选。默认：无。
+\begin{lstlisting}
+INSTANCE_TOGGLE_RATE_FILE {
+     <instance_toggle_rate_file>
+}
+\end{lstlisting}
+
+\paragraph{\gsr{INSTANCE_TOGGLE_RATE}}
+为设计中实例指定平均翻转率。芯片实例数量很大时，推荐用本关键字而非 \gsr{BLOCK_TOGGLE_RATE} 或 \gsr{BLOCK_TOGGLE_RATE_FILE}。不支持通配符 \texttt{*}。无论是否为时钟网络实例，第一项 TR 用于网络翻转率，第二项（若有）用于时钟 buffer 与 clock pin 翻转率；仅指定一项时用于与该实例相关的输出/信号翻转率。可选。默认：无。
+\begin{lstlisting}
+INSTANCE_TOGGLE_RATE {
+     <non-clock_inst_name> <output_TR> ?<clock_pin_TR>?
+     <clock_network_inst_name> <output_TR> ?<clock_pin_TR>?
+     ...
+}
+\end{lstlisting}
+
+\paragraph{\gsr{BLOCK_TOGGLE_RATE_FILE}}
+指定 DEF 中已定义 block/instance 的翻转率文件，格式同 \gsr{BLOCK_TOGGLE_RATE} 语法。可选。默认：无。
+\begin{lstlisting}
+BLOCK_TOGGLE_RATE_FILE {
+     <toggle_rate_filename>
+}
+\end{lstlisting}
+
+\paragraph{\gsr{BLOCK_TOGGLE_RATE}}
+为用户指定 block 中未另行指定的网，或实例，定义默认翻转率。block/instance 须在 DEF 中定义；\texttt{<block-instance\_name>} 可用通配符 \texttt{*}（如 \texttt{ABC*} 匹配以 ABC 开头的所有 block/instance 名）。block 的 \texttt{<clock\_network\_TR>} 用于 clock pin 与 clock buffer 输出。对实例而言，无论是否为时钟网络实例，第一项 TR 用于网络翻转率，第二项（若有）用于 clock buffer 与 clock pin。可选。默认：无。
+\begin{lstlisting}
+BLOCK_TOGGLE_RATE {
+     <block-instance_name> <non-clock_TR> ?<clock_network_TR>?
+     <non-clock_inst_name> <output_TR> ?<clock_pin_TR>?
+     <clock_network_inst_name> <output_TR> ?<clock_pin_TR>?
+     ...
+}
+\end{lstlisting}
+
+\paragraph{\gsr{TOGGLE_RATE}}
+为设计中未另行指定的网定义默认翻转率。该率为网翻转概率与实际时钟翻转率的乘积。翻转率定义为时钟域内每周期 0$\rightarrow$1 与 1$\rightarrow$0 状态变化次数的平均和。例如时钟网相对其时钟域翻转率为 2.0（每周期 0$\rightarrow$1 与 1$\rightarrow$0 各一次）。若 \texttt{.lib} 中无功耗表，翻转率取自 \gsr{TOGGLE_RATE}，电荷缩放以满足功耗。可选。默认：0.3。
+\begin{lstlisting}
+TOGGLE_RATE <non_clock_TR> ?<clock_network_TR>?
+\end{lstlisting}
+其中 \texttt{<non\_clock\_TR>} 为网在时钟周期内翻转的概率；\texttt{<clock\_network\_TR>} 用于 clock pin 与 clock buffer 输出——实际网络时钟翻转率（默认 2.0）。
+
+\subsubsection{翻转率缩放参数}
+\paragraph*{Setting Toggle Rate Scaling Parameters}
+
+功耗与平均翻转率近似线性，缩放参数使 RedHawk 能根据已知与计算功耗调整有效翻转率。例如块已知功耗 $P\_K$，估计翻转率 $T\_{RE1}$ 算出功耗 $P\_{C1}$，程序可将翻转率缩放至 $T\_{RE2}$ 并重算 $P\_{C2}$ 使其等于已知功耗：
+\[
+T\_{RE2}/T\_{RE1} = P\_{C2}/P\_{C1},\quad P\_{C2}=P\_K,\quad T\_{RE2} = T\_{RE1}\cdot P\_K/P\_{C1}
+\]
+为块与实例提供已知功耗后，RedHawk 可相应缩放翻转率，显著提高功耗计算精度。
+
+\paragraph{\gsr{BLOCK_POWER_FOR_SCALING_FILE}}
+指定含功耗说明文件的路径（相对或绝对，相对 RedHawk 运行目录），格式同 \gsr{BLOCK_POWER_FOR_SCALING}。可选。默认：无。
+\begin{lstlisting}
+BLOCK_POWER_FOR_SCALING_FILE {
+     <Block_Power_FilePathName>
+}
+\end{lstlisting}
+
+\paragraph{\gsr{BLOCK_POWER_FOR_SCALING}}
+根据用户提供的已知功耗数据，对 block、instance、cell 或 celltype 的估计翻转率做缩放。平坦设计用顶层 block 名；顶层 cell 名勿与所含 cell 名相同以免混淆。多 Vdd/Vss 设计可指定 pin 级 Vdd 功耗与 Vss 电流。可选。默认：无。
+\begin{lstlisting}
+BLOCK_POWER_FOR_SCALING {
+     CELLTYPE <cell_name> [<pwr_W> ?<Vdd_pin>? |
+                  <cell_current_A> ?<Vss_pin>? ]
+     ...
+     [FULLCHIP |<top_block_name>] <full_leaf_inst_path> <pwr_W>
+     [FULLCHIP |<top_block_name>] <full_block_path> <pwr_W> ? <domain> ?
+     ...
+     [FULLCHIP |<top_block_name>] <full_mVdd_inst_path>
+             [<pwr_W> ?<VDD_pin>? | <current_A> ?<Vss_pin>?]
+     ...
+     CELLS [ comb | ff_latch | mem | clockinst | io ] <pwr_W>
+     ...
+     BLOCK [<full_block_path> <pwr_W> ?<domain>? |
+             <full_leaf_inst_path> <pwr_W> ? <pin> ? ]
+     ...
+}
+\end{lstlisting}
+详见附录 C「\gsr{BLOCK_POWER_FOR_SCALING}」。
+
+\paragraph{\gsr{SCALE_CLOCK_POWER [0|1]}}
+选择是否缩放时钟网络组件的翻转率。为 0 时不缩放时钟网。可选。默认：1。
+
+\paragraph{\gsr{INSTANCE_POWER_FILE}}
+指定实例功耗文件路径，格式 \texttt{<instance\_name> <power in Watts>}。未列出的实例功耗视为 0，故应列出所有显著功耗实例，或一个都不列。可选。默认：无。
+\begin{lstlisting}
+INSTANCE_POWER_FILE {
+     <instance_power_file_path-name>
+}
+\end{lstlisting}
+
+\paragraph{\gsr{GSC_OVERRIDE_IPF [0|1]}}
+为 1 时覆盖 \gsr{BLOCK_POWER_FOR_SCALING}、\gsr{BLOCK_POWER_FOR_SCALING_FILE}、\gsr{INSTANCE_TOGGLE_RATE}、\gsr{BLOCK_TOGGLE_RATE}、\gsr{TOGGLE_RATE} 设置，并采用 GSC 中的翻转率。可选。默认：0。
+
+\paragraph{GSC 文件中的实例状态}
+GSC 中定义状态的实例在功耗计算中按以下方式处理：
+\begin{itemize}
+  \item \texttt{HIGH}：考虑实例从 0 切换到 1 时的功耗
+  \item \texttt{LOW}：考虑实例从 1 切换到 0 时的功耗
+  \item \texttt{STANDBY}：对 clock pin 从 0$\rightarrow$1 或 1$\rightarrow$0 的功耗取平均
+  \item \texttt{DISABLE}：仅考虑漏电功耗
+  \item \texttt{OFF}：功耗全部置零
+\end{itemize}
+
+\paragraph{时钟与信号翻转率同时用于功耗计算}
+默认信号与时钟翻转率一起均匀缩放以达到指定总功耗；若仅希望通过缩放信号翻转率满足功耗目标，在 GSR 中设 \gsr{SCALE_CLOCK_POWER} 为 0（时钟功耗含时钟网络功耗与 clock pin 功耗）。但缩放后功耗不会低于指定漏电功耗。若指定块功耗小于 RedHawk 计算的块漏电功耗，且 \gsr{SCALE_CLOCK_POWER} 为 1（默认），则功耗值均匀缩放以满足指定块功耗。
+
+\subsubsection{提取相关参数}
+\paragraph*{Setting Extraction Parameters}
+
+\begin{itemize}
+  \item \gsr{CELL_RC_FILE}：SPEF/DSPF；\gsr{EXTRACT_RC} 默认 1（动态）；静态可设 0。\gsr{CONDITION}：\texttt{best|typical|worst}。
+  \item \gsr{INTERCONNECT_GATE_CAP_RATIO}：互连线电容与扇入门电容之比（默认 1；三者皆未设时使用）
+  \item \gsr{STEINER_TREE_CAP <pF/um>}：Steiner 布线长度 $\times$ 单位电容
+\end{itemize}
+
+\subsubsection{功耗计算方法选择}
+\paragraph*{Selecting Power Calculation Methodology}
+
+\begin{itemize}
+  \item \gsr{SCANMODE [0|1]}：vectorless 是否含 scan pin 功耗
+  \item \gsr{POWER_MODE [APL|LIB|MIXED|APL_PEAK|APL_PEAK1]}：
+    \begin{itemize}
+      \item \texttt{APL}：优先 APL internal/leakage，缺则用 \texttt{.lib}
+      \item \texttt{LIB}：仅用 \texttt{.lib} internal
+      \item \texttt{MIXED}：优先 \texttt{.lib}，缺组件用 APL
+      \item \texttt{APL\_PEAK}：APL 峰值电荷算功耗
+      \item \texttt{APL\_PEAK1}：APL 峰值电流（偏悲观）
+    \end{itemize}
+  \item \gsr{INPUT_TRANSITION}：无 STA 时输入转换时间（默认 FREQ 倒数的 10\%）
+  \item \gsr{NAME_CASE_SENSITIVE [0|1]}（默认 1）
+\end{itemize}
+
+\subsubsection{供电网定义}
+\paragraph*{Specifying Supply Nets}
+
+\gsr{VDD\_NETS \{ <net> <Volt> ... \}}（必需）；\gsr{GND_NETS}（可选，默认 SPECIALNETS 为 GROUND 0\,V）。
+\begin{lstlisting}
+VDD_NETS {
+  <Vdd net_name in DEF> <value in Volt>
+  ...
+}
+GND_NETS {
+  <Gnd net_name_in_DEF> <Volts>
+  ...
+}
+\end{lstlisting}
+其中 \texttt{<Vdd net\_name in def>} 为电源网名（如核电源域 \texttt{VDD}、I/O 电源环 \texttt{VDDQ}）。
+
+\subsubsection{总线与层次分隔符}
+\paragraph*{Setting Bus and Hierarchy Delimiter Keywords}
+
+以下关键字定义总线与设计层次的分隔符，用于名称映射：
+\begin{itemize}
+  \item \gsr{BUS_DELIMITER <delim>}：RedHawk 数据库与 GSR 中总线位分隔符。可选。默认：\texttt{[ ]}
+  \item \gsr{PIN_DELIMITER <delim>}：网名/实例名与 pin 名之间的特殊字符；不得为 LEF 保留字符或 pin 名已用字符。可选。默认：\texttt{:}
+  \item \gsr{HIER_DIVIDER <divider>}：RedHawk 数据库与 GSR 中层次分隔符。可选。默认：\texttt{/}
+  \item \gsr{BUS_DELIMITER_STA <delim>}：STA 文件中总线位分隔符。可选。默认：\texttt{[ ]}
+  \item \gsr{PIN_DELIMITER_STA <delim>}：STA 文件中实例与 pin 名分隔符。可选。默认：\texttt{/}
+  \item \gsr{HIER_DIVIDER_STA <divider>}：STA 文件中层次分隔符。可选。默认：\texttt{/}
+\end{itemize}
+
+\subsection{Event-Driven（VCD）功耗计算}
+\subsubsection*{Setting up for Event-Driven (VCD File) Power Calculation}
+
+有 VCD 时强烈建议基于 VCD 计算功耗。vectorless 节中的以下 GSR 关键字在 VCD 模式下同样须定义，用法与 vectorless 相同，此处不再重复说明：
+\gsr{STA_FILE}、\gsr{CLOCK_ROOTS}、\gsr{BLOCK_POWER_FOR_SCALING_FILE}、\gsr{BLOCK_POWER_FOR_SCALING}、\gsr{SCALE_CLOCK_POWER}、\gsr{CELL_RC_FILE}、\gsr{INTERCONNECT_GATE_CAP_RATIO}、\gsr{STEINER_TREE_CAP}、\gsr{SCANMODE}、\gsr{POWER_MODE}、\gsr{INPUT_TRANSITION}、\gsr{NAME_CASE_SENSITIVE}、\gsr{VDD_NETS}、\gsr{GND_NETS}，以及总线与层次分隔符关键字。
+
+\subsubsection{VCD 通用设置}
+\paragraph*{General Setup}
+
+\gsr{VCD_FILE} 直接读 VCD/FSDB 用于功耗计算；GSC 中指定的实例开关状态覆盖 VCD 文件。详见附录 C「\gsr{VCD_FILE}」。可选。默认：无。
+\begin{lstlisting}
+VCD_FILE {
+  <top_block_name> <VCD filepath>
+  FILE_TYPE [ VCD | FSDB ]
+  FRONT_PATH <"string">
+  SUBSTITUTE_PATH <"string">
+  FRAME_SIZE <integer value in ps>
+  START_TIME <integer value in ps>
+  END_TIME <integer value in ps>
+  TRUE_TIME [0|1]
+  MAPPING_RULE_FILE <file_name>
+}
+\end{lstlisting}
+其中：
+\begin{itemize}
+  \item \texttt{FRONT_PATH}：须由 \texttt{SUBSTITUTE_PATH} 替换的字符串，以匹配 DEF 层次
+  \item \texttt{FRAME_SIZE}：逐周期功耗计算时每帧持续时间（ps）
+  \item \texttt{START_TIME}、\texttt{END_TIME}：VCD 中用于功耗计算的起止时间（ps），可选
+  \item \texttt{TRUE_TIME}：0 使用 STA 时序且无 glitch；1 使用 VCD 开关与时序数据；默认 0
+  \item \texttt{MAPPING_RULE_FILE}：VCD 与 DEF 名称映射规则文件（RTL VCD 分析常用）
+\end{itemize}
+更多信息见附录 E「\texttt{vcdscan}」「\texttt{fsdbtrans}」。
+
+\texttt{TRUE\_TIME 0}：用 STA、无 glitch；\texttt{1}：用 VCD 开关与时序。
+
+\subsubsection{MAPPING\_RULE\_FILE 名称映射}
+\paragraph*{Name Mapping using MAPPING\_RULE\_FILE}
+
+\gsr{MAPPING_RULE_FILE} 中可用以下规则映射 VCD 与 DEF 名称：
+\begin{itemize}
+  \item \texttt{change\_gate\_name <string1> <string2>}：映射 DEF（门级）名时将 \texttt{string1} 替换为 \texttt{string2}。例：\texttt{change\_gate\_name ricc icc}；要从名称中完全删除某字符串（如 \texttt{extra}）可写 \texttt{change\_gate\_name extra ""}
+  \item \texttt{change\_rtl\_name <string1> <string2>}：映射 VCD（RTL）名时替换。例：\texttt{change\_rtl\_name gen\_pqr\_i(\%d) pqr\_ixx\%dx/}
+  \item \texttt{define\_bus\_rule <rtl\_bus> <gate\_transform>}：RTL 总线 \texttt{string[\%d]}（如 \texttt{cnt[13]}）在门级常为 \texttt{string\_reg\_\%d}；若综合工具使用其他约定，可用本规则，且须同时指定门级名与输出 pin。例：\texttt{define\_bus\_rule [\%d] \%d\_\_regxx\_/Q}
+  \item \texttt{skip\_gate\_element <string>}：跳过门级网表/DEF 中确定不会出现在 RTL VCD 中的名称前缀，以加速映射。例：\texttt{skip\_gate\_element top/block\_name}（仅跳过以该字符串开头的名称）
+  \item \texttt{generate\_label <string>}：处理 RTL generate 构造。例：RTL \texttt{top/label[2]/block/cnt[2]} 对应门级 \texttt{top/block2/cnt[2]}，指定 \texttt{generate\_label label} 可自动处理
+\end{itemize}
+
+规则 \texttt{change\_gate\_name} 与 \texttt{change\_rtl\_name} 支持 \texttt{\%d} 通配数字。
+
+\textbf{通配符示例：}若 RTL 与 GATE 名称如下：
+\begin{verbatim}
+RTL: blockA/case_move_gen[0]/abc_move/rise_edge
+GATE: blockA/case_movexx0x/rise_edge_reg
+RTL: level_three_6/.../gen_pqr_i(1)/.../xyz_defg_ctrl_reg[14]
+GATE: level_three_6/.../pqr_ixx1x/.../xyz_defg_ctrl_reg_regx14x
+\end{verbatim}
+可用规则：
+\begin{lstlisting}
+change_rtl_name case_move_gen[%d]/abc_move/ case_movexx%dx/
+change_rtl_name gen_pqr_i(%d)/pqr_i/ pqr_ixx%dx/
+change_rtl_name gen_xyz_i(%d)/xyz_i/ xyz_ixx%dx/
+\end{lstlisting}
+
+\subsubsection{MBFF 名称映射}
+\paragraph*{MBFF Name Mapping using MAPPING\_RULE\_FILE}
+
+RTL-VCD 分析中，Multi Bit Flip Flop（MBFF）可能导致 RTL-VCD 名与门级名映射困难。MBFF 有多个输入/输出，用于实例化多位寄存器，通常有 20--30 个 D/Q pin；实例名常将各寄存器名拼接，并有前缀/分隔符标识 MBFF。支持 pin 名 \texttt{o}、\texttt{o1}、\texttt{o2} 等；scan 模式下输入值可在各 Q pin 间移位（Q0$\rightarrow$Q1$\rightarrow$Q2$\rightarrow$Q3）。
+
+RedHawk 可在 GSR 映射规则文件中指定 MBFF 后自动处理命名。2-bit MBFF 示例：
+\begin{verbatim}
+inst: xxx/MBIT__cp15_st_reg_1_MB_cp15_st_reg_2_
+pin:Q0 -> xxx/cp15_st[1];  pin:Q1 -> xxx/cp15_st[2]
+（"MBIT_" 为前缀，"MB_" 为分隔符）
+\end{verbatim}
+
+4-bit MBFF 示例：\texttt{MBIT\_cp\_addr\_reg\_reg\_4\_MB\_...\_MB\_cp\_addr\_reg\_reg\_7\_}，Q0--Q3 分别映射 \texttt{cp\_addr\_reg[4]}--\texttt{[7]}。
+
+在 \gsr{VCD_FILE} 中指定 \texttt{MAPPING\_RULE\_FILE}，文件中可用：
+\begin{itemize}
+  \item \texttt{define\_mbit\_prefix <prefix\_name>}：MBFF 实例名中位于拼接寄存器名之前的字符串（如上例 \texttt{MBIT\_\_}）
+  \item \texttt{define\_mbit\_delim <delimiter\_name>}：分隔两个寄存器名的字符串（如上例 \texttt{MB\_}）
+  \item \texttt{define\_mbit\_lsb <0|1>}（默认 0）：MBFF 阵列最低有效位
+\end{itemize}
+
+本流程已增强支持总线式输出 pin 名，如 \texttt{Q[0]}、\texttt{Q[1]}。
+
+\subsection{功耗计算流程与结果评估}
+\subsubsection*{Power Calculation Procedure and Results Evaluation}
+
+导入数据并设好 GSR 后：
+\begin{lstlisting}
+perform pwrcalc
+\end{lstlisting}
+
+已有结果可 \textbf{Static $\rightarrow$ Power $\rightarrow$ Import} 或 \cmd{import power <Power_Dir>}（如 \texttt{adsPower}）。
+
+\figplaceholder{Figure 4-4}{导入 adsPower 目录}
+
+GUI 步骤：
+\begin{enumerate}
+  \item \textbf{Static/Dynamic $\rightarrow$ Power $\rightarrow$ Calculate} 计算功耗
+  \item 查看 \texttt{adsRpt/power\_summary.rpt}（图~\ref{fig:pw-summary}）。功耗摘要报告推荐 \gsr{DYNAMIC_SIMULATION_TIME} 仿真时间以覆盖大部分功耗事件，并列出按频率域、电源域、单元类型划分的 \texttt{total\_pwr}、\texttt{leakage\_pwr}、\texttt{internal\_pwr}、\texttt{switching\_pwr} 及占总功耗百分比。导入的功耗值会在计算中缩放以满足实例级功耗
+  \item 生成功耗密度分布图：\textbf{View $\rightarrow$ Power Maps $\rightarrow$ Power Density Map}、\textbf{Power Map of Instances}、\textbf{Power Map of Clock Instances}，或 GUI 右侧对应按钮
+\end{enumerate}
+
+\begin{lstlisting}
+------------------------------- Power Summary Report -----------------
+Recommended dynamic simulation time, 5000psec, to include 100%
+of total power for DYNAMIC_SIMULATION_TIME in GSR.
+
+INFO: Importing user specified power file: demo.inst.power
+INFO: Instances not specified in this file will have zero power.
+INFO: 100% of instances specified in instance_power_file have
+corresponding instances in the design.
+0 out of 4142 instances do not have corresponding instance in
+the design.
+INFO: For complete list of PWR-121 and PWR-122 WARNINGS, please
+see adsRpt/apache.inst_pwr_file.mismatch.
+
+The power is based on the INSTANCE_POWER FILE: demo.inst.power
+Redhawk honors instance-by-instance power as specified in the
+above file.
+Individual components of power, like switching power, internal
+power, however, are calculated by Redhawk and may have been
+scaled to meet the total instance-specific power number.
+
+Power of different frequency (MHz) domain in Watts:
+Frequency     total_pwr leakage_pwr internal_pwr switching_pwr %_total_pwr
+4.000e+02     1.729e-02 1.704e-04    1.107e-02     6.052e-03    8.333e+01%
+2.000e+02     3.4595e-03 2.1869e-05 3.1000e-03     3.3758e-04   1.666e+01%
+0.000e+00     0.000e+00 0.000e+00    0.000e+00     0.000e+00    0.000e+00%
+
+Power of different Vdd domain in Watts:
+Vdd_domain total_pwr leakage_pwr internal_pwr switching_pwr %_total_pwr
+VDD (1.1V) 2.075e-02 1.922e-04 1.417e-02      6.389e-03      1.000e+02%
+
+Power of different cell types in Watts:
+cell_type    total_pwr leakage_pwr internal_pwr switching_pwr %_total_pwr
+combinational 7.111e-03 1.221e-04 1.754e-03       5.235e-03 3.426e+01
+latch_and_FF 4.292e-03 3.890e-05 3.323e-03        9.301e-04 2.067e+01
+memory        0.000e+00 0.000e+00 0.000e+00       0.000e+00 0.000e+00
+I/O           0.000e+00 0.000e+00 0.000e+00       0.000e+00 0.000e+00
+clocked_inst 9.352e-03 3.119e-05 9.096e-03        2.246e-04 4.505e+01
+decap         0.000e+00 0.000e+00 0.000e+00       0.000e+00 0.000e+00
+(where clocked_inst: instances with clock pin(s) not classified
+ as latch_and_FF, memory, or I/O)
+
+Total chip power, 0.020757 Watt including core power and other
+domain power.
+Total clock network only power, 0.003225 Watt. Total clock power,
+including clock network and FF/latch clock pin power, 0.005992 Watt.
+----------------------------------------------------------------------
+\end{lstlisting}
+
+\figplaceholder{Figure 4-5}{功耗摘要报告示例}
+\label{fig:pw-summary}
+
+功耗摘要中可检查：
+\begin{itemize}
+  \item 总功耗是否合理？
+  \item 时钟网络与时钟功耗是否合理？
+  \item 各时钟频率下的功耗是否符合预期？
+\end{itemize}
+高功耗单元彼此相邻未必造成压降问题，但若某区域大量单元同时高功耗且供电不足，则易产生压降。功耗图对评估布局/布图规划与功耗分布很重要。还应调查：
+\begin{itemize}
+  \item 设计总功耗是多少？
+  \item 整体功耗需求分布是否均匀？
+  \item 电源 pad 能否安全承受该负载？
+  \item 不同频率域间功耗如何平衡？
+  \item 时钟网络消耗多少功耗？
+\end{itemize}
+
+可点击任意实例查看其功耗、关联电容与施加电压。
+
+\section{电源网格电阻提取}
+\subsection*{Power Grid Resistance Extraction}
+
+功耗计算后进行网络电阻提取。先进节点须准确估计线宽与厚度。
+
+\subsection{金属密度计算}
+\subsubsection*{Metal Density Calculation}
+
+为准确 R 值需评估 CMP 导致的厚度变化：
+\begin{enumerate}
+  \item 从 DEF/LEF 或 GDS2RH/DB 读几何（含 MFILL）
+  \item 按层合并扁平化
+  \item 细网格计算全域金属密度
+  \item 提取时按线段周围区域平均密度
+  \item 默认同一线段用所经区域平均密度
+  \item 长导线跨多密度区时设 \gsr{LONG_WIRE_RES_CALC 1}
+  \item 用密度与 \texttt{POLYNOMIAL\_BASED\_THICKNESS\_VARIATION} 等计算最终厚度
+\end{enumerate}
+
+\subsection{TCL 与 GUI 提取}
+\subsubsection*{TCL Command R Extraction and GUI Extraction}
+
+静态 IR（R 网）：
+\begin{lstlisting}
+perform extraction [-power | -ground]
+\end{lstlisting}
+
+动态（RLC）：
+\begin{lstlisting}
+perform extraction [-power | -ground] -l -c
+\end{lstlisting}
+
+GUI：\textbf{Static $\rightarrow$ Network Extraction}，选 R 与 VDD/VSS；可仅 VDD 或 VSS 加速静态分析，动态须两者皆选。
+
+提取后检查：是否所有 P/G 网接到电源（否则警告 ``Net VDD not driven by any pad''）；\texttt{adsRpt/apache.*.unconnect} 中的断连。
+
+\section{检查电源/地网格薄弱性}
+\subsection*{Examining Power/Ground Grid Weakness}
+
+弱 P/G 结构导致过大压降。placement/CTS 后即可分析，无需 STA/SPEF：
+\begin{itemize}
+  \item \cmd{perform gridcheck}：实例网格电阻上界估计（归一化）
+  \item \cmd{perform res_calc}：指定实例的有效网格电阻
+\end{itemize}
+
+无需先跑功耗或静态分析；导入设计并 P/G 提取后即可。
+
+\textbf{gridcheck 流程：}
+\begin{enumerate}
+  \item 归一化电阻估计。在 TCL 命令行执行：
+\begin{lstlisting}
+perform gridcheck -o <output_file_name> ?-limit <line_limit>?
+\end{lstlisting}
+  报告格式将各实例或 arc 的 RVDD、RVSS 显示为 P/G 电阻分布的百分比（图~\ref{fig:pg-weak}）。多 P/G arc 设计时，\texttt{adsRpt/apache.gridcheck} 构造规则为：(a) 相对 R 最高的 arc 先显示直至行数限制；(b) 其余 arc 显示至行数限制或相对 R 小于上一 arc 末条为止。
+\end{enumerate}
+
+示例报告片段：
+\begin{lstlisting}
+# Power/Grnd arcs listed separately, there are 2 P/G arcs w/ non-zero R.
+# Max. Resistances (%) of Power/Ground Arcs:
+# Arc1 ( VDD_INT VSS) 100.0000
+# Arc2 ( VDD VSS) 93.7410
+ { Power/Ground Arc1:
+# Total VDD_INT(%) VSS(%) Location (x y) ArcID Instance_name
+100.000 49.5167 50.4833 3316.37 3950.55 Arc1 inst_129973/inst_366358
+99.6966 50.8138 49.1862 3318.21 3965.32 Arc1 inst_129973/inst_366355
+...
+ }
+ { Power/Ground Arc2:
+# Total VDD(%) VSS(%) Location (x y) ArcID Instance_name
+93.7410 50.0202 49.9798 2099.90 3888.64 Arc2 inst_129228/inst_465808
+...
+ }
+# Floating Instances: Location (x y)     Name
+floating        0       977.5 io/pad/VSSC/extra/left/4/adsU1
+floating        10000 2956.24 io/pad/VDDC/extra/right/23/adsU1
+...
+\end{lstlisting}
+
+\figplaceholder{Figure 4-6}{P/G 薄弱性报告示例}
+\label{fig:pg-weak}
+
+实例 P/G 电阻 $R\_{inst}$ 归一化：电阻最大实例为 100，最小为 0：
+\[
+(R\_{inst}-R\_{min})/(R\_{max}-R\_{min})\times 100
+\]
+其中 $R\_{inst}=RVDD+RVSS$。\textbf{Total} 列最高为 100；VDD(\%)+VSS(\%)=100。多域时百分比相对所有域最高电阻归一化。报告按 Total 相对电阻降序排列。RVDD 与 RVSS 百分比严重失衡表示该实例处 P/G 网格薄弱，尤其对 Total R 较大的实例。未接 VDD/VSS 的 pin 在报告末尾列为 floating。
+
+也可用 \textbf{Results $\rightarrow$ List of Weak PG Instances}；点击条目并 \textbf{Go To Location} 可缩放并高亮弱 P/G 实例；可按 Total、VDD(\%) 或 VSS(\%) 排序。
+
+\begin{enumerate}
+\setcounter{enumi}{1}
+  \item \textbf{View $\rightarrow$ Resistance maps} 显示 Total、RVDD 或 RVSS——所有实例的相对有效电阻。点击右侧 \textbf{Set Color Range} 查看各色阶对应的电阻梯度，可在对话框中修改显示与范围
+  \item \textbf{View $\rightarrow$ Nets} 按网选择要显示的电阻图
+  \item 高亮弱实例：
+\begin{lstlisting}
+select addfile high_VDD_res_instance   # 弱 VDD 结构
+select addfile high_VSS_res_instance   # 弱 VSS 结构
+\end{lstlisting}
+  \item \textbf{有效网格电阻计算。}\cmd{perform res_calc} 计算从所有 pad 到选定实例/位置的有效 P/G 网格电阻，给出绝对电阻值（欧姆）。默认无选项时报告最差实例；\texttt{-instance}、\texttt{-inst_file}、\texttt{-box} 可调查特定实例或薄弱区域；\texttt{-cell\_file <CellFile>} 指定每行一个 cell 名。示例输出：
+\begin{lstlisting}
+# Ohm       Location(x y)             Layer      Net         Instance
+4.54617 1005.4 8755.2 MET3                       VSS         inst_1234
+4.39744 1055.6 8855.3 MET5                       VDD         inst_4134
+3.32929 1855.7 8455.6 MET3                       VDD         inst_2324
+...
+\end{lstlisting}
+  \item \textbf{特殊节点电阻报告。}\cmd{perform gridcheck ?-stdcell [ave|min|max|all|none]? ?-macro [...]?}：\texttt{ave} 为所选实例所有节点平均电阻（默认）；\texttt{min}/\texttt{max} 报告最小/最大电阻节点；\texttt{none} 取消标准单元或宏报告；\texttt{all} 报告设计中最大 5000（默认）个节点电阻。报告格式类似 \cmd{perform res_calc}，VDD/VSS 逐点列出。示例：
+\begin{lstlisting}
+Resistance(%) Location( x y) Layer Net                     Instance
+87.4927 4459.77 443.855 METAL3 VDD                       inst_129747/adsU1
+87.3918 2839.76 443.855 METAL3 VDD                       inst_129747/adsU1
+...
+\end{lstlisting}
+\end{enumerate}
+
+\section{定义 Pad 与封装参数}
+\subsection*{Defining Pad and Package Parameters}
+
+静态 IR/EM 前须定义 pad、wirebond/bump 与封装参数。
+
+\subsection{命令行封装建模}
+\subsubsection*{Command Line Procedure for Package Modeling}
+
+封装 TCL 单位：R（$\Omega$）、C（pF）、L（pH）。
+\begin{lstlisting}
+setup pad [-power|-ground] [-r <R> | -c <C>]
+setup wirebond [-power|-ground] [-r <R> | -l <L> | -c <C>]
+setup package -r <R> -l <L> -c <C>
+\end{lstlisting}
+
+单 bump/pad RLC 见 PLOC 规范（附录 C）。更精确 SPICE 封装 subcircuit 见第 12 章。提取后可用：
+\begin{lstlisting}
+setup pss -pad_file <file.ploc> -subckt <pss_ckt_name>
+\end{lstlisting}
+修改 PLOC/封装后重跑 \cmd{setup pss} 即可 what-if。
+
+\subsection{GUI 封装建模与 Package Compiler}
+\subsubsection*{GUI Procedure and Package Compiler}
+
+\textbf{Static $\rightarrow$ Pad, Wire\_bond/Bump and Package Constraint} 输入 RLC（图~\ref{fig:pad-pkg-form}）。
+
+\begin{noteBox}
+静态分析仅需 R 值即可；动态分析须准确的 L、C 值才能获得精确结果。
+\end{noteBox}
+
+若无测试或 SPICE 模型的准确 RLC，可提供合理默认值以观察对压降的影响。封装模型 RLC 用于分析封装参数对电路的影响，封装对压降影响显著。
+
+\figplaceholder{Figure 4-7}{Pad、Wire-bond/Bump 与封装约束表单}
+
+\textbf{Package Compiler}：检查封装 SPICE 语法、RLCK 无源性、各电压域有效电感、die-package pin 匹配并生成标注 PLOC（基于 CPP 头）。详见第 12 章「Chip-Die Mapping Using Package Compiler」。
+
+\section{运行 RedHawk-S（静态 IR/EM 分析）}
+\subsection*{Running RedHawk-S (Static IR/EM Analysis)}
+
+完成前述步骤后：
+\begin{enumerate}
+  \item \textbf{Static $\rightarrow$ Static IR-drop \& EM Analysis}，或 \cmd{perform analysis -static}
+  \item 日志列出各 P/G 网最差 5 个压降
+  \item 点 IR 按钮查看 VDD/VSS 静态压降图（图~\ref{fig:static-vdd}、\ref{fig:static-vss}）
+\end{enumerate}
+
+\figplaceholder{Figure 4-8}{VDD 静态 IR 压降图}
+\label{fig:static-vdd}
+\figplaceholder{Figure 4-9}{VSS 静态 IR 压降图}
+\label{fig:static-vss}
+
+静态图可识别：热点数量与位置；意外色阶跳变（缺 strap/连接）；黑色区域（黑盒、缺数据或逻辑/物理断连）；从电源到热点色阶是否合理。
+
+\subsection{导出/导入设计数据库}
+\subsubsection*{Exporting and Importing Results to the Design Database}
+
+\begin{lstlisting}
+export db <Output_filename>    # 或 File -> Export DB
+import db <DB_filename>        # 或 File -> Import DB
+\end{lstlisting}
+
+导出含 \texttt{general}、\texttt{library.*}、\texttt{design.*} 及 \texttt{apache.gsr} 等文本。跨 Linux/Solaris/AMD64 平台无关。
+
+\textbf{导出数据库步骤：}
+\begin{enumerate}
+  \item 选择 Export DB 菜单项，在对话框中输入设计目录名并点 OK
+  \item 创建 snapshot 目录，含二进制文件：\texttt{general}（含 \texttt{.gsr}、\texttt{.tech} 等）、\texttt{library.0, library.1, ...}、\texttt{design.0, design.1, ...}
+  \item 功耗计算与仿真所需的 \texttt{apache.gsr} 等文本文件亦包含在 Export DB 中
+\end{enumerate}
+
+\textbf{兼容性：}同 major 版本内，旧 DB 可用新 RedHawk 加载（新特性不可用）；新 DB 不能用旧版加载；跨 major（如 2007.x 与 2008.x）不可互载。建议 DB 版本与加载工具版本一致。
+
+\textbf{导入数据库步骤：}
+\begin{enumerate}
+  \item 选择 Import DB，在对话框中选择设计目录并点 OK
+  \item 若 Selection 字段为空（AMD64/Enterprise 3.0 上可能发生），手动输入目录名，如 \texttt{/home/design/MY\_DB}
+\end{enumerate}
+
+\begin{noteBox}
+仅可将设计加载到 snapshot 目录；不得编辑二进制文件；不支持 query。版本标签在 \texttt{general} 中——须用同一版本 \cmd{export db} 的工具回放，否则报错如 \texttt{Data/File version is not RedHawk2004100-BINARY!}。
+\end{noteBox}
+
+大设计可用 \cmd{import db <file> -cache_mode 1} 或 \gsr{CACHE_MODE 1} 自适应缓存。
+
+\section{早期分析方法学}
+\subsection*{Early Analysis Methodology}
+
+\subsection{概述与输入}
+\subsubsection*{Overview and Input Data Required}
+
+布局布线不完整时，RedHawk 可在早期验证电源网格、pad 放置与 pad 连接 EM。支持抽象级别：
+\begin{enumerate}
+  \item 仅 P/G 布线，无块布局；有全芯片或分区功耗
+  \item P/G + 宏布局，宏无 LEF pin/详细布线
+  \item P/G + 宏布局，宏有 pin 无详细布线
+  \item P/G + 宏布局，宏有 pin 或详细布线
+\end{enumerate}
+
+\figplaceholder{Figure 4-10}{早期块分析场景}
+
+所需输入：\texttt{*.tech}；描述宏的 LEF（需 current sink 时含 PIN）；宏 DEF（若需详细布线）；顶层 DEF；电压源位置；GSR。
+
+
+\subsection{BLOCK\_POWER\_ASSIGNMENT 语法详解}
+\subsubsection*{Block Power and Current Assignment Syntax}
+
+\gsr{BLOCK_POWER_ASSIGNMENT}（BPA）因应用类型众多，语法按用途分类如下。
+
+\paragraph{为已有 LEF/DEF 实例分配功耗}
+\begin{lstlisting}
+<instName> [BLOCK|PIN] <layerSpec> <netName> [<powerW>|<currentA>|-1]
+\end{lstlisting}
+其中 \texttt{<layerSpec>} 为层名、\texttt{ALL}、\texttt{TOP}、\texttt{BOTTOM} 或与 BPA 实例重叠的最高/最低掩模层，或 via 名。\texttt{[<powerW>|<currentA>]} 为电源网功耗（W）或地网电流（A）；\texttt{-1} 表示由功耗引擎根据翻转率、BPFS、APL 等决定。
+
+\paragraph{创建新区域实例并分配功耗}
+\begin{lstlisting}
+<BPA_instName> REGION <layerSpec> <netName> [<powerW>|<currentA>]
+    <llx> <lly> <urx> <ury>
+\end{lstlisting}
+
+\paragraph{用 DECAP\_CELL 或 BLOCK\_POWER\_MASTER\_CELL 声明的单元创建实例}
+\begin{lstlisting}
+<BPA_instName> <cellName> <layerSpec> <netName>
+    [<powerW>|<currentA>] <llx> <lly> <orientation>
+\end{lstlisting}
+
+\paragraph{全芯片区域}
+\begin{lstlisting}
+<BPA_instName> FULLCHIP <layerSpec> <netName> [<powerW>|<currentA>]
+\end{lstlisting}
+注意：\texttt{FULLCHIP} 功率须在 BPFS 而非 BPA 中定义。
+
+\paragraph{在已有 BPA 实例内定义子区域（可多次声明）}
+\begin{lstlisting}
+<BPA_instName> BLOCK AREA <llx> <lly> <urx> <ury>
+<BPA_instName> BLOCK RECTILINEAR <x1 y1 x2 y2 x3 y3 ...>
+\end{lstlisting}
+
+\paragraph{排除区域或实例}
+\begin{itemize}
+  \item \texttt{<regionName> REGION EXCLUDE <llx> <lly> <urx> <ury>}：从 BPA 功耗分配中排除矩形区域
+  \item \texttt{<instName> BLOCK EXCLUDE}：排除与 BPA 重叠的设计实例
+  \item \texttt{<regionName> REGION INCLUDE <llx> <lly> <urx> <ury>}：在 EXCLUDE 区域内加回矩形
+  \item \texttt{<instName> BLOCK INCLUDE}：用已有实例边界框执行与 INCLUDE 相同操作
+  \item \texttt{<BPA_instName> BLOCK EXCLUDE_MACRO}：排除与 BPA 重叠的宏实例
+  \item \texttt{<instName> BLOCK EXCLUDE_BPFS}：排除 BPFS 中定义且与 BPA 重叠的实例
+  \item \texttt{<BPA_instName> BLOCK OVERLAP_OK}：排除与 BPA 重叠的所有实例所占区域
+\end{itemize}
+
+\paragraph{多域与 \texttt{-1} 功耗}
+每个 block 的每个域（net）须单独一行，例如：
+\begin{lstlisting}
+regionA REGION met3 vdd1 -1 100 200 300 400
+regionA REGION met4 vdd2 -1 100 200 300 400
+regionA REGION met3 vss -1 100 200 300 400
+\end{lstlisting}
+若 block 中某一网在 BPA 中设为 \texttt{-1}，则该 block 所有域的功耗/电流均由功耗计算引擎决定。
+
+\paragraph{BLOCK\_POWER\_MASTER\_CELL 与不规则区域}
+可在 \gsr{BLOCK_POWER_MASTER_CELL} 中定义共享主单元格及矩形子区域，再在 BPA 中引用：
+\begin{lstlisting}
+BLOCK_POWER_MASTER_CELL {
+    <master_cell_name1> <BB_llx> <BB_lly> <BB_urx> <BB_ury>
+    ?<master_cell_name2> <bbox> {
+        <sub-area bbox>
+        ...
+    }?
+}
+BLOCK_POWER_ASSIGNMENT {
+    <region> <master_cell_name> <layer> <net_name>
+    [<power_W>|<gnd_I>] <BB_llx> <BB_lly> <orientation_code>
+    ...
+}
+\end{lstlisting}
+多个 REGION 可共享同一 \texttt{master_cell_name}。
+
+\paragraph{BPA 典型示例}
+\begin{lstlisting}
+RegionABC FULLCHIP via7 VDD 2.0
+RegionABC FULLCHIP via5 VDDC 0.4
+BlckA BLOCK MET6 GND 1.0
+BlckB PIN MET6 VDD 0.2
+BlckC BLOCK via2 VDD 0.4
+Region1 REGION via3 VDDC 0.3 30.0 65.0 60.0 95.0
+IOL REGION MET5 VDD_L 0.005 100 1050 1000 9900
+regionA REGION ALL VSS 0.1 10.0 20.0 30.0 40.0
+\end{lstlisting}
+
+MMX 内子区域可用前缀 \texttt{adsU1/}，例如 \texttt{adsU1/regionA}，以便 RedHawk 正确解析层次。
+
+\paragraph{交互式 BPA 合并规则}
+\cmd{gsr set BLOCK_POWER_ASSIGNMENT_FILE <file>} 可在 \cmd{setup design} 前后初始化或重设 BPA。\cmd{gsr get BLOCK_POWER_ASSIGNMENT} 显示当前设置。\cmd{gsr get BLOCK_POWER_MASTER_CELL} 显示主单元格定义。新文件与已有 BPA 比较时：语法错误则不改该项；仅在新文件中存在则添加；仅在旧文件中存在则删除；双方都有则用新参数。
+
+\paragraph{REGION 重叠与 inactive 实例}
+两个不同 REGION 坐标重叠会警告（子区域除外）。BPA REGION 与常规实例重叠时，该实例视为 inactive 并被忽略。每个 BPA REGION 可作为实例名引用；层次名中 \texttt{/} 在 cell 名中替换为 \texttt{\_}（如 \texttt{U10/I5} $\rightarrow$ \texttt{U10\_I5}）。
+\subsection{MMX Pin 区域与 OBS、Decap}
+\subsubsection*{MMX Pin-based Regions, OBS, and Decap during BPA}
+
+\textbf{MMX\_PIN / MMX\_REGION}：向 MMX 内部晶体管 pin 或子区域分配功耗（仅静态）；与金属/区域 BPA 可共存，但金属 BPA 不得覆盖 MMX 晶体管 pin。限制：MMX 实例不能在 MMX\_REGION 内；MMX\_REGION 须在 MMX 内；同实例内可嵌套；区域不得重叠。
+
+\textbf{LEF OBS}：\gsr{READ_LEF_OBS 1} 读取 OVERLAP 层上 RECT；BPA 块类型 \texttt{OBS} 向 OBS 区域分配功耗。若某网对块设为 OBS，则该块 BPA 中所有网均按 OBS 处理。
+
+\subsection{创建去耦单元（DECAP\_CELL + BPA）}
+\subsubsection*{Creating Decap Cells During BPA}
+
+可用 \gsr{DECAP_CELL} 与 BPA 创建/实例化 decap 块，\cmd{print decap} 亦会考虑这些块。Decap 可来自 LEF 或在流程中创建：
+\begin{lstlisting}
+APL_FILES {
+    mydecap.cdev cap
+    ...
+}
+BLOCK_POWER_ASSIGNMENT {
+    DecapABC_10 DecapABC METAL1 VDD 0.0 3800 4200 N
+    DecapABC_10 DecapABC METAL1 VSS 0.0 3800 4200 N
+    DecapABC_20 LEF_decap1 METAL1 VDD 0.0 3900 4300 N
+}
+DECAP_CELL {
+    LEF_decap1
+    ...
+    DecapABC 100 100 0.1 10 METAL1 0.001
+}
+\end{lstlisting}
+语法 \texttt{<decap\_cell> <width> <height> <C\_pF> <R\_ohm> <layer> <leakage\_A>}。本例 RedHawk 为 \texttt{DecapABC} 创建 decap 单元，\texttt{DecapABC\_10/20} 为实例；GUI 选中 decap 实例时，日志显示实例名、单元名与分配的 decap 值。
+
+\subsection{早期 decap 估计流程}
+\subsubsection*{Early Stage Decap Estimation}
+
+为帮助满足全局 DvD 目标，可按以下步骤估计早期 decap：
+\begin{enumerate}
+  \item 在粗略 placement/CTS 完成后运行动态分析，查看 DvD
+  \item \cmd{decap fill -uniform <percent> -pattern \{<decap masters>\}} 在标准单元行上均匀填充指定比例 decap（可能与已有单元重叠）
+  \item 重跑 DvD；若未达全局目标则删除所加 decap（可忽略局部热点）
+  \item 调整覆盖率与 decap master 组合，重复 2--3 直至满足全局 DvD
+  \item 将所需 decap 量（可选含 placement 信息）反馈给 P\&R 工具
+  \item 继续常规定点与布线
+\end{enumerate}
+报告示例：
+\begin{lstlisting}
+DECAP_MASTER_NAME Number_of_Instance Amount_of_Decap_Added
+cell_698               333548              457.397700 pF
+cell_200               333548               93.843726 pF
+-------------------------------------------------------
+Total_Amount           667096              551.241426 pF
+\end{lstlisting}
+
+\subsection{早期分析报告}
+\subsubsection*{Reports Created from Early Analysis}
+
+早期分析与标准静态分析类似，生成：
+\begin{itemize}
+  \item 线基压降（wire-based voltage drops）
+  \item pad 电流（pad currents）
+  \item 潜在 EM 问题区域（potential EM problem areas）
+\end{itemize}
+
+\subsection{示例分析案例}
+\subsubsection*{Example Analyses}
+
+
+\paragraph{Case 1：仅 P/G 布线、无块布局}
+条件：仅有 P/G 布线，无块放置；有全芯片或分区功耗。可指定 FULLCHIP 与 REGION 功耗，并为各区域/全芯片指定电流 sink 所在金属层或 via 层。
+
+语法框架：
+\begin{lstlisting}
+BLOCK_POWER_ASSIGNMENT {
+    [<DEF_inst_name> [BLOCK|PIN] | <regionName> [FULLCHIP|REGION]]
+    [<layer_name>|ALL|TOP|BOTTOM|<via_name>] <pwr_domain_name>
+    [<domain_power-W>|<gnd_net_current-A>|-1]
+    ?<x1 y1 x2 y2 - REGION 必需>?
+}
+\end{lstlisting}
+示例：顶层 metal6 上 VDD\_X 域消耗 1.0\,W：
+\begin{lstlisting}
+RegionXYZ FULLCHIP metal6 VDD_X 1.0
+\end{lstlisting}
+via4 上区域 (100,100)--(200,200) 内 GND\_X 总电流 0.35\,A：
+\begin{lstlisting}
+RegionA REGION via4 GND_X 0.35 100.0 100.0 200.0 200.0
+\end{lstlisting}
+RedHawk 在 RegionA 内所有 via4 形状上插入 current sink，合计 0.35\,A。指定金属层时，区域内该层所有 top/bottom via 为 sink；指定 via 层时，该类型 via 为 sink。
+
+\paragraph{Case 2：P/G + 宏布局，宏无 LEF pin/详细视图}
+可指定 FULLCHIP 与块级功耗及每层 sink 定义。示例：
+\begin{lstlisting}
+RegionMNOP FULLCHIP metal6 VDD_X 1.0
+BlockA BLOCK via4 GND_X 0.35
+BlockA BLOCK via4 VDD_X 0.42
+BlockB BLOCK metal3 VDD_X 0.72
+\end{lstlisting}
+顶层 BlockA、BlockB 外 via5/via6 分配 1.0\,W（两 block 均覆盖 VDD\_X）；FULLCHIP 功率应仅针对顶层 sink。BlockA 内 via4 合计 0.35\,A（GND\_X）；BlockB 内 metal3 几何上 sink 合计 0.72\,W（VDD\_X）。
+
+\paragraph{Case 3：P/G + 宏布局，宏有 LEF pin}
+与 Case 2 类似，但对已有 LEF pin 的块使用 \texttt{PIN} 而非 \texttt{BLOCK}，current sink 须与 LEF 中 PIN 几何相交：
+\begin{lstlisting}
+RegionCDEF FULLCHIP metal6 VDD_X 1.0
+BlockA PIN via4 GND_X 0.35
+BlockA PIN via4 VDD_X 0.42
+BlockB PIN metal3 VDD_X 0.72
+\end{lstlisting}
+BlockA 内与 LEF PIN 相交的 via4 合计 0.35\,A；BlockB 内与 PIN 相交的 metal3/via2/via3 合计 0.72\,W。
+
+\section{评估静态 IR 结果}
+\subsection*{Evaluating Results of Static IR Voltage Drop Analysis}
+
+\begin{enumerate}
+  \item \textbf{View $\rightarrow$ Map Configuration $\rightarrow$ IR Drop Color Map} 按层查看
+  \item 放大至可见实例压降（图~\ref{fig:ir-instance}）
+  \item Configuration 中 \textbf{Set Color Range} 设百分比或绝对压降及颜色（图~\ref{fig:ir-color-range}）
+  \item 放大查看最差区（图~\ref{fig:ir-zoom}）
+  \item IPM 按钮查看高功耗实例；PD 看功耗密度；EM 看电迁移
+\end{enumerate}
+
+\figplaceholder{Figure 4-11}{实例 IR 压降显示}
+\label{fig:ir-instance}
+\figplaceholder{Figure 4-12}{压降色阶设置}
+\label{fig:ir-color-range}
+\figplaceholder{Figure 4-13}{放大最差压降区}
+\label{fig:ir-zoom}
+\figplaceholder{Figure 4-14}{点击热点实例}
+
+结果可接受且网格问题已处理后，进入第~\ref{chap:dvd}~章动态分析。
+
+\section{修复 IR 问题示例流程}
+\subsection*{Example Procedure to Fix IR Drop Problems}
+
+示例设计初始最差 Vdd--Vss 差 1.1073\,V（左上高功耗区），metal4/metal6 strap 供电不足（图~\ref{fig:ir-original}）。
+
+\figplaceholder{Figure 4-15}{原始 IR 压降图}
+\label{fig:ir-original}
+
+\textbf{修改 pad：}在两条 metal4 strap 上 \textbf{Edit $\rightarrow$ Add Pad} 加两个 pad；在 metal6 strap 加一个（图~\ref{fig:add-pads}）。
+
+\figplaceholder{Figure 4-16}{在 metal4 strap 上加 pad}
+\figplaceholder{Figure 4-17}{在 metal6 strap 上加 pad}
+\label{fig:add-pads}
+
+\textbf{加 metal6 strap：}\textbf{Edit $\rightarrow$ Add Power Strap}，竖向、宽 20\,\textmu m，stack via top/bottom 为 metal6/metal4，在 metal4 上绘制后 Commit。重跑提取与静态分析后最差差仅 1.1076\,V，改善很小（图~\ref{fig:add-straps}）。
+
+\figplaceholder{Figure 4-18}{在 metal4 上加 metal6 strap}
+\label{fig:add-straps}
+
+\textbf{电阻率敏感性：}将 tech 中 metal6 电阻率从 0.027 改为 0.014，重跑提取、\textbf{Power$\rightarrow$Import} 与静态分析，最差 1.109\,V，略有改善。说明可加更高金属层或改用 flip-chip。
+\paragraph{示例 IR 案例}
+图~\ref{fig:ir-original} 为原始 IR 图。最差 Vdd--Vss 差 1.1073\,V，位于芯片左上高功耗区。日志示例：
+\begin{lstlisting}
+The worst IR drop of the top cover cell
+voltage = 1.1073 at node (2679.182500,2737.390000)
+\end{lstlisting}
+自顶部延伸的 metal4 strap 与左侧 metal6 strap 对高功耗实例供电不足。
+
+\paragraph{修改 pad 步骤}
+\begin{enumerate}
+  \item \textbf{Edit $\rightarrow$ Add Pad} 在两条 metal4 strap 上各加一个 pad（图~\ref{fig:add-pads}）
+  \item 在 metal6 strap 上再加一个 pad
+\end{enumerate}
+
+\paragraph{加 metal6 strap 详细步骤}
+\textbf{Edit $\rightarrow$ Add Power Strap}：
+\begin{itemize}
+  \item 取消「Add strap by text input」，使用绘制输入
+  \item 选择竖向（Vertical）电源 strap
+  \item 宽度 20\,\textmu m
+  \item Stack via top：metal6；bottom：metal4
+  \item Strap metal layer：metal6
+  \item 在 metal4 上绘制后 Commit
+\end{itemize}
+重跑提取与静态分析后，最差差仅降至 1.1076\,V，改善很小。
+
+\paragraph{金属电阻率敏感性}
+将 tech 中 metal6 电阻率从 0.027 改为 0.014，重跑提取、\textbf{Power$\rightarrow$Import} 与静态分析，最差 1.109\,V，略有改善。说明可考虑更高金属层或 flip-chip 封装。
+
+
+更多网格修改见第 7 章。完成后进入第~\ref{chap:dvd}~章。

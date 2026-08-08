@@ -1,0 +1,333 @@
+% 第 14 章 Multivoltage Design Flow
+\bichapter{多电压设计流程}{Multivoltage Design Flow}
+\label{chap:mv}
+
+PrimeTime 支持使用 IEEE 1801 统一功耗格式（UPF）标准指定设计的多电压特性。PrimeTime 可在多电压供电及通过 \cmd{set\_voltage} 在特定供电网上设置电压值的情况下正确分析设计时序。关于多电压设计流程，参见：
+\begin{itemize}
+  \item 多电压分析要求
+  \item 指定供电连接
+  \item UPF 命令
+  \item Golden UPF 流程
+  \item 多供电电压分析
+\end{itemize}
+
+% ============================================================
+\section{多电压分析要求}
+\subsection*{Multivoltage Analysis Requirements}
+
+PrimeTime Suite 工具支持多电压分析（不同单元使用不同供电电压）：
+\begin{itemize}
+  \item PrimeTime 计算电压正确的延时与 slew
+  \item PrimeTime SI 计算电压正确的串扰延时与噪声效应
+  \item PrimePower 根据各单元各供电引脚的实际供电电压计算功耗
+\end{itemize}
+
+执行多电压分析须指定设计的功耗意图（哪些逻辑在何种电压下工作），可采用表~\ref{tab:mv-power-intent} 所示方法。
+
+\begin{table}[htbp]
+\centering
+\caption{为设计提供多电压功耗意图（表 28）}
+\label{tab:mv-power-intent}
+\begin{tabular}{@{}lll@{}}
+\toprule
+功耗意图来源 & Verilog 网表要求 & 库要求 \\
+\midrule
+从 UPF 文件（或等价 Tcl）读取 & PG-pin 或非 PG-pin 网表 & PG-pin 库 \\
+从 PG-pin 网表推断 & PG-pin 网表 & PG-pin 库 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+多电压分析的库要求：
+\begin{itemize}
+  \item 库须包含每个单元的电源与地（PG）引脚信息。Liberty 语法使用 \texttt{voltage\_map} 与 \texttt{pg\_pin}；\texttt{voltage\_map} 定义电源与默认电压，\texttt{pg\_pin} 指定各引脚关联的电源及相关参数。详见 \textit{Library Compiler User Guide}。
+  \item 若 PG-pin 库中单元缺少电源或地引脚，PrimeTime 在 link 时移除这些单元，不报告其时序或功耗信息。
+  \item Liberty 库数据须准确描述特定电压下的时序行为。PrimeTime 通过在分别表征于不同供电电压的库之间插值支持电压缩放；用 \cmd{define\_scaling\_lib\_group} 调用电压与温度缩放。注意 PrimeTime 行为与 Design Compiler 不同——DC 在精确角电压下 link 设计。详见交叉库电压与温度缩放。
+\end{itemize}
+
+% ============================================================
+\section{指定供电连接}
+\subsection*{Specifying Power Supply Connectivity}
+
+PrimeTime 支持两种方式指定供电连接：
+\begin{itemize}
+  \item UPF 指定的供电连接
+  \item 网表推断的供电连接
+\end{itemize}
+
+\subsection{UPF 指定的供电连接}
+\subsubsection*{UPF-Specified Supply Connectivity}
+
+默认情况下，对具有 UPF 指定功耗意图的多电压设计，通过加载与设计关联的 UPF 文件获得 PG 连接。例如：
+\begin{lstlisting}
+set_app_var search_path "/path1/mydata /path2/mydata"
+set_app_var link_path "* mylib_1V.db"
+read_verilog my_design.v
+link_design
+load_upf my_design.UPF
+read_sdc my_constraints.sdc
+set_voltage 0.9 -min 0.6 -object_list [get_supply_nets VDD1]
+set_voltage 0.8 -min 0.5 -object_list [get_supply_nets VDD2]
+set_voltage 0.0 -min 0.0 -object_list [get_supply_nets VSS]
+\end{lstlisting}
+
+\begin{seeAlsoBox}
+参见「UPF 命令」。
+\end{seeAlsoBox}
+
+\subsection{网表推断的供电连接}
+\subsubsection*{Netlist-Inferred Supply Connectivity}
+
+要从 PG-pin Verilog 网表推导供电连接信息，在读取任何设计信息前将 \cmd{link\_keep\_pg\_connectivity} 设为 \texttt{true}：
+\begin{lstlisting}
+set_app_var link_keep_pg_connectivity true
+read_verilog my_design.v
+link_design
+read_sdc my_constraints.sdc   # 无需加载 UPF
+set_voltage 0.9 -min 0.6 -object_list [get_supply_nets VDD1]
+\end{lstlisting}
+
+设为 \texttt{true} 后，工具从 PG 网表数据推导 UPF 功耗意图，并隐式更新设计数据库，等效于运行 \cmd{create\_power\_domain}、\cmd{create\_supply\_port}、\cmd{create\_supply\_net}、\cmd{connect\_supply\_net} 等 UPF 命令。link 后可用 \cmd{set\_voltage} 设置供电电压。
+
+PG 网表流程适用于 UPF-prime 或 golden UPF 流程生成的设计数据，支持时序分析、电压缩放、电源开关与 ECO 等。要求所有网表均含 PG 信息，不接受 PG 与非 PG 网表混合。
+
+在网表推断流程中，可读取 UPF 文件应用边界信息（端口供电与电压），但忽略内部块信息。详见「从 UPF 读取块边界信息」。
+
+工具创建 PG Verilog 文件中指定的 UPF 电源开关对象，可用 \cmd{get\_power\_switches}、\cmd{report\_power\_switch}、\cmd{get\_supply\_nets -of\_objects} 查询。
+
+\subsubsection{从 UPF 读取块边界信息}
+\paragraph*{Reading Block Boundary Information From UPF}
+
+网表推断流程中可读取 UPF 应用边界信息（如端口供电与电压），在使用 \cmd{extract\_model} 时尤其有用，以确保生成的模型具有正确的端口属性。
+
+表~\ref{tab:upf-boundary} 列出应用的边界 UPF 命令。
+
+\begin{table}[htbp]
+\centering
+\caption{网表推断供电连接流程中应用的 UPF 命令（表 29）}
+\label{tab:upf-boundary}
+\begin{tabular}{@{}ll@{}}
+\toprule
+UPF 命令 & 行为 \\
+\midrule
+\cmd{add\_pst\_state} & 始终应用 \\
+\cmd{connect\_supply\_net} & 默认忽略；\cmd{pg\_allow\_pg\_pin\_reconnection true} 时应用 \\
+\cmd{set\_port\_attributes} & 始终应用（仅 ETM 提取使用） \\
+\cmd{set\_related\_supply\_net} & 始终应用 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\cmd{link\_keep\_pg\_connectivity} 为 \texttt{true} 时，定义内部块信息的其他命令（如 \cmd{create\_supply\_net}、\cmd{set\_level\_shifter}、\cmd{set\_isolation}、\cmd{create\_power\_switch}）均被忽略。
+
+
+% ============================================================
+\section{UPF 命令}
+\subsection*{UPF Commands}
+
+不同电压的多个电源可为芯片不同区域的电源域供电。部分电源域可在不活动期间关断以省电。电平转换器（level shifter）转换跨域信号；隔离单元（isolation cell）在关断域输出端提供恒定信号电平。掉电域可含保持寄存器（retention register）在掉电期间保持逻辑值。电源开关单元在电源控制器控制下切换特定域的电源。可在 UPF 语言中指定这些多电压方面。
+
+标准 PrimeTime 许可证包含 UPF 支持，无需额外 UPF 许可证。但功耗分析需要 PrimePower 许可证，IR drop 标注需要 PrimeTime SI 许可证。
+
+\begin{seeAlsoBox}
+Synopsys 多电压流程与 UPF 命令背景见 \textit{Synopsys Multivoltage Flow User Guide}。
+\end{seeAlsoBox}
+
+PrimeTime 使用 UPF 指定的功耗意图与 \cmd{set\_voltage} 确定每个单元各电源引脚的电压。基于 UPF 与 \cmd{set\_voltage} 信息，PrimeTime 构建供电网络虚拟模型，将电压从 UPF 供电网传播到叶实例 PG 引脚。PrimeTime 不直接读取电源状态表，\cmd{set\_voltage} 须与拟验证的 UPF 电源状态表中特定状态一致。
+
+可在 shell 输入 UPF 命令，或在命令文件或用 \cmd{source}/\cmd{load\_upf} 加载。重新 link 设计时清除已加载 UPF 信息，与 SDC 类似。PrimeTime 不通过 \cmd{write\_script} 写出 UPF，也不识别 \cmd{save\_upf}。
+
+PrimeTime 支持 IEEE 1801（UPF）规范的命令与子集；不支持的命令与 PrimeTime 功能无关或尚未实现。
+
+支持的供电命令类别：
+\begin{itemize}
+  \item \textbf{电源域：}\cmd{connect\_supply\_net}、\cmd{create\_power\_domain}、\cmd{create\_power\_switch}、\cmd{create\_supply\_net}、\cmd{create\_supply\_port}、\cmd{create\_supply\_set}、\cmd{set\_domain\_supply\_net}
+  \item \textbf{隔离与保持：}\cmd{set\_isolation}、\cmd{set\_isolation\_control}、\cmd{set\_port\_attributes}、\cmd{set\_design\_attributes}、\cmd{set\_retention}、\cmd{set\_retention\_elements}、\cmd{set\_retention\_control}
+  \item \textbf{查找与查询：}\cmd{find\_objects}、\cmd{query\_cell\_instances}、\cmd{query\_cell\_mapped}、\cmd{query\_net\_ports}、\cmd{query\_port\_net}
+  \item \textbf{流程：}\cmd{load\_upf}、\cmd{set\_scope}、\cmd{set\_design\_top}、\cmd{upf\_version}
+  \item \textbf{相关非 UPF 命令：}\cmd{check\_timing -include signal\_level/supply\_net\_voltage/unconnected\_pg\_pins}、\cmd{get\_power\_domains}、\cmd{get\_power\_switches}、\cmd{get\_supply\_nets}、\cmd{report\_power\_*}、\cmd{set\_level\_shifter\_*}、\cmd{set\_related\_supply\_net}、\cmd{set\_temperature}、\cmd{set\_voltage}
+\end{itemize}
+
+PrimeTime 接受但对分析无用或信息来自其他来源的 UPF 命令（如 \cmd{add\_port\_state}、\cmd{create\_pst}、\cmd{map\_*}、\cmd{set\_level\_shifter} 等）作为有效语法但忽略。
+
+PrimeTime 拒绝为未知语法的命令（如 \cmd{save\_upf}、\cmd{merge\_power\_domains} 等）。
+
+典型 PrimeTime 多电压时序分析命令序列（UPF 相关加粗）：
+\begin{lstlisting}
+read_lib l1.lib
+read_verilog d1.v
+\section{load_upf / create_power_domain / create_supply_set ...}
+source d1.tcl
+define_scaling_lib_group library_list
+set_voltage -object_list supply_net_name
+set_voltage -cell ... -pg_pin_name ... value
+set_temperature -object_list cell_list value
+report_timing
+\end{lstlisting}
+
+\subsection{UPF 供电集（Supply Sets）}
+\subsubsection*{UPF Supply Sets}
+
+供电集是供电网的抽象集合，含 power 与 ground 两个供电功能。供电集与域无关，其 power/ground 可供创建范围内任意电源域使用，但各电源域可限制对本域内供电集的使用。
+
+供电集可在 RTL 级定义功耗意图，在未知实际供电网名之前即可综合。实现（布局布线）前须将供电集细化或关联到实际供电网。
+
+\subsection{UPF 供电集句柄}
+\subsubsection*{UPF Supply Set Handles}
+
+供电集句柄是为电源域隐式创建的抽象供电集，可在创建供电集/网/端口之前综合设计。
+
+\figplaceholder{Figure 139: Design example using supply set handles}{使用供电集句柄的设计示例}{fig:mv-supply-set}
+
+示例 25、26 演示供电集句柄与识别 power/ground 供电网。
+
+\subsection{虚拟供电网络}
+\subsubsection*{Virtual Power Network}
+
+PrimeTime 构建虚拟供电网络模型传播电压，不执行物理实现。可用 \cmd{report\_power\_network}、\cmd{report\_supply\_net} 等报告供电连接与电压。
+
+\subsection{设置电压与温度}
+\subsubsection*{Setting Voltage and Temperature}
+
+\cmd{set\_voltage} 在供电网或单元 PG 引脚上设置电压。\opt{-min} 指定最小延时分析的电压（OCV 角）。\opt{-cell} 与 \opt{-pg\_pin\_name} 在单元级标注 IR drop，须同时使用，需要 PrimeTime SI 许可证。
+
+\cmd{set\_temperature} 在单元列表上设置温度，与电压缩放库组配合使用。
+
+\subsection{多电压分析的库支持}
+\subsubsection*{Library Support for Multivoltage Analysis}
+
+多电压分析推荐：
+\begin{itemize}
+  \item 含 \texttt{pg\_pin} 与 \texttt{voltage\_map} 的 PG-pin Liberty 库
+  \item 用 \cmd{define\_scaling\_lib\_group} 定义在不同电压/温度表征的库组
+  \item 或用 \cmd{link\_path\_per\_instance} 将不同实例 link 到不同库模型
+  \item CCS 库模型推荐以获得最佳精度
+\end{itemize}
+
+\subsection{多电压报告与检查}
+\subsubsection*{Multivoltage Reporting and Checking}
+
+\begin{itemize}
+  \item \cmd{report\_power\_pin\_info} — 报告单元电源引脚电压与连接
+  \item \cmd{report\_power\_domain}、\cmd{report\_supply\_set} — 报告电源域与供电集
+  \item \cmd{check\_timing -include supply\_net\_voltage} — 检查未设置电压的供电网
+  \item \cmd{check\_timing -include unconnected\_pg\_pins} — 检查未连接 PG 引脚
+  \item \cmd{check\_timing -include signal\_level} — 信号电平不匹配检查
+\end{itemize}
+
+信号电平检查比较驱动器与负载的电压电平，检测电平转换器缺失或电压不匹配。可配置容差与过滤策略；相关 UPF 属性包括 \texttt{driver\_supply}、\texttt{receiver\_supply} 等。
+
+当驱动器与接收器由同一供电网供电且使用角电压（如 \cmd{set\_voltage 0.8 -min 1.2 VDD}）时，PrimeTime 考虑供电相关性——低电压同时作用于两者时不产生不匹配。
+
+\figplaceholder{Figure 140: Signal Level Checking With Supply Correlation}{具有供电相关性的信号电平检查}{fig:mv-signal-level}
+
+
+% ============================================================
+\section{Golden UPF 流程}
+\subsection*{Golden UPF Flow}
+
+Golden UPF 流程是维护设计 UPF 多电压功耗意图的可选方法。它在综合、物理实现与验证各步骤中使用原始「golden」UPF 文件，以及综合与实现工具生成的补充 UPF 文件。
+
+\figplaceholder{Figure 141: UPF-Prime and Golden UPF Flows}{UPF-Prime 与 Golden UPF 流程对比}{fig:golden-upf}
+
+Golden UPF 流程优势：
+\begin{itemize}
+  \item Golden UPF 文件在整个流程中保持不变，保留原始形式、结构、注释与通配命名
+  \item 可使用工具特定条件语句在不同工具中执行不同任务（传统 UPF-prime 流程中会丢失）
+  \item 功耗意图变更易于在补充 UPF 文件中跟踪
+  \item 可选使用 Verilog 网表存储所有 PG 连接，使 UPF 中 \cmd{connect\_supply\_net} 不必要，显著简化并减小 UPF 文件
+\end{itemize}
+
+在 PrimeTime SI 中使用 golden UPF 须启用：
+\begin{lstlisting}
+pt_shell> set_app_var enable_golden_upf true
+\end{lstlisting}
+
+启用后，除查询命令外的 UPF 命令须放入脚本并用 \cmd{load\_upf} 执行，不能在命令行单独执行或用 \cmd{source}。
+
+\begin{seeAlsoBox}
+详见 SolvNetPlus 文章 000024504「Golden UPF Flow Application Note」。
+\end{seeAlsoBox}
+
+% ============================================================
+\section{多供电电压分析}
+\subsection*{Multiple Supply Voltage Analysis}
+
+PrimeTime SI 可分析不同单元使用不同供电电压的设计。参见：
+\begin{itemize}
+  \item 多电压分析概述
+  \item 同时多电压分析（SMVA）
+  \item IR Drop 标注
+  \item 在时序分析中使用 Ansys RedHawk-SC
+\end{itemize}
+
+\subsection{多电压分析概述}
+\subsubsection*{Multivoltage Analysis Overview}
+
+PrimeTime SI 能在不同单元供电电压下准确确定延时、slew 与噪声效应，利用逻辑库中指定的单元延时模型。
+
+多电压基础设施支持：
+\begin{itemize}
+  \item 考虑精确驱动器与负载电源轨电压，计算非耦合信号网延时、约束与时序违例
+  \item 考虑精确 aggressor 电源轨电压，计算耦合延时、噪声凸起、时序与噪声违例
+  \item 驱动器与负载之间信号电平不匹配检查
+  \item 在电源轨上进行实例级 IR drop 标注及块级/实例级温度分析
+\end{itemize}
+
+准确分析需要：PG 连接；\cmd{set\_voltage} 设置的 PG 网电压；可选 IR drop（\cmd{set\_voltage -cell -pg\_pin\_name}，需 PrimeTime SI）；CCS 库组（\cmd{define\_scaling\_lib\_group}）或每电压库（\cmd{link\_path\_per\_instance}）；以及定义如何使用库数据构建延时模型的设置。
+
+\subsection{同时多电压分析（SMVA）}
+\subsubsection*{Simultaneous Multivoltage Analysis (SMVA)}
+
+多电压设计中时序路径可跨电源域。当各域可在多种供电电压下工作时，传统分析无法准确分析电压组合对每条路径的影响：每域单一电压则组合无界；每域 min/max（OCV）电压则过于悲观，因同域内单元不能同时工作于不同电压。
+
+基于图的同时多电压分析（SMVA）消除该悲观度：域内路径在该域所有电压级分析，跨域路径分析所穿越域的所有电压组合，单次运行完成。详见第~\ref{chap:smva}~章。
+
+\subsection{IR Drop 标注}
+\subsubsection*{IR Drop Annotation}
+
+用 \cmd{set\_voltage} 的 \opt{-cell} 与 \opt{-pg\_pin\_name} 在单元 PG 引脚标注供电电压，建模 IR drop 对时序与噪声的影响：
+\begin{lstlisting}
+pt_shell> set_voltage 1.10 -cell [get_cells U5*] -pg_pin_name VDD1
+\end{lstlisting}
+
+两选项须同时使用，需要 PrimeTime SI 许可证。\opt{-object\_list} 设置供电网电压不需要 PrimeTime SI 许可证。
+
+\subsubsection{带 IR Drop 的信号电平检查}
+\paragraph*{Signal Level Checking With IR Drop}
+
+\cmd{check\_timing -include signal\_level} 检查不同供电电压单元之间的电平不匹配。
+
+若在供电网上设置角电压又在单元级标注 IR drop：
+\begin{lstlisting}
+pt_shell> set_voltage 0.8 -min 1.2 VDD
+pt_shell> set_voltage 0.7 -min 1.1 -cell U3 -pg_pin_name VDD
+\end{lstlisting}
+
+\figplaceholder{Figure 142: Signal Level Checking With Cell-Level Voltage Annotation}{带单元级电压标注的信号电平检查}{fig:mv-irdrop-signal}
+
+此时 PrimeTime SI 假定单元级供电电压与主供电电压不相关，考虑驱动器与接收器之间的全最坏情况差异（如比较 0.8 V 与 1.1 V、1.2 V 与 0.7 V），可能触发两次不匹配违例。
+
+\subsection{在时序分析中使用 Ansys RedHawk-SC}
+\subsubsection*{Using Ansys RedHawk-SC With Timing Analysis}
+
+RedHawk-SC 功耗与可靠性分析工具可与 PrimeTime 协同分析 IR drop 与时钟抖动对时序的影响。
+
+\subsubsection{写出 Ansys RedHawk-SC STA 文件}
+\paragraph*{Writing Ansys RedHawk-SC STA Files}
+
+RedHawk-SC 需要 PrimeTime 的 STA 数据以执行 IR drop、时钟抖动与动态压降分析。
+
+\begin{enumerate}
+  \item 运行 \cmd{write\_rh\_file -output string [-filetype jitter|irdrop]}。需要时执行时序更新，以压缩 .gz 格式写出 STA 数据。动态压降分析使用 \opt{-filetype irdrop}。需要 PrimePower 或 PrimeTime-ADV-PLUS 许可证。
+  \item （可选）对所需时序路径用 \cmd{write\_dvd\_timing\_paths} 写出路径信息供 RedHawk-SC 关键路径场景使用。
+\end{enumerate}
+
+\subsubsection{读回 RedHawk 分析结果}
+\paragraph*{Reading Back RedHawk Analysis Results}
+
+可将 RedHawk 的 IR drop 与抖动结果读回 PrimeTime，用 \cmd{set\_voltage -cell -pg\_pin\_name} 标注单元级电压，或用抖动数据更新时钟不确定性。
+
+\begin{noteBox}
+RedHawk 与 PrimeTime 的接口与许可证要求随版本变化，请参阅当前版本文档与 SolvNetPlus 文章。
+\end{noteBox}

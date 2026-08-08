@@ -1,0 +1,1522 @@
+% 第 10 章 Unified Fill
+\bichapter{统一填充}{Unified Fill}
+\label{chap:fill}
+
+借助 IC Validator 的函数及其编程语言 PXL，可编写简单或复杂的过程以满足填充需求。本章说明如何使用面向应用的填充插入函数 \cmd{unified\_fill()}，并给出若干使用统一填充功能的 runset 用法模型。
+
+\begin{noteBox}
+Unified Fill 函数的完整说明见 \textit{IC Validator Reference Manual}。
+\end{noteBox}
+
+\cmd{unified\_fill()} 中定义的填充图案可包含单个填充层或多个填充层，即可输出多个多边形层。每个填充层定义可含单个矩形或任意数量的非矩形多边形。此外，每个图案可视为按间距约束在目标区域内重复的结构。
+
+统一填充功能包括以下各节：
+\begin{itemize}
+  \item 概述
+  \item 填充图案类型
+  \item 填充到填充间距
+  \item 目标区域与填充到信号间距
+  \item 范围与宽度相关间距
+  \item 多边形分组
+  \item 信号对齐填充
+  \item 改进图案插入
+  \item 节距对齐填充
+  \item 判据分析
+  \item 输出层
+  \item 层压缩
+\end{itemize}
+
+% ============================================================
+\section{概述}
+\subsection*{Overview}
+
+\cmd{unified\_fill()} 在开发填充流程时提供高度自动化与灵活性。填充需求可以简单到在某一层内生成矩形图案阵列，也可以复杂到用多种图案填充设计以达到特定密度目标。
+
+该函数支持多种可按需求组合配置的选项。主要高层特性包括：
+\begin{itemize}
+  \item 定义不同类型图案的能力
+  \item 定义使用从外部数据库读入的 fill cell 的填充插入序列
+  \item 基于方程的判据分析
+  \item 层着色（layer coloring）
+  \item 信号对齐填充
+  \item 自动创建目标层
+\end{itemize}
+
+表~\ref{tab:uf-terminology} 定义统一填充相关术语。
+
+\begin{longtable}{@{}p{0.32\textwidth} p{0.60\textwidth}@{}}
+\caption{统一填充术语}\label{tab:uf-terminology}\\
+\toprule
+\textbf{术语} & \textbf{定义} \\
+\midrule
+\endfirsthead
+\caption[]{统一填充术语（续）}\\
+\toprule
+\textbf{术语} & \textbf{定义} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+设计层（Design layer）与信号层（Signal layer）
+  & 设计中已有的层 \\
+Fill cell
+  & 从外部版图数据库导入到 IC Validator runset 的填充图案定义 \\
+填充层（Fill layer）
+  & 由 \cmd{unified\_fill()} 生成的多边形层输出 \\
+目标区域（Target region）与可填充区域（Fillable region）
+  & 可添加填充的区域 \\
+禁入区域（Keepout region）与排除区域（Exclusion region）
+  & 不得添加填充的区域 \\
+填充图案（Fill pattern）与填充结构（Fill structure）
+  & 由一个或多个填充层组成的填充配置。图案可定义为：单个填充层；或多个填充层 \\
+填充到信号间距（Fill-to-signal spacing）
+  & 从填充图案或填充层到设计层的间距 \\
+填充到填充间距（Fill-to-fill spacing）
+  & 填充图案之间或填充层之间的间距 \\
+\end{longtable}
+
+图~\ref{fig:fill-pattern-overview} 汇总各类型填充图案可用的功能。
+
+\figplaceholder{Figure 56: Fill Pattern Overview}{填充图案概览}{fig:fill-pattern-overview}
+
+% ============================================================
+\section{填充图案类型}
+\subsection*{Types of Fill Patterns}
+
+\cmd{unified\_fill()} 支持下列填充图案定义类型：
+\begin{itemize}
+  \item 多边形填充图案（Polygon Fill Patterns）
+  \item 可调矩形填充图案（Adjustable Rectangle Fill Patterns）
+  \item 堆叠填充图案（Stack Fill Patterns）
+  \item Cell 填充图案（Cell Fill Patterns）
+  \item 可扩展 Fill Cell 图案（Expandable Fill Cell Patterns）
+  \item 条带填充图案（Stripe Fill Patterns）
+\end{itemize}
+
+\subsection{多边形填充图案}
+\subsubsection*{Polygon Fill Patterns}
+
+多边形填充图案是基于坐标的填充图案定义。对此类型，将 \cmd{type} 选项设为 \cmd{UF\_POLYGON}。
+
+填充图案可有任意数量的填充层。多层图案定义中，每个填充层有各自的层定义。如例~\ref{ex:uf-single-rect} 所示，填充层由 \cmd{layers} 选项中 \cmd{output\_layer\_key} 指定的名称标识。
+
+\paragraph{单层单矩形图案定义}
+\textit{Single Layer Pattern Definition With Single Rectangle}
+
+\begin{lstlisting}[style=pxl,caption={单层单矩形图案定义},label={ex:uf-single-rect}]
+DATA_M1_fill : list of list of coordinate_s = {
+      { {0.0, 0.0}, {1.0, 0.0}, {1.0, 1.0}, {0.0, 1.0} }
+};
+SHAPE_M1_fill : polygon_layer_s = {
+      layer_spec = {output_layer_key = "M1_fill"}
+      polygons = DATA_M1_fill,
+};
+
+fill_patterns = {{
+      type = UF_POLYGON,
+      polygon_fill = {
+         layers = {SHAPE_M1_fill}
+      }
+}}
+\end{lstlisting}
+
+\paragraph{单层多矩形图案定义}
+\textit{Single Layer Pattern Definition With Multiple Rectangles}
+
+例~\ref{ex:uf-one-layer} 与图~\ref{fig:uf-one-layer} 所示图案定义有一个填充层 \cmd{M1\_fill}，由两个矩形定义。虚线表示层定义的包围盒（bounding box）。该图案按间距约束在目标区域内重复。因图案仅含一层，图案包围盒与层定义包围盒相同。
+
+\begin{lstlisting}[style=pxl,caption={使用 UF\_POLYGON 类型的单填充层示例},label={ex:uf-one-layer}]
+DATA_M1_fill : list of list of coordinate_s = {
+      { {0.0, 0.0}, {1.0, 0.0}, {1.0, 2.0}, {0.0, 2.0} },
+      { {2.0, 0.0}, {3.0, 0.0}, {3.0, 2.0}, {2.0, 2.0} }
+};
+
+SHAPE_M1_fill : polygon_layer_s = {
+      layer_spec = {output_layer_key = "M1_fill"}
+      polygons = DATA_M1_fill,
+};
+
+fill_patterns = {{
+      type = UF_POLYGON,
+      polygon_fill = {
+         layers = {SHAPE_M1_fill}
+      }
+}}
+\end{lstlisting}
+
+\figplaceholder{Figure 57: One Fill-Layer Example}{单填充层示例}{fig:uf-one-layer}
+
+\paragraph{多层图案定义}
+\textit{Multilayer Pattern Definition}
+
+例~\ref{ex:uf-two-layer} 与图~\ref{fig:uf-two-layer} 所示图案定义有两个填充层 \cmd{M1\_fill} 与 \cmd{M2\_fill}。虚线表示图案定义的包围盒。该图案按间距约束在目标区域内重复。本例中图案包围盒与各层定义的包围盒不同。重复图案时，以整个图案的包围盒为准。
+
+\begin{lstlisting}[style=pxl,caption={使用 UF\_POLYGON 类型的两填充层示例},label={ex:uf-two-layer}]
+DATA_M1_fill : list of list of coordinate_s = {
+      { {1.0, 0.0}, {2.0, 0.0}, {2.0, 3.0}, {1.0, 3.0} }
+};
+
+SHAPE_M1_fill : polygon_layer_s = {
+      layer_spec = {output_layer_key = "M1_fill"}
+      polygons = DATA_M1_fill,
+};
+
+DATA_M2_fill : list of list of coordinate_s = {
+      { {0.0, 1.0}, {3.0, 1.0}, {3.0, 2.0}, {0.0, 2.0} }
+};
+
+SHAPE_M2_fill : polygon_layer_s = {
+      layer_spec = {output_layer_key = "M2_fill"}
+      polygons = DATA_M2_fill,
+};
+
+fill_patterns = {{
+      type = UF_POLYGON,
+      polygon_fill = {
+         layers = {SHAPE_M1_fill,
+                   SHAPE_M2_fill}
+      }
+}}
+\end{lstlisting}
+
+\figplaceholder{Figure 58: Two Fill-Layer Example}{两填充层示例}{fig:uf-two-layer}
+
+\paragraph{多填充图案定义}
+\textit{Multiple Fill Pattern Definition}
+
+可在 \cmd{unified\_fill()} 中指定多个图案定义。输入目标区域按指定顺序对每个填充图案定义进行处理。图~\ref{fig:uf-multi-pat} 与图~\ref{fig:uf-adj-rect} 展示的填充流程先插入多层图案 M1 与 M2，再在剩余目标区域插入单层图案 M1。
+
+\begin{lstlisting}[style=pxl,caption={使用 unified\_fill() 的 fill\_patterns 选项的多图案示例},label={ex:uf-multi-pat}]
+DATA_M1_fill : list of list of coordinate_s = {
+      { {1.0, 0.0}, {2.0, 0.0}, {2.0, 3.0}, {1.0, 3.0} }
+};
+
+SHAPE_M1_fill : polygon_layer_s = {
+      layer_spec = {output_layer_key = "M1_fill"}
+      polygons = DATA_M1_fill,
+};
+
+DATA_M2_fill : list of list of coordinate_s = {
+      { {0.0, 1.0}, {3.0, 1.0}, {3.0, 2.0}, {0.0, 2.0} }
+};
+
+SHAPE_M2_fill : polygon_layer_s = {
+      layer_spec = {output_layer_key = "M2_fill"}
+      polygons = DATA_M2_fill,
+};
+
+fill_patterns = {
+        {type = UF_POLYGON,
+          polygon_fill = {
+             layers = {SHAPE_M1_fill,
+                       SHAPE_M2_fill}
+          }
+        },
+        {type = UF_POLYGON,
+          polygon_fill = {
+             layers = {SHAPE_M1_fill}
+          }
+        }
+}
+\end{lstlisting}
+
+\figplaceholder{Figure 59: Multiple Patterns Example}{多图案示例}{fig:uf-multi-pat}
+
+\subsection{可调矩形填充图案}
+\subsubsection*{Adjustable Rectangle Fill Patterns}
+
+可调矩形填充图案是单层矩形图案定义，可自动拉伸或收缩矩形尺寸以最大化填充密度。对此类型，将 \cmd{type} 设为 \cmd{UF\_ADJUSTABLE}。
+
+可从特定矩形尺寸出发，选择沿目标区域边界增大或缩小所有形状。增大与缩小按用户指定的增量进行。仅对目标区域边界上的填充形状进行调整。
+
+例~\ref{ex:uf-adjustable} 定义最小尺寸为 $1\,\mu\mathrm{m} \times 1\,\mu\mathrm{m}$ 的矩形。目标区域边界上的矩形沿 $x$ 方向以 $0.05\,\mu\mathrm{m}$ 为增量增长，以拟合最大可能形状。如图~\ref{fig:uf-adj-rect} 所示，最大可能形状为 $4\,\mu\mathrm{m} \times 1\,\mu\mathrm{m}$。
+
+\begin{lstlisting}[style=pxl,caption={使用 UF\_ADJUSTABLE 类型的可调矩形填充图案示例},label={ex:uf-adjustable}]
+fill_patterns = {{
+      type = UF_ADJUSTABLE,
+      adjustable_fill = {
+         layer_spec = {output_layer_key = "M1_Fill"}
+         width = 1.0,
+         height = 1.0,
+         width_bound = 4.0,
+         width_delta = 0.05,
+      }
+}}
+\end{lstlisting}
+
+\figplaceholder{Figure 60: Adjustable Rectangle Fill Pattern Example}{可调矩形填充图案示例}{fig:uf-adj-rect}
+
+\subsection{堆叠填充图案}
+\subsubsection*{Stack Fill Patterns}
+
+堆叠填充图案类似于 \cmd{UF\_POLYGON}，但在开发填充流程时自动化程度更高。对此类型，将 \cmd{type} 设为 \cmd{UF\_STACK}。
+
+当应用需要按序插入多层图案的多种变体、而又不必显式定义所有变体时，可使用 \cmd{UF\_STACK}。通过 \cmd{unified\_fill()} 的选项，提供一个由多个填充层组成的单一图案定义。工具根据可填充区域尝试插入不同变体：先从包含全部层的原始定义开始，再尝试仅含层子集的变体。
+
+目标是找到在给定可填充区域内能放入、且层数最多的图案变体。使用 \cmd{stack\_fill} 选项的 \cmd{required\_layer\_keys} 定义填充层之间的依赖，例如 via1 需要 metal1 与 metal2。例~\ref{ex:uf-stack} 给出示例。
+
+\begin{lstlisting}[style=pxl,caption={使用 stack\_fill 选项的堆叠填充图案示例},label={ex:uf-stack}]
+SHAPE_M1_fill : stack_layer_s = {
+      layer_spec = {output_layer_key = "M1_fill"}
+      polygons = DATA_M1_fill,
+};
+SHAPE_M2_fill : stack_layer_s = {
+      layer_spec = {output_layer_key = "M2_fill"}
+      polygons = DATA_M2_fill,
+};
+SHAPE_M3_fill : stack_layer_s = {
+      layer_spec = {output_layer_key = "M3_fill"}
+      polygons = DATA_M3_fill,
+};
+SHAPE_V1_fill : stack_layer_s = {
+      layer_spec = {output_layer_key = "V1_fill"},
+      polygons = DATA_V1_fill,
+      required_layer_keys = {"M1_fill", "M2_fill"}
+};
+SHAPE_V2_fill : stack_layer_s = {
+      layer_spec = {output_layer_key = "V2_fill"},
+      polygons = DATA_V2_fill,
+      required_layer_keys = {"M2_fill", "M3_fill"}
+};
+
+fill_patterns = {{
+      type = UF_STACK,
+      stack_fill = {
+         layers = {SHAPE_M1_fill,
+                   SHAPE_V1_fill,
+                   SHAPE_M2_fill,
+                   SHAPE_V2_fill,
+                   SHAPE_M3_fill},
+         min_stack = 1,
+         max_stack = 5
+      }
+}}
+\end{lstlisting}
+
+\cmd{SHAPE\_M1\_fill}、\cmd{SHAPE\_V1\_fill}、\cmd{SHAPE\_M2\_fill}、\cmd{SHAPE\_V2\_fill} 与 \cmd{SHAPE\_M3\_fill} 是同一多层图案的各个层定义。\cmd{unified\_fill()} 按下列顺序用这些图案处理可填充区域：
+\begin{itemize}
+  \item M1-V1-M2-V2-M3
+  \item M1-V1-M2
+  \item M2-V2-M3
+  \item M1
+  \item M2
+  \item M3
+\end{itemize}
+上述 \cmd{UF\_STACK} 示例等价于编写多个 \cmd{UF\_POLYGON} 类型的图案定义，如图~\ref{fig:uf-stack-bbox} 所示。
+
+\begin{lstlisting}[style=pxl,caption={使用 UF\_POLYGON 类型编写多个图案定义},label={ex:uf-equiv-poly}]
+fill_patterns = {
+     {type = UF_POLYGON,
+      polygon_fill = {      // First pattern for insertion
+         layers = {SHAPE_M1_fill,
+                   SHAPE_V1_fill,
+                   SHAPE_M2_fill,
+                   SHAPE_V2_fill,
+                   SHAPE_M3_fill}
+      }
+     },
+     {type = UF_POLYGON,
+       polygon_fill = {      // Second pattern for insertion
+          layers = {SHAPE_M1_fill,
+                    SHAPE_V1_fill,
+                    SHAPE_M2_fill}
+       }
+     },
+     {type = UF_POLYGON,
+       polygon_fill = {     // Third pattern for insertion
+          layers = {SHAPE_M2_fill,
+                    SHAPE_V2_fill,
+                    SHAPE_M3_fill}
+       }
+     },
+     {type = UF_POLYGON,
+       polygon_fill = {     // Fourth pattern for insertion
+          layers = {SHAPE_M1_fill}
+       }
+     },
+     {type = UF_POLYGON,
+       polygon_fill =       // Fifth pattern for insertion
+         {layers = {SHAPE_M2_fill}
+       }
+     },
+     {type = UF_POLYGON,
+       polygon_fill =       // Sixth pattern for insertion
+         {layers = {SHAPE_M3_fill}
+       }
+     }
+}
+\end{lstlisting}
+
+各层定义的顺序决定所放置图案变体的顺序。若层定义如例~\ref{ex:uf-stack-order} 所示：
+
+\begin{lstlisting}[style=pxl,caption={各层定义顺序示例},label={ex:uf-stack-order}]
+fill_patterns = {{
+         type = UF_STACK,
+         stack_fill = {
+            layers = {SHAPE_M3_fill,
+                      SHAPE_V2_fill,
+                      SHAPE_M2_fill,
+                      SHAPE_V1_fill,
+                      SHAPE_M1_fill},
+            min_stack = 1,
+            max_stack = 5
+         }
+}}
+\end{lstlisting}
+
+则图案插入顺序变为：
+\begin{itemize}
+  \item M1-V1-M2-V2-M3
+  \item M2-V2-M3
+  \item M1-V1-M2
+  \item M3
+  \item M2
+  \item M1
+\end{itemize}
+
+工具可构造的图案变体数量取决于 \cmd{min\_stack} 与 \cmd{max\_stack}：
+\begin{itemize}
+  \item \cmd{min\_stack} 指定任一变体所需的最少填充层数。
+  \item \cmd{max\_stack} 指定变体允许的最多填充层数。
+\end{itemize}
+图~\ref{fig:uf-all-var} 给出填充层为 5 个金属与 4 个 via、且 $\texttt{max\_stack}=9$、$\texttt{min\_stack}=5$ 时的全部图案变体示例。
+
+\figplaceholder{Figure 61: Example of All Pattern Variations for a Fill Application}{填充应用中全部图案变体示例}{fig:uf-all-var}
+
+取决于图案中的层定义，图案包围盒可能大于各层定义的单独包围盒。此时，图案较小变体的包围盒可能与包含全部层的完整图案定义不同。
+
+默认情况下，\cmd{unified\_fill()} 对所有变体保留完整图案的包围盒。所有自动变体默认与完整图案的包围盒对齐，如图~\ref{fig:uf-all-var} 所示。
+
+例~\ref{ex:uf-stack-two} 与图~\ref{fig:uf-stack-bbox} 给出完整图案为含 \cmd{M1\_fill} 与 \cmd{M2\_fill} 两层结构（见图~\ref{fig:uf-two-layers-ex}）的示例。有两个变体：仅 \cmd{M1\_fill} 与仅 \cmd{M2\_fill}。但所有图案的包围盒都与完整图案相同。因此，\cmd{M1\_fill} 上各矩形看起来可能比指定间距更远——因为间距基于包围盒。
+
+\figplaceholder{Figure 62: Two Fill Layers Example}{两填充层示例}{fig:uf-two-layers-ex}
+
+\begin{lstlisting}[style=pxl,caption={使用 stack\_fill 的两填充层图案结构},label={ex:uf-stack-two}]
+fill_patterns = {{
+      type = UF_STACK,
+      stack_fill = {
+         pattern_spec = {space_x = 0.1,
+                         space_y = 0.1},
+         layers = {SHAPE_M1_fill,
+                   SHAPE_M2_fill},
+         min_stack = 1,
+         max_stack = 2
+      }
+}}
+\end{lstlisting}
+
+\figplaceholder{Figure 63: Pattern Structure With Two Fill Layers}{两填充层的图案结构}{fig:uf-stack-bbox}
+
+默认情况下，\cmd{unified\_fill()} 对所有变体保留完整图案的包围盒。
+可将 \cmd{separate\_patterns} 设为 \cmd{true} 以改变对齐行为。此时每个图案变体根据其所含层子集的范围拥有各自包围盒；插入变体时使用该变体自身的包围盒，而非完整图案的包围盒。
+在图~\ref{fig:uf-sep-pat} 中，完整图案的两个变体各有包围盒，因此看起来比 \cmd{separate\_patterns} 为 \cmd{false} 时放置得更近。
+
+\figplaceholder{Figure 64: Pattern Structure With Two Fill Layers With separate\_patterns Option True}{separate\_patterns 为 true 时的两填充层图案结构}{fig:uf-sep-pat}
+
+当 \cmd{separate\_patterns} 为 \cmd{false} 时：
+\begin{itemize}
+  \item \cmd{fill\_context}、\cmd{iterations} 与 \cmd{shift\_factor} 选项被忽略。
+  \item \cmd{min\_stack} 与 \cmd{max\_stack} 被忽略；换言之，工具使用图案的全部可能变体。
+\end{itemize}
+
+\subsection{Cell 填充图案}
+\subsubsection*{Cell Fill Patterns}
+
+Cell 填充图案允许从外部数据库导入图案，而无需在 runset 中手工定义。对此类型，将 \cmd{type} 设为 \cmd{UF\_CELL}。
+
+\cmd{UF\_CELL} 提供额外接口，可从外部 GDSII 或 OASIS 库导入 cell，并将该 cell 中的层映射到填充层。其余功能与 \cmd{UF\_POLYGON}、\cmd{UF\_STACK} 相同。导入的图案定义可按 \cmd{UF\_POLYGON} 方式原样使用，或按 \cmd{UF\_STACK} 方式拆成更小图案。
+
+Fill cell 或 fill cell 库可与填充 runset 一并维护。这些 fill cell 含 runset 可导入的填充层，并按指定约束插入目标区域。关于将 cell 导入 runset，见 \textit{IC Validator Reference Manual} 中的 \cmd{import\_gds\_cell()} 与 \cmd{import\_oasis\_cell()}。
+
+在例~\ref{ex:uf-cell} 中，\cmd{M1\_fill}、\cmd{V1\_fill}、\cmd{M2\_fill}、\cmd{V2\_fill} 与 \cmd{M3\_fill} 层定义从 \cmd{Fill\_Cell.gds} 文件中的 \cmd{FillCell} cell 导入。例如，\cmd{Fill\_Cell.gds} 中的 Layer~(1;0) 指定为 \cmd{M1\_fill}。概念上等价的额外功能示例见“堆叠填充图案”。
+
+\begin{lstlisting}[style=pxl,caption={Cell 填充图案示例},label={ex:uf-cell}]
+Fill_Cell_lib = gds_library("./Fill_Cell.gds");
+Fill_Cell = import_gds_cell(Fill_Cell_lib, "FillCell");
+
+STACK_metal_fill : cell_fill_s =
+{
+   cell = Fill_Cell
+   layers = {         // Map Individual layers of the cell to Fill layers
+       {ldt_list = {{1, 0}},layer_spec = {output_layer_key = "M1_fill"}},
+       {ldt_list = {{2, 0}},layer_spec = {
+                               output_layer_key = "V1_fill"},
+                               required_layer_keys = {"M1", "M2"}},
+       {ldt_list = {{3, 0}},layer_spec = {output_layer_key = "M2_fill"}},
+       {ldt_list = {{4, 0}},layer_spec = {
+                               output_layer_key = "V2_fill"},
+                               required_layer_keys = {"M2", "M3"}},
+       {ldt_list = {{5, 0}},layer_spec = {output_layer_key = "M3_fill"}}
+   },
+   min_stack = 1,
+   max_stack = 5,
+   rotation = NONE,
+   reflection = false
+};
+\end{lstlisting}
+
+\begin{noteBox}
+按需求，\cmd{UF\_STACK} 相对 \cmd{UF\_POLYGON} 在开发填充流程时提供更多自动化；类似地，\cmd{UF\_CELL} 相对 \cmd{UF\_STACK} 与 \cmd{UF\_POLYGON} 提供更多自动化。
+\end{noteBox}
+
+图~\ref{fig:uf-cell-model} 给出 \cmd{UF\_CELL} 用法模型示例。
+
+\figplaceholder{Figure 65: Usage Model for the UF\_CELL Type}{UF\_CELL 类型的用法模型}{fig:uf-cell-model}
+
+\subsection{可扩展 Fill Cell 图案}
+\subsubsection*{Expandable Fill Cell Patterns}
+
+可扩展 fill-cell 图案允许插入沿填充目标区域边界扩展的 fill cell。对此类型，将 \cmd{type} 设为 \cmd{UF\_EXPANDABLE} 或 \cmd{UF\_EXPANDABLE\_CELL}。
+
+\cmd{UF\_EXPANDABLE\_CELL} 提供额外接口，可从外部 GDSII 或 OASIS 库导入 cell 并将层映射到填充层。其余功能与 \cmd{UF\_EXPANDABLE} 相同。
+
+使用可扩展 fill-cell 类型图案时，先用增量单元（incremental unit cells）定义基础 fill cell。例如图~\ref{fig:uf-repeatable}，简单基础 cell 由三个增量单元组成；本例中仅中间单元可重复。
+
+\figplaceholder{Figure 66: Repeatable Cell Example}{可重复 cell 示例}{fig:uf-repeatable}
+
+图~\ref{fig:uf-expand} 展示 fill cell 的扩展。上半部分为扩展前插入的基础 cell；下半部分为通过重复中间单元扩展后的基础 cell。
+
+\figplaceholder{Figure 67: Expansion of a Fill Cell}{Fill cell 的扩展}{fig:uf-expand}
+
+例~\ref{ex:uf-expandable} 说明如何编写 \cmd{UF\_EXPANDABLE} 类型：
+\begin{enumerate}
+  \item 定义每个增量单元所用的层。
+  \item 声明组成基础 cell 的三个实际增量单元 cell。
+  \item 调用 \cmd{unified\_fill()} 并取回输出层。
+\end{enumerate}
+
+\begin{lstlisting}[style=pxl,caption={UF\_EXPANDABLE 类型示例},label={ex:uf-expandable}]
+// Define the layers used in each incremental unit
+EXPAND_CELL_LEFT_LAYER_1 : polygon_layer_s = {
+   layer_spec = {output_layer_key = "OUTPUT_EXPAND_CELL_LEFT_LAYER_1"},
+   polygons = {{ {0.045, 0.193}, {0.261, 0.103}, {0.261, 0.287}, {0.058, 0.247} }}
+};
+EXPAND_CELL_LEFT_LAYER_2 : polygon_layer_s = {
+   layer_spec = {output_layer_key = "OUTPUT_EXPAND_CELL_LEFT_LAYER_2"},
+   polygons = {{ {0.045, 0.128}, {0.191, 0.128}, {0.191, 0.432}, {0.155, 0.232} }}
+};
+EXPAND_CELL_MIDDLE_LAYER_1 : polygon_layer_s = {
+   layer_spec = {output_layer_key = "OUTPUT_EXPAND_CELL_MIDDLE_LAYER_1"},
+   polygons = {{ {0.045, 0.193}, {0.261, 0.103}, {0.261, 0.287}, {0.058, 0.247} }}
+};
+EXPAND_CELL_MIDDLE_LAYER_2 : polygon_layer_s = {
+   layer_spec ={ output_layer_key = "OUTPUT_EXPAND_CELL_MIDDLE_LAYER_2"},
+   polygons = {{ {0.045, 0.128}, {0.191, 0.128}, {0.191, 0.432}, {0.155, 0.232} }}
+};
+EXPAND_CELL_RIGHT_LAYER_1 : polygon_layer_s = {
+   layer_spec = {output_layer_key = "OUTPUT_EXPAND_CELL_RIGHT_LAYER_1"},
+   polygons = {{ {0.045, 0.193}, {0.261, 0.103}, {0.261, 0.287}, {0.058, 0.247} }}
+};
+EXPAND_CELL_RIGHT_LAYER_2 : polygon_layer_s = {
+   layer_spec = {output_layer_key = "OUTPUT_EXPAND_CELL_RIGHT_LAYER_2"},
+   polygons = {{ {0.045, 0.128}, {0.191, 0.128}, {0.191, 0.432}, {0.155, 0.232} }}
+};
+// Declare the actual three incremental unit cells that make up the base cell
+cell_A_left : base_cell_s = {
+   layers = {EXPAND_CELL_LEFT_LAYER_1, EXPAND_CELL_LEFT_LAYER_2 },
+   repeatable = false
+};
+cell_B_middle : base_cell_s = {
+   layers = { EXPAND_CELL_MIDDLE_LAYER_1, EXPAND_CELL_MIDDLE_LAYER_2 },
+   repeatable = true,
+   maximum = 10
+};
+cell_C_right : base_cell_s = {
+   layers = { EXPAND_CELL_RIGHT_LAYER_1, EXPAND_CELL_RIGHT_LAYER_2 },
+   repeatable = false
+};
+// Call unified_fill()
+expand_fill_cell_output = unified_fill(
+   fill_patterns = {
+      {type = UF_EXPANDABLE,
+        expandable_polygon_fill = {
+           pattern_spec = {
+              space_x = 0.12,
+              space_y = 0.06,
+              stagger_x = 0.2 },
+           base_cell = {cell_A_left, cell_B_middle, cell_C_right} }
+      }
+   },
+   fill_boundary = { type = LAYER, layer = REGION_CELL2_CORE }
+);
+// Retrieve the output layers
+expand_fill_cell_layer_1 =
+      expand_fill_cell_output ["OUTPUT_EXPAND_CELL_LEFT_LAYER_1"][0]
+   or expand_fill_cell_output ["OUTPUT_EXPAND_CELL_MIDDLE_LAYER_1"][0]
+   or expand_fill_cell_output ["OUTPUT_EXPAND_CELL_RIGHT_LAYER_1"][0]
+
+expand_fill_cell_layer_2 =
+      expand_fill_cell_output ["OUTPUT_EXPAND_CELL_LEFT_LAYER_2"][0]
+   or expand_fill_cell_output ["OUTPUT_EXPAND_CELL_MIDDLE_LAYER_2"][0]
+   or expand_fill_cell_output ["OUTPUT_EXPAND_CELL_RIGHT_LAYER_2"][0]
+\end{lstlisting}
+
+\subsection{条带填充图案}
+\subsubsection*{Stripe Fill Patterns}
+
+条带填充图案允许在目标区域插入条带形填充。对此类型，将 \cmd{type} 设为 \cmd{UF\_STRIPE}。指定条带的方向、宽度与间距，如例~\ref{ex:uf-stripe} 所示。
+
+\figplaceholder{Figure 68: Stripe Fill Patterns}{条带填充图案}{fig:uf-stripe}
+
+为条带填充指定对称（symmetry）时，\cmd{unified\_fill()} 会：
+\begin{enumerate}
+  \item 获取包围盒
+  \item 找到包围盒中心
+  \item 将第一条带的中心线放在包围盒中心
+  \item 以距中心条带等距的方式放置后续条带
+  \item 仅保留全宽条带
+\end{enumerate}
+
+图~\ref{fig:uf-stripe-sym} 展示条带对称的结果。
+
+\figplaceholder{Figure 69: Symmetry of Stripes}{条带对称}{fig:uf-stripe-sym}
+
+例~\ref{ex:uf-stripe} 给出使用 \cmd{UF\_STRIPE} 类型的 \cmd{unified\_fill()} 调用。
+
+\begin{lstlisting}[style=pxl,caption={UF\_STRIPE 类型示例},label={ex:uf-stripe}]
+result = unified_fill(
+   fill_patterns = {
+      {type = UF_STRIPE,
+        stripe_fill = {
+           layer_spec = {
+              output_layer_key = "DM1_FILL",
+           },
+           direction = HORIZONTAL,
+           width = 0.1,
+           spacing = 0.2,
+        }
+      }
+   },
+
+     fill_boundary = {
+        type = LAYER,
+        layer = M1
+     },
+     extents_output = {
+        {output_layer_key = "OUTPUT_DM_EXTENTS"}
+     }
+);
+\end{lstlisting}
+
+% ============================================================
+\section{填充到填充间距}
+\subsection*{Fill-to-Fill Spacing}
+
+如前所述，可将 Unified Fill 函数配置为向指定目标区域插入不同类型图案。通过提供图案定义列表，指示工具按顺序重复每个图案定义以填充目标区域。
+
+填充到填充间距功能允许定义：
+\begin{itemize}
+  \item 相同图案实例之间的间距
+  \item 不同图案之间的间距
+\end{itemize}
+
+\subsection{相同图案实例之间的间距}
+\subsubsection*{Spacing Between Instances of the Same Patterns}
+
+相同图案实例之间的间距由 \cmd{pattern\_spec} 中的 \cmd{space\_x}、\cmd{space\_y}、\cmd{stagger\_x} 与 \cmd{stagger\_y} 控制。
+
+\begin{noteBox}
+在某些条件下这些值可为负，以支持图案放置重叠。
+\end{noteBox}
+
+此外，对于位于不同目标区域内的填充多边形与图案之间的间距，可在 \cmd{pattern\_spec} 内用 \cmd{pattern\_spacing} 设置图案间距，或在 \cmd{layer\_spec} 内用 \cmd{fill\_to\_fill\_spacing} 设置各填充层之间的间距。相关选项为：
+\begin{itemize}
+  \item \cmd{allowed\_spacing\_x}
+  \item \cmd{allowed\_spacing\_y}
+  \item \cmd{min\_space\_corner}
+  \item \cmd{extension}
+\end{itemize}
+这些选项的说明见 Unified Fill 函数文档。可用它们在填充处理期间触发更复杂的层相关间距检查。\cmd{space\_x}、\cmd{space\_y}、\cmd{stagger\_x} 与 \cmd{stagger\_y} 按 \cmd{separate\_patterns} 作用于整个图案定义的包围盒。
+
+按设计，\cmd{unified\_fill()} 确保任意两图案不会比 \cmd{space\_x} 与 \cmd{space\_y} 更近。例~\ref{ex:uf-space-same} 为多层图案定义指定了 \cmd{space\_x} 与 \cmd{space\_y}。若落在目标区域相邻多边形中的图案过近，则不插入其中之一以满足填充到填充间距约束，如图~\ref{fig:uf-space-same}。
+
+\begin{lstlisting}[style=pxl,caption={使用 space\_x 与 space\_y 的相同图案间距},label={ex:uf-space-same}]
+SHAPE_M1_fill : polygon_layer_s = {
+   layer_spec = {output_layer_key = "M1_fill"}
+   polygons = DATA_M1_fill,
+};
+SHAPE_M2_fill : polygon_layer_s = {
+   layer_spec = {output_layer_key = "M2_fill"}
+   polygons = DATA_M2_fill,
+};
+
+fill_patterns = {{
+   type = UF_POLYGON,
+   polygon_fill = {
+      pattern_spec = {space_x = 0.1,
+                      space_y = 0.1},
+      layers = {SHAPE_M1_fill,
+                SHAPE_M2_fill}
+   }
+}}
+\end{lstlisting}
+
+\figplaceholder{Figure 70: Spacing Between Same Patterns Example}{相同图案间距示例}{fig:uf-space-same}
+
+例~\ref{ex:uf-allowed-space} 在 \cmd{pattern\_spacing} 中为多层图案定义指定 \cmd{allowed\_spacing\_x} 与 \cmd{allowed\_spacing\_y}，以确保不同目标区域中图案实例之间有必要间距。如图~\ref{fig:uf-allowed-space}，因 $x$、$y$ 方向间距满足允许值，两个图案实例都被放置。
+
+\begin{lstlisting}[style=pxl,caption={允许间距小于 space 值时的多层图案间距},label={ex:uf-allowed-space}]
+fill_patterns = {{
+   type = UF_POLYGON,
+   polygon_fill = {
+      pattern_spec = {space_x = 0.1, space_y = 0.1,
+                      pattern_spacing = {
+                         allowed_spacing_x = {>= 0.02},
+                         allowed_spacing_y = {>= 0.02}
+                      }
+      },
+      layers = {SHAPE_M1_fill,
+                SHAPE_M2_fill}
+   }
+}}
+\end{lstlisting}
+
+\figplaceholder{Figure 71: Spacing Between Multilayer Patterns With Allowed Spacing Values Smaller Than Space Values Example}{允许间距小于 space 值时的多层图案间距示例}{fig:uf-allowed-space}
+
+例~\ref{ex:uf-ftf-allowed} 在 \cmd{M1\_fill} 填充层的 \cmd{fill\_to\_fill\_spacing} 中指定允许间距。即使包围盒间距违反 \cmd{space\_x}/\cmd{space\_y}，只要图案内各层满足允许间距，工具也不移除图案，如图~\ref{fig:uf-ftf-allowed}。
+
+\begin{lstlisting}[style=pxl,caption={在 fill\_to\_fill\_spacing 中使用允许间距},label={ex:uf-ftf-allowed}]
+SHAPE_M1_fill : polygon_layer_s = {
+   layer_spec = {
+      output_layer_key = "M1_fill",
+      fill_to_fill_spacing = {
+         allowed_spacing_x = {>= 0.02},
+         allowed_spacing_y = {>= 0.02}
+      }
+   }
+   polygons = DATA_M1_fill,
+};
+fill_patterns = {{
+   type = UF_POLYGON,
+   polygon_fill = {
+      pattern_spec = {space_x = 0.1, space_y = 0.1},
+      layers = {SHAPE_M1_fill,
+                SHAPE_M2_fill}
+}}
+\end{lstlisting}
+
+\figplaceholder{Figure 72: Using the Allowed Spacing Values in the fill\_to\_fill\_spacing Option Example}{在 fill\_to\_fill\_spacing 中使用允许间距示例}{fig:uf-ftf-allowed}
+
+\subsection{不同图案之间的间距}
+\subsubsection*{Spacing Between Different Patterns}
+
+处理填充图案列表时，可用 \cmd{other\_pattern\_spacing} 指定不同图案之间的间距。该选项为整数到 double 约束的哈希，整数表示图案在列表中的顺序，0 表示第一个图案。例如，要将与第三个图案的间距设为 $\geq 0.5$，写：
+\begin{lstlisting}[style=pxl]
+other_pattern_spacing = {2 => >= 0.5}
+\end{lstlisting}
+
+\begin{noteBox}
+间距始终作用于每个图案的包围盒。
+\end{noteBox}
+
+图~\ref{fig:uf-diff-pat-space} 给出使用图案 A、B、C 的应用，期望间距如下：
+
+Pattern A：
+\begin{itemize}
+  \item 到 Pattern B 的间距 $= 2$
+  \item 到 Pattern C 的间距 $= 1$
+\end{itemize}
+Pattern B：
+\begin{itemize}
+  \item 到 Pattern A 的间距 $= 2$
+  \item 到 Pattern C 的间距 $= 3$
+\end{itemize}
+Pattern C：
+\begin{itemize}
+  \item 到 Pattern A 的间距 $= 1$
+  \item 到 Pattern B 的间距 $= 3$
+\end{itemize}
+
+\figplaceholder{Figure 73: Spacing Between Different Patterns Example}{不同图案间距示例}{fig:uf-diff-pat-space}
+
+在 \cmd{other\_pattern\_spacing} 中使用适当索引设置当前图案到其他图案的间距，如例~\ref{ex:uf-other-pat}。
+
+\begin{lstlisting}[style=pxl,caption={使用 other\_pattern\_spacing 选项},label={ex:uf-other-pat}]
+fill_patterns = {
+// First Pattern A
+   {type = UF_POLYGON,
+    polygon_fill = {
+       pattern_spec = {
+          space_x = 0.1, space_y = 0.1,
+          other_pattern_spacing = {1 => >= 2, 2 => >= 1}
+       },
+       layers = {SHAPE_A}
+    }
+   },
+
+// Second Pattern B
+   {type = UF_POLYGON,
+    polygon_fill = {
+       pattern_spec = {
+          space_x = 0.1, space_y = 0.1,
+          other_pattern_spacing = { 0 => >= 2, 2 => >= 3}
+       },
+       layers = {SHAPE_B}
+    }
+   },
+
+// Third Pattern C
+   {type = UF_POLYGON,
+     polygon_fill = {
+        pattern_spec = {
+           space_x = 0.1, space_y = 0.1,
+           other_pattern_spacing = {0 => >= 1, 1 => >= 3}
+        },
+        layers = {SHAPE_C}
+     }
+   }
+}
+\end{lstlisting}
+
+\subsection{间距选项的规则与限制}
+\subsubsection*{Rules and Restrictions for Spacing Options}
+
+间距选项适用下列规则与限制：
+\begin{itemize}
+  \item \cmd{allowed\_spacing\_x} 与 \cmd{allowed\_spacing\_y} 可同时在 \cmd{layer\_spec} 与 \cmd{pattern\_spacing} 中设置。
+  \item \cmd{layer\_spec} 中的 \cmd{allowed\_spacing\_x}/\cmd{allowed\_spacing\_y} 不支持多个间距范围（列表只能有一个值）；仅支持 $>$ 与 $\geq$ 约束。
+  \item \cmd{pattern\_spacing} 中的 \cmd{allowed\_spacing\_x}/\cmd{allowed\_spacing\_y} 支持多个间距范围；不支持 $<$ 与 $\leq$。
+  \item \cmd{allowed\_spacing\_x}、\cmd{allowed\_spacing\_y} 与 \cmd{min\_space\_corner} 不支持负值。
+  \item 未指定允许间距时，有效填充到填充间距为任意 $\geq$ \cmd{space\_x}/\cmd{space\_y} 的距离；工具确保相邻填充区域多边形中的图案或填充层具有该最小间距。
+  \item 指定允许间距时，工具确保相邻目标层多边形中的图案或填充层具有允许间距的最小值。
+  \item 当 \cmd{fill\_context} 为 \cmd{PARTITION\_CONTEXT} 时，相邻分区中的图案或填充层使用已指定的允许间距。
+  \item 当 \cmd{type} 为 \cmd{UF\_STACK} 或 \cmd{UF\_CELL} 时，\cmd{other\_pattern\_spacing} 不适用于图案变体；给定图案不同变体之间的最小间距基于 \cmd{space\_x}/\cmd{space\_y}。
+  \item 默认情况下，\cmd{unified\_fill()} 对填充区域中不共享任何公共投影的不同多边形之间的图案执行角落检查（corner checking）。
+  \item 当 \cmd{type} 为 \cmd{UF\_STACK} 时，工具不对不同置换的图案应用 \cmd{pattern\_spacing} 或 \cmd{fill\_to\_fill\_spacing}。
+  \item 当 \cmd{type} 为 \cmd{UF\_POLYGON}、\cmd{UF\_STACK}、\cmd{UF\_CELL}、\cmd{UF\_EXPANDABLE} 或 \cmd{UF\_EXPANDABLE\_CELL} 时，\cmd{space\_x}/\cmd{space\_y} 可为 $\leq 0$。对 \cmd{UF\_STACK} 与 \cmd{UF\_CELL}，还须 \cmd{separate\_patterns} 为 \cmd{false} 且 \cmd{grouping} 为 \cmd{NONE}。
+  \item 若 \cmd{space\_x} 或 \cmd{space\_y} 为负，则使用 \cmd{min\_space\_corner} 与 \cmd{extension} 的角落检查被禁用。默认情况下，不同填充区域中填充图案之间的角落间距检查基于 $\max(\texttt{space\_x},\texttt{space\_y})$。
+\end{itemize}
+
+% ============================================================
+\section{目标区域与填充到信号间距}
+\subsection*{Target Region and Fill-to-Signal Spacing}
+
+\cmd{unified\_fill()} 不要求在 runset 中显式推导目标区域。工具使用各种填充到信号间距约束自动构造目标区域。在单个填充层定义或填充图案定义中，用 \cmd{fill\_to\_signal\_spacing} 指定这些间距值。
+
+在例~\ref{ex:uf-fts} 中，\cmd{M1\_Fill} 填充层相对 \cmd{aM1} 设计层保持 $0.1\,\mu\mathrm{m}$。类似地：
+\begin{itemize}
+  \item \cmd{M1\_fill} 到 \cmd{aM1\_fill} 的最小间距为 $0.5\,\mu\mathrm{m}$
+  \item \cmd{M2\_fill} 到 \cmd{aM2} 的最小间距为 $0.1\,\mu\mathrm{m}$
+  \item \cmd{M2\_fill} 到 \cmd{aM2\_fill} 的最小间距为 $0.5\,\mu\mathrm{m}$
+  \item $(\texttt{M1\_fill},\texttt{M2\_fill})$ 多层图案到 \cmd{BLKG\_1} 的最小间距为 $0.3\,\mu\mathrm{m}$
+  \item $(\texttt{M1\_fill},\texttt{M2\_fill})$ 多层图案到 \cmd{BLKG\_2} 的最小间距为 $0.2\,\mu\mathrm{m}$
+\end{itemize}
+
+\begin{lstlisting}[style=pxl,caption={fill\_to\_signal\_spacing 选项示例},label={ex:uf-fts}]
+DATA_M1_fill : list of list of coordinate_s = {
+   { {1.0, 0.0}, {2.0, 0.0}, {2.0, 3.0}, {1.0, 3.0} }
+};
+SHAPE_M1_fill : polygon_layer_s = {
+   layer_spec = {
+      output_layer_key = "M1_fill",
+      fill_to_signal_spacing = {
+         {aM1,      min_space = 0.1},
+         {aM1_FILL, min_space = 0.5}
+      }
+   }
+   polygons = DATA_M1_fill,
+};
+
+DATA_M2_fill : list of list of coordinate_s = {
+      { {0.0, 1.0}, {3.0, 1.0}, {3.0, 2.0}, {0.0, 2.0} }
+};
+SHAPE_M2_fill : polygon_layer_s = {
+   layer_spec = {
+      output_layer_key = "M2_fill",
+      fill_to_signal_spacing = {
+         {aM2,      min_space = 0.1},
+         {aM2_FILL, min_space = 0.5}
+      }
+   }
+   polygons = DATA_M2_fill,
+};
+
+fill_patterns = {{
+   type = UF_POLYGON,
+   polygon_fill = {
+      layers = {SHAPE_M1_fill,
+                SHAPE_M2_fill},
+      fill_to_signal_spacing = {
+         {aBLKG_1, min_space = 0.3},
+         {aBLKG_2, min_space = 0.2}
+      }
+   }
+}}
+\end{lstlisting}
+
+对 \cmd{UF\_POLYGON} 类型，多层图案不会拆成更小变体。如图~\ref{fig:uf-spacing-pat}，图案在目标区域内按 \cmd{fill\_to\_signal\_spacing} 指定的与设计层最小距离重复。
+
+默认情况下，\cmd{unified\_fill()} 从设计层边到图案包围盒测量间距。图案的禁入区域由该图案及其各层定义中的全部 \cmd{fill\_to\_signal\_spacing} 约束构造。
+
+测量填充与信号层间距有两种方法，由 \cmd{spacing\_context} 控制：
+\begin{itemize}
+  \item 设为 \cmd{UF\_PATTERN} 时，从信号量到填充图案的包围盒。
+  \item 设为 \cmd{UF\_LAYER} 时，从信号量到图案内层的各个多边形。
+\end{itemize}
+
+\begin{noteBox}
+当 \cmd{space\_x} 与 \cmd{space\_y} 为负时，不支持将 \cmd{spacing\_context} 设为 \cmd{UF\_PATTERN}。
+\end{noteBox}
+
+\figplaceholder{Figure 74: spacing\_context = UF\_PATTERN Example}{spacing\_context = UF\_PATTERN 示例}{fig:uf-spacing-pat}
+
+如图~\ref{fig:uf-spacing-layer}，当 \cmd{spacing\_context} 为 \cmd{UF\_LAYER} 时，工具从设计层边到单个层定义的包围盒测量填充到信号间距。
+
+\figplaceholder{Figure 75: spacing\_context = UF\_LAYER Example}{spacing\_context = UF\_LAYER 示例}{fig:uf-spacing-layer}
+
+例~\ref{ex:uf-fts-layer} 与图~\ref{fig:uf-spacing-beh} 说明 \cmd{spacing\_context} 的行为。
+
+\begin{lstlisting}[style=pxl,caption={填充层定义中的 fill\_to\_signal\_spacing},label={ex:uf-fts-layer}]
+SHAPE_M1_fill : polygon_layer_s = {
+   layer_spec = {
+      output_layer_key = "M1_fill",
+      fill_to_signal_spacing = {
+         {aM1, min_space = 5.0}
+      }
+   }
+   polygons = DATA_M1_fill,
+};
+SHAPE_M2_fill : polygon_layer_s = {
+   layer_spec = {
+      output_layer_key = "M2_fill",
+      fill_to_signal_spacing = {
+         {aM2, min_space = 0.1}
+      }
+   }
+   polygons = DATA_M2_fill,
+};
+
+fill_patterns = {{
+   type = UF_POLYGON,
+   polygon_fill = {
+      layers = {SHAPE_M1_fill,
+                SHAPE_M2_fill}
+   }
+}}
+\end{lstlisting}
+
+\figplaceholder{Figure 76: spacing\_context Behavior}{spacing\_context 行为}{fig:uf-spacing-beh}
+
+对 \cmd{UF\_POLYGON}、\cmd{UF\_STACK}、\cmd{UF\_CELL}、\cmd{UF\_EXPANDABLE} 与 \cmd{UF\_EXPANDABLE\_CELL}，可在 \cmd{layer\_spec} 与图案级同时指定 \cmd{fill\_to\_signal\_spacing}；同时指定时取最严格值。例~\ref{ex:uf-fts-both} 中，\cmd{M1\_fill} 相对 \cmd{aM1} 至少保持 $0.5\,\mu\mathrm{m}$。
+
+\begin{lstlisting}[style=pxl,caption={在 layer\_spec 与图案中同时定义 fill\_to\_signal\_spacing},label={ex:uf-fts-both}]
+SHAPE_M1_fill : polygon_layer_s = {
+   layer_spec = {
+      output_layer_key = "M1_fill",
+      fill_to_signal_spacing = {
+         {aM1, min_space = 0.5}
+      }
+   }
+   polygons = DATA_M1_fill,
+};
+
+fill_patterns = {{
+   type = UF_POLYGON,
+   polygon_fill = {
+      layers = {SHAPE_M1_fill,},
+      fill_to_signal_spacing = {
+         {aM1, min_space = 0.1}
+      }
+}
+}}
+\end{lstlisting}
+
+例~\ref{ex:uf-fts-multi} 与图~\ref{fig:uf-spacing-multi} 在填充层定义与填充图案定义的不同位置使用多个设计层与 \cmd{fill\_to\_signal\_spacing} 值。
+
+\begin{lstlisting}[style=pxl,caption={带 spacing\_context 与多个设计层的 fill\_to\_signal\_spacing},label={ex:uf-fts-multi}]
+SHAPE_M1_fill : polygon_layer_s = {
+   layer_spec = {
+      output_layer_key = "M1_fill",
+      fill_to_signal_spacing = {
+         {aM1, min_space = 1.0}
+      }
+   }
+   polygons = DATA_M1_fill,
+};
+SHAPE_M2_fill : polygon_layer_s = {
+   layer_spec = {
+      output_layer_key = "M2_fill",
+      fill_to_signal_spacing = {
+         {aM2, min_space = 2.0}
+      }
+   }
+   polygons = DATA_M2_fill,
+};
+
+fill_patterns = {{
+   type = UF_POLYGON,
+   polygon_fill = {
+      layers = {SHAPE_M1_fill,
+                SHAPE_M2_fill},
+      fill_to_signal_spacing = {
+         {aBLKG, min_space = 5.0}
+      }
+}
+}}
+\end{lstlisting}
+
+\figplaceholder{Figure 77: spacing\_context Behavior With Multiple Design Layers}{多设计层下的 spacing\_context 行为}{fig:uf-spacing-multi}
+
+% ============================================================
+\section{范围与宽度相关间距}
+\subsection*{Range and Width Dependent Spacing}
+
+除 \cmd{fill\_to\_signal\_spacing} 中的固定最小间距外，还可指定填充层到设计层的间距范围。可指定下界与上界约束列表，表示填充层相对设计层的允许间距；填充图案仅放置在这些间距约束内。此外，可基于设计层多边形宽度指定间距约束列表。
+
+在例~\ref{ex:uf-range-width} 中，\cmd{M1\_fill} 到 \cmd{aM1} 的间距为：
+\begin{itemize}
+  \item \cmd{M1\_fill} 到 \cmd{aM1} 的最小间距：
+  \begin{itemize}
+    \item \cmd{aM1} 宽度 $> 0.1$
+    \item 间距 $= 0.1$
+  \end{itemize}
+  \item \cmd{M1\_fill} 到 \cmd{aM1} 的允许间距：
+  \begin{itemize}
+    \item \cmd{aM1} $> 0.3$
+    \item $0.2 < \mathrm{space} < 0.5$ 或 $\mathrm{space} \geq 1.0$\\
+    即不允许将 \cmd{M1\_fill} 放在相对 \cmd{aM1} 间距 $\leq 0.2$ 或 $0.5 \leq \mathrm{space} < 1.0$ 处。
+  \end{itemize}
+\end{itemize}
+
+\begin{lstlisting}[style=pxl,caption={范围与宽度相关间距示例},label={ex:uf-range-width}]
+       layer_spec = {
+          output_layer_key = "M1_fill",
+          fill_to_signal_spacing = {
+             {aM1, {
+                 {width > 0.1, {>= 0.1}},
+                 {width > 0.3, {(0.2, 0.5), >= 1.0}}
+             }},
+          }
+       }
+       polygons = DATA_M1_fill,
+  };
+
+  fill_patterns = {{
+     type = UF_POLYGON,
+     polygon_fill = {
+        layers = {SHAPE_M1_fill}
+     }
+  }}
+\end{lstlisting}
+
+% ============================================================
+\section{多边形分组}
+\subsection*{Polygon Grouping}
+
+对 \cmd{UF\_STACK} 与 \cmd{UF\_CELL} 填充类型，\cmd{unified\_fill()} 可将图案定义拆成更小置换。若图案定义有两个填充层（例如 \cmd{M1\_fill} 与 \cmd{M2\_fill}），可有三种置换：
+\begin{itemize}
+  \item 完整图案
+  \item 仅含 \cmd{M1\_fill} 的图案
+  \item 仅含 \cmd{M2\_fill} 的图案
+\end{itemize}
+当填充层的单个层定义含多个多边形时，可配置工具进一步拆分层定义，使得在图案放置导致间距违例时，该填充层的多边形要么全部保留，要么全部不保留。
+默认情况下，当层定义由多个多边形构成时，每次图案重复中工具保留所有满足填充到信号间距的多边形。
+
+如图~\ref{fig:uf-grouping-default}，虚线所示多层图案在目标区域内重复，\cmd{spacing\_context} 为 \cmd{UF\_LAYER}。图案含两个填充层，各由两个矩形组成。基于填充层到设计层的间距，每个实例可能保留全部或部分多边形；导致间距违例的多边形被移除。
+
+\figplaceholder{Figure 78: Multilayer Pattern Repeated Inside a Target Region}{目标区域内重复的多层图案}{fig:uf-grouping-default}
+
+也可配置为：若某次图案重复中填充层的任一多边形导致间距违例，则从该次重复中移除该填充层的全部多边形。为此在填充层定义中将 \cmd{grouping} 设为 \cmd{ALL}。例如例~\ref{ex:uf-grouping-all} 与图~\ref{fig:uf-grouping-all}，即使仅一个多边形违例，右上图案重复中 \cmd{M1\_fill} 的两个多边形都被移除。
+
+\begin{lstlisting}[style=pxl,caption={grouping = ALL 示例},label={ex:uf-grouping-all}]
+SHAPE_M1_fill : polygon_layer_s = {
+   layer_spec = {
+      output_layer_key = "M1_fill",
+      grouping = ALL,
+      fill_to_signal_spacing = {
+         {aM1, min_space = 1.0}
+      }
+   }
+   polygons = DATA_M1_fill,
+};
+\end{lstlisting}
+
+\figplaceholder{Figure 79: Layer Removed From Top Right Pattern Repetition Example}{右上图案重复中移除层示例}{fig:uf-grouping-all}
+
+多边形分组适用下列规则与限制：
+\begin{itemize}
+  \item 若 \cmd{spacing\_context} 为 \cmd{UF\_PATTERN}，则 \cmd{grouping} 的 \cmd{NONE} 不适用，因为填充到信号间距从图案包围盒而非各个多边形测量；此时 \cmd{grouping} 自动为 \cmd{ALL}。
+  \item 当 \cmd{space\_x} 与 \cmd{space\_y} 为负时，不支持 \cmd{grouping} 设为 \cmd{ALL}。
+  \item \cmd{grouping} 不适用于 \cmd{UF\_POLYGON} 与 \cmd{UF\_ADJUSTABLE} 类型。
+\end{itemize}
+
+% ============================================================
+\section{信号对齐填充}
+\subsection*{Signal Aligned Fills}
+
+需要通过在设计层多边形旁放置填充形状以保护设计层时，使用 \cmd{unified\_fill()} 的 \cmd{signal} 选项。该功能以环状形式在设计层形状周围插入填充，使填充形状主轴与设计层形状的边对齐。图~\ref{fig:uf-ring2} 给出示例。
+
+\figplaceholder{Figure 80: Fill with ring\_count = 2}{ring\_count = 2 的填充}{fig:uf-ring2}
+
+仅对 \cmd{UF\_ADJUSTABLE} 与 \cmd{UF\_POLYGON} 使用 \cmd{signal}。对 \cmd{UF\_POLYGON}，图案必须是单层单形状。必须在 \cmd{fill\_patterns} 定义中将 \cmd{fill\_context} 设为 \cmd{SIGNAL\_CONTEXT}。用 \cmd{signal} 的 \cmd{ring\_count} 控制环绕每个设计层形状的填充图案环数。图~\ref{fig:uf-ring2} 中环数为 2。图~\ref{fig:uf-ring4} 与例~\ref{ex:uf-ring4} 给出环数为 4 的示例。
+
+\figplaceholder{Figure 81: Fill with ring\_count = 4}{ring\_count = 4 的填充}{fig:uf-ring4}
+
+\begin{lstlisting}[style=pxl,caption={ring\_count = 4 的填充},label={ex:uf-ring4}]
+DATA_M1_fill : list of list of coordinate_s = {
+   { {0.0, 0.0}, {2.0, 0.0}, {2.0, 1.0}, {0.0, 1.0} }
+};
+SHAPE_M1_fill : polygon_layer_s = {
+   layer_spec = {
+      output_layer_key = "M1_fill",
+      fill_to_signal_spacing = {
+         {aM1, min_space = 0.1},
+      }
+   }
+   polygons = DATA_M1_fill,
+};
+
+fill_patterns = {{
+   type = UF_POLYGON,
+   polygon_fill = {
+      pattern_spec = {space_x = 0.1,
+                      space_y = 0.1},
+      layers = {SHAPE_M1_fill},
+      fill_context = SIGNAL_CONTEXT,
+      signal = {layer = aM1,
+                ring_count = 4}
+   }
+}}
+\end{lstlisting}
+
+可将 \cmd{signal} 与“范围与宽度相关间距”节所述的宽度相关间距配合使用，用于要求填充形状相对设计层形状按不同最小间距保持距离、且间距取决于设计层形状宽度的应用。填充图案环使用全部间距约束生成。
+
+信号对齐填充适用下列规则与限制：
+\begin{itemize}
+  \item \cmd{signal} 不能与 \cmd{UF\_STACK} 或 \cmd{UF\_CELL} 一起使用。
+  \item 图案定义有多个填充层、或填充层定义有多个多边形时，不能使用 \cmd{signal}。
+  \item 不支持 \cmd{stagger\_y}；该选项被忽略。
+  \item \cmd{fill\_context} 必须为 \cmd{SIGNAL\_CONTEXT}；此时忽略 \cmd{partition}、\cmd{insertion} 与 \cmd{pitch}。
+  \item 对 \cmd{signal} 中指定的设计层不支持 \cmd{width\_based\_spacing}；用 \cmd{fill\_to\_signal\_spacing} 中的 \cmd{min\_space} 设置填充层与该设计层的最小间距。
+\end{itemize}
+
+\subsection{为信号对齐填充定义填充图案}
+\subsubsection*{Defining the Fill Pattern for Signal Aligned Fills}
+
+用坐标列表定义填充图案时，确保图案在 $x$、$y$ 方向的尺寸满足需求。\cmd{signal} 将 $x$ 方向视为图案主轴，并将该边与设计层形状对齐。
+\begin{itemize}
+  \item 要使填充图案矩形的长边与设计层形状对齐，确保图案 $x$ 方向尺寸大于 $y$ 方向。
+  \item 要使短边与设计层形状对齐，确保图案 $x$ 方向尺寸小于 $y$ 方向。
+\end{itemize}
+图~\ref{fig:uf-align-edge} 说明这两种情形（为简洁未显示全部填充放置）。本例坐标数据为：
+\begin{lstlisting}[style=pxl]
+DATA_M1_fill_V : list of list of coordinates_s = {
+   { {0.0, 0.0}, {1.0, 0.0}, {1.0, 5.0}, {0.0, 5.0} }
+};
+\end{lstlisting}
+
+\figplaceholder{Figure 82: Aligning Short or Long Edge of the Fill Pattern}{对齐填充图案的短边或长边}{fig:uf-align-edge}
+
+% ============================================================
+\section{改进图案插入}
+\subsection*{Improving Pattern Insertion}
+
+与 \cmd{fill\_patterns} 参数类似，\cmd{unified\_fill()} 中图案放置的默认起点是目标层多边形包围盒的左下角。当目标层多边形为复杂非矩形时，默认放置未必达到最大插入。图~\ref{fig:uf-default-place} 展示若干图案因此无法放置的情况。
+
+\figplaceholder{Figure 83: Default Placement That Is Not Maximum Insertion}{未达到最大插入的默认放置}{fig:uf-default-place}
+
+\cmd{unified\_fill()} 提供若干可选配置以改变默认起点并提高图案放置灵活性，从而可能改善插入率。
+例~\ref{ex:uf-iteration} 说明如何用 \cmd{iteration} 选项改善插入率。
+
+\begin{lstlisting}[style=pxl,caption={使用 iteration 选项},label={ex:uf-iteration}]
+fill_patterns = {{
+   type = UF_POLYGON,
+   polygon_fill = {
+      pattern_spec = {space_x = 0.1,
+                      space_y = 0.1},
+      layers = {SHAPE_M1_fill},
+      insertion = {iterations = 3}
+   }
+}}
+\end{lstlisting}
+
+\cmd{insertion} 选项的详细说明见 \textit{IC Validator Reference Manual} 中的 \cmd{unified\_fill()}。
+
+% ============================================================
+\section{节距对齐填充}
+\subsection*{Pitch Aligned Fills}
+
+在 \cmd{fill\_pattern()} 函数中，可用 \cmd{grid\_mode} 控制图案网格位置。
+\begin{itemize}
+  \item 指定 \cmd{GLOBAL}：以整个数据库范围的左下角为参考放置填充形状。
+  \item 指定 \cmd{LOCAL}：允许输入层上每个多边形有各自唯一的参考网格点。
+\end{itemize}
+参考网格点是输入层每个多边形包围盒的左下角。
+
+对 \cmd{unified\_fill()}，除 \cmd{GLOBAL} 与 \cmd{LOCAL} 外，还可通过引用另一层对图案网格位置施加更复杂控制。除目标层外还可指定上下文层（context layer）。使用上下文层时，填充图案放在目标层多边形内，使填充图案包围盒的左下顶点与以上下文层各多边形包围盒左下顶点为参考网格点的网格点对齐。一个上下文层多边形可包含多个目标层多边形。
+
+图~\ref{fig:uf-pitch-cmp} 比较 \cmd{fill\_pattern()} 的 \cmd{grid\_mode} 与 \cmd{unified\_fill()} 的 \cmd{fill\_context}。
+
+\figplaceholder{Figure 84: Pitch Aligned Fills Comparison}{节距对齐填充比较}{fig:uf-pitch-cmp}
+
+例~\ref{ex:uf-pitch-y} 与图~\ref{fig:uf-pitch-y} 展示 \cmd{pitch} 选项行为。本例仅对 $y$ 方向网格点应用 \cmd{pitch}。给定目标层多边形中的填充图案从最接近该多边形包围盒左下顶点、且满足指定节距值的网格点开始放置。
+
+\begin{lstlisting}[style=pxl,caption={仅在 Y 方向应用 pitch 选项},label={ex:uf-pitch-y}]
+fill_patterns = {{
+   type = UF_POLYGON,
+   polygon_fill = {
+         pattern_spec = {space_x = 0.1,
+                         space_y = 0.1},
+         layers = {SHAPE_M1_fill},
+         pitch = {y = 0.1,
+                  context_layer = aFILL_CONTEXT_LAYER}
+     }
+}}
+\end{lstlisting}
+
+\figplaceholder{Figure 85: Applying the Pitch Option Only in the Y-Direction}{仅在 Y 方向应用 pitch 选项}{fig:uf-pitch-y}
+
+节距对齐填充适用下列规则与限制：
+\begin{itemize}
+  \item 完全位于上下文层外的目标层多边形被丢弃；不在这些多边形中插入填充图案。
+  \item 若目标层多边形悬出上下文层多边形，则仅插入完全被上下文层包围的填充图案多边形。
+  \item 不在目标层与上下文层多个多边形交互的区域插入填充图案。
+  \item 使用 \cmd{pitch} 时，若 \cmd{fill\_context} 为 \cmd{CHIP\_CONTEXT} 或 \cmd{REGION\_CONTEXT} 则被忽略（此时这些设置不相关）。
+  \item 节距值必须与图案尺寸及 \cmd{space\_x}/\cmd{space\_y} 相关。例如，下列值必须是节距值的倍数，否则结果填充可能缺失图案：\\
+  $((\text{图案 }x\text{ 方向尺寸}) + \texttt{space\_x})$
+\end{itemize}
+
+为提高插入率，可增大 \cmd{insertion} 的 \cmd{shift\_factor}。工具会自动调整目标层多边形内的填充图案，使其与上下文层多边形的网格线对齐。目标层多边形为复杂非矩形时，\cmd{shift\_factor} 很有用。例~\ref{ex:uf-shift} 说明用法。
+
+\begin{lstlisting}[style=pxl,caption={使用 shift\_factor 选项},label={ex:uf-shift}]
+fill_patterns = {{
+   type = UF_POLYGON,
+   polygon_fill = {
+      pattern_spec = {space_x = 0.1,
+                      space_y = 0.1},
+      layers = {SHAPE_M1_fill},
+      insertion = {shift_factor = 5}
+      pitch = {y = 0.1,
+               context_layer = aFILL_CONTEXT_LAYER},
+   }
+}}
+\end{lstlisting}
+
+% ============================================================
+\section{判据分析}
+\subsection*{Criteria Analysis}
+
+用 \cmd{unified\_fill()} 可按密度等指标定制填充流程。工具支持基于方程的判据分析，以满足密度范围、目标密度以及设计上均匀梯度密度等要求。\cmd{unified\_fill()} 使用与 \cmd{density()} 相同的算法，确保填充结果满足填充后设计规则要求。
+
+用下列参数配置填充流程：
+\begin{itemize}
+  \item \cmd{criteria}
+  \item \cmd{delta\_window}
+  \item \cmd{delta\_x}
+  \item \cmd{delta\_y}
+  \item \cmd{window\_layer}
+  \item \cmd{boundary}
+\end{itemize}
+
+\cmd{criteria} 选项支持下列子选项：
+\begin{itemize}
+  \item \cmd{target}
+  \item \cmd{gradient}
+  \item \cmd{fill\_layer\_keys}
+  \item \cmd{design\_layers}
+  \item \cmd{design\_layers\_hash}
+  \item \cmd{window\_function}
+\end{itemize}
+
+图案定义中 \cmd{output\_layer\_key} 指定的字符串名用于标识判据方程中的填充层。可在 \cmd{criteria} 参数中指定任意数量的判据方程。同一填充层有多个判据方程时，工具确保至少满足其中一个；不同填充层各有方程时（例如 \cmd{aM1\_FILL} 与 \cmd{aM2\_FILL} 各有一个），工具处理全部方程。
+
+指定 \cmd{criteria} 但未给窗口函数时，工具对每个 delta 窗口求默认方程并与 \cmd{target}、\cmd{gradient} 比较；评估填充图案使计算值收敛到指定值。默认方程为：
+\[
+\frac{(\text{填充层面积}) + (\text{设计层面积})}{(\text{delta 窗口面积})}
+\]
+其中：
+\begin{itemize}
+  \item 填充层面积是当前 delta 窗口内、\cmd{fill\_layer\_keys} 指定的全部填充层上多边形数据面积之和。
+  \item 设计层面积是当前 delta 窗口内、\cmd{design\_layers} 指定的全部设计层上多边形数据面积之和。
+\end{itemize}
+
+\begin{noteBox}
+图案定义必须生成能使判据有贡献的填充输出。例如，若图案定义由窄且间距很宽的矩形组成，工具无法达到较高的目标密度。
+\end{noteBox}
+
+例~\ref{ex:uf-criteria-two} 给出两个填充层 \cmd{M1\_fill} 与 \cmd{M2\_fill} 各有判据方程的填充规范。现有 \cmd{aM1} 设计层与 \cmd{M1\_fill} 的累积密度应在 25\%--45\% 之间、目标 35\%，在 $100\,\mu\mathrm{m} \times 100\,\mu\mathrm{m}$ 窗口内测量，沿 $x$、$y$ 以 $50\,\mu\mathrm{m}$ 步进。\cmd{M2\_fill} 有类似规范与相同密度值。
+
+\begin{lstlisting}[style=pxl,caption={带两个判据方程的填充规范},label={ex:uf-criteria-two}]
+DATA_M1_fill : list of list of coordinate_s = {
+   { {1.0, 0.0}, {2.0, 0.0}, {2.0, 3.0}, {1.0, 3.0} }
+};
+
+SHAPE_M1_fill : polygon_layer_s = {
+   layer_spec = {output_layer_key = "M1_fill"}
+   polygons = DATA_M1_fill,
+};
+
+DATA_M2_fill : list of list of coordinate_s = {
+   { {0.0, 1.0}, {3.0, 1.0}, {3.0, 2.0}, {0.0, 2.0} },
+};
+
+SHAPE_M2_fill : polygon_layer_s = {
+   layer_spec = {output_layer_key = "M2_fill"}
+   polygons = DATA_M2_fill,
+};
+
+fill_patterns_m1_m2 = {{
+   type = UF_POLYGON,
+   polygon_fill = {
+      layers = {SHAPE_M1_fill,
+                SHAPE_M2_fill}
+   }
+}}
+
+M1_density_criteria : fill_criteria_s =
+{
+   target = {range = [0.25, 0.45], target = 0.35},
+   fill_layer_keys = {"M1_fill"},
+   design_layers = {aM1}
+};
+M2_density_criteria : fill_criteria_s =
+{
+   target = {range = [0.25, 0.45], target = 0.35},
+   fill_layer_keys = {"M2_fill"},
+   design_layers = {aM2}
+};
+uf_fill_output_h = unified_fill(
+   fill_patterns = fill_patterns_m1_m2,
+   criteria = {M1_density_criteria,
+               M2_density_criteria},
+   delta_window = {100, 100},
+   delta_x = 50,
+   delta_y = 50,
+   fill_boundary = {type = LAYER, layer = data_extent},
+   window_layer = aWINDOW,
+   grid = 0.001,
+   boundary = ALIGN
+);
+M1_fill_output = uf_fill_output_h["M1_fill"][0];
+M2_fill_output = uf_fill_output_h["M2_fill"][0];
+\end{lstlisting}
+
+例~\ref{ex:uf-criteria-multi} 在同一判据方程中使用多个设计层与填充层。每个窗口中 M1、M2、M3 的设计与填充密度之和应 $\geq 105\%$。
+
+\begin{noteBox}
+为简洁，例~\ref{ex:uf-criteria-multi} 仅展示判据方程。
+\end{noteBox}
+
+\begin{lstlisting}[style=pxl,caption={同一判据方程中含多层的填充规范},label={ex:uf-criteria-multi}]
+M1_M2_density_criteria : fill_criteria_s =
+{
+   target = {range = >= 1.05},
+   fill_layer_keys = {"M1_fill", "M2_fill", "M3_fill"},
+   design_layers = {aM1, aM2, aM3}
+};
+\end{lstlisting}
+
+对特定填充层指定多个填充图案时，\cmd{unified\_fill()} 按声明顺序依次插入。指定判据时，可能不会用到全部图案定义——一旦满足判据即停止插入，无论是否已用完所有图案。
+例~\ref{ex:uf-seq-pat} 中，\cmd{M1\_fill} 的流程由两个插入序列组成；插入第一个图案后若已满足判据，则不执行第二个序列。
+
+\begin{lstlisting}[style=pxl,caption={图案定义序列},label={ex:uf-seq-pat}]
+fill_patterns_m1 = {
+{
+   type = UF_POLYGON,
+   polygon_fill = {layers = {SHAPE_M1_fill_TYPE1}}
+},
+{
+   type = UF_POLYGON,
+   polygon_fill = {layers = {SHAPE_M1_fill_TYPE2}}
+}}
+M1_density_criteria : fill_criteria_s =
+{
+   target = {range = [0.25, 0.45], target = 0.35},
+   fill_layer_keys = {"M1_fill"},
+   design_layers = {aM1}
+};
+uf_fill_output_h = unified_fill(
+   fill_patterns = fill_patterns_m1,
+   criteria = {M1_density_criteria},
+   delta_window = {100, 100},
+   delta_x = 50,
+   delta_y = 50,
+   fill_boundary = {type = LAYER, layer = data_extent},
+   window_layer = aWINDOW,
+   grid = 0.001,
+   boundary = ALIGN
+);
+M1_fill_output = uf_fill_output_h["M1_fill"][0];
+\end{lstlisting}
+
+也可不使用默认判据方程，而通过定义窗口函数指定自定义判据，如例~\ref{ex:uf-custom-crit}。
+
+\begin{lstlisting}[style=pxl,caption={自定义判据方程},label={ex:uf-custom-crit}]
+design_layers : layer_groups_h = {
+   "aM1" => aM1
+};
+M1_density_criteria_func : function ( void ) returning void
+{
+   da_aM1 = uf_area(DESIGN, "aM1");
+   fa = uf_area(FILL, "M1_fill");
+
+check_value : double = (da_aM1 + fa) / uf_window_area();
+   uf_save_window(check_value);
+};
+M1_density_criteria : fill_criteria_s =
+{
+   target = {[0.25, 0.45]},
+   fill_layer_keys = {"M1_fill"},
+   design_layers_hash = design_layers,
+   window_function = M1_density_criteria_func
+};
+\end{lstlisting}
+
+\begin{seeAlsoBox}
+可在窗口函数中使用的实用函数，见 \textit{IC Validator Reference Manual}“Utility Functions”章中的 Unified Fill Utility Functions 一节。
+\end{seeAlsoBox}
+
+适用下列规则与限制：
+\begin{itemize}
+  \item 单个窗口函数中不能使用多个填充层。
+  \item 未指定 \cmd{target} 时，工具用范围中点作为内部目标。
+  \item 必须指定可收敛的有效约束。例如下列约束不允许：
+  \begin{lstlisting}[style=pxl]
+target = {range = <0.50}
+  \end{lstlisting}
+\end{itemize}
+
+下列示例说明若干情形的行为：
+\begin{itemize}
+  \item \cmd{target = \{range = >0.50\}}\\
+  工具尝试达到大于 50\% 的目标密度。
+  \item \cmd{target = \{range = [0.45, 0.55]\}}\\
+  工具假定内部目标密度为 50\%。初始密度已大于 50\% 的窗口不再添加填充；否则朝 50\% 收敛但不超过 50\%。
+  \item \cmd{target = \{range = [0.45, 0.55], target = 0.48\}}\\
+  工具朝 48\% 收敛。若窗口初始密度为 46\%，则朝 48\% 收敛但不超过 48\%。
+  \item \cmd{target = \{range = >0.30, target = 0.50\}}\\
+  允许范围为大于 30\% 且小于等于 100\%。工具朝 50\% 收敛但不超过 50\%。
+\end{itemize}
+
+% ============================================================
+\section{输出层}
+\subsection*{Output Layers}
+
+\cmd{unified\_fill()} 返回含层列表的哈希，每个列表有三个多边形层：
+
+\begin{longtable}{@{}p{0.12\textwidth} p{0.80\textwidth}@{}}
+\caption{输出层列表索引}\label{tab:uf-output-idx}\\
+\toprule
+\textbf{索引} & \textbf{多边形层} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{索引} & \textbf{多边形层} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+0 & 未着色（Uncolored） \\
+1 & Color~1（须 \cmd{color} 为 \cmd{true} 才有此层） \\
+2 & Color~2（须 \cmd{color} 为 \cmd{true} 才有此层） \\
+\end{longtable}
+
+取回多边形层列表时，指定填充图案定义 \cmd{layer\_spec} 中使用的 \cmd{output\_layer\_key}。若 \cmd{color} 为 \cmd{false}，仅在索引 0 生成未着色数据；若为 \cmd{true}，则在索引 1、2 分别返回两个着色输出层。例如：
+\begin{lstlisting}[style=pxl]
+M1_fill_ALL = M1_fill_h["M1_fill"][0];
+M1_fill_COLOR1 = M1_fill_h["M1_fill"][1];
+M1_fill_COLOR2 = M1_fill_h["M1_fill"][2];
+\end{lstlisting}
+
+例~\ref{ex:uf-hash-access} 给出两个填充层从输出哈希访问的过程。
+
+\begin{lstlisting}[style=pxl,caption={从哈希访问填充层},label={ex:uf-hash-access}]
+fill_patterns_m1_m2 = {{
+   type = UF_POLYGON,
+   polygon_fill = {
+      layers = {SHAPE_M1_fill,      //output_layer_key is "M1_fill"
+                SHAPE_M2_fill}      //output_layer_key is "M2_fill"
+   }
+}}
+uf_fill_output_h = unified_fill(
+   fill_patterns = fill_patterns_m1_m2
+);
+
+M1_fill_output = uf_fill_output_h["M1_fill"][0];
+M2_fill_output = uf_fill_output_h["M2_fill"][0];
+\end{lstlisting}
+
+例~\ref{ex:uf-color} 给出 \cmd{M1\_fill} 有两个图案插入步骤、且每个图案定义指定颜色的填充规范。每次插入步骤将填充形状作为独立集合着色。两个步骤在 \cmd{output\_layer\_key} 中使用相同字符串名指定填充层；工具将不同图案定义的全部多边形数据累积到该填充层输出哈希键的同一多边形层列表元素中。本例中 \cmd{M1\_fill} 输出哈希键列表索引 0 含两个插入步骤的完整多边形数据；索引 1 含两个步骤的完整 color~1 数据；索引 2 含完整 color~2 数据。
+
+\begin{lstlisting}[style=pxl,caption={使用 color 选项的图案插入},label={ex:uf-color}]
+SHAPE_M1_fill_TYPE1 : polygon_pattern_s = {
+   layer_spec = {
+        output_layer_key = "M1_fill",
+   }
+   polygons = DATA_M1_fill_TYPE1,
+};
+SHAPE_M1_fill_TYPE2 : polygon_pattern_s = {
+   layer_spec = {
+        output_layer_key = "M1_fill",
+   }
+   polygons = DATA_M1_fill_TYPE2,
+};
+M1_fill_h = unified_fill(
+   fill_patterns = {
+      {type = UF_POLYGON,
+        polygon_fill = {
+           layers = {SHAPE_M1_fill_TYPE1},
+           color = true
+        }
+      },
+      {type = UF_POLYGON,
+        polygon_fill = {
+           layers = {SHAPE_M1_fill_TYPE2},
+           color = true
+        }
+      }
+   },
+
+     fill_boundary = {type = LAYER, layer = data_extent}
+);
+
+M1_fill_ALL    = M1_fill_h["M1_fill"][0];
+M1_fill_COLOR1 = M1_fill_h["M1_fill"][1];
+M1_fill_COLOR2 = M1_fill_h["M1_fill"][2];
+\end{lstlisting}
+
+除填充层外，还可通过指定一个或多个适当的 \cmd{output\_layer\_key}，取回一个或多个输出填充层的包围盒（extents）。例~\ref{ex:uf-extents} 与图~\ref{fig:uf-extents} 展示 \cmd{extents\_output} 用法。
+
+\begin{lstlisting}[style=pxl,caption={使用 extents\_output 选项},label={ex:uf-extents}]
+SHAPE_M1_fill : polygon_pattern_s = {
+   layer_spec = {
+      output_layer_key = "M1_fill",
+   }
+   polygons = DATA_M1_fill_TYPE1,
+};
+
+M1_fill_h = unified_fill(
+   fill_patterns = {{
+      {type = UF_POLYGON,
+        polygon_fill = {
+           layers = {SHAPE_M1_fill},
+           color = true
+        }
+      }
+   },
+
+     extents_output = {
+       {output_layer_key = "M1_fill_boundary",
+         fill_layer_keys = {"M1_fill"}
+       }
+     }
+);
+
+M1_fill   = M1_fill_h["M1_fill"][0];
+M1_fill_E = M1_fill_h["M1_fill_boundary"][0];
+\end{lstlisting}
+
+\figplaceholder{Figure 86: Using the extents\_output Option}{使用 extents\_output 选项}{fig:uf-extents}
+
+当 \cmd{extents\_output} 中未指定 \cmd{output\_layer\_key} 时，图案包围盒由图案放置中全部填充层共同构造。对 \cmd{UF\_STACK} 或 \cmd{UF\_CELL} 生成的图案，\cmd{extents\_output} 按 \cmd{separate\_patterns} 工作。
+
+% ============================================================
+\section{层压缩}
+\subsection*{Layer Compression}
+
+\cmd{unified\_fill()} 生成的输出多边形层上的几何数据可分层级分组，以减小 \cmd{write\_gds()}、\cmd{write\_milkyway()} 等函数创建的输出文件大小。IC Validator runset 中可通过两种方式实现层压缩：
+\begin{itemize}
+  \item 在 \cmd{unified\_fill()} 的图案定义中指定 \cmd{hierarchical\_fill} 选项。
+  \item 在 \cmd{write\_gds()} 与 \cmd{write\_milkyway()} 中使用 \cmd{compress\_fill} 选项。
+\end{itemize}
+\cmd{unified\_fill()} 中的 \cmd{hierarchical\_fill} 类似于 \cmd{fill\_pattern()} 中的 \cmd{output\_aref}。但为获得最佳输出文件大小，建议对各个多边形层在 \cmd{write\_gds()} 与 \cmd{write\_milkyway()} 中使用 \cmd{compress\_fill} 参数。

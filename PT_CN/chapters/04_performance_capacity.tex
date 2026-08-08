@@ -1,0 +1,1333 @@
+% 第 4 章 Managing Performance and Capacity
+\bichapter{管理性能与容量}{Managing Performance and Capacity}
+\label{chap:perf}
+
+要了解如何管理 PrimeTime 工具的性能与容量，请参阅：
+\begin{itemize}
+  \item 高容量模式选项（High Capacity Mode Options）
+  \item 高级数据管理（Advanced Data Management）
+  \item 多线程多核分析（Threaded Multicore Analysis）
+  \item 分布式多场景分析（Distributed Multi-Scenario Analysis，DMSA）
+  \item HyperGrid 分布式分析
+  \item 报告 CPU 时间与内存使用
+  \item 流程摘要报告（Flow Summary Reports）
+  \item 分析 Tcl 脚本性能（Profiling）
+\end{itemize}
+
+% ============================================================
+\section{高容量模式选项}
+\subsection*{High Capacity Mode Options}
+
+默认情况下，PrimeTime 以高容量模式（high capacity mode）运行，可降低峰值内存占用，并在性能与容量之间进行运行时权衡，且不影响最终结果。高容量模式兼容所有分析流程，包括 Flat 与层次化流程；但在启用时钟重汇聚悲观度移除（CRPR，Clock Reconvergence Pessimism Removal）时最为有用。
+
+在高容量模式下，工具将数据临时存储到由 \cmd{pt\_tmp\_dir} 变量指定的本地磁盘分区；默认为 \texttt{/tmp} 目录。退出会话时，占用的磁盘空间会自动释放。为有效使用该模式，主机本地磁盘可用容量应尽可能接近物理 RAM。但实际磁盘使用量取决于设计、约束与工具设置。
+
+要在高容量模式下指定容量与性能之间的权衡，将 \cmd{sh\_high\_capacity\_effort} 变量设为 \texttt{low}、\texttt{medium}、\texttt{high} 或 \texttt{default}（\texttt{default} 等价于 \texttt{medium}）。effort 设置越高，峰值内存越低，但运行时间越长。必须在调用 \cmd{set\_program\_options} 命令之前设置该变量。
+
+要禁用高容量模式，使用 \opt{-disable\_high\_capacity} 选项运行 \cmd{set\_program\_options} 命令。只读变量 \cmd{sh\_high\_capacity\_enabled} 显示高容量模式是否启用：
+\begin{lstlisting}
+pt_shell> set_program_options -disable_high_capacity
+Information: high capacity analysis mode disabled. (PTHC-001)
+pt_shell> printvar sh_high_capacity_enabled
+sh_high_capacity_enabled = "false"
+\end{lstlisting}
+
+% ============================================================
+\section{高级数据管理}
+\subsection*{Advanced Data Management}
+
+PrimeTime 提供更高效的设计数据存储方法——高级数据管理（advanced data management），可降低内存消耗并允许分析更大设计。
+
+建议用于超过 1 亿实例的设计，尤其是使用基于矩建模（moment-based modeling）的参数化片上变异（POCV）分析时。启用此功能时，运行时间与磁盘占用会略有增加。
+
+要使用此功能，在加载任何设计数据之前设置以下变量：
+\begin{lstlisting}
+pt_shell> set_app_var timing_enable_advanced_data_management true
+\end{lstlisting}
+
+为方便起见，将此变量设为 \texttt{true} 时，工具还会将 \cmd{sh\_high\_capacity\_effort} 变量设为 \texttt{high}。（高容量 effort 默认级别为 \texttt{medium}。）
+
+此功能需要 PrimeTime-ELT 许可证。
+
+% ============================================================
+\section{多线程多核分析}
+\subsection*{Threaded Multicore Analysis}
+
+PrimeTime 可执行多线程多核分析（threaded multicore analysis），通过在可用核上运行多个线程来提升共享内存服务器上的性能。工具并行执行多项任务，以加快以下命令的周转时间：
+\begin{center}
+\cmd{get\_timing\_paths} \quad \cmd{read\_parasitics} \quad \cmd{read\_verilog} \quad
+\cmd{report\_analysis\_coverage} \quad \cmd{report\_attribute} \quad \cmd{report\_constraint} \\
+\cmd{report\_timing} \quad \cmd{save\_session} \quad \cmd{update\_timing} \quad
+\cmd{update\_noise} \quad \cmd{write\_sdf}
+\end{center}
+
+要了解如何使用多线程多核分析，请参阅：
+\begin{itemize}
+  \item 配置多线程多核分析
+  \item 并行执行命令
+  \item 多线程多核寄生参数读取
+  \item 多线程多核基于路径的分析（PBA）
+\end{itemize}
+
+\subsection{配置多线程多核分析}
+\subsubsection*{Configuring Threaded Multicore Analysis}
+
+默认情况下，工具使用多线程多核分析以提升性能。此功能允许多个同时执行的线程并行工作。
+
+默认情况下，每个进程使用的最大 CPU 核数为 4。\cmd{set\_host\_options} 命令的 \opt{-max\_cores} 选项可指定此限制，例如：
+\begin{lstlisting}
+pt_shell> set_host_options -max_cores 32
+Information: Checked out license 'PrimeTime-ADV' (PT-019)
+\end{lstlisting}
+
+大于 16 的值需要 PrimeTime-ADV 许可证，大于 32 的值需要一个或多个 PrimeTime-APX 许可证。即使之后将最大核数降至阈值以下，工具仍保留这些许可证。详情见「本地进程许可证」（Local-Process Licensing）。
+
+若限制超过当前机器提供的 CPU 核数，将降至可用核数。（此调整仅考虑核的存在；不考虑机器负载。）
+
+超线程（overthreading）允许同时线程数在短时间内暂时超过最大核数。默认启用。若计算环境不允许超线程，通过以下变量禁用：
+\begin{lstlisting}
+pt_shell> set_app_var multi_core_allow_overthreading false
+\end{lstlisting}
+禁用超线程可能降低多核性能。
+
+\subsection{并行执行命令}
+\subsubsection*{Executing Commands in Parallel}
+
+可将并行命令执行用于 Tcl 过程以及更新后报告与分析，但不能用于更新设计的命令，如 ECO、时序更新或噪声更新。
+
+使用并行命令执行时，同时执行的并行命令最大数量由 \cmd{set\_host\_options} 命令的 \opt{-max\_cores} 选项决定。
+
+并行命令执行在首先启动运行时间最长的命令时最为有效。
+
+要并行执行命令，在脚本中使用以下命令：
+\begin{itemize}
+  \item \cmd{parallel\_execute} 命令
+  \item \cmd{redirect -bg}（后台）命令
+  \item \cmd{parallel\_foreach\_in\_collection} 命令
+\end{itemize}
+
+\subsubsection{parallel\_execute 命令}
+\paragraph*{The parallel\_execute Command}
+
+要并行运行一组命令，使用 \cmd{parallel\_execute} 命令，例如：
+\begin{lstlisting}
+parallel_execute {
+  {save_session design_dir/my_session} /dev/null
+  {report_timing -max 10000 -nworst 10} report_timing.log
+  {report_constraints -all_violators} report_constraints.log
+  {report_qor} report_qor.log
+}
+\end{lstlisting}
+
+所有并行运行的命令完成后，工具返回 \texttt{pt\_shell>} 提示符。
+
+\cmd{parallel\_execute} 命令在命令运行期间动态分配核。当给定混合类型命令时，这可提高处理效率：
+\begin{itemize}
+  \item 指定多核与非多核命令混合时，处理核动态分配给能使用它们的命令。
+  \item 命令完成时，其处理核可重新分配给仍在运行的其他命令。
+\end{itemize}
+
+可包含含多条命令的命令块。这对彼此有依赖关系的命令，或并行化更复杂代码结构很有用，例如：
+\begin{lstlisting}
+parallel_execute {
+  {
+    set paths [get_timing_paths ...]
+    foreach_in_collection path $paths {
+      ...
+    }
+  } paths.txt
+  ...
+}
+\end{lstlisting}
+
+若指定 \cmd{set\_host\_options -max\_cores 1}，工具以单核分析模式运行，并按指定顺序串行执行 \cmd{parallel\_execute} 内的所有命令。
+
+\subsubsection{redirect -bg 命令}
+\paragraph*{The redirect -bg (Background) Command}
+
+要在后台运行更新后命令，使用 \cmd{redirect -bg} 命令：
+\begin{lstlisting}
+update_timing -full
+redirect -bg -file rpt_file1 {report_cmd1}
+redirect -bg -file rpt_file2 {report_cmd2}
+redirect -bg -file rpt_file3 {report_cmd3}
+...
+\end{lstlisting}
+
+主 \texttt{pt\_shell} 继续运行，\cmd{redirect -bg} 将作业排队并等待可用核。
+
+若指定 \cmd{set\_host\_options -max\_cores 1}，工具以单核分析模式运行；\cmd{redirect} 命令忽略 \opt{-bg} 选项并在前台运行命令。
+
+若存在至少一个活动的后台 \cmd{redirect -bg} 命令时发出 \cmd{exit} 命令，工具会阻塞退出请求，直至所有后台命令完成。
+
+\subsubsection{parallel\_foreach\_in\_collection 命令}
+\paragraph*{The parallel\_foreach\_in\_collection Command}
+
+要加速对对象集合的迭代，使用 \cmd{parallel\_foreach\_in\_collection} 命令。该命令类似 \cmd{foreach\_in\_collection}，但增加了在多核上并行处理。可与 \cmd{post\_eval} 命令配合使用，后者指定由管理进程按顺序执行的脚本：
+\begin{lstlisting}
+parallel_foreach_in_collection iterator_variable collections {
+  body_script_executed_by_workers_in_parallel
+  ...
+  post_eval {
+    script_executed_by_manager_in_sequence
+    ...
+  }
+}
+\end{lstlisting}
+
+以下示例展示如何使用 \cmd{parallel\_foreach\_in\_collection} 与 \cmd{post\_eval} 查找并报告违例路径最多的端点：
+
+\figplaceholder{Figure 10: Example of parallel\_foreach\_in\_collection and post\_eval commands}{parallel\_foreach\_in\_collection 与 post\_eval 命令示例}{fig:parallel-foreach}
+
+\begin{lstlisting}
+set endpoints [add_to_collection [all_registers -data_pins -async_pins] \
+  [all_outputs]]
+set most_violators 0
+set ep_with_most_violators {}
+parallel_foreach_in_collection endpoint $endpoints {
+  set paths [get_timing_paths -to $endpoint -nw 1000 \
+                                -slack_lesser_than 0]
+  set num_violators [sizeof_collection $paths]
+  post_eval {
+    if { $num_violators > $most_violators } {
+      set most_violators $num_violators
+      set ep_with_most_violators $endpoint
+    }
+  }
+}
+echo "endpoint [get_object_name $ep_with_most_violators] \
+      has $most_violators violators"
+\end{lstlisting}
+
+\figplaceholder{Figure 11: Execution of parallel\_foreach\_in\_collection}{parallel\_foreach\_in\_collection 的执行时序}{fig:parallel-foreach-timing}
+
+\cmd{parallel\_foreach\_in\_collection} 命令自动调度并平衡 $N$ 次迭代执行，以优化可用核的利用率。执行 body 脚本时，工作进程将 \cmd{post\_eval} 指定的脚本提交给管理进程，然后各工作进程继续下一次循环迭代而不等待。管理进程按顺序执行 \cmd{post\_eval} 命令。因此，为获得最佳性能，\cmd{post\_eval} 命令应尽可能快，且仅限于无法并行化的部分，如更改约束、设置用户定义属性、修改持久变量以聚合结果。还应避免过多的变量传递，尤其是处理大列表与数组时。
+
+有关将现有 \cmd{foreach\_in\_collection} 循环转换为 \cmd{parallel\_foreach\_in\_collection} 循环的信息，请参阅后者命令的 man page。
+
+\subsection{多线程多核寄生参数读取}
+\subsubsection*{Threaded Multicore Parasitics Reading}
+
+默认情况下，\cmd{read\_parasitics} 命令在工具启动的独立进程中运行，可与 \cmd{read\_sdc} 等命令并行执行。为获得最大运行时收益，应在链接设计后立即使用 \cmd{read\_parasitics} 命令。可使用 \cmd{set\_host\_options -max\_cores 1} 命令禁用并行寄生数据读取。
+
+寄生读取过程中写入的临时文件是存储在 \cmd{pt\_tmp\_dir} 目录中的大型寄生文件。会话结束时工具会自动删除这些文件。默认情况下，工具将寄生命令日志写入当前工作目录的 \texttt{parasitics\_command.log} 文件；要指定不同日志文件，设置 \cmd{parasitics\_log\_file} 变量。
+
+\subsection{多线程多核基于路径的分析}
+\subsubsection*{Threaded Multicore Path-Based Analysis}
+
+当使用 \opt{-pba\_mode path} 或 \opt{-pba\_mode exhaustive} 选项运行 \cmd{get\_timing\_paths} 或 \cmd{report\_timing} 命令时，PrimeTime 对基于路径的分析（PBA，Path-Based Analysis）运行多线程多核分析。此功能支持路径特定与穷举重算的所有命令变体，例如：
+\begin{itemize}
+  \item \cmd{get\_timing\_paths -pba\_mode exhaustive} \ldots
+  \item \cmd{get\_timing\_paths -pba\_mode path} \ldots
+  \item \cmd{get\_timing\_paths -pba\_mode path \$path\_collection}
+  \item \cmd{report\_timing -pba\_mode exhaustive} \ldots
+  \item \cmd{report\_timing -pba\_mode path} \ldots
+  \item \cmd{report\_timing -pba\_mode path \$path\_collection}
+\end{itemize}
+
+若无可用多核，PrimeTime 运行标准单核基于路径的分析。
+
+
+% ============================================================
+\section{分布式多场景分析}
+\subsection*{Distributed Multi-Scenario Analysis}
+
+验证芯片设计需要在不同工作条件与不同工作模式下进行多次 PrimeTime 运行。给定芯片设计的特定工作条件与工作模式组合称为场景（scenario）。设计的场景数为：
+\[
+\text{场景数} = [\text{工作条件集}] \times [\text{模式}]
+\]
+
+PrimeTime 可通过分布式多场景分析（DMSA）并行分析多个场景。DMSA 使用管理 PrimeTime 进程设置、执行并控制多个工作进程——每个场景一个——而非按顺序分析各场景。可将场景处理分布到不同主机上并行运行，缩短总周转时间。在不同场景间共享公共数据时，总运行时间会减少。
+
+单个脚本可控制多个场景，便于设置与管理不同分析集。此能力不使用多线程（将单进程拆分为可并行执行的片段），而是提供高效方式指定给定设计的不同工作条件与模式分析，并将这些分析任务分布到不同主机。
+
+要了解如何使用 DMSA，请参阅：
+\begin{itemize}
+  \item 术语定义
+  \item DMSA 流程概述
+  \item 分布式处理设置
+  \item DMSA 批处理模式脚本示例
+  \item 基线映像生成与存储
+  \item 主机资源亲和性
+  \item 场景变量与属性
+  \item 合并报告
+  \item 将场景设计数据加载到管理进程
+  \item 保存与恢复会话
+  \item 许可证资源管理
+  \item 工作进程故障处理
+  \item 消息与日志文件
+  \item DMSA 变量与命令
+  \item DMSA 限制
+\end{itemize}
+
+\subsection{术语定义}
+\subsubsection*{Definition of Terms}
+
+以下术语描述分布式处理的各个方面：
+\begin{description}
+  \item[baseline image（基线映像）] 由网表映像与场景的公共数据文件组合产生的映像。
+  \item[command focus（命令焦点）] 分析命令所应用的当前场景集。命令焦点可包含会话中所有场景或仅子集。
+  \item[current image（当前映像）] 当场景数超过主机数且工作进程必须切换处理另一场景时，自动保存到磁盘的映像。
+  \item[manager（管理进程）] 管理场景分析进程分布的进程。
+  \item[scenario（场景）] 工作条件与工作模式的特定组合。
+  \item[session（会话）] 选定进行分析的当前场景集。
+  \item[task（任务）] 由管理进程为工作进程执行而定义的自包含工作单元。
+  \item[worker（工作进程）] 由管理进程启动并控制、对一个场景执行时序分析的进程；亦称 worker process。
+\end{description}
+
+\figplaceholder{Figure 12: Relationships Between Scenarios, Session, and Command Focus}{场景、会话与命令焦点之间的关系}{fig:dmsa-terms}
+
+场景描述配置所指定设计分析时使用的特定工作条件与工作模式组合。可创建的场景数量无限制（受管理进程内存限制）。使用 \cmd{create\_scenario} 命令创建场景，该命令指定场景名称及应用场景分析条件与模式设置的脚本名称。
+
+脚本分为两组：公共数据脚本（common-data scripts）与特定数据脚本（specific-data scripts）。公共数据脚本在两个或多个场景间共享；特定数据脚本仅属于特定场景且不共享。此分组帮助管理进程管理任务并在不同场景间共享信息，最小化不同场景的重复工作。
+
+会话描述要在并行中分析的场景集。使用 \cmd{current\_session} 命令选择当前会话的场景。当前会话可包含所有已定义场景或仅子集。
+
+命令焦点是受管理进程 PrimeTime 提示符处输入的分析命令影响的场景集。命令焦点可包含当前会话中所有场景或 \cmd{current\_scenario} 命令指定的子集。默认情况下，当前会话的所有场景均在命令焦点中。
+
+\subsection{DMSA 流程概述}
+\subsubsection*{Overview of the DMSA Flow}
+
+要了解多场景流程基础，请参阅：
+\begin{itemize}
+  \item 准备运行 DMSA
+  \item DMSA 使用流程
+\end{itemize}
+
+\subsubsection{准备运行 DMSA}
+\paragraph*{Preparing to Run DMSA}
+
+开始多场景分析之前，必须设置搜索路径并创建 \texttt{.synopsys\_pt.setup} 文件：
+\begin{itemize}
+  \item 设置搜索路径
+  \item \texttt{.synopsys\_pt.setup} 文件
+\end{itemize}
+
+\subparagraph{设置搜索路径}
+在多场景分析中，只能在管理进程设置 \cmd{search\_path} 变量。读取搜索路径时，管理进程在管理进程上下文中解析所有相对路径，然后自动将完全解析的搜索路径设置到工作进程。例如，管理进程可能在 \texttt{/remote1/test/ms} 目录启动，并用以下命令设置 \cmd{search\_path}：
+\begin{lstlisting}
+set search_path ". .. ../scripts"
+\end{lstlisting}
+管理进程自动将工作进程的搜索路径设为：
+\begin{lstlisting}
+/remote1/test/ms /remote1/test /remote1/ms/scripts
+\end{lstlisting}
+
+多场景分析推荐流程是将搜索路径设为指定：
+\begin{itemize}
+  \item 所有场景与配置文件的位置
+  \item 在工作进程上下文中读入的所有 Tcl 脚本及网表、SDF、库与寄生文件
+\end{itemize}
+为获得最佳结果，避免在工作进程上下文脚本中使用相对路径。
+
+\subparagraph{.synopsys\_pt.setup 文件}
+管理进程与工作进程按以下顺序 source 同一组 \texttt{.synopsys\_pt.setup} 文件：
+\begin{enumerate}
+  \item PrimeTime 安装目录 setup 文件：\texttt{install\_dir/admin/setup/.synopsys\_pt.setup}
+  \item 主目录 setup 文件：\texttt{\textasciitilde/.synopsys\_pt.setup}
+  \item 管理进程启动目录 setup 文件：\texttt{\$sh\_launch\_dir/.synopsys\_pt.setup}
+\end{enumerate}
+
+要仅在特定标量或分布式分析模式下有条件地执行命令，检查 \cmd{sh\_host\_mode} 变量是否设为 \texttt{scalar}、\texttt{manager} 或 \texttt{worker}，例如：
+\begin{lstlisting}
+if { $sh_host_mode eq "manager" } {
+   set multi_scenario_working_directory "./work"
+}
+\end{lstlisting}
+
+\subsubsection{DMSA 使用流程}
+\paragraph*{DMSA Usage Flow}
+
+DMSA 能力可用于 PrimeTime 与 PrimeTime SI 的时序分析，以及 PrimePower 的功耗分析，显著缩短周转时间。有关在 PrimePower 中使用 DMSA 的更多信息，请参阅 PrimePower User Guide 中「Distributed Peak Power Analysis」一节。
+
+从管理 PrimeTime 进程的 \texttt{pt\_shell>} 提示符，可启动并控制最多 256 个工作进程（见「DMSA 限制」）。
+
+\figplaceholder{Figure 13: Typical Multi-Scenario Analysis Flow}{典型多场景分析流程}{fig:dmsa-flow}
+
+典型多场景分析步骤如下：
+\begin{enumerate}
+  \item 使用 \opt{-multi\_scenario} 选项运行 \cmd{pt\_shell} 命令启动多场景分析模式。或从普通 PrimeTime 会话将 \cmd{multi\_scenario\_enable\_analysis} 变量设为 \texttt{true}。
+  \item 使用 \cmd{create\_scenario} 命令创建场景。每个 \cmd{create\_scenario} 命令指定场景名称及应用场景条件的 PrimeTime 脚本文件。
+  \item 运行 \cmd{set\_host\_options} 命令配置用于时序更新与报告的算力资源。此命令不启动主机，但设置该主机的 host 选项。例如，host 选项名为 \texttt{ptopt030}，使用 \texttt{rsh} 连接，每进程最多 3 核：
+\begin{lstlisting}
+pt_shell> set_host_options -name my_opts -max_cores 3 \
+          -num_processes 4 -submit_command "/usr/bin/rsh -n" ptopt030
+\end{lstlisting}
+        在管理脚本中使用 \cmd{set\_host\_options} 命令指定远程核数。
+  \item 运行 \cmd{report\_host\_usage} 命令验证 host 选项。此命令还报告本地进程及所有已上线分布式进程的峰值内存与 CPU 使用。报告显示指定的 host 选项、分布式进程状态、各进程使用的 CPU 核数及分布式主机使用的许可证。
+  \item 运行 \cmd{start\_hosts} 命令请求算力资源并使主机上线。
+\begin{noteBox}
+若设置 \cmd{multi\_scenario\_working\_directory} 与 \cmd{multi\_scenario\_merged\_error\_log} 变量，须在启动算力资源之前设置。
+\end{noteBox}
+  \item 使用 \cmd{current\_session} 命令为会话选择场景。该命令指定先前用 \cmd{create\_scenario} 创建的场景列表。
+  \item （可选）使用 \cmd{current\_scenario} 命令更改当前会话中处于命令焦点的场景。默认情况下，当前会话的所有场景均在命令焦点中。
+  \item 查看分析报告并修复验证问题：
+  \begin{enumerate}
+    \item 执行 \cmd{remote\_execute} 命令或在管理进程执行合并报告命令以开始处理场景。有关合并报告，见「合并报告」。
+    \item 工作进程完成所有场景处理后，可查看分析报告。在 \cmd{multi\_scenario\_working\_directory} 变量指定目录下查找 \cmd{remote\_execute} 生成的报告。若使用 \opt{-verbose} 选项，所有信息直接显示在管理进程控制台。所有合并报告命令的输出直接显示在管理进程控制台。
+    \item 使用 ECO 命令修复时序与设计规则违例。
+  \end{enumerate}
+\end{enumerate}
+
+
+\subsection{分布式处理设置}
+\subsubsection*{Distributed Processing Setup}
+
+要对多个场景进行分布式处理，须首先以 DMSA 模式调用 PrimeTime 工具，然后管理算力资源、定义工作目录、创建场景并指定当前会话与命令焦点。详情见：
+\begin{itemize}
+  \item 启动分布式多场景分析模式
+  \item 管理算力资源
+  \item 创建场景
+  \item 指定当前会话与命令焦点
+  \item 远程执行命令
+\end{itemize}
+
+\subsubsection{启动分布式多场景分析模式}
+\paragraph*{Starting the Distributed Multi-Scenario Analysis Mode}
+
+要以 DMSA 模式启动 PrimeTime，启动 PrimeTime shell 时使用 \opt{-multi\_scenario} 选项：
+\begin{lstlisting}
+% pt_shell -multi_scenario
+\end{lstlisting}
+
+PrimeTime 启动并显示 \texttt{pt\_shell>} 提示符，与单场景会话相同。分布式多场景分析由一个管理 PrimeTime 进程与多个 PrimeTime 工作进程执行。管理进程与工作进程通过全双工网络通信交互。
+
+管理进程生成分析任务并管理这些任务到工作进程的分布。它不执行时序分析，也不保存网表与输入的多场景数据以外的数据。因此管理进程的命令集仅限于执行管理功能的命令。
+
+使用 \cmd{multi\_scenario\_working\_directory} 变量指定存储分布式处理工作文件的目录。
+
+使用 \cmd{multi\_scenario\_merged\_error\_log} 变量指定写入工作进程发出的所有 error、warning 与 information 消息的文件。多个工作进程发出的同一消息在合并错误日志中合并为单条记录。详见「合并错误日志」。
+
+\cmd{multi\_scenario\_merged\_error\_log} 变量限制每任务写入日志的特定类型消息数量。默认值为 100。
+
+启动时，每个 PrimeTime 进程（管理进程与工作进程）均会查找并 source \texttt{.synopsys\_pt.setup} 文件，与正常模式相同。各进程还写入各自的日志文件。更多信息见「日志文件」。
+
+\subsubsection{管理算力资源}
+\paragraph*{Managing Compute Resources}
+
+在分布式分析中，管理进程使用一个或多个工作进程执行工作。这些工作进程可配置、在多种计算环境中启动、查询状态并按需终止。
+
+管理进程为工作进程生成要执行的任务。任一任务仅适用于一个场景，任一工作进程一次仅可配置为一个场景。若场景数多于运行它们的工作进程，部分工作进程需要换出一个场景以执行所有场景。
+
+避免在主机上指定超过可用 CPU 数量的进程，否则大量时间花在换入换出工作进程上。为获得最佳 DMSA 系统性能，使工作进程数、命令焦点中的场景数与可用 CPU 数匹配，使每个场景在各自 CPU 上的各自工作进程中执行。
+
+\subparagraph{设置分布式 Host 选项}
+使用 \cmd{set\_host\_options} 命令分配工作进程作为算力资源。管理进程调用的每个工作进程是仅管理进程可访问的单 PrimeTime 会话。无法手动以 worker 模式启动 PrimeTime 进程。
+
+使用 \cmd{set\_host\_options -num\_processes} 命令指定工作进程：
+\begin{lstlisting}
+pt_shell> set_host_options -num_processes process_count ...
+\end{lstlisting}
+\opt{-num\_processes} 选项表示规范适用于工作进程而非本地进程。
+
+\cmd{set\_host\_options} 命令提供额外选项配置工作进程。例如，\opt{-protocol} 选项指定进程使用的计算环境：
+
+\begin{table}[htbp]
+\centering
+\caption{set\_host\_options -protocol 选项}
+\small
+\begin{tabular}{@{}llp{6.5cm}@{}}
+\toprule
+\opt{-protocol} 值 & 类型 & 说明 \\
+\midrule
+auto（默认） & 自动 & 从 \opt{-submit\_command} 值推断协议 \\
+rsh & 非托管（直接登录） & 远程 shell 登录 \\
+ssh & 非托管（直接登录） & Secure Shell 登录 \\
+lsf & 托管（计算农场） & Load Sharing Facility \\
+netbatch & 托管（计算农场） & NetBatch \\
+pbs & 托管（计算农场） & PBS Professional \\
+rtda & 托管（计算农场） & RunTime Design Automation \\
+sge & 托管（计算农场） & Grid Engine \\
+slurm & 托管（计算农场） & Slurm Workload Manager \\
+custom & 自定义 & 自定义作业提交命令或脚本 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+托管算力资源使工具在资源可用时分配池化资源。\cmd{set\_host\_options} 还提供多种额外选项配置作业提交命令、为工作进程定义名称及定义负载共享特性。详情及命令示例见 \cmd{set\_host\_options} man page。
+
+可使用多个 \cmd{set\_host\_options -num\_processes} 命令创建多组待启动进程，每组可有各自的 host 选项，并可选使用 \opt{-name} 选项命名。
+
+以下命令配置四个工作进程：两个通过 SSH 到特定机器，两个在 LSF 计算农场：
+\begin{lstlisting}
+set_host_options \
+  -num_processes 2 \
+  -name my_local \
+  -max_cores 2 \
+  -protocol ssh \
+  workstation23.internal.mycompany.com
+
+set_host_options \
+  -num_processes 2 \
+  -name my_farm \
+  -max_cores 2 \
+  -protocol lsf \
+  -submit_command "[sh which bsub] -n 2 -R rusage" \
+  -terminate_command "[sh which bkill]"
+\end{lstlisting}
+
+可与 \opt{-num\_processes} 选项一起指定 \opt{-max\_cores} 选项，配置每个工作进程用于多线程多核分析的最大核数。
+
+还可通过设置以下变量进一步配置管理进程与工作进程：
+
+\begin{table}[htbp]
+\centering
+\caption{分布式分析配置变量}
+\small
+\begin{tabular}{@{}p{5.5cm}p{7.5cm}@{}}
+\toprule
+变量 & 说明 \\
+\midrule
+\cmd{distributed\_cleanup\_variables\_for\_swap} & 控制场景交换时清理变量状态 \\
+\cmd{distributed\_custom\_protocol\_error\_detection\_timeout} & 分布式管理进程等待自定义协议工作进程上线的最长时间 \\
+\cmd{distributed\_farm\_check\_pending\_workers\_interval} & 分布式管理进程等待计算农场启动的工作进程上线的最长时间 \\
+\cmd{distributed\_farm\_protocol\_error\_detection\_timeout} & 分布式管理进程等待计算农场启动的工作进程上线的最长时间 \\
+\cmd{distributed\_heartbeat\_period} & 分布式工作进程向管理进程发送心跳的间隔 \\
+\cmd{distributed\_heartbeat\_timeout} & 心跳超时（以错过的心跳次数计）。若管理进程连续错过这么多工作进程心跳，则假定工作进程失败 \\
+\cmd{distributed\_logging} & 指定分布式分析期间日志详细程度 \\
+\cmd{distributed\_sh\_protocol\_error\_detection\_timeout} & 分布式管理进程等待 sh、rsh 与 ssh 协议工作进程上线的最长时间 \\
+\cmd{distributed\_worker\_exit\_action} & 控制分布式工作进程上 \cmd{exit} 命令的行为 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+详情见各变量 man page。要移除 host 选项并终止关联进程，使用 \cmd{remove\_host\_options} 命令。
+
+\subparagraph{配置分布式环境}
+使用 \cmd{set\_distributed\_parameters} 命令配置分布式环境（远程启动脚本、工作进程启动脚本及集合属性最大层级）。在运行 \cmd{start\_hosts} 命令之前设置配置。
+
+\subparagraph{启动算力资源}
+使用 \cmd{start\_hosts} 命令启动 \cmd{set\_host\_options} 指定的主机。该命令持续运行直至以下事件之一发生：
+\begin{itemize}
+  \item 所有请求的远程主机进程可用
+  \item 可用远程主机进程数达到 \cmd{start\_hosts} 命令中指定的 \opt{-min\_hosts} 值（若指定）
+  \item 秒数达到 \cmd{start\_hosts} 命令中指定的 \opt{-timeout} 值（默认 21600）
+\end{itemize}
+
+可用主机数直接影响 PrimeTime 同时分析场景的能力。可用主机过少时，会发生昂贵的映像交换，直至有足够主机可用。
+
+运行 \cmd{start\_hosts} 命令时，先前添加的主机开始经历其生命周期状态转换，如下图所示。
+
+\figplaceholder{Figure 14: Life cycle states}{生命周期状态}{fig:dmsa-lifecycle}
+
+\subparagraph{DMSA 虚拟工作进程}
+当场景数超过可用主机数时，至少两个场景须分配到同一主机运行。若在这些场景中执行多个命令，工具须执行保存与恢复操作以在内存中换入换出设计以执行各命令，这可能消耗大量运行时与网络资源。
+
+此时可在 \cmd{set\_host\_options} 命令中设置 ``load factor''（负载因子）以避免额外运行时与延迟：
+\begin{lstlisting}
+pt_shell> set_host_options -load_factor 2 ...
+\end{lstlisting}
+默认负载因子为 1，禁用此功能。设为 2 以减少保存与恢复操作，代价是更多内存。
+
+此功能通过在内存中创建可各处理一个场景的虚拟工作进程实现。设为 2 将工作进程数加倍，为每个真实工作进程创建一个虚拟工作进程。若真实与虚拟工作进程可同时接受所有场景，则无需保存与恢复操作。
+
+示例：
+\begin{itemize}
+  \item \textbf{2 个场景，每场景多条命令}：\texttt{-num\_processes 2}，进程数等于场景数，提高负载因子无收益。
+  \item \textbf{4 个场景，每场景多条命令}：\texttt{-num\_processes 2 -load\_factor 2}，工作进程从 2 加倍到 4，内存分配加倍，4 个工作进程可同时接受 4 个场景，无需保存与恢复。
+  \item \textbf{6 个场景，每场景多条命令}：\texttt{-num\_processes 2 -load\_factor 2}，工作进程加倍到 4，减少但无法完全消除保存与恢复，因 4 个工作进程无法同时接受全部 6 个场景。
+\end{itemize}
+
+为优化时间收益，使工作进程总数等于场景数（可能使用多个 \cmd{set\_host\_options} 命令），并在主机上为虚拟工作进程分配足够内存。
+
+\subsubsection{创建场景}
+\paragraph*{Creating Scenarios}
+
+场景是给定配置的特定工作条件与工作模式组合。使用 \cmd{create\_scenario} 命令创建场景，例如：
+\begin{lstlisting}
+pt_shell> create_scenario -name scen1 \
+          -common_data {common_s.pt} \
+          -specific_data {specific1.pt}
+\end{lstlisting}
+
+与场景关联的脚本有两类：
+\begin{itemize}
+  \item 处理多个场景共享的公共数据、并包含在基线映像生成过程中的脚本（见「基线映像生成与存储」）
+  \item 仅应用于指定场景的特定数据脚本
+\end{itemize}
+
+管理进程在适当情况下在场景组间共享公共数据，从而减少所有场景的总运行时间。
+
+\figplaceholder{Figure 15: Multi-Scenario Setup Example}{多场景设置示例}{fig:dmsa-setup}
+
+该设计须在称为 slow 与 fast 的两个工艺变异极端，以及称为 read 与 write 的两种工作模式下分析。因此四个场景为：slow-read、slow-write、fast-read、fast-write。\texttt{common\_all.pt} 脚本读入设计并应用所有场景共用的约束。\texttt{common\_s.pt} 在部分（非全部）场景间共享。\texttt{specific1.pt} 直接贡献于单个场景条件的指定。
+
+使用 \cmd{create\_scenario} 命令的 \opt{-image} 选项可从先前保存的场景映像创建场景。该映像可从标准 PrimeTime 会话、从 DMSA 管理进程保存的会话或从 DMSA 会话期间生成的当前映像生成。
+
+若需创建电压缩放组，须在用于设置场景的脚本之一中使用 \cmd{link\_design} 命令之前创建。
+
+\subparagraph{移除场景}
+使用 \cmd{remove\_scenario} 命令移除先前用 \cmd{create\_scenario} 创建的场景：
+\begin{lstlisting}
+pt_shell> remove_scenario s1
+\end{lstlisting}
+
+\subsubsection{指定当前会话与命令焦点}
+\paragraph*{Specifying the Current Session and Command Focus}
+
+使用 \cmd{current\_session} 命令指定要分析的场景集：
+\begin{lstlisting}
+pt_shell> current_session {s2 s3 s4}
+\end{lstlisting}
+
+该命令列出要成为当前会话一部分的场景。默认情况下，列出的所有场景均在命令焦点中——即当前受管理进程分析命令影响的场景。要进一步缩小命令焦点，使用 \cmd{current\_scenario} 命令：
+\begin{lstlisting}
+pt_shell> current_scenario {s3}
+\end{lstlisting}
+
+此命令在交互分析中很有用。例如，可能想修改特定网线上的负载，然后仅在特定场景或当前会话全部场景的子集中重新检查路径时序。
+
+可按以下方式将命令焦点恢复为会话中所有场景：
+\begin{lstlisting}
+pt_shell> current_scenario -all
+\end{lstlisting}
+
+在开始 DMSA 之前检查分布式处理设置，使用 \cmd{report\_multi\_scenario\_design} 命令，该命令生成有关用户定义多场景对象与属性的详细报告。
+
+\subsubsection{远程执行命令}
+\paragraph*{Executing Commands Remotely}
+
+要显式在工作进程上下文中运行命令，使用 \cmd{remote\_execute} 命令。将命令列表作为 Tcl 字符串括起。用分号分隔命令使其依次执行。
+
+要在远程求值子表达式与变量，使用花括号生成命令字符串，例如：
+\begin{lstlisting}
+remote_execute {
+  # variable all_in evaluated at worker
+  report_timing -from $all_in -to [all_outputs]
+}
+\end{lstlisting}
+此例中，\cmd{report\_timing} 在工作进程求值，\texttt{all\_in} 变量与 \cmd{all\_outputs} 表达式在工作进程上下文中求值。
+
+要在管理进程本地求值表达式与变量，用引号括起命令字符串。所有管理进程求值必须返回字符串，例如：
+\begin{lstlisting}
+remote_execute "
+  # variable all_out evaluated at manager
+  report_timing -to $all_out
+"
+\end{lstlisting}
+
+发出 \cmd{remote\_execute} 命令后，管理进程为命令焦点中所有场景的执行生成任务。示例：
+\begin{lstlisting}
+remote_execute {set x 10}
+\section{Send tasks for execution in all scenarios in command focus}
+set x 20
+remote_execute {report_timing -nworst $x}
+\section{Leads to report_timing -nworst 10 getting executed at the workers}
+
+remote_execute "report_timing -nworst $x"
+\section{Leads to report_timing -nworst 20 getting executed at the workers}
+\end{lstlisting}
+
+使用 \opt{-pre\_commands} 选项时，\cmd{remote\_execute} 在远程执行命令之前执行指定命令。使用 \opt{-post\_commands} 选项时，在远程执行命令之后执行所列命令。
+
+可使用 \opt{-verbose} 选项的 \cmd{remote\_execute} 命令将所有工作进程数据返回到管理进程终端屏幕，而非管道到 DMSA 文件系统层次工作目录中的 \texttt{out.log} 文件。
+
+远程执行网表编辑命令的能力扩展到所有 PrimeTime 命令，但以下命令除外：显式 \cmd{save\_session}（仅 worker）、显式 \cmd{restore\_session}、\cmd{remove\_design}。
+
+
+\subsection{DMSA 批处理模式脚本示例}
+\subsubsection*{DMSA Batch Mode Script Example}
+
+批处理模式下，PrimeTime 命令包含在工具启动时调用的脚本中，例如：
+\begin{lstlisting}
+% pt_shell -multi_scenario -file script.tcl
+\end{lstlisting}
+
+以下是典型的多场景管理脚本：
+\begin{lstlisting}
+set multi_scenario_working_directory "./ms_session_1"
+set multi_scenario_merged_error_log "merged_errors.log"
+
+\section{Start of specifying the set-up}
+set search_path "./scripts"
+
+set_host_options -32bit -num_processes 1 platinum1
+set_host_options -32bit -num_processes 1 platinum2
+
+report_host_usage
+start_hosts
+
+create_scenario -name s1 \
+  -common_data common_data_scenarios_s1_s3.tcl \
+  -specific_data specific_data_scenario_s1.tcl
+create_scenario -name s2 \
+  -common_data common_data_scenarios_s2_s4.tcl \
+  -specific_data specific_data_scenario_s2.tcl
+create_scenario -name s3 \
+  -common_data common_data_scenarios_s1_s3.tcl \
+  -specific_data specific_data_scenario_s3.tcl
+create_scenario -name s4 \
+  -common_data common_data_scenarios_s2_s4.tcl \
+  -specific_data specific_data_scenario_s4.tcl
+
+current_session {s1 s2}
+
+remote_execute -pre_commands {source constraint_group1.tcl \
+  source constraint_group2.tcl} {report_timing}
+
+quit
+\end{lstlisting}
+
+任务是工作进程执行以完成某功能的自包含工作块。工作进程在获得适合该任务的许可证后立即开始执行指定场景的任务。
+
+该脚本功能：设置管理进程搜索路径；\cmd{set\_host\_options} 指定算力资源 host 选项；\cmd{report\_host\_usage} 生成 host 选项详细报告；\cmd{start\_hosts} 启动主机进程；\cmd{create\_scenario} 创建 s1--s4 四个场景；\cmd{current\_session} 选择 s1 与 s2；\cmd{remote\_execute -pre\_commands} 在 s1 与 s2 中开始任务生成与执行；\cmd{quit} 有序终止工作进程与管理进程并释放许可证。
+
+脚本将报告与日志写入以下路径（假设管理 \texttt{pt\_shell} 从 \texttt{/mypath} 启动）：
+\begin{itemize}
+  \item 管理命令日志：\texttt{/mypath/pt\_shell\_command.log}
+  \item 工作进程错误合并报告：\texttt{/mypath/ms\_session\_1/merged\_errors.log}
+  \item 会话工作输出日志：\texttt{/mypath/ms\_session\_1/default\_session/out.log}
+  \item s1、s2 工作输出日志：\texttt{/mypath/ms\_session\_1/s1/out.log}、\texttt{s2/out.log}
+  \item 工作命令日志：\texttt{/mypath/ms\_session\_1/pt\_shell\_command\_log/platinum1\_pt\_shell\_command.log} 等
+\end{itemize}
+
+\subsection{基线映像生成与存储}
+\subsubsection*{Baseline Image Generation and Storage}
+
+管理进程生成并委派给工作进程的第一个任务是基线映像生成。基线映像由网表表示与该场景的公共数据文件组成。许多情况下，同一映像可由多个场景共享。
+
+在其他类型任务进行之前，基线映像生成必须成功完成。映像生成失败也会导致依赖该映像的场景的多场景分析失败。
+
+对于命令焦点中提供基线映像的每个场景，该映像写入多场景工作目录下 \texttt{scenario\_name/baseline\_image} 目录。
+
+基线映像生成后，管理进程生成并委派工作进程执行命令焦点中场景的用户指定命令。
+
+当场景数多于执行场景任务可用进程数时，工作进程为一个场景保存当前映像，同时继续为另一场景执行任务。工作进程将映像保存在多场景工作目录下 \texttt{scenario\_name/current\_image} 目录。
+
+\subsection{主机资源亲和性}
+\subsubsection*{Host Resource Affinity}
+
+工作进程自动重新配置以在不同场景执行不同任务可能是昂贵操作。多场景流程尝试最小化场景换出，但受命令焦点中场景数与已添加工作进程数限制。场景与工作进程的严重不平衡会降低系统性能。
+
+若每个命令焦点场景有一个工作进程、每个工作进程有可用 CPU、且每个工作进程有所需功能的许可证，则可从 DMSA 获得最佳性能，使所有工作进程并发执行以获得最大吞吐量。
+
+可选项为场景指定在指定主机上执行的``亲和性''（affinity），以更高效分配有限计算资源。
+
+\figplaceholder{Figure 16: Random Scenario-to-Host Distribution (Default)}{随机场景到主机分布（默认）}{fig:dmsa-affinity-random}
+
+\figplaceholder{Figure 17: Directed Scenario-to-Host Distribution Using Affinity}{使用亲和性的定向场景到主机分布}{fig:dmsa-affinity-directed}
+
+指定场景 host 资源亲和性示例：
+\begin{lstlisting}
+set_host_options -name SmallHosts -max_cores 8 -num_processes 2 \
+ -submit_command {bsub -n 8 -R "rusage[mem=4000] span[ptile=1]"}
+
+set_host_options -name BigHosts -max_cores 16 -num_processes 2 \
+ -submit_command {bsub -n 16 -R "rusage[mem=8000] span[ptile=1]"}
+...
+create_scenario -name S1 -affinity SmallHosts ...
+create_scenario -name S2 -affinity SmallHosts ...
+create_scenario -name S3 -affinity BigHosts ...
+create_scenario -name S4 -affinity BigHosts ...
+\end{lstlisting}
+
+报告场景亲和性设置，使用 \cmd{report\_multi\_scenario\_design -scenario} 命令。
+
+\subsection{场景变量与属性}
+\subsubsection*{Scenario Variables and Attributes}
+
+可在 DMSA 期间在管理进程或其任一工作进程中设置变量：
+\begin{itemize}
+  \item 管理进程上下文变量
+  \item 工作进程上下文变量与表达式
+  \item 设置分布式变量
+  \item 获取分布式变量值
+  \item 合并分布式变量值
+  \item 跨场景同步对象属性
+\end{itemize}
+
+\paragraph{管理进程上下文变量}
+管理进程上下文变量示例：
+\begin{lstlisting}
+set x {"ffa/CP ffb/CP ffc/CP"}
+report_timing -from $x
+\end{lstlisting}
+注意 \texttt{x} 被强制为字符串。
+
+\paragraph{工作进程上下文变量与表达式}
+管理进程不知道工作进程上的变量，但可将变量或表达式字符串传递给工作进程远程求值。要将 token 传递给工作进程远程求值，使用花括号。例如场景 1 中 \texttt{x} 为 \texttt{ff1/CP}，场景 2 中为 \texttt{ff2/CP}，则 \cmd{report\_timing -from \{\$x\}} 在场景 1 上下文中报告从 \texttt{ff1/CP} 开始的所有最差路径，在场景 2 上下文中报告从 \texttt{ff2/CP} 开始的所有路径。
+
+\paragraph{设置分布式变量}
+要从管理进程在工作进程级别设置变量，使用 \cmd{set\_distributed\_variables} 命令。变量可以是 Tcl 变量、集合、数组或列表。示例：
+\begin{lstlisting}
+pt_shell> array set x {s1 10 s2 0}
+pt_shell> array set y {s1 0 s2 15}
+pt_shell> set_distributed_variables {x y}
+\end{lstlisting}
+
+创建并设置单个变量时无需创建数组：
+\begin{lstlisting}
+pt_shell> set my_var 2.5
+pt_shell> set_distributed_variables my_var
+\end{lstlisting}
+
+\paragraph{获取分布式变量值}
+使用 \cmd{get\_distributed\_variables} 命令获取命令焦点中场景内设置的变量值。检索的值返回到管理进程并存储在以场景名索引的 Tcl 数组中。示例：
+\begin{lstlisting}
+current_session {scen1 scen2}
+remote_execute {
+  set pin_slack1 [get_attribute -class pin UI/Z slack];
+  set pin_slack2 [get_attribute -class pin U2/Z slack]
+}
+get_distributed_variables {pin_slack1 pin_slack2}
+\end{lstlisting}
+
+检索集合时需指定要从集合检索的属性：
+\begin{lstlisting}
+current_session {scen1 scen2}
+remote_execute {set mypaths [get_timing_paths -nworst 100]}
+get_distributed_variables mypaths -attributes (slack)
+\end{lstlisting}
+
+\paragraph{合并分布式变量值}
+默认情况下，\cmd{get\_distributed\_variables} 将场景变量作为数组带回。使用 \opt{-merge\_type} 选项可将值合并回变量，例如保留所有场景中 \texttt{worst\_slack} 的最小（最负）值：
+\begin{lstlisting}
+pt_shell> get_distributed_variables {worst_slack} -merge_type min
+pt_shell> echo $worst_slack
+-0.7081
+\end{lstlisting}
+
+\opt{-merge\_type} 支持的合并类型：\texttt{min}、\texttt{max}、\texttt{average}、\texttt{sum}、\texttt{list}、\texttt{unique\_list}、\texttt{none}。可使用 \opt{-null\_merge\_method} 覆盖选项指定合并空（empty）条目时的行为。
+
+\paragraph{跨场景同步对象属性}
+例如，将单元 \texttt{U72} 的 \texttt{dont\_touch} 属性同步为 \texttt{true}：
+\begin{lstlisting}
+pt_shell> synchronize_attribute -class cell {U72} dont_touch
+\end{lstlisting}
+此命令在 DMSA 管理进程中工作，可同步用户定义属性或 \texttt{dont\_touch} 应用属性。\opt{-merge\_type} 可设为 \texttt{min} 或 \texttt{max}，默认 \texttt{max}。
+
+
+\subsection{合并报告}
+\subsubsection*{Merged Reporting}
+
+在多场景分析中运行报告命令可能从各场景产生大量数据，难以识别关键信息。为帮助管理这些数据集，工具支持合并报告（merged reporting）。
+
+合并报告自动消除冗余数据并按数值排序，使您可将所有场景视为单个虚拟 PrimeTime 实例。此功能适用于：
+\begin{center}
+\cmd{get\_timing\_paths} \quad \cmd{report\_analysis\_coverage} \quad \cmd{report\_clock\_timing} \quad
+\cmd{report\_constraint} \quad \cmd{report\_min\_pulse\_width} \quad \cmd{report\_si\_bottleneck} \quad \cmd{report\_timing}
+\end{center}
+
+要在管理进程获得合并时序报告，像普通单场景会话一样在管理进程发出 \cmd{report\_timing} 命令（在管理进程上下文中执行）。管理进程与工作进程协作在命令焦点中所有场景执行 \cmd{report\_timing}，在管理进程控制台产生最终合并报告。每份报告显示其来源的场景名。
+
+可选择在合并报告命令之前或之后在工作进程上下文中运行一个或多个命令：
+\begin{lstlisting}
+pt_shell> remote_execute -pre_commands {source my_constraints.tcl} \
+ -post_commands {source my_data_proc.tcl} {report_timing}
+\end{lstlisting}
+
+当场景数多于工作进程数时，使用这些选项可减少主机上换入换出场景的次数，因为所有场景特定任务（前置命令、报告命令与后置命令）在映像单次加载到主机时一起执行。
+
+\subsubsection{get\_timing\_paths}
+\paragraph*{get\_timing\_paths}
+
+从管理进程使用 \cmd{get\_timing\_paths} 命令根据命令中设置的参数从各场景返回时序路径对象集合。时序路径集合按指定要求（如 \opt{-nworst} 或 \opt{-max\_paths}）压缩，返回按报告标准跨所有场景的最差时序路径的合并输出集合。要查找特定时序路径对象的场景名，查询时序路径对象的 \texttt{scenario\_name} 属性。使用 \opt{-attributes} 选项指定时序路径集合中包含的属性。默认仅包含 \texttt{full\_name}、\texttt{scenario\_name} 与 \texttt{object\_class} 属性。
+
+\subsubsection{report\_analysis\_coverage}
+\paragraph*{report\_analysis\_coverage}
+
+\cmd{report\_analysis\_coverage} 命令报告当前会话中所有活动场景的时序检查覆盖率。时序检查状态报告为：\textbf{Violated}（到达时间不满足时序要求）、\textbf{Met}（满足时序要求）、\textbf{Untested}（时序检查被跳过）。仅当时序检查在所有场景中均未测试时才归入 Untested 类别。若至少一个场景中测试了时序检查，则报告为 Violated 或 Met，即使在某些场景中未测试。这允许在功能模式与测试模式等行为显著不同时进行有意义的报告。
+
+\subsubsection{report\_clock\_timing}
+\paragraph*{report\_clock\_timing}
+
+管理进程执行的 \cmd{report\_clock\_timing} 返回显示设计中时钟网络时序属性的合并报告。合并报告在 \texttt{Scen} 列下显示场景列表。
+
+\subsubsection{report\_constraint}
+\paragraph*{report\_constraint}
+
+管理进程执行的 \cmd{report\_constraint} 返回显示命令焦点中所有场景基于约束信息的合并报告，报告最差违例大小及导致违例的设计对象。DMSA 的 \cmd{report\_constraint} 合并过程将命令焦点中所有场景视为单个虚拟 PrimeTime 实例。当对象在多个场景中被约束时，这些约束视为重复。PrimeTime 报告每个相关对象的最严重违例实例。指定 \opt{-verbose} 或 \opt{-all\_violators} 选项时，PrimeTime 报告约束违例者的场景名。
+
+在摘要模式下为 DMSA 指定 \cmd{report\_constraint} 处理 setup 检查时，报告显示每组所有场景的最差 setup 约束。hold 信息显示各时钟组跨所有场景的最差总端点代价之和。
+
+\subsubsection{report\_min\_pulse\_width}
+\paragraph*{report\_min\_pulse\_width}
+
+使用 \cmd{report\_min\_pulse\_width} 命令定位具有最严重最小脉冲宽度违例的引脚。工具修剪、排序并报告焦点中所有场景最差脉冲宽度违例的引脚。
+
+\subsubsection{report\_si\_bottleneck}
+\paragraph*{report\_si\_bottleneck}
+
+使用 \cmd{report\_si\_bottleneck} 命令定位串扰延迟中最关键的网线。以最小网线修复工作量识别并修复大多数问题。跨所有场景执行排序与打印，修剪重复项以留下跨场景的唯一网线集。
+
+\subsubsection{report\_timing}
+\paragraph*{report\_timing}
+
+管理进程执行的 \cmd{report\_timing} 返回消除跨场景冗余数据并按 slack 排序的合并报告，有效地将命令焦点中的场景视为单一分析。合并过程报告所有场景的最差路径，同时保持 \opt{-nworst}、\opt{-max\_paths} 及其他 \cmd{report\_timing} 选项施加的限制。
+
+当同一路径从多个场景报告时，PrimeTime 仅在合并报告中保留该路径最严重实例并显示该实例最严重的场景。使用 \opt{-dont\_merge\_duplicates} 选项可防止路径合并。
+
+PrimeTime 认为来自两个场景的两条路径是同一路径的实例，当且仅当满足以下全部条件：路径组、数据部分路径上引脚序列、数据部分每个引脚的转换、发射时钟、捕获时钟、约束类型。
+
+\subparagraph{标准选项处理}
+\cmd{report\_timing} 的所有选项均可用于合并报告，少数例外见「DMSA 限制」。只要未向选项传递集合，即可像在 PrimeTime 单场景会话中一样在管理进程指定，例如：
+\begin{lstlisting}
+pt_shell> report_timing -nworst 10
+pt_shell> report_timing -delay_type max_rise -path_type full_clock -nosplit
+pt_shell> report_timing -from {$all_in} -to {[all_outputs]}
+\end{lstlisting}
+
+使用 \opt{-pre\_commands} 选项使集合在与 \cmd{report\_timing} 相同的任务中生成，管理进程的合并 \cmd{report\_timing} 然后使用您指定的名称引用显式集合。
+
+\subparagraph{复杂选项处理}
+以下选项在多场景管理进程中已更改，以允许求值管理进程与工作进程变量与表达式：\opt{-from}、\opt{-rise\_from}、\opt{-fall\_from}、\opt{-through}、\opt{-rise\_through}、\opt{-fall\_through}、\opt{-to}、\opt{-rise\_to}、\opt{-fall\_to}、\opt{-exclude}、\opt{-rise\_exclude}、\opt{-fall\_exclude}。
+
+在 PrimeTime 单场景会话中，这些变量接受列表参数；但在多场景合并报告中，这些变量接受字符串参数。
+
+\subsection{将场景设计数据加载到管理进程}
+\subsubsection*{Loading Scenario Design Data Into the Manager}
+
+默认情况下，DMSA 分析中的管理进程不加载设计数据。这降低内存与运行时需求，对大多数合并报告与 ECO 任务已足够。
+
+对于更复杂任务，可使用 \cmd{load\_distributed\_design} 与 \cmd{cache\_distributed\_attribute\_data} 命令在管理进程加载设计与库数据。
+
+\paragraph{加载网表与库数据}
+\cmd{load\_distributed\_design} 命令加载跨所有场景相同的网表与库数据，如引脚方向与时序弧。从 \cmd{current\_scenarios} 列表中第一个场景加载网表与库。不保证跨场景相同的数据（如时序或 slack 数据）不会加载。
+
+加载网表与库数据后：
+\begin{itemize}
+  \item 可用 \cmd{get\_cells}、\cmd{get\_pins}、\cmd{get\_timing\_arcs} 等命令获取网表对象
+  \item 可用 \cmd{get\_lib\_cells}、\cmd{get\_lib\_pins}、\cmd{get\_lib\_timing\_arcs} 获取库对象
+  \item \cmd{get\_timing\_paths} 返回真正的 \texttt{timing\_path} 集合对象
+  \item 可用 \cmd{all\_fanin}、\cmd{all\_fanout} 探索网表拓扑
+  \item 在 PrimeTime GUI 中可使用 ECO 与 Path Analyzer 功能
+\end{itemize}
+
+\figplaceholder{Figure 18: Netlist and Path Query After Loading Scenario Data Into Distributed Manager}{将场景数据加载到分布式管理进程后的网表与路径查询}{fig:dmsa-load-design}
+
+所有场景网表必须相同（约束与工作条件可不同）。若有任何网表差异，或管理进程无当前场景，工具报错：
+\begin{lstlisting}
+Error: Restore session at manager failed due to: Scenario has a
+different signature compared to known signatures. (MS-037)
+\end{lstlisting}
+
+在管理进程加载网表会为 DMSA 管理进程保留 PrimeTime 许可证，意味着该许可证（或在基于核的许可情况下的一部分）不与运行 DMSA 场景的任何工作进程共享。若不加载网表，管理进程启动时检出的 PrimeTime 许可证与工作进程共享。使用 \cmd{remove\_distributed\_design} 命令移除已加载的分布式数据。
+
+\paragraph{加载场景特定设计数据}
+\cmd{cache\_distributed\_attribute\_data} 命令将当前活动场景的场景特定设计数据加载到管理进程。此命令要求已使用 \cmd{load\_distributed\_design} 加载设计数据。为节省内存，命令仅将您指定的属性加载到管理进程。支持的 \opt{-class} 值为 \texttt{port}、\texttt{cell}、\texttt{pin}、\texttt{net}。多次调用 \cmd{cache\_distributed\_attribute\_data} 是累积的。使用 \cmd{purge\_distributed\_attribute\_data} 命令从管理进程内存移除部分或全部属性数据。
+
+\subsection{保存与恢复会话}
+\subsubsection*{Saving and Restoring Your Session}
+
+可在 \texttt{\$sh\_launch\_dir/images/scen1} 与 \texttt{scen2} 目录中找到管理进程发出的 \cmd{save\_session} 命令生成的映像，然后可将这些映像重新加载到单场景 PrimeTime 会话。
+
+保存与恢复功能允许显式将保存的映像恢复到 DMSA 场景，通过 \cmd{create\_scenario -image} 选项实现。使用 \opt{-image} 选项可将 \cmd{save\_session} 命令产生的任何单核分析 PrimeTime 映像（在 DMSA 内外）直接作为场景加载到 DMSA，然后在 DMSA 上下文中正常操作。
+
+\subsection{许可证资源管理}
+\subsubsection*{License Resource Management}
+
+在 DMSA 分析中，管理进程执行所有许可证管理。从中央许可证服务器获取工作进程所需的任何许可证，然后动态分配给工作进程。
+
+DMSA 分析中可使用以下许可功能：
+\begin{itemize}
+  \item 分布式基于核的许可（Distributed Core-Based Licensing）——每份 PrimeTime-ADV 或 PrimeTime-APX 许可证分别启用跨场景 32 或 64 核，无论核如何分布，常降低整体许可需求
+  \item 增量许可处理（Incremental License Handling）——降低许可上限；超出上限的许可归还许可证服务器池
+  \item 许可池化（License Pooling）——从不同许可证服务器检出不同功能的许可证
+  \item 许可自动缩减（License Autoreduction）——指示管理进程在不需要时自动将已检出功能的许可证数减至最小
+  \item 许可排队（License Queuing）——若所有许可证当前在使用中，等待许可证可用
+\end{itemize}
+
+\paragraph{限制 DMSA 分析中的许可使用}
+在管理进程使用 \cmd{set\_license\_limit} 命令限制管理进程可为工作进程获取的最大许可证数：
+\begin{lstlisting}
+pt_shell> set_license_limit PrimeTime -quantity 5
+\end{lstlisting}
+默认情况下，仅在工作进程开始处理任务时检出许可证。要立即检出，在管理进程使用 \cmd{get\_license} 命令。为获得最佳 DMSA 吞吐量，使许可限制与工作进程数匹配，确保所有工作进程可并发执行。
+
+\subsection{工作进程故障处理}
+\subsubsection*{Worker Process Fault Handling}
+
+当工作进程发生导致异常终止的故障时，工具根据 \cmd{multi\_scenario\_fault\_handling} 变量（可设为 \texttt{ignore} 或 \texttt{exit}）采取行动。
+
+设为 \texttt{ignore}（默认）且工作进程发生严重故障时，异常终止的场景及依赖这些场景的场景从当前会话的进一步分析中排除，显示警告消息说明哪些场景异常终止，会话继续分析命令焦点中剩余场景。
+
+设为 \texttt{exit} 且发生严重故障时，活动命令完成任务后管理进程终止整个分析。
+
+\paragraph{合并报告与工作进程故障处理}
+若一个或多个工作进程异常终止，报告命令的相关信息不可用。场景异常终止时收到警告消息，PrimeTime 从当前会话移除此场景，然后自动向命令焦点中剩余场景重新发出报告命令。
+
+\paragraph{网表编辑命令与工作进程故障处理}
+在管理进程将网表更改提交到任何场景之前，必须能提交到所有场景。PrimeTime 先检查更改可在所有场景中成功，再提交更改。检查或提交期间场景异常终止时，从命令焦点移除该场景并自动向剩余场景重新发出网表编辑命令。
+
+\paragraph{remote\_execute 与工作进程故障处理}
+\cmd{remote\_execute} 支持在命令焦点中所有场景执行任意数量命令。若遇到异常终止的场景，发出警告、从当前会话移除场景，后续调用仅应用于剩余场景。
+
+\paragraph{其他命令与工作进程故障处理}
+\cmd{get\_distributed\_variables}、\cmd{get\_timing\_paths}、\cmd{save\_session}、\cmd{set\_distributed\_variables} 等命令在异常终止时类似处理：警告、从会话移除场景，并对剩余场景重新发出或正常执行命令。
+
+
+\subsection{消息与日志文件}
+\subsubsection*{Messages and Log Files}
+
+多场景分析可能产生大量数据。为避免在管理进程过载数据，所有数据写入一组日志文件。管理进程仅显示有限的交互消息。使用 \opt{-verbose} 选项时，\cmd{remote\_execute} 将所有数据发送到管理终端。
+
+\subsubsection{交互消息与进度消息}
+工作进程执行任务时向管理进程发送消息指示进度。工作进程在各分析阶段发送置信度消息更新分析进度。
+
+\subsubsection{任务执行状态消息的用户控制}
+可将 \cmd{multi\_scenario\_message\_verbosity\_level} 变量设为 \texttt{default} 或 \texttt{low}。\texttt{default} 显示所有任务执行状态消息；\texttt{low} 仅显示 error、fatal 与 failure 消息，对需要更多输出控制的 Tcl 脚本有用。
+
+\subsubsection{错误与警告消息}
+工作进程上给定场景发生错误时，在管理进程完整报告错误及场景名。警告仅在场景中首次出现该警告时在管理进程报告。
+
+\subsubsection{日志文件}
+多场景分析的所有数据（含日志文件）的根工作目录由 \cmd{multi\_scenario\_working\_directory} 变量决定。若未显式设置，设为启动 PrimeTime 管理进程的当前目录。须对管理进程及所有工作进程可写且可访问。
+
+\begin{itemize}
+  \item \textbf{输出日志（Output Log）}：每个场景有自己的输出日志，位于 \texttt{multi\_scenario\_working\_directory/s1/out.log}。不能设置或更改输出日志名。
+  \item \textbf{命令日志（Command Log）}：每个远程进程有自己的命令日志，位于工作目录下 \texttt{command\_log} 目录，例如 \texttt{srv1\_6\_pt\_shell\_command.log}。管理进程命令日志位于 \texttt{\$sh\_launch\_dir/pt\_shell\_command.log}。\cmd{sh\_source\_logging} 设为 \texttt{true} 时，source 脚本中的各条命令写入命令日志。
+  \item \textbf{合并错误日志（Merged Error Log）}：设置 \cmd{multi\_scenario\_merged\_error\_log} 变量，例如 \texttt{error.log}。从特定任务开始到结束的所有错误消息合并；同一错误在多个场景出现时仅打印一次并列出场景。\textbf{须在发出 \cmd{start\_hosts} 命令之前设置 \cmd{multi\_scenario\_working\_directory} 与 \cmd{multi\_scenario\_merged\_error\_log} 变量。}
+\end{itemize}
+
+\subsubsection{命令输出重定向}
+多场景分析支持命令输出重定向。须为每个进程重定向到不同目标文件，否则两个不同进程同时控制同一文件会出错。
+
+\begin{noteBox}
+使用输出重定向时务必使用相对路径。不要使用绝对路径；否则所有工作进程尝试写入同一文件，可能导致读/写冲突并使工作进程失败。
+\end{noteBox}
+
+\cmd{multi\_scenario\_working\_directory} 变量值与场景名一起确定输出目标文件名。交互重定向示例：\cmd{remote\_execute \{report\_timing\} > \$x.out} 将输出定向到当前工作目录的 \texttt{myfile.out}，\texttt{\$x} 仅在管理进程求值。脚本重定向示例：\texttt{report\_timing > rt.log} 在 \texttt{/mypath/s3/rt.log} 与 \texttt{s4/rt.log} 中分别生成输出。
+
+\subsection{DMSA 变量与命令}
+\subsubsection*{DMSA Variables and Commands}
+
+\paragraph{DMSA 变量}
+\begin{table}[htbp]
+\centering
+\caption{DMSA 变量}
+\small
+\begin{tabular}{@{}p{5.5cm}p{7.5cm}@{}}
+\toprule
+变量 & 说明 \\
+\midrule
+\cmd{multi\_scenario\_merged\_error\_limit} & 每任务写入命令日志的特定类型错误最大数量。默认 100 \\
+\cmd{multi\_scenario\_merged\_error\_log} & 指定存储工作进程产生数据的 error、warning、information 消息的文件位置。默认 ``''。须在运行 \cmd{start\_hosts} 之前设置 \\
+\cmd{multi\_scenario\_working\_directory} & 指定管理进程与工作进程可写的工作目录。默认当前工作目录。须在运行 \cmd{start\_hosts} 之前设置 \\
+\cmd{sh\_host\_mode} & 指定工作模式：\texttt{scalar}、\texttt{manager} 或 \texttt{worker}。只读。可用于脚本判断是否在正常 PrimeTime 会话或管理/工作进程上操作 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{DMSA 命令}
+\begin{table}[htbp]
+\centering
+\caption{DMSA 命令}
+\small
+\begin{tabular}{@{}p{2.8cm}p{3.5cm}p{6.5cm}@{}}
+\toprule
+类别 & 命令 & 说明 \\
+\midrule
+场景设置 & \cmd{create\_scenario} & 创建单个场景（必需） \\
+ & \cmd{remove\_scenario} & 移除一个或多个指定场景 \\
+ & \cmd{remove\_multi\_scenario\_design} & 移除所有多场景数据，含会话、所有场景与配置 \\
+ & \cmd{report\_multi\_scenario\_design} & 报告当前用户定义的多场景分析 \\
+Host 与许可配置 & \cmd{set\_host\_options} & 定义算力资源（必需） \\
+ & \cmd{remove\_host\_options} & 移除已添加到农场池的所有分布式主机 \\
+ & \cmd{set\_license\_limit} & 限制管理进程为工作进程使用获取的许可证数 \\
+ & \cmd{start\_hosts} & 在 \cmd{set\_host\_options} 指定的主机上启动工作进程（必需） \\
+ & \cmd{report\_host\_usage} & 报告主机与资源使用 \\
+分析焦点 & \cmd{current\_scenario} & 将命令焦点更改为当前会话中选定的场景 \\
+ & \cmd{current\_session} & 将特定场景组置于分析焦点（必需） \\
+ & \cmd{remove\_current\_session} & 移除先前设置的会话；取消所有场景焦点 \\
+工作进程上下文 & \cmd{remote\_execute} & 从管理进程创建在工作进程上下文中执行的命令缓冲区 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{工作进程不允许的命令}
+不能在 worker 进程上运行：\cmd{exit}、\cmd{quit}、\cmd{remove\_design}、\cmd{remove\_lib}、\cmd{rename\_design}、\cmd{restore\_session}。
+
+\subsection{DMSA 限制}
+\subsubsection*{Limitations of DMSA}
+
+DMSA 功能有以下限制：
+\begin{itemize}
+  \item 管理进程可控制的最大工作进程数为 256 个并发主机
+  \item 不支持使用 GUI
+\end{itemize}
+
+
+% ============================================================
+\section{HyperGrid 分布式分析}
+\subsection*{HyperGrid Distributed Analysis}
+
+超大设计的时序分析具有挑战性。若设计包含物理设计块，可使用层次化时序分析先单独验证各块，再用块模型验证顶层设计。
+
+HyperGrid 分布式分析可在单次运行中通过在不同主机上运行的多个工作进程并行分析来分析超大设计。可用常规 PrimeTime 分析中相同的命令探索并报告整个设计。
+
+HyperGrid 可用于不适合层次化时序分析流程的设计，也可作为层次化流程中的额外最终验证。此功能需要 PrimeTime-ADV-PLUS 许可证。
+
+\subsection{HyperGrid 流程概述}
+\subsubsection*{Overview of the HyperGrid Flow}
+
+HyperGrid 将超大设计的分析分布到多台机器，使用相同分析脚本并生成与全 Flat 分析相同的报告。
+
+\subsubsection{划分设计}
+\paragraph*{Partitioning the Design}
+
+HyperGrid 分布式分析中，拆分设计的过程称为划分（partitioning）。HyperGrid 划分不受逻辑设计层次限制，而是按到时钟与数据端点的扇入逻辑锥（fanin logic cones）划分。扇入锥可穿过层次块。不同划分可包含同一块的不同部分。
+
+\figplaceholder{Figure 19: HyperGrid Partitioning, Using Fanin Logic Cones to Endpoints}{HyperGrid 划分：使用到端点的扇入逻辑锥}{fig:hypergrid-partition}
+
+每个划分包含到一组时钟/数据端点的扇入逻辑锥。划分过程使用网表、详细寄生参数与约束数据以确保考虑设计逻辑的完整时序上下文。此外，扇入逻辑锥包括：
+\begin{itemize}
+  \item 侧负载级（side load stages）——建模发散到当前划分外端点的路径的接收端负载
+  \item 攻击者级（aggressor stages）——建模划分间耦合时序与噪声相互作用；HyperGrid 按需同步划分间信号完整性效应
+\end{itemize}
+
+不同划分中的不同端点可共享公共起点，此时起点扇出的部分包含在两个划分中。时钟扇入锥往往比数据扇入锥起点更少、侧负载引脚更多。
+
+\subsubsection{管理进程与工作进程}
+\paragraph*{The Manager Process and the Worker Processes}
+
+HyperGrid 分布式分析使用单个管理进程调用并控制多个工作进程。管理进程：确定如何划分设计；调用工作进程（每个划分一个）；通过查询工作进程并合并信息生成全设计报告。工作进程：读取特定划分的设计数据；执行时序与噪声更新；收集并返回管理进程查询的结果。
+
+\figplaceholder{Figure 20: Analysis Script Execution in a HyperGrid Distributed Analysis}{HyperGrid 分布式分析中的分析脚本执行}{fig:hypergrid-flow}
+
+HyperGrid 分布式分析始终使用基于核的许可。详见「分布式基于核的许可」。
+
+\subsubsection{分布式分析工作目录}
+\paragraph*{The Distributed Analysis Working Directory}
+
+HyperGrid 分布式分析中，分布式分析工作目录包含工具生成的脚本与各划分的日志文件。目录结构：\texttt{WORK/partition0/}、\texttt{partition1/}、\ldots、\texttt{partitionN/}，各含 \texttt{RUN.ptsh}、\texttt{parasitics.log}、\texttt{out.log}。
+
+设计链接后，各划分目录中的 \texttt{out.log} 显示划分特征（叶引脚数、层次引脚数、叶单元数、划分编号、各类型引脚/网线/单元占比等）。
+
+\subsection{准备分布式分析}
+\subsubsection*{Preparing for Distributed Analysis}
+
+HyperGrid 分布式分析需要包装脚本（wrapper script），该脚本启用 HyperGrid、配置并启动工作进程，然后在分布式模式下运行实际分析脚本。示例：
+\begin{lstlisting}
+\section{enable Hypergrid analysis}
+set_app_var distributed_enable_analysis true
+set_app_var distributed_working_directory ./MY_WORK_DIR
+
+\section{start worker processes}
+set_host_options \
+  -num_process 4 \
+  -max_cores 4 \
+  -submit {...compute farm submission command...}
+start_hosts
+
+\section{run the timing analysis script, distributed across the workers}
+start_dsta \
+  -script run_top_flat.tcl
+\end{lstlisting}
+
+关键命令：\cmd{distributed\_enable\_analysis} 启用 HyperGrid；\cmd{distributed\_working\_directory} 设置工作目录（默认 \texttt{dsta\_working\_dir}）；\cmd{set\_host\_options} 与 \cmd{start\_hosts} 配置并启动远程工作进程；\cmd{start\_dsta} 开始分布式分析（在 master 划分设计、在 worker 加载划分数据、在 master 运行指定分析脚本并与 worker 通信）。包装脚本中 \cmd{start\_dsta} 之后的命令在指定分析脚本完成后作为分布式报告命令执行。
+
+\subsection{运行分布式分析}
+\subsubsection*{Running the Distributed Analysis}
+
+\begin{enumerate}
+  \item 按「准备分布式分析」创建包装脚本
+  \item 在新 PrimeTime 会话中运行包装脚本：\texttt{\% pt\_shell -f wrapper.tcl}
+\end{enumerate}
+
+若分析脚本（由包装脚本调用）在 \cmd{update\_timing} 之前将命令输出重定向到文件，目标文件名必须为相对路径，否则多个工作进程在读入与约束设计时尝试写入同一文件会发生冲突。
+
+若分析脚本运行 \cmd{exit} 或 \cmd{quit} 命令，分布式分析会话结束。
+
+\subsection{在 HyperGrid 分析中查询属性}
+\subsubsection*{Querying Attributes in a HyperGrid Analysis}
+
+分布式分析中，管理进程维护全设计的逻辑网表表示，但不计算任何时序信息。在管理进程查询属性时，工具行为取决于属性数据存储位置：若可从管理进程逻辑网表获得（如对象名或引脚方向），查询立即返回；若仅从划分级分析获得（如时序或噪声信息），须向工作进程请求数据。
+
+为提高划分源属性的性能，HyperGrid 提供属性缓存功能以最小化从工作进程传输的数据量。
+
+\paragraph{foreach\_in\_collection 中的自动属性缓存}
+在管理进程的 \cmd{foreach\_in\_collection} 循环内执行属性查询时，HyperGrid 检测查询的属性并从各划分缓存其值以加速后续循环迭代。属性数据仅为循环集合对象缓存，且仅在循环持续期间缓存。
+
+\paragraph{显式属性缓存}
+脚本可使用 \cmd{cache\_distributed\_attribute\_data} 命令在管理进程显式缓存属性数据。显式缓存的属性可供后续所有命令使用，直至 \cmd{purge\_distributed\_attribute\_data} 显式释放。
+
+\subsection{保存分布式会话}
+\subsubsection*{Saving a Distributed Session}
+
+可使用 \cmd{save\_session} 命令将 HyperGrid 分布式分析会话保存到磁盘。结果目录包含管理进程与所有工作进程的数据。由于分布式设计数据开销，分布式分析会话目录大于等效全 Flat 会话目录。恢复保存的分布式会话时，工具以相同划分重新创建原始分布式分析，使用与原始分布式分析相同的 \cmd{set\_host\_options} 规范启动工作进程。
+
+\subsection{支持 HyperGrid 分布式分析的命令}
+\subsubsection*{Commands With HyperGrid Distributed Analysis Support}
+
+支持 HyperGrid 分布式分析的工具命令包括：
+\begin{center}
+\small
+\cmd{check\_noise} \cmd{check\_timing} \cmd{get\_attribute} \cmd{get\_clock\_relationship}
+\cmd{get\_timing\_paths} \cmd{report\_analysis\_coverage}
+\cmd{report\_annotated\_parasitics -list\_annotated} \cmd{report\_attribute}
+\cmd{report\_clock\_gating\_check} \cmd{report\_constraint} \cmd{report\_crpr}
+\cmd{report\_delay\_calculation} \cmd{report\_global\_slack} \cmd{report\_global\_timing}
+\cmd{report\_min\_period} \cmd{report\_min\_pulse\_width} \cmd{report\_net}
+\cmd{report\_noise} \cmd{report\_noise\_calculation} \cmd{report\_qor}
+\cmd{report\_timing} \cmd{restore\_session} \cmd{save\_session} \cmd{write\_rh\_file}
+\end{center}
+
+以下命令支持在管理进程查询与探索多电压信息：\cmd{add\_power\_state}、\cmd{add\_pst\_state}、\cmd{create\_pst}、\cmd{create\_supply\_set}、\cmd{get\_supply\_groups}、\cmd{get\_supply\_nets}、\cmd{get\_supply\_ports}、\cmd{get\_supply\_sets}、\cmd{report\_power\_domain}、\cmd{report\_power\_pin\_info}、\cmd{report\_power\_switch}、\cmd{report\_pst}、\cmd{report\_supply\_group}、\cmd{report\_supply\_net}、\cmd{report\_supply\_set}、\cmd{report\_timing -supply\_net\_group}、\cmd{set\_retention}、\cmd{set\_retention\_control}、\cmd{set\_retention\_elements}。
+
+\subsection{HyperGrid 分布式分析的限制}
+\subsubsection*{Limitations of HyperGrid Distributed Analysis}
+
+HyperGrid 分布式分析不支持以下 PrimeTime 流程与功能：
+\begin{itemize}
+  \item AOCV 深度调整（支持距离调整）
+  \item ECO 修复（自动或手动）、网表编辑命令
+  \item ETM 模型
+  \item HyperScale 层次化分析
+  \item HyperTrace 加速 PBA
+  \item SMVA/DVFS 同时多电压分析
+\end{itemize}
+
+
+% ============================================================
+\section{报告 CPU 时间与内存使用}
+\subsection*{Reporting the CPU Time and Memory Usage}
+
+PrimeTime 执行静态时序分析所使用的内存与 CPU 资源取决于设计规模、分析模式与报告要求等多种因素。PrimeTime 为分布式进程提供性能与容量信息。无论使用单核分析、多核分析还是 DMSA，均可在 PrimeTime 中监控内存与 CPU 使用。
+
+使用 \cmd{cputime} 命令报告与当前 \texttt{pt\_shell} 进程关联的总处理器时间（秒）。使用 \cmd{mem} 命令报告当前 \texttt{pt\_shell} 进程分配的总内存（KB）。为后续 PrimeTime 会话指定内存需求时，使用此报告内存值并额外增加 20\% 以保障操作系统高效运行。
+
+在 DMSA 流程中使用 \cmd{report\_host\_usage} 命令报告所有已设置的 host 选项。此命令还报告本地进程的峰值内存、CPU 使用与经过时间；在 DMSA 中还报告所有分布式进程的峰值内存、CPU 使用与经过时间。报告显示指定的 host 选项、分布式进程状态、各进程使用的 CPU 核数及分布式主机使用的许可证。
+
+对于配置为在同一主机上使用多个 CPU 核的进程（如单核或多线程多核分析），\cmd{report\_host\_usage} 提供当前 PrimeTime 会话的资源使用。
+
+退出 PrimeTime 时，工具报告会话的峰值内存、CPU 使用与经过时间：
+\begin{lstlisting}
+Maximum memory usage for this session: 31.08 MB
+CPU usage for this session: 23 seconds
+Elapsed time for this session: 211 seconds
+\end{lstlisting}
+
+退出 DMSA 会话时，工具报告分布式进程信息（各 host 选项的峰值内存、CPU 时间与经过时间，以及会话总计）。
+
+% ============================================================
+\section{流程摘要报告}
+\subsection*{Flow Summary Reports}
+
+现代分析流程复杂。完整分析流程分散在多个脚本中：工具配置、设计读入与链接、设计约束与报告。脚本常嵌套并调用更多脚本。确定流程主要步骤消耗的运行时间很困难；追踪意外隐式更新的发生位置更难。
+
+PrimeTime 提供流程摘要（flow summary）功能，可：
+\begin{itemize}
+  \item 生成整个分析流程中脚本执行的结构化摘要
+  \item 突出显著工具事件（设计链接、工具更新等）
+  \item 报告脚本及其中显著命令使用的运行时间
+  \item 将消耗非平凡运行时间的重复命令作为一组突出显示
+  \item 性能开销很小（小于 5\%）
+\end{itemize}
+
+\subsection{流程摘要报告结构}
+\subsubsection*{The Flow Summary Report Structure}
+
+流程摘要是脚本执行的文本表示，并为显著与耗时事件添加注释。
+
+\paragraph{流程摘要上下文层级}
+开头的 \texttt{START} 标记表示首次启用流程摘要功能的位置，后续缩进层级对应嵌套脚本执行：
+\begin{lstlisting}
+START {
+| source read_design.pt {
+| | <<< Event: Invoking link_design; File: read_design.pt; Line: 3; "link"
+| } 0.6s
+| source constraints.pt {
+| | source multicycles.pt {
+| | | <<< Event: Invoking logical_update_timing; ...
+| | } 0.1s
+| } 0.5s
+| <<< Event: Invoking update_timing; File: run.pt; Line: 8; "update_timing"
+| update_timing: 14.9s
+| uncaptured: 0.2s
+} 16.3s
+\end{lstlisting}
+
+可使用支持查找匹配开/闭花括号的文本编辑器轻松在摘要中导航上下文层级。
+
+\paragraph{事件标记}
+``\texttt{<<< Event}'' 标记指示显著工具事件及引起该事件的命令（含脚本与行号）。可能的事件类型包括：\texttt{Invoking link\_design}、\texttt{Invoking update\_timing}、\texttt{Halting background parasitics read}、\texttt{Invalidating update (logical/full)}、\texttt{Invoking logical update\_timing}、\texttt{Invoking update\_noise}、\texttt{Forcing full update}、\texttt{helper\_command > 30s}。
+
+\paragraph{显著命令标记}
+消耗非平凡运行时间（10 秒或更多）的命令显式注明其运行时间。
+
+\paragraph{未捕获命令标记}
+快速命令通常不显式列出，其总运行时间由 ``\texttt{uncaptured}'' 运行时间标记汇总。
+
+\paragraph{命令捆绑}
+若多个快速命令的累积运行时间变得显著（大于 10 秒），它们被分组为命令捆绑（command bundles）。命令不在显著命令条目间捆绑，以保持报告与实际命令执行顺序一致。
+
+\paragraph{辅助命令}
+辅助命令（helper command）通常用于为其他命令提供信息，包括：\cmd{get\_pins}、\cmd{get\_nets}、\cmd{get\_ports}、\cmd{get\_cells}、\cmd{all\_fanin}、\cmd{all\_fanout}。通常辅助命令本身不引人注意，除非意外贡献运行时间。因此仅 30 秒或以上的辅助命令视为显著，使用特殊``显著辅助命令''事件标记报告。
+
+\paragraph{运行时间}
+流程摘要显示命令（显著与未捕获）与闭合上下文层级的运行时间信息。所有运行时间值为经过的挂钟时间（wall clock time）测量。
+
+\subsection{生成流程摘要报告}
+\subsubsection*{Generating a Flow Summary Report}
+
+要开始新的流程摘要报告，将 \cmd{sh\_flow\_summary\_file} 变量设为应写入摘要的文件名：
+\begin{lstlisting}
+pt_shell> file delete ./summary.txt
+pt_shell> set_app_var sh_flow_summary_file {./summary.txt}
+Information: Writing flow summary to summary.txt.
+\end{lstlisting}
+
+默认此变量为空字符串，禁用该功能。若指定文件已存在，后续流程摘要信息追加到末尾，允许在流程中开关该功能以仅包含感兴趣区域。因此须删除任何先前的摘要文件以开始新文件。
+
+流程摘要在工具执行期间增量写出，允许检查进行中分析的流程摘要。要停止写入，将 \cmd{sh\_flow\_summary\_file} 设为空字符串。停止时，工具在输出文件添加流程摘要功能本身总开销的最终行：
+\begin{lstlisting}
+Runtime overhead of flow summary utility is: 3.1 s
+\end{lstlisting}
+
+\subsection{定义自定义流程段}
+\subsubsection*{Defining Custom Flow Segments}
+
+自定义流程段（custom flow segments）允许将脚本部分分组为额外的命名上下文层级结构，便于分离长脚本部分或洞察未捕获运行时间发生位置。使用 \cmd{define\_custom\_flow\_segment} 命令在脚本中定义命名起点与终点。流程段应在同一脚本文件上下文中开始与结束；嵌套流程段须按顺序关闭（低层级先于高层级）。
+
+\subsection{写入多个流程摘要报告}
+\subsubsection*{Writing to Multiple Flow Summary Reports}
+
+要将当前流程摘要报告停止并开始写入新报告，将 \cmd{sh\_flow\_summary\_file} 设为新文件名。若有进行中的现有流程摘要报告，会自动关闭。从顶层以下上下文层级停止与启动流程摘要报告时需注意：若在较低上下文层级停止，待处理层级关闭并写入报告；若从较低上下文层级启动，当前待处理上下文层级不作为报告中的开层级写入，当前上下文视为顶层，``\texttt{<end of source preceding flow summary>}'' 消息指示现有上下文退出的位置。
+
+\subsection{限制}
+\subsubsection*{Limitations}
+
+\begin{itemize}
+  \item 时间值四舍五入到最近的 0.1 秒打印，个别值之和可能与总值不完全一致
+  \item Tcl 过程不在流程摘要中引入显式层级，但其内部活动正常汇总
+  \item \cmd{parallel\_execute} 与 \cmd{parallel\_foreach\_in\_collection} 命令作为单条命令列出，无工作线程详情
+\end{itemize}
+
+% ============================================================
+\section{分析 Tcl 脚本性能}
+\subsection*{Profiling the Performance of Tcl Scripts}
+
+要识别 Tcl 脚本中的运行时与内存瓶颈，可在时序运行期间执行 Tcl 分析（profiling）。此能力可帮助修复性能与容量问题。
+
+执行 Tcl 分析的步骤：
+\begin{enumerate}
+  \item 运行 \cmd{start\_profile} 命令开始收集分析数据。默认 \cmd{start\_profile} 跟踪运行超过 0.1 秒或使用超过 100 KB 内存的命令。使用 \opt{-verbose} 选项时跟踪所有命令。
+  \item 运行要分析的 Tcl 脚本。
+  \item 使用 \cmd{stop\_profile}、\cmd{exit} 或 \cmd{quit} 命令停止收集分析数据。
+  \item 评估自动生成的 Tcl profile 与 stopwatch 报告。默认情况下，工具将这些文件写入当前工作目录下 \texttt{profile} 子目录。
+\end{enumerate}
+
+\begin{table}[htbp]
+\centering
+\caption{Tcl profile 与 stopwatch 报告文件}
+\small
+\begin{tabular}{@{}p{5.5cm}p{7.5cm}@{}}
+\toprule
+文件名 & 说明 \\
+\midrule
+\texttt{tcl\_profile\_summary\_latest.html} & HTML 格式 Tcl profile 报告摘要页，显示分析起止时间并提供按 CPU 时间、调用次数、经过时间或内存使用排序的报告链接 \\
+\texttt{tcl\_profile\_summary\_latest.txt} & 纯文本摘要页 \\
+\texttt{tcl\_profile\_sorted\_by\_cpu\_time*.txt} & 按 CPU 时间排序的 Tcl profile 报告 \\
+\texttt{tcl\_profile\_sorted\_by\_delta\_mem\_*.txt} & 按内存使用排序 \\
+\texttt{tcl\_profile\_sorted\_by\_elapsed\_time\_*.txt} & 按经过时间排序 \\
+\texttt{tcl\_profile\_sorted\_by\_num\_calls\_*.txt} & 按调用次数排序 \\
+\texttt{tcl\_stopwatch\_*.txt} & 纯文本 stopwatch 报告 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Tcl 脚本 profile 报告摘要示例：\cmd{get\_timing\_paths} 命令从 \texttt{gtp\_only.tcl} 脚本调用一次，执行耗时 8 秒（Elapsed 列）。
+
+\figplaceholder{Figure 21: Stopwatch Report Example}{Stopwatch 报告示例}{fig:stopwatch}
+
+stopwatch 报告（\texttt{tcl\_stopwatch\_*.txt}）是显示每条命令的时间、性能与内存指标的 ASCII 文本文件，包含 \texttt{STOPWATCH[START]}、\texttt{STOPWATCH[start\_update\_timing]}、\texttt{STOPWATCH[after\_update\_timing]} 等条目，记录命令执行开始与完成时的当前指标及与上一 stopwatch 条目的差值。

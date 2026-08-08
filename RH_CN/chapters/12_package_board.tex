@@ -1,0 +1,418 @@
+﻿% 第 12 章 封装与板级分析（原书 12-324 … 12-342）
+\bichapter{封装与板级分析}{Package and Board Analysis}
+\label{chap:pkg}
+
+\section{引言}
+\subsection*{Introduction}
+
+高质量片外 RLC 元件（如封装与板）模型对实现精确电路功耗仿真非常重要。本章描述创建所需封装与板级电路模型以及将封装端口名映射到 die pad 名的流程。
+
+RedHawk 可通过集成的芯片封装分析（CPA）GUI 进行芯片-封装热协同分析。芯片热建模（CTM）在 RedHawk 中原生支持，可在同一会话中完成 CTM 生成与 CTM+封装热分析。详见第~\ref{chap:cpa}~章「Chip-Package Analysis (CPA)」。
+
+\section{封装与板级模型}
+\subsection*{Package and Board Models}
+
+封装模型有三种类型：简单模型中所有电源 pad 具有相同 RLC、所有地 pad 具有相同 RLC；更复杂的建模通过 Spice 子电路或 S 参数模型为各 pad 分配不同值。以下各节分别说明。
+
+\subsection{简单封装 RLC 模型}
+\subsubsection*{Simple Package RLC Model}
+
+RedHawk 中简单封装电路模型如图~\ref{fig:simple-pkg} 所示。封装寄生表示封装基板本身的 RLC；wirebond 表示键合线（引线框到 bondpad）寄生。倒装芯片无引线框时，可将其纳入封装寄生。Padwire 寄生表示 pad（或 bump）走线（bondpad/bump 到 I/O pad 单元）的寄生。若该走线已包含在 DEF 中，RedHawk 自动提取，无需另行指定。
+
+\figplaceholder{Figure 12-1}{简单封装 RLC 模型}
+
+简单模型用 TCL 命令为设计中所有 pad 标注单一 RLC 值，可分别用于电源 pad 与地 pad。所有电源 pad 与所有地 pad 具有相同寄生值。
+
+命令：
+\begin{lstlisting}
+setup package -r <in Ohm> -c <in pF> -l <in pH>
+setup wirebond -power/-ground -r <in Ohm> -c <in pF> -l <in pH>
+setup pad -power/-ground -r <in Ohm> -c <in pF>
+\end{lstlisting}
+
+支持电源与地不对称封装模型；wirebond 与 pad 约束可分别标注。pad 寄生一般不标注电感（走线很短，仿真中通常视为零）。
+
+示例：
+\begin{lstlisting}
+setup pad -power -r 0.010000 -c 0.5
+setup pad -ground -r 0.010000 -c 0.5
+setup wirebond -power -r 0.245000 -l 1420 -c 5
+setup wirebond -ground -r 0.245000 -l 1420 -c 5
+setup package -r 0.001000 -l 10 -c 10
+\end{lstlisting}
+
+RedHawk 还支持更详细的分布式 RLCK 与 S 参数封装/板级模型，见下文。
+
+\subsection{分布式 RLCK 封装与板级子电路模型}
+\subsubsection*{Distributed RLCK Package and Board Subcircuit Model}
+
+为准确分析动态压降，封装寄生须为遵循常规 SPICE 语法的子电路描述。理想电压通过子电路施加在封装 ball 上，分析时连接到 die。子电路定义中的端口列表可包含信号、电源与地端口。
+
+支持电源与地不对称模型。子电路网表中支持以下元件：
+
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabular}{cl}
+\toprule
+\textbf{符号} & \textbf{元件} \\
+\midrule
+R & 电阻 \\
+L & 自感 \\
+Kxx & 互感 \\
+C & 电容 \\
+H & 电流控制电压源 \\
+I & 电流源 \\
+V & 电压源 \\
+E & 线性压控电压源 \\
+F & 线性流控电流源 \\
+G & 线性压控电流源 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+所有元件须为固定值，不依赖其他参数。还支持 \texttt{.inc}/\texttt{.include} 与 \texttt{subckt}。
+
+整个片外网络须捕获在名为 \texttt{REDHAWK\_PKG} 的 SPICE 子电路网表中；电源与地理想源须在顶层网表定义。所有定义与实例化须遵循常规 SPICE 语法。
+
+\begin{noteBox}
+封装网表中提供的电压值用于 RedHawk 分析，GSR 文件中指定的电压将被覆盖。
+\end{noteBox}
+
+图~\ref{fig:pkg-model} 说明 RedHawk 中封装与板级参数的建模方式。\texttt{REDHAWK\_PKG} 子电路各端口可连接到一个或多个 die pad（节点名不能为 ``0''）。
+
+\figplaceholder{Figure 12-1（扩展）}{RedHawk 中封装参数建模}
+
+\subsection{封装 K 参数支持}
+\subsubsection*{Support for Package K-parameters}
+
+RedHawk 支持封装子电路模型以更准确分析片外封装与板效应下的动态压降。除基本 Spice 元件（RLC）外，还支持互感系数 K。互感系数表示电感间耦合：若 L1 与 L2 间互感为 M12，则 $K = M\_{12}/\sqrt{L\_1 L\_2}$。封装 Spice 网表中形如：
+\begin{lstlisting}
+K_L1_L2  L1  L2  0.5
+\end{lstlisting}
+互感系数绝对值须在 0 与 1.0 之间。可对电感组中每对电感指定 K（$i=1\ldots N$）。自感 $L\_{11}\ldots L\_{NN}$ 与互感 $M\_{ij}$ 构成电感矩阵，通常由场求解器提取。
+
+以下示例 \texttt{top.sp} 含互感 K12：
+\begin{lstlisting}
+.subckt REDHAWK_PKG PvddA1 PvddA2 PvddB1 PvddB2 Pvss1 Pvss2
+Va Ppcb_A 0 1.1v
+Vb Ppcb_B 0 1.0v
+Vvss Ppcb_vss 0 0v
+XVDDA_RLC Ppcb_A PvddA1 PvddA2 VDDA_RLC
+...
+.ends
+
+.subckt VDDA_RLC Ppcb Pdie1 Pdie2
+R1 Ppcb N1 1e-9
+L1 N1 Pdie1 1e-12
+K12 L1 L2 0.3
+C1 Pdie1 0 1e-10
+...
+.ends
+\end{lstlisting}
+
+RedHawk 须在 GSR 中指定顶层 SPICE 网表：
+\begin{lstlisting}
+PACKAGE_SPICE_SUBCKT top.sp
+\end{lstlisting}
+
+\subsection{线性流控/压控源模型}
+\subsubsection*{Linear Current- and Voltage-Controlled Source Models}
+
+RedHawk 封装建模支持以下 Spice 线性源（可选关键字如 \texttt{VCVS}、\texttt{CCCS} 等）：
+
+\textbf{线性压控电压源（E）：}\texttt{E* N+ N- ?VCVS? NC+ NC- VGain}
+
+\textbf{线性流控电流源（F）：}\texttt{F* N+ N- ?CCCS? Vname IGain}（电流从正节点经源到负节点；\texttt{Vname} 为控制电流流经的电压源名）
+
+\textbf{线性压控电流源（G）：}\texttt{G* N+ N- ?VCCS? NC+ NC- TransC}
+
+\textbf{线性流控电压源（H）：}\texttt{H* N+ N- ?CCVS? Vname TransR}
+
+\begin{noteBox}
+F 与 H 类型的哑源（dummy source）电压须为 0。
+\end{noteBox}
+
+\subsection{静态分析的 S 参数封装与板级建模}
+\subsubsection*{S-Parameter Package and Board Modeling for Static Analysis}
+
+\texttt{REDHAWK\_PKG} 子电路中的 S 参数封装或 PCB 模型支持 RedHawk 静态分析，与动态分析可使用相同模型。步骤：
+\begin{enumerate}
+  \item 确保 S 参数数据在足够低频率可用，理想为 DC（$f=0$）。对封装模型 1\,kHz 通常足够低；对大去耦电容的 PCB，$f \le 10$\,Hz 可能必要。推荐使用 DC 数据。
+  \item 在 \texttt{REDHAWK\_PKG} 子电路中用与动态仿真相同语法实例化 S 参数模型。
+\end{enumerate}
+
+端口数无实际限制，内存与运行时间需求较低。方法为将 DC 处 S 矩阵转为 Y 矩阵并综合为电阻网络。图~\ref{fig:sparam-general} 为静态与动态通用的 S 参数建模示意图；BGA/VRM 侧允许多端口。
+
+\figplaceholder{Figure 12-2}{通用 S 参数示意图（静态与动态分析）}
+
+\subsection{动态分析的 S 参数封装与板级建模}
+\subsubsection*{S-Parameter Package and Board Modeling for Dynamic Analysis}
+
+随芯片时钟频率升高，多 GHz 范围内封装与 PCB 精确频率行为愈发重要。设计者通常使用全波电磁求解器生成频域散射（S）参数，封装/PCB 模型以 Touchstone 格式表示。时钟频率高于 500\,MHz 时，应使用 S 参数建模以获得准确结果。
+
+\subsubsection{建模方法学}
+S 参数模型在各频率点描述黑盒网络所有「端口」间的电压电流关系。概念上，S 参数以入射波 $a$ 与反射波 $b$ 描述功率从源到负载的传输：$b = Sa$。$a\_k$、$b\_k$ 与端口电压 $V\_k$、电流 $I\_k$ 的关系为：
+\[
+a\_k = \frac{V\_k + Z\_0 I\_k}{2\sqrt{Z\_0}}, \quad
+b\_k = \frac{V\_k - Z\_0 I\_k}{2\sqrt{Z\_0}}
+\]
+定义包含归一化（参考）阻抗 $Z\_0$，Touchstone 示例（$Z\_0=2\,\Omega$）：
+\begin{lstlisting}
+# HZ S RI R 2.000
+\end{lstlisting}
+RedHawk 目前仅支持标量参考阻抗（所有端口相同）。
+
+动态建模须在封装 die pad、BGA pad 及/或板 VRM 位置定义端口。封装/PCB 配电网络建模中，端口通常定义在一组 Vdd 节点与一组 Vss 节点之间；Vss 节点称为端口的「参考」节点。
+
+倒装封装典型端口设置：
+\begin{enumerate}
+  \item 将封装 die pad 区域划分为 $N$ 个分区；
+  \item 每分区在 Vdd 与 Vss 节点间设一端口；
+  \item 封装 BGA 侧按需在所有 Vdd 与 Vss 节点间设端口。
+\end{enumerate}
+
+S 参数封装与 PCB 模型提供与 RLCK 模型相同的自动预仿真时间确定（仅无向量 DvD 流程），上限 120\,ns，下限 3.5\,ns。
+
+\subsubsection{在 REDHAWK\_PKG 子电路中连接 S 参数模型}
+两种连接模式：共参考（端口相对全局地）与差分（浮地参考）。实践中差分连接更常用，因多数 EM 求解器对地网产生差分端口定义。
+
+\textbf{共参考节点：}各端口在节点 $N\_k$ 与全局地之间定义，用法与 RLCK 类似；绝对节点电压有意义；端口电流之和不必为零（尚有参考电流 $I\_{ref}$）。
+
+\figplaceholder{Figure 12-3}{基本全局地连接 S 参数模型}
+
+共参考 S 参数的问题：
+\begin{itemize}
+  \item 许多工业 EM 求解器无法提取相对全局地的 S 参数；
+  \item 端口数为差分连接法的两倍；
+  \item RedHawk 默认解耦方法下，共参考 S 参数会将连到全局地的 RC 支路短路，引入额外误差。
+\end{itemize}
+使用共参考 S 参数须在仿真中使用耦合模式（GSR 关键字 \texttt{DYNAMIC\_SOLVER\_MODE 1}）。因此推荐差分连接。
+
+\textbf{差分连接：}RedHawk 自动检测 S 参数封装/PCB 的差分连接，并禁用绝对电压（Vdd/Vss）的 log 报告（对差分连接无效）。每端口电压在节点对 $k(\mathrm{pos})$ 与 $k(\mathrm{neg})$ 间定义；$N$ 端口 S 参数连接 $2N$ 个节点。仅定义差分电压 $V\_1 = V\_1(\mathrm{pos})-V\_1(\mathrm{neg})$ 等；S 参数构造上强制 $I(\mathrm{VDD})=-I(\mathrm{VSS})$。差分连接不提供经封装与电源到全局地的 DC 路径。
+
+\figplaceholder{Figure 12-4}{基本差分连接 S 参数模型}
+
+RedHawk 认为 S 参数为差分连接，除非满足以下共参考条件之一：
+\begin{itemize}
+  \item 所有端口负节点为全局地（Spice 节点 0）——共参考 S 参数推荐方法；
+  \item 端口负节点经 $R < 1.2\times 10^{-5}\,\Omega$ 连到全局地；
+  \item 端口负节点经零伏理想电压源连到全局地。
+\end{itemize}
+此时 log 会注明 S 参数模型为共参考连接。
+
+\subsubsection{在 RedHawk 中指定 S 参数模型}
+RedHawk 将 $N$ 端口 S 参数视为 $2N$ 端子器件：
+\begin{lstlisting}
+Nxxxx S(N) n1p n1n n2p n2n ... nNp nNn <modelname>
+.model <modelname> nport file = "<filename>" np = <N_value>
+\end{lstlisting}
+
+\figplaceholder{Figure 12-5}{倒装 bump 分区模型（Vdd 红，Vss 黑）}
+
+GSR 关键字 \texttt{SPARAM\_HANDLING} 控制行为：
+\begin{itemize}
+  \item \texttt{SPARAM\_HANDLING 2}——完整无源性强制（默认）
+  \item \texttt{SPARAM\_HANDLING 0}——拟合低频准确的 RLCK 模型
+\end{itemize}
+
+最简单两端口示例：
+\begin{lstlisting}
+.subckt REDHAWK_PKG pVdd pVss
+Npkg S(2) pVdd pVss bgaVdd bgaVss PKG_MODEL
+.model PKG_MODEL nport file = "pkg.s2p" np = 2
+Vvdd bgaVdd 0 1.2
+Vvss bgaVss 0 0.0
+.ends
+\end{lstlisting}
+
+支持同一 \texttt{REDHAWK\_PKG} 中多个 S 参数模型。封装节点 DC 电压在 \texttt{adsRpt/Dynamic/Vdc.txt}，便于瞬态仿真前调试封装连通性。
+
+\subsubsection{有理逼近与无源性强制结果的保存/复用}
+端口数很大时，S 参数处理可能耗时，结果保存在运行目录 \texttt{SparmCache} 子目录（含原始 Touchstone 与 \texttt{*.r\#p} 有理逼近/无源性强制结果），可复制到新运行目录复用。
+
+\subsubsection{使用建议与限制}
+\begin{enumerate}
+  \item 端口数不宜超过 100，实用上限约 50--60。
+  \item 仅支持单一参考阻抗（不支持参考阻抗向量）。
+  \item 尚不支持 Touchstone 2.0。
+  \item Touchstone 文件须含 S 矩阵（文件头第二关键字为 \texttt{S}）。
+  \item RedHawk 自动预仿真时间确定目前不支持 S 参数模型；可通过 CPM+Pkg+Board 瞬态 Spice 分析确定 presim 时间。
+\end{enumerate}
+
+\subsubsection{用法摘要与示例}
+\begin{enumerate}
+  \item 确保 GSR 设置 \texttt{SPARAM\_HANDLING 2}（默认）。
+  \item 在 SUtility 中做基本检查：低频处 DC 连接的端口间应有传输（如端口 1 与 6 DC 连接且无其他端口 DC 连到它们，则 $S(1,6)$ 在 DC 应趋近 1（0\,dB））。VRM 端口连 10 个其他端口时，对应传输项量级约 0.1（$-20$\,dB）。
+  \item 不要将多个 S 参数模型合并为一个；\texttt{REDHAWK\_PKG} 中支持多个 S 参数模型。
+  \item 创建 \texttt{REDHAWK\_PKG} 子电路，在节点对间定义 S 参数端口（差分连接）。21 端口差分模型示例：
+\begin{lstlisting}
+.subckt REDHAWK_PKG
++ bg0_VDD bg0_VSS
++ bg1_VDD bg1_VSS
+... (bg2 through bg19)
++ BGA_VDD BGA_VSS
+
+* Instantiate package model
+*! Port[1] = bg0 ... Port[21] = bottom
+Npkg S(21)
++ bg0_VDD bg0_VSS
++ bg1_VDD bg1_VSS
+... (all port pairs)
++ BGA_VDD BGA_VSS
++ PKG_MODEL
+
+.model PKG_MODEL nport file = "package.s21p" np=21
+
+V_vdd BGA_VDD 0 1.2
+V_vss BGA_VSS 0 0.000
+.ends
+\end{lstlisting}
+\end{enumerate}
+
+\begin{noteBox}
+BGA 侧电源应在节点与地（Spice 节点 0）之间，如示例中加粗所示。presim 时间自动确定。
+\end{noteBox}
+
+\subsubsection{最佳 S 参数提取建议}
+\begin{enumerate}
+  \item 频率范围：$f\_{\min}=0$（DC）或足够接近；$f\_{\max}=2.5$--5\,GHz；1\,Hz--100\,MHz 用对数网格，以上用线性网格。
+  \item 大去耦电容 PCB：从极低频（如 1\,Hz）开始，对数段每十倍 15--20 点。
+  \item 频率点数：通常约 250--500；复杂频响可能需 1000--2000 点。
+  \item 参考阻抗：$Z\_0=2\,\Omega$（RedHawk 默认，优于经典 50\,$\Omega$）。
+  \item Touchstone 数据有效数字：建议 12--14 位小数。
+  \item 最大端口数：绝对最大 100，建议限制在 50--60。
+\end{enumerate}
+
+\subsection{仿真结果分析}
+\subsubsection*{Analysis of the Simulation Results}
+
+使用差分连接 S 参数模型分析结果时须特别注意：仅有差分电压（电压差）有意义。显示电压波形时只显示 $V(\mathrm{vdd})-V(\mathrm{vss})$，不要显示单端 $V(\mathrm{vdd})$ 与 $V(\mathrm{vss})$。Signal Viewer（sv）可用 Calculator 由两波形生成差分波形。pad 电压可用 \texttt{gnuplot} 与存在封装模型时生成的 \texttt{adsRpt/Dynamic/Vpad.data}。
+
+电流值无需此类变换；电流始终「绝对」，线电压应忽略。以下结果仍有意义：
+\begin{itemize}
+  \item Pad 差分电压 $V(\mathrm{vdd})-V(\mathrm{vss})$：
+\begin{lstlisting}
+plot voltage -pad_pair {<pad1_name> <pad2_name>} ?-sv? ?-xgr? -o <file_name>
+# 例：
+plot voltage -pad_pair {VDD1 VSS90} -sv -o vdrop.txt
+\end{lstlisting}
+  pad 名在花括号内，逗号分隔。
+  \item Pad 电流与电池电流
+  \item 实例压降
+  \item 最差 VDD-VSS 电压报告
+\end{itemize}
+
+\section{PLOC 文件中封装端口名到 Die Pad 名的映射}
+\subsection*{Mapping Package Port Names to Die Pad Names in the PLOC File}
+
+封装端口到一个或多个 die pad 的映射通过 PLOC 文件定义。部分封装厂商提供可用协议；若无协议须手动映射。
+
+无封装模型的标准 \texttt{*.ploc} 语法：
+\begin{lstlisting}
+<die_pad_name> <X-coord> <Y-coord> <layer> <POWER | GROUND>
+\end{lstlisting}
+
+若包含封装子电路模型，语法修改为：
+\begin{lstlisting}
+<die_pad_name> <X-coord_um> <Y-coord_um> <layer>
+    <power/ground_domain_name> <Spice_pkg_port_name>
+\end{lstlisting}
+其中 power/ground 域名称为 GSR \texttt{VDD\_NETS} 中指定的名称；端口不能命名为 ``0''。封装子电路中信号端口可悬空。多个 pad 可连到封装同一端口。
+
+示例：
+\begin{lstlisting}
+Pad_A1 3125 4340 metal6 VDD_A PvddA1
+Pad_A2 3225 4340 metal7 VDD_A PvddA1
+...
+Pad_VSS1 6125 4340 metal7 VSS Pvss1
+\end{lstlisting}
+
+\texttt{*.ploc} 按标准流程导入 RedHawk。
+
+\section{使用 Package Compiler 进行芯片-Die 映射}
+\subsection*{Chip-Die Mapping Using Package Compiler}
+
+\subsection{概述}
+\subsubsection*{Overview}
+
+精确芯片分析需要准确 RLCK Spice 子电路形式的封装模型。RedHawk Package Compiler 可作为 Chip Package Protocol（CPP）头的扩展提供此功能：
+\begin{itemize}
+  \item 将封装 Spice 模型包装为 RedHawk 兼容格式
+  \item 匹配 die 与封装 pin 并创建带注释的 PLOC
+  \item 计算有效电感
+  \item 计算各电压域有效封装电感
+  \item 执行 RLCK 无源性检查
+  \item 执行封装 Spice 语法检查
+\end{itemize}
+
+Package Compiler 利用 CPP 头信息识别封装与 die pin、区分 die 侧与 PCB 侧节点、区分电源网与地网。若已运行过 Package Compiler，再次调用时会识别已包装的 RedHawk 封装模型与已注释 PLOC，并对输出文件重新执行相同检查。
+
+\figplaceholder{Figure 12-6}{Package Compiler 流程与数据流概览}
+
+\subsection{输入}
+\subsubsection*{Inputs}
+\begin{itemize}
+  \item PLOC 文件（\texttt{*.ploc}）：\texttt{<pin/pad\_name> <x\_loc> <y\_loc> <layername> <P/G\_domain\_name>}。最后一列应为域名，而非 ``Power''/``Ground''。
+  \item 封装 Spice 文件：带 CPP 头的目标封装模型。
+  \item GSR 文件：\texttt{VDD\_NETS \{ <die\_VDD\_name> <voltage> ... \}}、\texttt{GND\_NETS \{ ... \}}。
+\end{itemize}
+
+\subsection{命令语法}
+\subsubsection*{Command Syntax}
+\begin{lstlisting}
+compile_pkg
+    [ -m <pkg_model_file>] [ -p <ploc_file> ] [-n <p_n_t_file>]
+    [ -t <transform_file> ] [ -vv <port_value_file> ]
+    [ -vg <gsr file> ] [ -g <generic_pkg_file> ]
+    [ -c ] [ -nma <#_of_match_iter> ] [ -no_leff_calc ]
+    [ -op <output_ploc_file> ] [ -om <wrapped_model> ]
+    [ -ow <working directory> ] [ -icf <input_config_file> ]
+    [ -start_tol <min_dist> -end_tol <max_dist> ]
+    [-snap ] [ -ee]
+\end{lstlisting}
+
+主要选项：\texttt{-m} 封装模型 Spice；\texttt{-p} die pin 位置；\texttt{-n} 封装网类型文件；\texttt{-t} die/封装 pin 匹配变换；\texttt{-vv} PCB pin 电压；\texttt{-vg} 从 GSR 读 die 网电压；\texttt{-g} 无 \texttt{-m} 时指示封装 pin 位置；\texttt{-c} 检查已注释 ploc 与 \texttt{-m} 数据一致性；\texttt{-nma} 最大匹配尝试次数；\texttt{-no\_leff\_calc} 不计算有效电感；\texttt{-op}/\texttt{-om} 输出 PLOC/包装模型；\texttt{-ow} 工作目录；\texttt{-icf} 输入参数文件；\texttt{-start\_tol}/\texttt{-end\_tol} 匹配距离容差（米）；\texttt{-snap} 将 die pin 吸附到最近封装 pin；\texttt{-ee} 强制 die 地只连封装地、die 电源只连封装电源。
+
+未使用 \texttt{--ee} 与 \texttt{--snap} 时，生成 \texttt{adsPackage/unmatchedPlocPins.txt} 列出容差外未匹配 ploc pin。使用 \texttt{--ee} 与 \texttt{--snap} 时，容差外 PLOC 点吸附到最近相关封装点，不生成未匹配文件。
+
+\subsection{输出}
+\subsubsection*{Outputs}
+
+主要输出：将原始 \texttt{<pkg\_spice>} 的
+\begin{lstlisting}
+subckt pkg die1 die2 pcb1 pcb2
+...
+.ends
+\end{lstlisting}
+包装为 RedHawk 兼容的 \texttt{redhawk\_pkg}：
+\begin{lstlisting}
+include <pkg_spice>
+.subckt redhawk_pkg die1 die2
+V1 pcb1 0 1.2
+V2 pcb2 0 0
+Xpkg die1 die2 pkg
+.ends
+\end{lstlisting}
+新 Spice 文件 include 原封装文件；子电路网表排除 PCB 侧节点（由电压文件赋适当电压）。
+
+其他输出：
+\begin{itemize}
+  \item \texttt{<ploc\_file>.1}——成功 die-封装 pin 配对后的完整注释 ploc
+  \item 电路语法检查（节点存在、网类型正确、die 侧节点不作电压源、节点类型唯一、PLOC 完整注释、PCB 节点电压有效等）
+  \item 无源性检查（RLCK）
+  \item \texttt{*.pnt} 封装网类型文件（成功 pin 配对后自动创建；有效电感计算需要）
+  \item 各电源-地封装网对的有效电感；测试平台 \texttt{<pkg\_model>.<power>\_<gnd>.leff.sp}；默认用 \texttt{\$APACHEROOT/bin/nspice}；波形 \texttt{*.aa0} 可用 \texttt{sv} 查看
+  \item \texttt{<ploc\_file>.map.1}——die 到封装 pin 映射列表
+  \item \texttt{<ploc\_file>.T}——匹配所用变换参数（旋转、镜像、平移）
+\end{itemize}
+
+\section{已知限制}
+\subsection*{Known Restrictions}
+
+封装模型须遵守以下限制：
+\begin{itemize}
+  \item 仅支持前述 SPICE 关键字。
+  \item 封装节点到片上位置的映射目前仅通过 \texttt{.ploc} 文件支持。
+  \item 用户创建的顶层 SPICE 网表须使用 \texttt{REDHAWK\_PKG} 作为子电路名。
+\end{itemize}

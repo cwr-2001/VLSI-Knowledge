@@ -1,0 +1,380 @@
+% 第 3 章 Licensing
+\bichapter{许可证}{Licensing}
+\label{chap:licensing}
+
+以下主题说明 PrimeTime 工具中许可证如何检出与管理：
+\begin{itemize}
+  \item 许可证如何工作
+  \item 控制许可证行为
+\end{itemize}
+
+% ============================================================
+\section{许可证如何工作}
+\subsection*{How Licenses Work}
+
+以下主题说明许可证如何检出，以及许可证需求如何计算：
+\begin{itemize}
+  \item 许可证链（License Chains）
+  \item 本地进程许可证（Local-Process Licensing）
+  \item 分布式分析中的许可证管理
+  \item 基于场景的分布式许可证（Distributed Scenario-Based Licensing）
+  \item 基于核的分布式许可证（Distributed Core-Based Licensing）
+  \item SMVA 许可证
+\end{itemize}
+
+\subsection{许可证链}
+\subsubsection*{License Chains}
+
+许可证链是有序的许可证序列。后续每个更高层级许可证都是其前面较低层级许可证的超集。
+
+PrimeTime Suite 产品的完整许可证链为（从低到高）：
+\begin{center}
+\texttt{PrimeTime} $\rightarrow$
+\texttt{PrimeTime-SI} $\rightarrow$
+\texttt{PrimeTime-ADV} $\rightarrow$
+\texttt{PrimeTime-ADV-PLUS} $\rightarrow$
+\texttt{PrimeTime-ELT} $\rightarrow$
+\texttt{PrimeTime-APX}
+\end{center}
+
+要检出某一特定许可证，必须先检出其前面的所有较低层级许可证（且数量相同）。例如，若某功能需要 PrimeTime-ADV-PLUS，则必须检出：PrimeTime、PrimeTime-SI、PrimeTime-ADV 与 PrimeTime-ADV-PLUS。
+
+当使用需要不同许可证的多个功能时，会检出至任一功能所需的最高层级许可证。若多个功能需要同一许可证，该同一许可证即可满足这些功能。
+
+功能完成后，其许可证仍保持由工具检出状态，以确保后续使用该功能时已具备所需许可证。关于手动签入/签出许可证，见「手动控制许可证使用」。
+
+各 PrimeTime 层级所含许可证详情，见第~\ref{chap:intro}~章「PrimeTime 产品层级与许可证」。
+
+\subsection{本地进程许可证}
+\subsubsection*{Local-Process Licensing}
+
+在本地进程许可证模式下，本地（非分布式）PrimeTime 进程的许可证需求由其使用的功能决定。这是默认许可证行为。
+
+使用多核分析时：
+\begin{lstlisting}
+pt_shell> set_host_options -max_cores N
+\end{lstlisting}
+适用以下行为：
+\begin{itemize}
+  \item 每份已购 PrimeTime Base 产品最多启用 16 核；
+  \item 每份已购 PrimeTime Elite 产品最多启用 32 核；
+  \item 每份已购 PrimeTime Apex 产品最多启用 64 核。
+\end{itemize}
+
+为实现上述行为，所需许可证数量按 $N$ 计算如下：
+\begin{itemize}
+  \item \textbf{1 至 16 核}：无需额外许可证，无需调整许可证数量。
+  \item \textbf{17 至 32 核}：需要 PrimeTime-ADV 许可证（由 PrimeTime Elite 产品层级提供），无需调整许可证数量。
+  \item \textbf{33 核及以上}：需要 PrimeTime-APX 许可证（由 PrimeTime Apex 产品层级提供）。所需许可证数量按下列除数规则计算（\texttt{ceil()} 向上取整）：
+\end{itemize}
+
+\begin{table}[htbp]
+\centering
+\caption{33 核及以上时按核数计算的许可证数量}
+\begin{tabular}{@{}ll@{}}
+\toprule
+许可证 & 由 $N$ 计算的许可证数量 \\
+\midrule
+PrimeTime & $\lceil N/32 \rceil$ \\
+PrimeTime-SI & $\lceil N/32 \rceil$ \\
+PrimeTime-ADV & $\lceil N/32 \rceil$ \\
+PrimeTime-ADV-PLUS & $\lceil N/32 \rceil$ \\
+PrimeTime-ELT & $\lceil N/32 \rceil$ \\
+PrimeTime-APX & $\lceil N/64 \rceil$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{noteBox}
+尽管 PrimeTime-APX 之下较低层级许可证的除数为 32 而非 64，但每份 PrimeTime-APX 许可证附带两份各较低层级许可证以作补偿。详见「PrimeTime 产品层级与许可证」。
+\end{noteBox}
+
+例如，本地分析使用 \opt{-max\_cores 80} 时，许可证需求计算为：
+\begin{center}
+\begin{tabular}{@{}lc@{}}
+\toprule
+许可证 & 数量 \\
+\midrule
+PrimeTime & $\lceil 80/32 \rceil = 3$ \\
+PrimeTime-SI & $3$ \\
+PrimeTime-ADV & $3$ \\
+PrimeTime-ADV-PLUS & $3$ \\
+PrimeTime-ELT & $3$ \\
+PrimeTime-APX & $\lceil 80/64 \rceil = 2$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{分布式分析中的许可证管理}
+\subsubsection*{License Management in Distributed Analysis}
+
+分布式分析允许将分析工作分布到由管理进程（manager process）控制的工作进程（worker processes）。PrimeTime 提供两类分布式分析：
+\begin{itemize}
+  \item 分布式多场景分析（Distributed Multi-Scenario Analysis，DMSA）
+  \item HyperGrid 分布式分析
+\end{itemize}
+
+在分布式分析中，管理进程执行全部许可证管理：从中央许可证服务器获取工作进程所需的任何许可证，再动态分配给工作进程。
+
+\figplaceholder{Figure 9: Manager Process License Management in Distributed Analysis}{分布式分析中管理进程的许可证管理}{fig:dmsa-lic}
+
+管理进程与工作进程共享其许可证，因此管理进程实际上不占用许可证。
+
+默认情况下，管理进程保留其从中央许可证服务器检出的许可证，以确保工作进程具备持续工作所需许可证。但在以下情况下，管理进程可将许可证归还中央服务器：
+\begin{itemize}
+  \item 启用了许可证自动缩减（license autoreduction）；
+  \item 手动减少了许可证数量。
+\end{itemize}
+
+\subsubsection{分布式多场景分析（DMSA）}
+\paragraph*{Distributed Multi-Scenario Analysis (DMSA)}
+
+在 DMSA 中，管理进程动态向工作进程分配许可证。
+
+工作进程仅在主动执行任务时使用许可证。若工作进程数多于许可证数，部分工作进程执行任务（使用管理进程分配的许可证），其余保持空闲（等待可用许可证）。工作进程完成任务后，其许可证可供其他工作进程使用。
+
+每次管理进程向工作进程分配任务时：
+\begin{itemize}
+  \item 若管理进程已有所需许可证，则分配给该工作进程以开始任务；
+  \item 否则，管理进程尝试从中央许可证服务器获取；成功则分配并开始任务；
+  \item 否则，该工作进程保持空闲，直到另一工作进程完成任务并释放许可证。
+\end{itemize}
+
+这种动态许可证分配可在许可证受限情况下尽量减少昂贵的场景镜像交换（scenario image-swapping）。
+
+\subsubsection{HyperGrid 分布式分析}
+\paragraph*{HyperGrid Distributed Analysis}
+
+在 HyperGrid 分布式分析中，管理进程在分析开始时获取分区工作进程所需的许可证。若无法获得所需许可证，管理进程退出并报错：
+\begin{lstlisting}
+Error: Insufficient license resources available to analyze 8 partitions.
+(DA-020)
+\end{lstlisting}
+
+\subsection{基于场景的分布式许可证}
+\subsubsection*{Distributed Scenario-Based Licensing}
+
+在基于场景的分布式许可证模式下：
+\begin{itemize}
+  \item 每个场景的许可证需求分别按「本地进程许可证」所述确定；
+  \item 总许可证需求为各场景许可证需求之和。
+\end{itemize}
+
+该模式仅适用于 DMSA，且为 DMSA 的默认许可证行为。
+
+例如，两个 DMSA 场景各使用 \opt{-max\_cores 80} 时，基于场景的许可证需求为：
+\begin{center}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+许可证 & 场景 A & 场景 B & 合计 \\
+\midrule
+PrimeTime & 3 & 3 & 6 \\
+PrimeTime-SI & 3 & 3 & 6 \\
+PrimeTime-ADV & 3 & 3 & 6 \\
+PrimeTime-ADV-PLUS & 3 & 3 & 6 \\
+PrimeTime-ELT & 3 & 3 & 6 \\
+PrimeTime-APX & 2 & 2 & 4 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{基于核的分布式许可证}
+\subsubsection*{Distributed Core-Based Licensing}
+
+在基于核的分布式许可证模式下：
+\begin{itemize}
+  \item 对各许可证，将分布式场景或工作进程中需要该许可证的核数求和；
+  \item 对每种许可证，按需要该许可证的总核数 $N$，用下列除数规则计算需求（\texttt{ceil()} 向上取整）：
+\end{itemize}
+
+\begin{table}[htbp]
+\centering
+\caption{基于核的分布式许可证除数规则}
+\begin{tabular}{@{}ll@{}}
+\toprule
+许可证 & 由 $N$ 计算的许可证数量 \\
+\midrule
+PrimeTime & $\lceil N/32 \rceil$ \\
+PrimeTime-SI & $\lceil N/32 \rceil$ \\
+PrimeTime-ADV & $\lceil N/32 \rceil$ \\
+PrimeTime-ADV-PLUS & $\lceil N/32 \rceil$ \\
+PrimeTime-ELT & $\lceil N/32 \rceil$ \\
+PrimeTime-APX & $\lceil N/64 \rceil$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{itemize}
+  \item 启用基于核的许可证需要 PrimeTime-ADV 许可证。若分析所用其他功能尚未要求该许可证，仍会按上表由 $N$ 计算数量并检出。
+\end{itemize}
+
+HyperGrid 分布式分析始终使用基于核的许可证模式。对 DMSA，该模式可选；在管理进程上设置：
+\begin{lstlisting}
+pt_shell> set_app_var multi_scenario_license_mode core
+\end{lstlisting}
+
+两个场景各使用 \opt{-max\_cores 80} 时，基于核的许可证需求示例为：
+\begin{center}
+$\lceil (80+80)/32 \rceil = 5$（PrimeTime 至 PrimeTime-ELT），
+$\lceil (80+80)/64 \rceil = 3$（PrimeTime-APX）。
+\end{center}
+
+\subsection{SMVA 许可证}
+\subsubsection*{SMVA Licensing}
+
+PrimeTime 中多数功能由单一许可证启用，再按需乘以核数调整。
+
+但同时多电压分析（Simultaneous Multi-Voltage Analysis，SMVA）需要 PrimeTime-ADV-PLUS 许可证，其数量取决于分析特性。SMVA 许可证需求按以下计算：
+
+\[
+\lceil \max(\text{传播的 DVFS 场景数},\ \text{供电组电压层级数}) / 8 \rceil
+\]
+
+其中：
+\begin{itemize}
+  \item 「传播的 DVFS 场景数」是跨电源域传播时序信息时实际发现的 DVFS 场景数量；
+  \item 「供电组电压层级数」是某供电组中定义的电压层级数量。
+\end{itemize}
+
+换言之，许可证需求由 DVFS 场景数与任一供电组中电压层级数（取较大者）除以 8 决定，小数部分一律向上取整。
+
+该 SMVA 派生需求适用于 PrimeTime-ADV-PLUS（因而也适用于链中较低层级许可证）。对每种许可证，最终需求取 \opt{-max\_cores} 派生需求与 SMVA 派生需求的 $\max()$。
+
+例如，\opt{-max\_cores 80} 且有 50 个 SMVA 场景时：
+\begin{center}
+$\max(\lceil 80/32\rceil=3,\ \lceil 50/8\rceil=7)=7$
+（适用于 PrimeTime 至 PrimeTime-ADV-PLUS）；
+PrimeTime-ELT 仍为 3，PrimeTime-APX 仍为 2。
+\end{center}
+
+在含 SMVA 的 DMSA 运行中，总体 SMVA 派生需求始终取各场景特定 SMVA 需求的 $\max()$。这对基于场景与基于核的分布式许可证模式均成立。
+
+% ============================================================
+\section{控制许可证行为}
+\subsection*{Controlling License Behaviors}
+
+以下主题说明如何在分析期间管理 PrimeTime 签入与签出许可证的方式：
+\begin{itemize}
+  \item 手动控制许可证使用
+  \item 增量许可证处理
+  \item 许可证池化（License Pooling）
+  \item 许可证排队（License Queuing）
+  \item 许可证自动缩减（License Autoreduction）
+\end{itemize}
+
+\subsection{手动控制许可证使用}
+\subsubsection*{Manually Controlling License Usage}
+
+默认情况下，工具自动检出所需数量的许可证，并在退出时签回。若站点可用许可证短缺，可用下表命令控制许可证使用。
+
+\begin{table}[htbp]
+\centering
+\caption{手动控制许可证使用的命令}
+\begin{tabularx}{\textwidth}{@{}X l@{}}
+\toprule
+目的 & 命令 \\
+\midrule
+检出一份（或可选更多）许可证 &
+\cmd{get\_license [-quantity number] feature\_list} \\
+显示工具当前持有的许可证 &
+\cmd{list\_licenses} \\
+将许可证签回服务器（可选保留一定数量） &
+\cmd{remove\_license [-keep number] feature\_list} \\
+限制特定许可证的最大检出数量 &
+\cmd{set\_license\_limit -quantity number feature\_list} \\
+移除特定许可证的限制 &
+\cmd{remove\_license\_limit feature\_list} \\
+报告特定许可证的限制 &
+\cmd{report\_license\_limit feature\_list} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+下例手动检出、报告，再签回部分许可证：
+\begin{lstlisting}
+pt_shell> # check out four PrimeTime and PrimeTime SI licenses
+pt_shell> get_license -quantity 4 {PrimeTime PrimeTime-SI}
+1
+pt_shell> # view the licenses currently checked out
+pt_shell> list_licenses
+Licenses in use:
+     PrimeTime    (4)
+     PrimeTime-SI     (4)
+1
+pt_shell> # check in all PrimeTime SI licenses except one
+pt_shell> remove_license -keep 1 {PrimeTime-SI}
+1
+pt_shell> # verify that the PrimeTime SI licenses were returned
+pt_shell> list_licenses
+Licenses in use:
+     PrimeTime    (4)
+     PrimeTime-SI     (1)
+1
+\end{lstlisting}
+
+\subsection{增量许可证处理}
+\subsubsection*{Incremental License Handling}
+
+增量许可证处理允许在分析期间更改某功能的许可证数量。该功能始终启用。
+
+许可证可按如下方式增量签入与签出：
+\begin{itemize}
+  \item 分别用 \cmd{get\_license} 或 \cmd{remove\_license} 增加或减少某功能已检出的许可证数量；
+  \item 用 \cmd{set\_license\_limit} 更改最大检出数量。若降低限制，PrimeTime 会签回足够数量的该功能许可证以满足新目标限制。
+\end{itemize}
+
+\subsection{许可证池化}
+\subsubsection*{License Pooling}
+
+许可证池化允许从不同许可证服务器检出不同功能的许可证。该功能始终启用。
+
+同一功能的所有许可证必须由单一许可证服务器提供。许可证跨越（license spanning，即从多个服务器为同一功能检出许可证）当前不受支持。
+
+\subsection{许可证排队}
+\subsubsection*{License Queuing}
+
+许可证排队允许在所有许可证当前被占用时等待可用许可证。默认禁用。启用方法：在调用工具之前，在用户环境中将环境变量 \texttt{SNPSLMD\_QUEUE} 设为 \texttt{true}。启动工具时会看到：
+\begin{lstlisting}
+Information: License queuing is enabled. (PT-018)
+\end{lstlisting}
+
+若启用许可证排队，可能出现两进程彼此等待对方所持许可证的死锁。为防止此情况，同时设置：
+\begin{itemize}
+  \item \texttt{SNPS\_MAX\_WAITTIME}——进程等待获取启动 PrimeTime 会话所需初始许可证的最长时间。默认 259{,}200 秒（72 小时）。超时后显示：
+\begin{lstlisting}
+Information: Timeout while waiting for feature 'PrimeTime'.
+(PT-017)
+\end{lstlisting}
+  \item \texttt{SNPS\_MAX\_QUEUETIME}——在成功检出启动 \cmd{pt\_shell} 的初始许可证后，同一 \cmd{pt\_shell} 进程内检出后续功能许可证的最长排队时间。默认 28{,}800 秒（8 小时）。超时后显示类似 PT-017 消息。
+\begin{noteBox}
+不建议在 DMSA 流程中设置 \texttt{SNPS\_MAX\_QUEUETIME}。DMSA 管理进程已在许可证受限情况下执行动态许可证获取。若同时设置该变量，管理进程每次获取新许可证失败都会阻塞至超时，从而阻止工作进程在超时完成前启动新作业。
+\end{noteBox}
+\end{itemize}
+
+分析流程中，排队功能还可能显示其他状态消息，例如：
+\begin{lstlisting}
+Information: Started queuing for feature 'PrimeTime SI'. (PT-015)
+Information: Still waiting for feature 'PrimeTime SI'. (PT-016)
+Information: Successfully checked out feature 'PrimeTime SI'. (PT-014)
+\end{lstlisting}
+
+\subsection{许可证自动缩减}
+\subsubsection*{License Autoreduction}
+
+许可证自动缩减是 DMSA 功能，允许空闲场景工作进程暂时将其许可证归还中央服务器。默认禁用。可随时在 DMSA 管理进程中将全局变量 \cmd{enable\_license\_auto\_reduction} 设为 \texttt{true}/\texttt{false} 以启用或禁用。启用后，若某场景任务已完成且没有其他场景在等待该许可证，则许可证归还中央许可证池。
+
+须谨慎使用该功能，原因如下：
+\begin{itemize}
+  \item 尽管可将许可证归还中央服务器，但不保证后续分析能重新获取这些许可证。若管理进程无法或部分无法重新获取，DMSA 并发度会降低，可能影响性能与出结果时间。
+  \item 反复签入/签出许可证本身会显著拖慢交互工作（如合并报告，或与场景大量通信的 Tcl 脚本/过程）。此时可在初始时序更新期间启用自动缩减，在交互工作期间禁用：
+\begin{lstlisting}
+\section{get all scenarios to update their timing}
+set enable_license_auto_reduction true
+remote_execute {update_timing}
+set enable_license_auto_reduction false
+
+\section{generate merged reports}
+report_timing ...
+report_constraint ...
+\end{lstlisting}
+\end{itemize}

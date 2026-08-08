@@ -1,0 +1,2883 @@
+                                                                                       Feedback
+
+
+
+
+11
+Back-Annotation
+     Back-annotation is the process of reading delay or parasitic resistance and capacitance
+     values from an external file into the tool for timing analysis. Using back-annotation, you
+     can accurately analyze the circuit timing in the tool after each phase of physical design. To
+     learn about back-annotation, see
+     •   SDF Back-Annotation
+     •   Annotating Delays, Timing Checks, and Transition Times
+     •   Writing an SDF File
+     •   Setting Lumped Parasitic Resistance and Capacitance
+     •   Detailed Parasitics
+     •   Reading Parasitic Files
+     •   Incomplete Annotated Parasitics
+     •   Back-Annotation Order of Precedence
+     •   Reporting Annotated Parasitics
+     •   Removing Annotated Data
+     •   GPD Parasitic Explorer
+
+
+SDF Back-Annotation
+     For initial static timing analysis, PrimeTime estimates net delays based on a wire load
+     model. Actual delays depend on the physical placement and routing of the cells and nets.
+     A floor planner or router can provide more detailed and accurate delay information, which
+     you can provide to PrimeTime for a more accurate analysis. This process is called delay
+     back-annotation. Back-annotated information is often provided in an SDF file.
+     You can read SDF back-annotated delay information in these ways:
+     •   Read the delays and timing checks from an SDF file.
+     •   Annotate delays, timing checks, and transition times without using the SDF format.
+
+
+PrimeTime® User Guide                                                                          365
+T-2022.03
+                                                                                       Feedback
+Chapter 11: Back-Annotation
+SDF Back-Annotation
+
+
+     PrimeTime supports SDF v1.0 through 2.1 and a subset of v3.0 features. In general, it
+     supports all SDF constructs except for the following:
+     •   PATHPULSE, GLOBALPATHPULSE
+
+     •   NETDELAY, CORRELATION
+
+     •   PATHCONSTRAINT, SUM, DIFF, SKEWCONSTRAINT
+
+     It also supports the following subset of SDF v3.0 constructs:
+     •   RETAIN
+
+     •   RECREM
+
+     •   REMOVAL
+
+     •   CONDELSE
+
+     If you do not have an SDF file, you can specify delays in an analyzer script file containing
+     capacitance and resistance parasitics annotation commands.
+
+
+     Reading SDF Files
+     The read_sdf command reads instance-specific pin-to-pin leaf cell and net timing
+     information from an SDF version 1.0, 1.1, 2.0, 2.1, or 3.0 file, and uses the information to
+     annotate the current design.
+     Instance names in the design must match instance names in the timing file. For example,
+     if the timing file was created from a design using VHDL naming conventions, the design
+     you specify must use VHDL naming conventions.
+     After reading an SDF file, PrimeTime reports the following:
+     •   Number of errors found while reading the SDF file (for example, pins not found in the
+         design)
+     •   Number of annotated delays and timing checks
+     •   Unsupported SDF constructs found in the SDF file, with the number of occurrences of
+         each SDF construct
+     •   Process, temperature, and voltage values found in the SDF file
+     •   Annotated delays and timing checks of the design (with the report_annotated_delay
+         and report_annotated_check commands)
+
+
+
+
+PrimeTime® User Guide                                                                          366
+T-2022.03
+                                                                                        Feedback
+Chapter 11: Back-Annotation
+SDF Back-Annotation
+
+
+     The following command reads from disk the SDF format file adder.sdf, which contains load
+     delays included in the cell delays and uses its information to annotate the timing on the
+     current design.
+     pt_shell> read_sdf -load_delay cell adder.sdf
+
+     The following commands read the timing information of instance u1 of design MULT16
+     from the disk file mult16_u1.sdf, and annotates the timing on the design MY_DESIGN. The
+     load delay is included in the net delays.
+     pt_shell> current_design MY_DESIGN
+     pt_shell> read_sdf -load_delay net -path u1 mult16_u1.sdf
+
+     The following command reads timing information and annotates the current design with
+     the worst timing when the timing file has different timing conditions for the same pin pair.
+     The load delay is assumed to be included in the cell delay.
+     pt_shell> read_sdf -cond_use max boo.sdf
+
+     The following command reads minimum and maximum timing information and annotates
+     the current design with delays corresponding to minimum and maximum operating
+     conditions. When reporting minimum delay, PrimeTime uses delays annotated for the
+     minimum condition. When reporting maximum delays, PrimeTime uses delays annotated
+     for the maximum condition.
+     pt_shell> read_sdf -analysis_type on_chip_variation boo.sdf
+
+     The following command reads minimum and maximum timing information from two
+     separate SDF files and annotates the current design with delays corresponding to
+     minimum and maximum operating conditions. When reporting minimum delays, PrimeTime
+     uses delays annotated for the minimum condition. When reporting maximum delays,
+     PrimeTime uses delays annotated for the maximum condition.
+     pt_shell> read_sdf -analysis_type on_chip_variation \
+                 -min_file boo_bc.sdf -max_file boo_wc.sdf
+
+     Annotating Timing From a Subdesign Timing File
+     When you specify the -path option, the read_sdf command annotates the current design
+     with information from a timing file created from a subdesign of the current design. When
+     you specify a subdesign, you cannot use the net delays to the ports of the subdesign to
+     annotate the current design.
+
+     Annotating Load Delay
+     The load delay, also known as extra source gate delay, is the portion of the cell delay
+     caused by the capacitive load of the driven net. Some delay calculators consider the load
+     delay part of the net delay; other delay calculators consider the load delay part of the cell
+     delay. By default, the read_sdf command assumes the load delay is included in the cell
+
+
+PrimeTime® User Guide                                                                           367
+T-2022.03
+                                                                                          Feedback
+Chapter 11: Back-Annotation
+SDF Back-Annotation
+
+
+     delay in the timing file being read. If your timing file includes the load delay in the net delay
+     instead of in the cell delay, use the -load_delay option with the read_sdf command.
+
+     Annotating Conditional Delays From SDF
+     Delays and timing checks specified in an SDF file can be conditional. The SDF condition
+     is usually an expression based on the value of some inputs of the annotated cell. The way
+     PrimeTime annotates these conditional delays depends on whether the Synopsys library
+     specifies conditional delays.
+     •   If the Synopsys library contains conditional arcs, all conditional delays specified in
+         SDF file are annotated. The condition string specified in the Synopsys library with the
+         sdf_cond construct must exactly match the condition string in the SDF file.
+
+     •   If the Synopsys library does not contain conditional arcs (there is no sdf_cond
+         construct in the Synopsys library), the maximum or minimum delays of all conditional
+         delays from SDF are annotated. To specify whether to annotate the minimum or
+         maximum delays, use the -cond_use max or -cond_use min option of the read_sdf
+         command.
+     If your library contains state-dependent delays, using a Synopsys library containing
+     conditional arcs enables more accurate annotation from the SDF.
+     PrimeTime uses the condition specified in the SDF only to annotate the delays and
+     timing checks to the appropriate timing arc specified in the Synopsys library. If you
+     have conditional timing arcs in your SDF, and your library is defined correctly to support
+     conditional arcs, you can use case analysis (or constant propagation) to enable the
+     required conditional arc values. Consider the example 2-input XOR gate in Figure 112.
+
+Figure 112    Example of state-dependent timing arcs
+                                                Noninverting timing arc
+                                                (condition: B = 0)
+             A
+                                                   Z
+
+             B                                  Inverting timing arc
+                                                (condition: B = 1)
+
+
+
+     The SDF for the delay from A to Z looks like this:
+     (INSTANCE U1)
+     (DELAY
+       (ABSOLUTE
+         (COND B (IOPATH A Z (0.21) (0.54) ) )
+         (COND ~B (IOPATH A Z (0.27) (0.34) ) )
+
+
+
+PrimeTime® User Guide                                                                             368
+T-2022.03
+                                                                                               Feedback
+Chapter 11: Back-Annotation
+SDF Back-Annotation
+
+
+         )
+     )
+
+     If the Synopsys library contains no conditions, the annotation from SDF uses the worst-
+     case delay for all timing arcs from A to Z. Mapping from the library the timing arc that
+     corresponds to a given condition is not possible. In this case, the annotated delays are as
+     shown in Figure 113.
+
+Figure 113         Annotated delays when the Synopsys library contains no conditions
+                                                Noninverting timing arc
+               A
+                                                (condition: B = 0)
+                            r:0.27/ f:0.54
+                                                    Z
+                            r:0.27/ f:0.54
+               B
+                                                Inverting timing arc
+                                                (condition: B = 1)
+
+
+     If the Synopsys library contains conditions, the annotation can identify which timing arc
+     corresponds to the SDF condition. In this case, the annotated delays are as shown in
+     Figure 114.
+
+Figure 114         Annotated delays when the Synopsys Library contains conditions
+                                                    Noninverting timing arc
+                                                    (condition: B = 0)
+               A
+                              r:0.27/ f:0.34
+                                                         Z
+                                                                       -Inverting Timing Arc
+               B               r:0.21/ f:0.54       Inverting timing =arc
+                                                                       0)
+                                                    (condition: B = 1)
+
+
+     Note:
+             An IOPATH statement in the SDF file annotates all arcs between two pins.
+             However, even if an IOPATH statement follows a COND IOPATH statement, the
+             COND IOPATH statement takes precedence over the IOPATH statement.
+
+     The IOPATH delay for the A to Z arc varies depending on whether the B input is a 1 or 0.
+     To select the B = 0 delays, set a case analysis on the B input pin. For example:
+     pt_shell> set_case_analysis 0 [get_pins U1/B]
+
+
+
+
+PrimeTime® User Guide                                                                                369
+T-2022.03
+                                                                                           Feedback
+Chapter 11: Back-Annotation
+SDF Back-Annotation
+
+
+     Note:
+           It is possible for a constant to propagate to a pin that selects a conditional arc.
+           This can occur through normal logic constant propagation from a tie-high or tie-
+           low condition, or through a set_case_analysis that was set on another pin
+           that propagates a constant to the pin.
+
+     Annotating Timing Checks
+     When the SDF file contains the timing checks in Table 19, they are used to annotate the
+     current design.
+Table 19        SDF constructs for timing checks
+
+      For check                   SDF construct is
+
+      Setup and hold              SETUP, HOLD, and SETUPHOLD
+
+      Recovery                    RECOVERY
+
+      Removal                     REMOVAL
+
+      Minimum pulse width         WIDTH
+
+      Minimum period              PERIOD
+
+      Maximum skew                SKEW
+
+      No change                   NOCHANGE
+
+
+
+
+     Reporting Delay Back-Annotation Status
+     Because SDF files are usually large (about 100 MB or larger) and contain many delays,
+     it is a good idea to verify that all nets are back-annotated with delays (and timing checks,
+     where applicable).
+
+     Reporting Annotated or Nonannotated Delays
+     You can check and identify nets that have not been back-annotated with delays in SDF.
+     PrimeTime checks and reports on cell delays and net delays independently. When
+     reporting net delays, PrimeTime considers three types of nets:
+     •     Nets connected to primary input ports
+     •     Nets connected to primary output ports
+     •     Internal nets that are not connected to primary ports
+
+
+
+
+PrimeTime® User Guide                                                                            370
+T-2022.03
+                                                                                     Feedback
+Chapter 11: Back-Annotation
+SDF Back-Annotation
+
+
+     This distinction is important because according to the SDF standard, only internal nets are
+     annotated in SDF.
+     The report_annotated_delay command reports the number of annotated
+     and nonannotated delay arcs. To produce a report of annotated delays, use the
+     report_annotated_delay command.
+     PrimeTime displays a report similar to the following:
+                                  |           |           |    NOT    |
+     Delay type                   |    Total | Annotated | Annotated |
+     -----------------------------+-----------+-----------+-----------+--
+     cell arcs                    |       16 |        14 |         2 |
+     cell arcs (unconnected)      |        5 |         5 |         0 |
+     internal net arcs            |        3 |         3 |         0 |
+     net arcs from primary inputs |       11 |        11 |         0 |
+     net arcs to primary outputs |         4 |         4 |         0 |
+     -----------------------------+-----------+-----------+-----------+----
+                                  |       39 |        37 |         2 |
+
+     Reporting Annotated or Nonannotated Timing Checks
+     You can create a report showing the number of annotated timing checks of all cell timing
+     arcs within your design.
+     To produce an annotated timing check report, run the report_annotated_check
+     command.
+     PrimeTime displays a report similar to the following:
+     ******************************
+     report: annotated_check
+     Design: my_design
+     ******************************
+                                                          |NOT       |
+                                    |Total     |Annotated |Annotated |
+     -------------------------------+----------+----------+----------|
+     cell setup arcs                |   2368   |   2368   |    0     |
+     cell hold arcs                 |   2368   |   2368   |    0     |
+     cell recovery arcs             |    676   |    676   |    0     |
+     cell removal arcs              |      0   |      0   |    0     |
+     cell min pulse width arc       |    135   |    135   |    0     |
+     cell min period arcs           |    822   |    822   |    0     |
+     cell max skew arcs             |    716   |    716   |    0     |
+     cell nochange arcs             |      0   |      0   |    0     |
+     -------------------------------+----------+----------+----------|
+                                    |   7085   |   7085   |   0      |
+
+     Faster Timing Updates in SDF Flows
+     For each point in a path, PrimeTime calculates slew from the input slew and
+     capacitance and propagates the calculated slew forward from that point in the path. The
+
+
+PrimeTime® User Guide                                                                        371
+T-2022.03
+                                                                                       Feedback
+Chapter 11: Back-Annotation
+Annotating Delays, Timing Checks, and Transition Times
+
+
+     timing_use_zero_slew_for_annotated_arcs variable enables you to use zero slew for
+     arcs annotated with SDF delays, thereby reducing runtime when analyzing designs with all
+     or almost all arcs annotated with SDF.
+     By default, this variable is set to auto. In a design that uses SDF-annotated delays on
+     all arcs or almost all arcs, such as 95% or more, you can forgo the higher accuracy of
+     slew calculation in favor of faster runtime with the auto setting. In this case, for each
+     arc that is fully annotated by either the read_sdf or set_annotated_delay command,
+     PrimeTime skips the delay and slew calculation and sets a slew of zero on the load pin of
+     the annotated arc. As a result, timing updates can be completed in significantly less time.
+     For any arcs that are not annotated, PrimeTime estimates the delay and output slew
+     using the best available input slew. For a block of arcs that are not annotated, PrimeTime
+     propagates the worst slew throughout the block.
+     When you use this feature, it is recommended that you disable prelayout slew scaling by
+     setting the timing_prelayout_scaling variable to false.
+
+
+Annotating Delays, Timing Checks, and Transition Times
+     You can annotate delays, timing checks, and transition times to make a limited number of
+     changes for debugging. To learn about manually set annotations, see
+     •   Annotating Delays
+     •   Annotating Timing Checks
+     •   Annotating Transition Times
+
+
+     Annotating Delays
+     To set cell or net delays, run the set_annotated_delay command. To set a cell delay,
+     you specify the delay from a cell input to an output of the same cell. To set a net delay, you
+     specify the delay from a cell output to a cell input.
+     This example annotates a cell delay of 20 units between input pin A of cell instance
+     U1/U2/U3 and output pin Z of the same cell instance. The delay value of 20 includes the
+     load delay.
+     pt_shell> set_annotated_delay -cell -load_delay cell 20 \
+                 -from U1/U2/U3/A -to U1/U2/U3/Z
+
+     This example annotates a rise net delay of 1.4 units between output pin U1/Z and input pin
+     U2/A. The delay value for this net does not include load delay.
+     pt_shell> set_annotated_delay -net -rise 1.4 -load_delay \
+                 cell -from U1/Z -to U2/A
+
+
+
+PrimeTime® User Guide                                                                          372
+T-2022.03
+                                                                                        Feedback
+Chapter 11: Back-Annotation
+Annotating Delays, Timing Checks, and Transition Times
+
+
+     This example annotates a rise net delay of 12.3 units between the same output pins. In
+     this case the net delay value does include load delay.
+     pt_shell> set_annotated_delay -net -rise 12.3 -load_delay \
+                 net -from U1/Z -to U2/A
+
+     This example annotates a fall cell delay of 21.2 units on the enable arc of the three-state
+     cell instance U8.
+     pt_shell> set_annotated_delay -cell -fall -of_objects \
+               [get_timing_arcs -from U8/EN -to U8/Z \
+               -filter sense==enable_low] 21.2
+
+     To list annotated delay values, run the report_annotated_delay command. To remove
+     the annotated cell or net delay values from a design, run the remove_annotated_delay or
+     reset_design command.
+
+
+     Annotating Timing Checks
+     The set_annotated_check command sets the setup, hold, recovery, removal, or no-
+     change timing check value between two pins.
+     This example annotates a setup time of 2.1 units between clock pin CP of cell instance
+     u1/ff12 and data pin D of the same cell instance.
+     pt_shell> set_annotated_check -setup 2.1 -from u1/ff12/CP \
+                 -to u1/ff12/D
+
+     To list annotated timing check values, use the report_annotated_check command. To
+     see the effect of set_annotated_check for a specific instance, use the report_timing
+     command. To remove annotated timing check values from a design, use the
+     remove_annotated_check or reset_design command.
+
+
+     Annotating Transition Times
+     The set_annotated_transition command sets the transition time on any pin of a
+     design. Transition time (also known as slew) is the amount of time it takes for a signal to
+     change from low to high or from high to low.
+     This example annotates a rising transition time of 0.5 units and a falling transition time of
+     0.7 units on input pin A of cell instance U1/U2/U3.
+     pt_shell> set_annotated_transition -rise 0.5 [get_pins U1/U2/U3/A]
+     pt_shell> set_annotated_transition -fall 0.7 [get_pins U1/U2/U3/A]
+
+
+
+
+PrimeTime® User Guide                                                                           373
+T-2022.03
+                                                                                       Feedback
+Chapter 11: Back-Annotation
+Writing an SDF File
+
+
+
+Writing an SDF File
+     You might want to write out the back-annotated delay information to use for gate-level
+     simulation or another purpose. To write the delay information in SDF version 1.0, 2.1, or
+     3.0 format, use the write_sdf command. The default output format is version 2.1. For
+     example, to write an SDF file, enter
+     pt_shell> write_sdf -version 2.1 -input_port_nets mydesign.sdf
+
+     Note:
+         If you use a utility other than the write_sdf command to write out the SDF
+         file, ensure that the annotations are explicitly specified where the SDF version
+         permits.
+     To learn about the SDF written by PrimeTime, see
+     •   SDF Constructs
+     •   SDF Delay Triplets
+     •   SDF Conditions and Edge Identifiers
+     •   Reducing SDF for Clock Mesh/Spine Networks
+     •   Writing VITAL Compliant SDF Files
+     •   Writing a Mapped SDF File
+     •   Writing Compressed SDF Files
+     •   Writing SDF Files Without Setup or Hold Violations
+
+
+     SDF Constructs
+     The SDF written by PrimeTime uses the following SDF constructs:
+     •   DELAYFILE, SDFVERSION, DESIGN, DATE, VENDOR, PROGRAM, VERSION, DIVIDER,
+         VOLTAGE, PROCESS, TEMPERATURE, TIMESCALE
+
+     •   CELL, CELLTYPE, INSTANCE
+
+     •   ABSOLUTE, COND, CONDELSE, COSETUP, DELAY, HOLD, INTERCONNECT, IOPATH, NOCHANGE,
+         PERIOD, RECOVERY, RECREM, RETAIN, SETUP, SETUPHOLD, SKEW, TIMINGCHECK, WIDTH
+
+
+
+
+PrimeTime® User Guide                                                                        374
+T-2022.03
+                                                                                          Feedback
+Chapter 11: Back-Annotation
+Writing an SDF File
+
+
+         Note:
+            The following constructs are supported in SDF version 3.0 only: CONDELSE,
+            RETAIN, RECREM, REMOVAL.
+
+     •   Posedge and negedge identifiers
+     The SDF written by the write_sdf command does not use the following SDF constructs:
+     INCREMENT, CORRELATION, PATHPULSE, GLOBALPATHPULSE, PORT, DEVICE, SUM, DIFF,
+     SKEWCONSTRAINT, PATHCONSTRAINT.
+
+
+     SDF Delay Triplets
+     The SDF delay triplet values depend on whether your design uses a single operating
+     condition or minimum and maximum operating conditions. For a single operating condition,
+     the SDF delay triplet has three identical values, for example: (1.0:1.0:1.0).
+     For minimum and maximum operating conditions, the SDF triplet contains only two delays
+     for the minimum operating condition and the maximum operating condition, respectively:
+     (1.0::2.0). The typical delay of the SDF triplet is not used. The SDF delays written by
+     PrimeTime specify the following transitions: 0 to 1, 1 to 0, 0 to Z, Z to 1, 1 to Z, and Z to 0.
+
+
+     SDF Conditions and Edge Identifiers
+     PrimeTime takes advantage of the edge identifiers as well as conditions if edge identifiers
+     are specified in the library with sdf_cond. PrimeTime uses edge identifiers for timing
+     checks and cell delays.
+     PrimeTime writes an edge identifier (POSEDGE or NEGEDGE) for a combinational cell delay
+     arc when the positive edge delay differs from the negative edge delay, and the input net
+     transition differs between rise and fall on the input pin of the delay arc. As a result, two
+     timing arc IOPATH delays can be generated for a given timing arc. For example:
+     (CELL
+       (CELLTYPE "XOR")
+       (INSTANCE U1)
+       (DELAY
+         (ABSOLUTE
+         (IOPATH (posedge A) Z (0.936:0.936:0.936)
+     (1.125:1.125:1.125))
+         (IOPATH (negedge A) Z (1.936:1.936:1.936)
+     (2.125:2.125:2.125))
+         (IOPATH (posedge B) Z (0.936:0.936:0.936)
+     (1.125:1.125:1.125))
+         (IOPATH (negedge B) Z (1.936:1.936:1.936)
+     (2.125:2.125:2.125))
+         )
+
+
+
+
+PrimeTime® User Guide                                                                             375
+T-2022.03
+                                                                                       Feedback
+Chapter 11: Back-Annotation
+Writing an SDF File
+
+
+         )
+     )
+
+     This is common for library cells such as multiplexers and exclusive OR cells. Other SDF
+     writers might only generate one set of delay triplets for the positive and negative edges.
+     PrimeTime writes both for the highest accuracy. However, some logic simulators do not
+     support edge identifiers on combinational and sequential timing arcs and expect to see
+     only one timing arc. To write an SDF that is compatible with these simulators, use the
+     -no_edge option with the write_sdf command. For example:
+     pt_shell> write_sdf -no_edge mydesign.sdf
+
+     With the -no_edge option, PrimeTime generates only one timing arc, with the worst-case
+     delay triplets for the positive and negative transitions. Note that the simulation timing
+     delays might be pessimistic as a result of using the -no_edge option.
+
+
+     Reducing SDF for Clock Mesh/Spine Networks
+     A design with a large clock mesh or spine network can produce an unreasonably large
+     SDF file because of the extremely large number of nets in the clock network. In these
+     cases, you can choose to have PrimeTime reduce the SDF file by combining SDF values
+     that differ by a negligible amount, and using the SDF 3.0 PORT construct to represent the
+     combined nets.
+     The SDF reduction features operate under the control of four variables:
+     •   sdf_enable_port_construct – Boolean variable, when set to true, enables the
+         PORT construct to be used for writing SDF. The default setting is false.
+     •   sdf_enable_port_construct_threshold – Floating-point value that specifies the
+         absolute delay difference, in picoseconds, below which the PORT construct is used.
+         The default setting is 1 ps.
+     •   sdf_align_multi_drive_cell_arcs – Boolean variable, when set to true, causes
+         PrimeTime to unify the small differences in driver cell outputs to networks that
+         constitute a mesh or spine, which can cause simulation failure. The default setting is
+         false.
+
+     •   sdf_align_multi_drive_cell_arcs_threshold – Floating-point value that specifies
+         the absolute delay difference, in picoseconds, below which multidrive arcs are aligned.
+         The default setting is 1 ps.
+
+     See Also
+     •   Fast Multidrive Delay Analysis
+     •   Parallel Driver Reduction
+
+
+
+PrimeTime® User Guide                                                                         376
+T-2022.03
+                                                                                    Feedback
+Chapter 11: Back-Annotation
+Writing an SDF File
+
+
+     PORT Construct
+     The sdf_enable_port_construct variable determines whether the PORT
+     statement is used to replace multiple INTERCONNECT statements. The PORT
+     statement is used in all parallel nets (within specified threshold) except those parallel
+     nets which are driven by three-state buffers. If the PORT statement is used, the
+     sdf_enable_port_construct_threshold variable determines the maximum allowable
+     absolute difference in delay arc values for interconnections to be combined. For example,
+     consider the clock network shown in Figure 115.
+
+Figure 115    Parallel buffers driving parallel buffers
+                                  A                               W
+                              a        y                     a          y
+
+
+                                  B                               X
+                              a        y                     a          y
+
+
+                                  C                               Y
+                              a        y                     a          y
+
+
+                                  D                               Z
+                              a        y                     a          y
+
+
+
+
+     If using the PORT construct is disabled (the default), the write_sdf command writes out
+     this clock network using SDF syntax similar to the following:
+     (INSTANCE top)
+     (DELAY
+       (ABSOLUTE
+         (INTERCONNECT A/y W/a (0.01 ::0.03))
+         (INTERCONNECT A/y X/a (0.02 ::0.04))
+         (INTERCONNECT A/y Y/a (0.01 ::0.04))
+         (INTERCONNECT A/y Z/a (0.02 ::0.03))
+         (INTERCONNECT B/y W/a (0.01 ::0.03))
+         (INTERCONNECT B/y X/a (0.03 ::0.05))
+         ...
+         (INTERCONNECT D/y Y/a (0.02 ::0.05))
+         (INTERCONNECT D/y Z/a (0.01 ::0.03))
+       )
+     )
+
+     There are 16 interconnection combinations listed.
+
+
+
+
+PrimeTime® User Guide                                                                      377
+T-2022.03
+                                                                                         Feedback
+Chapter 11: Back-Annotation
+Writing an SDF File
+
+
+     If the PORT construct is enabled, and if the variation in delay values is within the specified
+     threshold, the write_sdf command reduces the SDF as follows:
+     (INSTANCE top)
+     (DELAY
+       (ABSOLUTE
+         (PORT W/a (0.02 ::0.04))
+         (PORT X/a (0.03 ::0.05))
+         (PORT Y/a (0.02 ::0.06))
+         (PORT Z/a (0.03 ::0.07))
+       )
+     )
+
+     Four PORT statements replace 16 INTERCONNECT statements.
+
+     Normalizing Multidriven Arcs for Simulation
+     When the sdf_align_multi_drive_cell_arcs and sdf_enable_port_construct
+     variables are enabled, PrimeTime aligns similar delay values of cell timing arcs where
+     multiple drivers drive a common net.
+     Note:
+         If the common net is driven by three-state buffers, PrimeTime does not align cell
+         delays.
+     The sdf_align_multi_drive_cell_arcs_threshold variable then determines the
+     maximum allowable absolute difference in delay arc values for normalizing to occur.
+     Normalizing means using a single worst-case delay arc value to represent multiple drivers.
+     This can prevent errors from occurring when the SDF file is used for circuit simulation. For
+     example, consider the cell delays in the parallel driver network shown in Figure 116.
+
+Figure 116    Cell delays in a parallel driver network
+
+                          delay Dmax
+                                                 cell delay
+                                                 min= 1.1
+                                        B1
+                                                 max=1.4
+                                                 cell delay
+                                                 min= 1.0                   D     Q
+                 B0                     B2       max=1.3
+
+                                                 cell delay                  ck
+                                                 min= 1.2
+                                        B3
+                                                 max=1.5
+
+
+
+
+PrimeTime® User Guide                                                                            378
+T-2022.03
+                                                                                       Feedback
+Chapter 11: Back-Annotation
+Writing an SDF File
+
+
+     PrimeTime aligns the cell arcs if the sdf_align_multi_drive_cell_arcs
+     variable is set to true, the delay are values are within the
+     sdf_align_multi_drive_cell_arcs_threshold variable setting, the cells in the clock
+     network are combinational (not sequential), and each cell has one input and one output.
+     The normalizing process adjusts both the net delays and cell delays in the clock network
+     as needed to ensure that the complete path delays are the same. Net delays are adjusted
+     only if the sdf_enable_port_construct variable is set to true and the delays are within
+     the threshold variable setting, in which case the PORT statement is used to represent the
+     net arcs connected to the ck load pin in the example. In the case of the nets connecting
+     B0 to cells B1 through B3, no changes are made to the delay values because each of the
+     three cells has only one fanin net.
+     In the case of the cell delays, the worst delay from B0 to the output pin of cells B1 through
+     B3 is calculated to be Dmax. The cell arcs of B1 through B3 are adjusted to make the
+     delay of each path from B0 to the output pins of the cells to be equal to Dmax. In this
+     example, the cells are given the same delays because the net arcs from B0 to the cells B1
+     through B3 all have the same delays. Taking the worst delay means using the minimum of
+     min delays and maximum of max delays, the most pessimistic values. In the case of cells
+     with multiple arcs, the worst cell arc is used to represent the cell delay.
+     To generate an SDF file for simulation, set the sdf_align_multi_drive_cell_arcs
+     variable to true. Avoid reading the generated SDF back into PrimeTime for timing
+     analysis, as the data is pessimistic.
+     If multidrive normalizing is disabled, the write_sdf command writes the following
+     description of the example network.
+     Net delays:
+     (INTERCONNECT B1/z FF1/ck (0.01 ::0.04))
+     (INTERCONNECT B2/z FF1/ck (0.03 ::0.05))
+     (INTERCONNECT B3/z FF1/ck (0.02 ::0.04))
+
+     Cell delays:
+     (CELLTYPE "buf")
+     (INSTANCE B1)
+     (DELAY
+       (ABSOLUTE
+         (DEVICE (1::8) (4::7))
+       )
+     )
+     (CELLTYPE "buf")
+     (INSTANCE B2)
+     (DELAY
+       (ABSOLUTE
+         (DEVICE (2::9) (3::11))
+       )
+     )
+
+
+
+PrimeTime® User Guide                                                                          379
+T-2022.03
+                                                                                       Feedback
+Chapter 11: Back-Annotation
+Writing an SDF File
+
+
+     (CELLTYPE "buf")
+     (INSTANCE B3)
+     (DELAY
+       (ABSOLUTE
+         (DEVICE (1::5) (5::8))
+       )
+     )
+
+     If multidrive normalizing is enabled, and if the delay differences are under the specified
+     threshold, the write_sdf command writes the following description of the example
+     network.
+     Net delays:
+     (PORT FF1/ck (0.03 ::0.05))
+
+     Cell delays:
+     (CELLTYPE "buf" )
+     (INSTANCE B1)
+     (DELAY
+       (ABSOLUTE
+         (DEVICE (2::9) (5::11))
+       )
+     )
+     (CELLTYPE "buf" )
+     (INSTANCE B2)
+     (DELAY
+       (ABSOLUTE
+         (DEVICE (2::9) (5::11))
+       )
+     )
+     (CELLTYPE "buf" )
+     (INSTANCE B3)
+     (DELAY
+       (ABSOLUTE
+         (DEVICE (2::9) (5::11))
+       )
+
+
+     Writing VITAL Compliant SDF Files
+     To write out SDF that is VITAL compliant, use this command:
+     pt_shell> write_sdf -no_edge_merging -exclude {"no_condelse"} \
+               file.sdf
+
+     If your simulator cannot handle negative delays, use the -no_negative_values option
+     with the timing_checks, cell_delays, or net_delays values. To zero out all negative
+     timing check values—such as setup, hold, recovery or removal SDF statements, use
+     the -no_negative_values timing_checks option. To zero out all negative cell delay
+     values—such as IOPATH and port SDF statements, use the -no_negative_values
+
+
+PrimeTime® User Guide                                                                             380
+T-2022.03
+                                                                                         Feedback
+Chapter 11: Back-Annotation
+Writing an SDF File
+
+
+     cell_delays option. To zero out all negative net delays—such as interconnect SDF
+     statements, use the -no_negative_values net_delays option. For example, to zero out
+     timing checks and net delays, use this command:
+     pt_shell> write_sdf -no_edge_merging -no_negative_values \
+          {timing_checks net_delays} -exclude {"no_condelse"} file.sdf
+
+
+     Writing a Mapped SDF File
+     The Standard Delay Format (SDF) mapping feature of PrimeTime lets you specify the
+     output format of the SDF file. You start by creating an SDF map file, which specifies the
+     syntax and timing arcs written to the SDF file for cells in the library. For example, if you
+     want to change the SDF output for a flip-flop in the library, you define a map for that cell.
+     You apply the mapping by using the -map option of the write_sdf command.
+     To learn about the SDF mapping feature, see
+     •   Specifying Timing Labels in the Library
+     •   Specifying the min_pulse_width Constraint
+     •   Using SDF Mapping
+     •   Supported SDF Mapping Functions
+     •   SDF Mapping Assumptions
+     •   Bus Naming Conventions
+     •   Labeling Bus Arcs
+     •   SDF Mapping Limitations
+     •   Mapped SDF File Examples
+
+     Specifying Timing Labels in the Library
+     To reference delays of timing arcs in the SDF mapping mechanism, you need to specify
+     a label to the timing arcs in the library. The timing_label attribute is written in the timing
+     group of the library file to label a timing arc. This labels arcs for supplying values for the
+     following SDF constructs: IOPATH, SETUP, HOLD, SETUPHOLD, RECOVERY, REMOVAL, RECREM,
+     NOCHANGE, and WIDTH.
+
+     The following example shows how to label a timing arc A_Z:
+     cell(IV_I) {
+       area : 1;
+       pin(A) {
+         direction : input;
+         capacitance : 1;
+       }
+
+
+PrimeTime® User Guide                                                                            381
+T-2022.03
+                                                                                     Feedback
+Chapter 11: Back-Annotation
+Writing an SDF File
+
+
+         pin(Z) {
+           direction : output;
+           function : "A’";
+           timing() {
+             related_pin : "A";
+             timing_label : "A_Z";
+             rise_propagation(onebyone) {
+               values("0.380000");
+             }
+             rise_transition(tran) {
+               values("0.03, 0.04, 0.05");
+             }
+             fall_propagation(prop) {
+               values("0.15, 0.17, 0.20");
+             }
+             fall_transition(tran) {
+               values("0.02, 0.04, 0.06");
+             }
+           }
+         }
+     }
+
+     Specifying the min_pulse_width Constraint
+     To specify the minimum pulse width arcs, use one of the following methods:
+     •   Method 1 – Specify a min_pulse_width group within the pin group (in the library file).
+         1. Place the timing_label_mpw_high attribute in the min_pulse_width group to
+            reference the constraint_high attribute.
+         2. Place the timing_label_mpw_low attribute in the min_pulse_width group to
+            reference the constraint_low attribute.
+     •   Method 2 – Specify the constraints in the library by using the min_pulse_width_high
+         and min_pulse_width_low attributes in the pin group.
+         1. Place the timing_label_mpw_high attribute in the pin group to reference the
+            min_pulse_width_high attribute.
+
+         2. Place the timing_label_mpw_low attribute in the pin group to reference the
+            min_pulse_width_low attribute.
+
+     Accessing the min_pulse_width Constraint
+     To access the min_pulse_width values, use these functions:
+     •   min_rise_delay(label_high) – Returns the value of the min_pulse_width_high
+         attribute.
+     •   max_rise_delay(label_high) – Same as min_rise_delay(label_high).
+
+
+
+
+PrimeTime® User Guide                                                                        382
+T-2022.03
+                                                                                     Feedback
+Chapter 11: Back-Annotation
+Writing an SDF File
+
+
+     •   min_fall_delay (label_low) – Returns the value of the min_pulse_width_low
+         attribute.
+     •   max_fall_delay(label_low) – Same as min_fall_delay(label_low).
+
+     For information about functions that support SDF mapping, see Table 21.
+     Specifying the min_period Constraint on a Pin
+     Specify the min_period constraint on a pin as an attribute in the pin section. Use the
+     min_period(pin_name) function to take the pin name as argument and to return the
+     value of the min_period constraint.
+
+     Using SDF Mapping
+     To specify the SDF mapping file when writing the SDF file for a design, use this command:
+     write_sdf [-context verilog | vhdl] [-map map_file] output_sdf_file
+
+     Note:
+         Only names that are specified using the bus() function are affected. For more
+         information, see Table 21.
+     For example:
+     pt_shell> write_sdf -context verilog -map example.map example.sdf
+
+     Output
+     File: example.sdf
+     (DELAYFILE
+       (SDFVERSION "OVI V2.1" )
+       (DESIGN        "ADDER" )
+       (DATE          "Wed Apr 01 08:18:28 2019" )
+       (VENDOR        "abc")
+       (PROGRAM       " " )
+       (VERSION       "3.24" )
+       (DIVIDER       /)
+       (VOLTAGE 0:0:0)
+       (PROCESS "")
+       (TEMPERATURE 0:0:0 )
+       (TIMESCALE     1 ns)
+     (CELL
+       (CELLTYPE "ADDER")
+       (INSTANCE )
+       (DELAY
+         (ABSOLUTE
+           (INTERCONNECT ...)
+         )
+       )
+     )
+     (CELL
+       (CELLTYPE "EXMP")
+
+
+PrimeTime® User Guide                                                                         383
+T-2022.03
+                                                                                           Feedback
+Chapter 11: Back-Annotation
+Writing an SDF File
+
+
+         (INSTANCE U15)
+         (DELAY
+           (ABSOLUTE
+             (IOPATH A Z (1.8::4.3) (1.8::4.0))
+             (IOPATH IN[0] Z (3.0::1.2) (3.0::1.0))
+           )
+         )
+     )
+     (CELL
+       (CELLTYPE "FD02"
+         (INSTANCE B1/U12/DFF)
+         (DELAY
+           (ABSOLUTE
+             (IOPATH (posedge CP) Q(1.2::1.2) (1.5::1.5))
+             (IOPATH (posedge CP) QN(1.2::1.2) (1.5::1.5))
+             (IOPATH (negedge CD) Q (::) (2.1::2.4))
+             (IOPATH (negedge CD) QN (2.1::2.4) (::))
+           )
+           (TIMINGCHECK
+             (SETUP D (posedge CP)) (2.1::2.5))
+             (HOLD D (posedge CP)) (1.1::1.4))
+             (WIDTH (negedge CP) (5.0))
+             (RECOVERY (posedge CD) (posedge CP)) (2.5))
+             (PERIOD (posedge CP) (5.0))
+           )
+         )
+       )
+     )
+
+     When SDF for cells are not present in the SDF mapping file, they are written with the
+     default write_sdf format.
+     SDF Mapping Notation
+     The notation used in presenting the syntax of the SDF mapping language follows. In the
+     following list, item is a symbol for a syntax construct item.
+     •    item? – Item is optional in the definition (it can appear one time or not at all).
+
+     •    item* – Item can appear zero or any number of times.
+
+     •    item+ – Item can appear one or more times (but cannot be omitted).
+
+     •    KEYWORD – Keywords are shown in uppercase bold for easy identification but are case-
+          insensitive.
+     •    VARIABLE – Is a symbol for a variable. Variable symbols are shown in uppercase for
+          easy identification, but are case-insensitive. Some variables are defined as one of a
+          number of discrete choices; other variables represent user data such as names and
+          numbers.
+
+
+
+
+PrimeTime® User Guide                                                                             384
+T-2022.03
+                                                                                               Feedback
+Chapter 11: Back-Annotation
+Writing an SDF File
+
+
+     SDF Mapping Comments
+     When adding comment lines in the SDF mapping file, use this format:
+     [white_space]* [#] [any char except new-line char]*
+
+     If the line has a pound sign (#) as the first nonwhitespace character, it is treated as a
+     comment line and is ignored.
+     Quoted strings can contain new-line characters in them, and can span multiple lines.
+     Comments cannot be embedded inside a quoted string. For definitions of SDF mapping
+     functions, see Table 21.
+     SDF Mapping Variables
+     Table 20 lists the variables used in the SDF mapping language.
+     Table 20       SDF mapping variables
+
+Variable                Description
+
+SDFMAP_DNUMBER          A nonnegative integer number, for example, +12, 23, 0
+
+SDFMAP_FUNCTION         A string that denotes the function name. Supported functions are given in
+                        Table 21.
+
+SDFMAP_IDENTIFIER       The name of an object. It is case-sensitive. The following characters are
+                        allowed: alphanumeric characters, the underscore character (_), and the
+                        escape character (\). If you want to use a nonalphanumeric character as a part
+                        of an identifier, you must prefix it with the escape character. White spaces are
+                        not allowed with the hierarchy divider character (/).
+
+SDFMAP_MAP              A positive integer value preceded with the dollar sign ($), for example, $10, $3,
+                        $98. Used to specify a placeholder for a value in the mapping file.
+
+SDFMAP_NUMBER           A nonnegative (zero or positive) real number, for example, 0, 1, 3.4, .7, 0.5,
+                        2.4e-2, 3.4e2
+
+SDFMAP_QSTRING          A string of any legal SDF characters and spaces, including tabs and new-line
+                        characters, optionally enclosed by double quotation marks.
+
+SDFMAP_RNUMBER          A positive, zero, or negative real number, for example, 0, 1, 0.0, –3.4, .7, –0.3,
+                        2.4e-2, 3.4e4
+
+SDFMAP_TSVALUE          A real number followed by a unit.
+
+
+
+     Supported SDF Mapping Functions
+     Table 21 lists the functions supported when writing mapped SDF files.
+
+
+
+
+PrimeTime® User Guide                                                                                    385
+T-2022.03
+                                                                                         Feedback
+Chapter 11: Back-Annotation
+Writing an SDF File
+
+
+     Table 21       SDF mapping functions
+
+Function                         Return     Comment
+                                 value
+
+in(float)                        Float      Natural logarithm.
+
+exp(float)                       Float      Exponentiation.
+
+sqrt(float)                      Float      Square root.
+
+max(float, float)                Float      Two-argument maximum function.
+
+min(float, float)                Float      Two-argument minimum function.
+
+bus(string)                      String     Returns a transformed string by replacing the bus
+                                            delimiter characters in the string with the appropriate
+                                            bus delimiter characters as specified in the write_sdf
+                                            command.
+                                            The -context verilog option causes the string to be
+                                            transformed to the %s[%d] format.
+                                            The -context vhdl option causes the string to be
+                                            transformed to the %s(%d) format.
+
+pin(string)                      String     Returns the string argument passed to it.
+
+max_fall_delay(label)            Float      Maximum fall delay value associated with that timing
+                                            label.
+
+max_fall_delay_bus               Float      Maximum fall delay value to be used when the timing
+  (label, from_pin, to_pin)                 label is associated with a bus arc.
+
+max_fall_retain_delay            Float      Maximum fall delay value to be used when the timing
+  (label, from_pin, to_pin)                 label is associated with a retain arc.
+
+max_rise_delay(label)            Float      Maximum rise delay value associated with that timing
+                                            label.
+
+max_rise_delay_bus               Float      Maximum rise delay value is used when the timing label
+(label, from_pin, to_pin)                   is associated with a bus arc.
+
+max_rise_retain_delay            Float      Maximum rise delay value to be used when the timing
+  (label, from_pin, to_pin)                 label is associated with a retain arc.
+
+min_fall_delay(label)            Float      Minimum fall delay value associated with that timing
+                                            label.
+
+min_fall_delay_bus               Float      Minimum fall delay function to be used when the timing
+  (label, from_pin, to_pin)                 label is associated with a bus arc.
+
+min_fall_retain_delay            Float      Minimum fall delay value to be used when the timing
+  (label, from_pin, to_pin)                 label is associated with a retain arc.
+
+
+
+
+PrimeTime® User Guide                                                                              386
+T-2022.03
+                                                                                      Feedback
+Chapter 11: Back-Annotation
+Writing an SDF File
+
+
+     Table 21      SDF mapping functions (Continued)
+
+Function                        Return    Comment
+                                value
+
+min_period(pin)                 Float     Returns the minimum period value associated with the
+                                          pin name “pin” of the current cell.
+
+min_rise_delay(label)           Float     Minimum rise delay value associated with that timing
+                                          label.
+
+min_rise_delay_bus              Float     Minimum rise delay value to be used when the timing
+  (label, from_pin, to_pin)               label is associated with a bus arc.
+
+min_rise_retain_delay           Float     Minimum rise delay value to be used when the timing
+  (label, from_pin, to_pin)               label is associated with a retain arc.
+
+
+     SDF Mapping File Syntax
+     Example 12 shows the complete syntax of a mapped SDF file.
+
+Example 12 Syntax of mapped SDF file
+     mapping_file       ::= map_header cell_map+
+     map_header         ::= sdf_version sdf_map_name? hierarchy_divider?
+                            bus_delimiter?
+
+     sdf_map_name              ::= $SDF_MAP_NAME SDFMAP_QSTRING
+     sdf_version               ::= $SDF_VERSION SDFMAP_QSTRING
+     hierarchy_divider         ::= $SDF_HIERARCHY_DIVIDER SDFMAP_HCHAR
+     bus_delimiter             ::= $SDF_BUSBIT SDFMAP_QSTRING
+
+     cell_map                  ::= $SDF_CELL cell_name format_string var_map
+                                   $SDF_CELL_END
+     cell_name                 ::= SDFMAP_QSTRING
+     format_string             ::= SDFMAP_QSTRING
+
+     var_map                   ::= var_map_line+
+     var_map_line              ::= SDFMAP_MAP expression
+
+     expression                ::= expression binary_operator expression
+                               ||= unary_operator expression
+                               ||= expression ? expression : expression
+                               ||= ( expression )
+                               ||= function_call
+                               ||= SDFMAP_NUMBER
+
+     function_call             ::= SDFMAP_FUNCTION ( func_args? )
+     func_args                 ::= func_arg
+                               ||= func_args , func_args
+     func_arg                  ::= SDFMAP_IDENTIFIER
+
+
+
+PrimeTime® User Guide                                                                            387
+T-2022.03
+                                                                                       Feedback
+Chapter 11: Back-Annotation
+Writing an SDF File
+
+
+                                 ||= expression
+
+     binary_operator             ::= +
+                                 ||= -
+                                 ||= *
+                                 ||= /
+                                 ||= &
+                                 ||= |
+                                 ||= >
+                                 ||= <
+                                 ||= =
+     binary_operator             ::= !
+                                 ||= -
+
+     SDF Mapping Assumptions
+     The SDF mapping file reader assumes that the SDF format string read from the SDF
+     mapping file has valid SDF syntax. For instance, it assumes that when the proper
+     substitutions are made for the placeholders, the resulting SDF is syntactically (and also
+     semantically) correct. The SDF map parser does not attempt to parse the format string
+     to check for possible user errors. It performs the placeholder substitutions and prints the
+     resulting string to the SDF output file.
+     To check the validity of the generated mapped SDF file, read the mapped file by using the
+     read_sdf command. For example:
+     pt_shell> read_sdf -syntax_only mapped.sdf
+
+     Bus Naming Conventions
+     When you specify mapping names with the bus(string) function, the SDF writer replaces
+     the bus bit delimiting characters (specified by the construct $SDF_BUSBIT QSTRING) by
+     using the appropriate delimiting characters.
+     For example, suppose the following lines are in the mapping file:
+     $SDF_BUSBIT "<>"
+     ...
+     $23 bus(output_bus<5>)
+
+     When you specify the write_sdf command with the -context verilog option, the
+     SDF writer prints the name as output_bus[5]. For more information, see Using SDF
+     Mapping. If more than one set of matching bus delimiters is found in a name, the SDF
+     writer replaces only the matching set of delimiters at the end of the name string. If you do
+     not specify bus delimiters, the names are printed unchanged.
+     Header Consistency Check for SDF Mapping Files
+     Each SDF mapping file defines SDF version and SDF bus delimiter characters in its
+     header. When PrimeTime reads multiple SDF mapping files during one write_sdf
+
+
+
+PrimeTime® User Guide                                                                          388
+T-2022.03
+                                                                                        Feedback
+Chapter 11: Back-Annotation
+Writing an SDF File
+
+
+     command, it assumes all the headers have the same SDF version and bus delimiter
+     characters.
+
+     Labeling Bus Arcs
+     A pin in the library file can be a bus. In the following example, the timing group on the pin
+     defines multiple arcs.
+
+Example 13 Timing group on the pin defines multiple arcs
+     bus(A) {
+         bus_type : bus_11;
+         direction : input ;
+     timing() {
+           related_pin : "CK" ;
+           timing_type : setup_rising ;
+              timing_label : "tas";
+           intrinsic_rise : 1.12000 ;
+           intrinsic_fall : 1.12000 ;
+
+     In Example 13 (assuming A is an 11-bit bus), 11 setup arcs are defined between bus A
+     and CK. When you label such an arc, since only one timing label is present, PrimeTime
+     attaches the same label (tas) to all arcs defined by the statement. When you access
+     individual bit arcs, use the bus versions of the max/min rise/fall delay functions. For
+     example, to reference the arc corresponding to A[5], which is from CK to A[5], use the
+     mapping functions shown in Example 14 and Example 15.
+
+Example 14 Mapping functions
+     max_rise_delay_bus(tas, CK, A[5]) #To get the max rise delay
+     min_rise_delay_bus(tas, CK, A[5]) #To get the min rise delay
+     max_fall_delay_bus(tas, CK, A[5]) #To get the max fall delay
+     min_fall_delay_bus(tas, CK, A[5]) #To get the min fall delay
+
+Example 15 Mapping functions
+     bus (In)    {
+       bus_type : "bus8";
+       direction   :    input;
+       capacitance :    1.46;
+       fanout_load :    1.46;
+     }
+     bus(Q){
+       bus_type : "bus8";
+       direction   :    output;
+       timing () {
+         timing_label      : "In_to_Q"
+           timing_sense       : non_unate;
+           intrinsic_rise     : 2.251622;
+           rise_resistance : 0.020878;
+           intrinsic_fall     : 2.571993;
+           fall_resistance : 0.017073;
+
+
+
+PrimeTime® User Guide                                                                           389
+T-2022.03
+                                                                                         Feedback
+Chapter 11: Back-Annotation
+Writing an SDF File
+
+
+             related_pin           : "In";
+         }
+     }
+
+     To reference the arc from In[6] to Q[6] and print the following SDF line:
+     (IOPATH In[6] Q[6] (1.8::4.3) (1.8::4.0))
+
+     This is the SDF mapping file format string:
+     (IOPATH $1 $2 ($3::$4) ($5::$6))
+
+     The resulting SDF function mapping is as follows:
+     $1 bus(I1[6])
+     $2 bus(Q[6])
+     $3 min_rise_delay_bus(In_to_Q, In[6], Q[6])
+     $4 max_rise_delay_bus(In_to_Q, In[6], Q[6])
+     $5 min_fall_delay_bus(In_to_Q, In[6], Q[6])
+     $6 max_fall_delay_bus(In_to_Q, In[6], Q[6])
+
+     Note:
+         Avoid using a bus arc in nonbus max/min rise/fall delay functions.
+
+     SDF Mapping Limitations
+     The SDF mapping file syntax has the following limitations:
+     •   You cannot use wildcard characters.
+     •   You cannot specify instance-specific mapping format. An SDF mapping format must be
+         specified for a library cell. The format is applied when writing SDF for every cell that is
+         an instance of that library cell.
+     •   If the SDF mapping file does not provide a format for every cell present in the library,
+         PrimeTime prints these cells using the default format of the write_sdf command.
+
+     Mapped SDF File Examples
+     The following examples show different types of mapped SDF files.
+     Library File for Cells EXMP and FF1
+     A complete SDF mapping example for cells EXMP and FF1 is shown in Example 17. The
+     min_pulse_width arcs are labeled by using Style 2.
+
+     Example 16 shows a library file, example.lib.
+
+Example 16 Library file example.lib
+     library(example) {define("timing_label_mpw_low", "pin",
+     "string");
+
+
+
+PrimeTime® User Guide                                                                            390
+T-2022.03
+                                                             Feedback
+Chapter 11: Back-Annotation
+Writing an SDF File
+
+
+     define("timing_label", "timing", "string");
+     define("timing_label_mpw_low", "pin", "string");
+
+     /* If using style #1 to specify min_pulse_width info
+                */
+     /* define("timing_label_mpw_low", "min_pulse_width",
+     "string");
+     */
+     /* define("timing_label_mpw_high", "min_pulse_width",
+     "string");*/
+
+     type(two_bit) {
+         base_type : array;
+         data_type : bit;
+         bit_width : 2;
+         bit_from : 1;
+         bit_to : 0;
+         downto : true;
+       }
+     cell (EXMP) {
+       version :    1.00;
+       area     :   1.000000;
+       cell_footprint : "EXMP";
+         bus(IN) {
+         bus_type : two_bit;
+            direction : input;
+            pin(IN[1:0]) {
+              capacitance : 1;
+            }
+         }
+
+          pin (A)     {
+            direction   :   input;
+            capacitance :   0.49;
+            fanout_load :   0.49;
+            max_transition : 4.500000;
+         }
+         pin (B)    {
+            direction   :   input;
+            capacitance :   0.51;
+            fanout_load :   0.51;
+            max_transition : 4.500000;
+         }
+         pin(Y){
+            direction   :   output;
+            capacitance :   0.00;
+            function : "(A & B & IN[0] & IN[1])";
+            timing () {
+             related_pin : "A";
+             timing_label : "A_Z";
+             rise_transition (transitionDelay){ ...}
+             fall_transition (transitionDelay){...}
+             rise_propagation (propDelay){...}
+
+
+PrimeTime® User Guide                                              391
+T-2022.03
+                                                         Feedback
+Chapter 11: Back-Annotation
+Writing an SDF File
+
+
+                fall_propagation (propDelay){...}
+              }
+              timing () {
+                related_pin : "B";
+                timing_label : "B_Z";
+                rise_transition (transitionDelay){...}
+                fall_transition (transitionDelay){...}
+                rise_propagation (propDelay){...}
+                fall_propagation (propDelay) { ...}
+              }
+              timing () {
+                related_pin : "IN[0]";
+                timing_label : "IN[0]_Z";
+                rise_transition (transitionDelay){...}
+                fall_transition (transitionDelay)...}{
+                rise_propagation (propDelay){...}
+                fall_propagation (propDelay){...}
+              }
+              timing () {
+                related_pin : "IN[1]";
+                timing_label : "IN[1]_Z";
+                rise_transition (transitionDelay){...}
+                fall_transition (transitionDelay){...}
+                rise_propagation (propDelay){...}
+                fall_propagation (propDelay){...}
+              }
+              ...
+          }
+
+     cell(FD2) {
+       area : 9;
+       pin(D) {
+         direction : input;
+         capacitance : 1;
+         timing() {
+              timing_label : "setup_D";
+           timing_type : setup_rising;
+           intrinsic_rise : 0.85;
+           intrinsic_fall : 0.85;
+           related_pin : "CP";
+         }
+         timing() {
+              timing_label : "hold_D";
+           timing_type : hold_rising;
+           intrinsic_rise : 0.4;
+           intrinsic_fall : 0.4;
+           related_pin : "CP";
+         }
+       }
+       pin(CP) {
+         direction : input;
+         capacitance : 1;
+         min_period : 5.0
+
+
+PrimeTime® User Guide                                          392
+T-2022.03
+                                                                     Feedback
+Chapter 11: Back-Annotation
+Writing an SDF File
+
+
+            min_pulse_width_high: 1.5
+            min_pulse_width_low: 1.5
+            timing_label_mpw_low: "min_pulse_low_CP"
+            timing_label_mpw_high: "min_pulse_high_CP"
+        }
+
+       pin(CD) {
+         direction : input;
+         capacitance : 2;
+         timing() {
+              timing_label : "recovery_rise_CD";
+           timing_type : recovery_rising;
+           intrinsic_rise : 0.5;
+           related_pin : "CP";
+         }
+       }
+     ...
+     pin(Q) {
+         direction : output;
+         function : "IQ";
+         internal_node : "Q";
+         timing() {
+              timing_label : "CP_Q";
+           timing_type : rising_edge;
+           intrinsic_rise : 1.19;
+           intrinsic_fall : 1.37;
+           rise_resistance : 0.1458;
+           fall_resistance : 0.0523;
+           related_pin : "CP";
+         }
+         timing() {
+              timing_label : "clear_Q";
+           timing_type : clear;
+           timing_sense : positive_unate;
+           intrinsic_fall : 0.77; /* CP -> Q intrinsic - 0.6 ns */
+           fall_resistance : 0.0523;
+           related_pin : "CD";
+         }
+       }
+       pin(QN) {
+         direction : output;
+         function : "IQN";
+         internal_node : "QN";
+         timing() {
+              timing_label : "CP_QN";
+           timing_type : rising_edge;
+           intrinsic_rise : 1.47;
+           intrinsic_fall : 1.67;
+           rise_resistance : 0.1523;
+           fall_resistance : 0.0523;
+           related_pin : "CP";
+         }
+         timing() {
+
+
+PrimeTime® User Guide                                                      393
+T-2022.03
+                                                                                   Feedback
+Chapter 11: Back-Annotation
+Writing an SDF File
+
+
+                  timing_label : "preset_QN";
+               timing_type : preset;
+               timing_sense : negative_unate;
+               intrinsic_rise : 0.87; /* CP -> QN intrinsic - 0.6 ns */
+               rise_resistance : 0.1523;
+               related_pin : "CD";
+           }
+          }
+      }
+     }
+
+     Note:
+          The min_pulse_width_low/high constraints have been defined as attributes
+          inside the pin group. The timing label attributes timing_label_mpw_low and
+          timing_label_mpw_high are used to reference these constraints.
+
+     Mapped SDF File
+     Example 17 shows a mapped SDF file, example.map.
+
+Example 17 Mapped SDF file, example.map
+     # This is a comment
+     $SDF_VERSION "OVI 2.1"
+     $SDF_BUSBIT "[]"
+     $SDF_CELL EXMP
+     "(DELAY
+        (ABSOLUTE
+          (IOPATH $1 $2 ($3::$4) ($5::$6))
+          (IOPATH $7 $2 ($8::$9) ($10::$11))
+        )
+     )"
+     $3 min_rise_delay(A_Z)
+     $4 max_rise_delay(A_Z)
+     $5 min_fall_delay(A_Z)
+     $6 max_fall_delay(A_Z)
+     $1 pin(A)
+     $2 pin(Z)
+     $7 bus(IN[0])
+     $8 min_rise_delay(IN[0]_Z)
+     $9 max_rise_delay(IN[0]_Z)
+     $10 min_fall_delay(IN[0]_Z)
+     $11 max_fall_delay(IN[0]_Z)
+     $SDF_CELL_END
+
+     $SDF_CELL DFF
+     "(DELAY
+         (ABSOLUTE
+          (IOPATH (posedge $1) $2 ($3::$4) ($5::$6))
+          (IOPATH (posedge $7) $8 ($9::$10) ($11::$12))
+          (IOPATH (negedge $13) $2 (::) ($16::$17))
+          (IOPATH (negedge $13) $8($18::$19) (::))
+
+
+
+PrimeTime® User Guide                                                                    394
+T-2022.03
+                                                                          Feedback
+Chapter 11: Back-Annotation
+Writing an SDF File
+
+
+         )
+     )
+     (TIMINGCHECK
+         (SETUP $20(posedge $1)) ($30::$31))
+         (HOLD $20 (posedge $1)) ($32::$33))
+         (WIDTH (negedge $1) ($34))
+         (RECOVERY (posedge $13) (posedge $1)) ($36))
+         (PERIOD (posedge $1) ($37))
+     )"
+     $1 pin(CP)
+     $2 pin(Q)
+     $3 min_rise_delay(CP_Q)
+     $4 max_rise_delay(CP_Q)
+     $5 min_fall_delay(CP_Q)
+     $6 max_fall_delay(CP_Q )
+     $7 pin(CP)
+     $8 pin(QN)
+     $9 min_rise_delay(CP_QN)
+     $10 max_rise_delay(CP_QN)
+     $11 min_fall_delay(CP_QN)
+     $12 max_fall_delay(CP_QN)
+     $13 pin(CD)
+     $16 min_fall_delay(clear_Q)
+     $17 max_fall_delay(clear_Q)
+     $18 min_rise_delay(preset_QN)
+     $19 max_rise_delay(preset_QN)
+     $20 pin(D)
+     $30 min_rise_delay(setup_D)
+     $31 max_rise_delay(setup_D)
+     $32 min_rise_delay(hold_D)
+     $33 max_rise_delay(hold_D)
+     $34 min_fall_delay(min_pulse_low_CP)
+     $36 max_rise_delay(recovery_rise_CD)
+     $37 min_period(CP)
+
+     Three-State Buffers
+     For an example of files for a three-state noninverting buffer, see
+     •   Library file – Example 18
+     •   Mapped SDF file – Example 19
+
+Example 18 Library file for three-state noninverting buffer
+     /
+     *---------------------------------------------------------
+     Internal Tristate Non-Inverting Buffer, Positive Enable, 1x
+     Drive
+     ---------------------------------------------------------*
+     /
+     define("timing_label", "timing", "string");
+     define("timing_label_mpw_low", "pin", "string");
+
+
+
+PrimeTime® User Guide                                                           395
+T-2022.03
+                                                        Feedback
+Chapter 11: Back-Annotation
+Writing an SDF File
+
+
+     define("timing_label_mpw_low", "pin", "string");
+
+     cell(BTS) {
+       area : 63 ;
+       pin(Z) {
+         direction : output ;
+        function : "A";
+         max_capacitance : 0.14000 ;
+         capacitance : 0.00420 ;
+        three_state : "E’";
+         timing() {
+           related_pin : "A" ;
+           timing_sense : positive_unate ;
+           timing_label : "A_Z";
+           cell_rise(table_1) {
+             values ( ... ) ;
+           }
+           rise_transition(table_1) {
+             values ( ... ) ;
+           }
+           cell_fall(table_1) {
+             values ( ... ) ;
+           }
+           fall_transition(table_1) {
+             values ( ... ) ;
+           }
+           intrinsic_rise : 0.31166 ;
+           intrinsic_fall : 0.40353 ;
+         }
+         timing() {
+           related_pin : "E" ;
+           timing_label : "E_Z_3s_enable";
+           cell_rise(table_1) {
+             values ( ... ) ;
+           }
+           rise_transition(table_1) {
+             values ( ... ) ;
+           }
+           cell_fall(table_1) {
+             values ( ... ) ;
+           }
+           fall_transition(table_1) {
+             values ( ... ) ;
+           }
+           intrinsic_rise : 0.22159 ;
+           intrinsic_fall : 0.27933 ;
+         }
+         timing() {
+           related_pin : "E" ;
+           timing_type : three_state_disable ;
+           timing_label : "E_Z_3s_disable";
+           cell_rise(table_10) {
+             values ( ... ) ;
+
+
+PrimeTime® User Guide                                         396
+T-2022.03
+                                                                    Feedback
+Chapter 11: Back-Annotation
+Writing an SDF File
+
+
+             }
+             rise_transition(table_10) {
+               values ( ... ) ;
+             }
+             cell_fall(table_10) {
+               values ( ... ) ;
+             }
+             fall_transition(table_10) {
+               values ( ... ) ;
+             }
+             intrinsic_rise : 0.30693 ;
+             intrinsic_fall : 0.19860 ;
+           }
+         }
+         pin(A) {
+           direction : input ;
+           capacitance : 0.00423 ;
+         }
+         pin(E) {
+           direction : input ;
+           capacitance : 0.01035 ;
+         }
+     }
+
+Example 19 Mapped SDF file for three-state noninverting buffer
+     $SDF_VERSION "OVI 2.1"
+     $SDF_BUSBIT "[]"
+     $SDF_CELL BTS
+      "(DELAY
+          (ABSOLUTE
+            (IOPATH $1 $3 ($4::$5) ($6::$7))
+            (IOPATH $2 $3 ($8::$9) ($10::$11) ($12::$13) ($8::$9)
+     ($14::$15) ($10::$11))
+       )"
+     ####
+       $1 pin(A)
+       $2 pin(E)
+       $3 pin(Z)
+     ####
+       $4 min_rise_delay(A_Z)
+       $5 max_rise_delay(A_Z)
+       $6 min_fall_delay(A_Z)
+       $7 max_fall_delay(A_Z)
+     #####
+       $8 min_rise_delay(E_Z_3s_enable)
+       $9 max_rise_delay(E_Z_3s_enable)
+       $10 min_fall_delay(E_Z_3s_enable)
+       $11 max_fall_delay(E_Z_3s_enable)
+       $12 min_rise_delay(E_Z_3s_disable)
+       $13 max_rise_delay(E_Z_3s_disable)
+       $14 min_fall_delay(E_Z_3s_disable)
+
+
+
+
+PrimeTime® User Guide                                                     397
+T-2022.03
+                                                                                        Feedback
+Chapter 11: Back-Annotation
+Setting Lumped Parasitic Resistance and Capacitance
+
+
+       $15 max_fall_delay(E_Z_3s_disable)
+     ####
+
+
+     Writing Compressed SDF Files
+     To compress large SDF files to a gzip file, use the write_sdf command with the
+     -compress option:
+     pt_shell> write_sdf -compress gzip 1.sdf.gz
+
+
+     Writing SDF Files Without Setup or Hold Violations
+     The write_sdf command allows you to write an SDF file that masks setup and hold
+     violations. This is useful in the middle of the design flow, when the timing still has some
+     violations but gate-level simulation must be run.
+     To do this, use the -mask_violations option of the write_sdf command. Valid values
+     are setup, hold, and both. For example,
+     pt_shell> write_sdf \
+                 -significant_digits 5 \
+                 -mask_violations both \
+                 masked.sdf
+     Adjusting SDF to mask 16 setup violations.
+     Adjusting SDF to mask 131 hold violations.
+
+     The write_sdf command masks violations by adjusting the delay of the last timing arc
+     driving the violating endpoint, adding delay to mask hold violations and subtracting delay
+     to mask setup violations.
+     Note the following limitation:
+     •   You might need to use a higher -significant_digits value to avoid rounding issues
+         that cause slight violations.
+
+
+Setting Lumped Parasitic Resistance and Capacitance
+     You can annotate resistance and capacitance (RC) on nets, as shown in Figure 117.
+     Even if you annotated all the delays of the design with SDF, you might want to annotate
+     parasitics to perform certain design rule checks, such as maximum transition or maximum
+     capacitance.
+
+
+
+
+PrimeTime® User Guide                                                                              398
+T-2022.03
+                                                                                       Feedback
+Chapter 11: Back-Annotation
+Setting Lumped Parasitic Resistance and Capacitance
+
+
+Figure 117    Lumped RC
+
+
+
+                           R
+
+                  C
+
+
+
+
+     Setting lumped resistance or capacitance with the set_resistance or set_load
+     command temporarily overrides the wire load model or detailed parasitics for a net.
+     Removing lumped resistance or capacitance from a net with the remove_resistance
+     or remove_capacitance command causes the net to revert back to its previous form of
+     parasitic data.
+     You can set lumped resistance and capacitance separately. For example, you can read
+     in detailed parasitics for a net, and then override just the capacitance for that net with the
+     set_load command. In that case, PrimeTime still uses the detailed parasitic information to
+     calculate the net resistance.
+
+
+     Setting Net Capacitance
+     The set_load command sets the net capacitance values on ports and nets. If the current
+     design is hierarchical, you must link it with the link_design command.
+     By default, the total capacitance on a net is the sum of all of pin, port, and wire
+     capacitance values associated with the net. A capacitance value you specify overrides the
+     internally estimated net capacitance.
+     Use the set_load command for nets at lower levels of the design hierarchy. Specify these
+     nets as BLOCK1/BLOCK2/NET_NAME.
+     If you use the -wire_load option, the capacitance value is set as a wire capacitance on
+     the specified port and the value is counted as part of the total wire capacitance (not as part
+     of the pin or port capacitance).
+     To view capacitance values on ports, use report_port. To view capacitance values on
+     nets, use the report_net command.
+
+
+     Setting Net Resistance
+     The set_resistance command sets net resistance values. The specified resistance value
+     overrides the internally estimated net resistance value.
+
+
+
+
+PrimeTime® User Guide                                                                          399
+T-2022.03
+                                                                                       Feedback
+Chapter 11: Back-Annotation
+Detailed Parasitics
+
+
+     You can also use the set_resistance command for nets at lower levels of the design
+     hierarchy. You can specify these nets as BLOCK1/BLOCK2/NET_NAME.
+     To view resistance values, use the report_net command. To remove resistance
+     values annotated on specified nets, use the remove_resistance command. To remove
+     resistance annotated on the entire design, use the reset_design command.
+
+
+Detailed Parasitics
+     You can annotate detailed parasitics into PrimeTime and annotate each physical segment
+     of the routed netlist in the form of resistance and capacitance (see Figure 118). Annotating
+     detailed parasitics is very accurate but more time-consuming than annotating lumped
+     parasitics. Because of the potential complexity of the RC network, PrimeTime takes longer
+     to calculate the pin-to-pin delays in the netlist.
+     This RC network is used to compute effective capacitance (Ceffective), slew, and delays at
+     each subnode of the net. PrimeTime can read detailed RC in SPEF format.
+
+Figure 118    Detailed RC
+
+                                                               R5
+                                                C3
+
+                                                                     C5
+                                                     R3
+                                                          C7
+                              R1           R2
+
+
+                  C1                  C2
+                                                     R4
+                                                               R6
+                                                C4
+
+                                                                C6
+
+
+
+     Use this model for netlists that have critical timing delays, such as clock trees. This model
+     can produce more accurate results, especially in deep submicron designs where net
+     delays are more significant compared to cell delays. The detailed RC network supports
+     meshes, as shown in Figure 119.
+
+
+
+
+PrimeTime® User Guide                                                                          400
+T-2022.03
+                                                                                    Feedback
+Chapter 11: Back-Annotation
+Reading Parasitic Files
+
+
+Figure 119    Meshed RC
+
+                                                              R6
+                                               C6
+                                                              R8        C7
+                                                    R5
+                                                         C4
+                              R2          R3
+
+
+                  C2                 C3                                 C9
+                                                    R4             R9
+                                                              R7
+                                               C5
+
+                                                               C8
+
+
+
+
+Reading Parasitic Files
+     The read_parasitics command can read parasitic data file in the following formats:
+     •   Galaxy Parasitic Database (GPD)
+     •   Standard Parasitic Exchange Format (SPEF)
+     •   Detailed Standard Parasitic Format (DSPF)
+     •   Reduced Standard Parasitic Format (RSPF), version IEEE 1481-1999
+     •   Milkyway (PARA)
+     The read_parasitics command annotates the current design with the parasitic
+     information. A SPEF or RSPF file is an ASCII file that can be compressed with gzip.
+     Specifying the format in the command is optional because the reader can automatically
+     determine the file type.
+     Net and instance pin names in the design must match the names in the parasitic file. For
+     example, if you create the parasitic file from a design using VHDL naming conventions, the
+     design name must use VHDL naming conventions.
+     When reading parasitic files, by default, PrimeTime assumes that capacitance values
+     specified in the SPEF files do not include the pin capacitance. PrimeTime uses the pin
+     capacitance values specified in the Synopsys design libraries; any pin capacitance
+     values specified in SPEF are ignored. You must ensure that the coupling capacitance
+     in the SPEF file are symmetric. To verify that the coupling capacitance contains only
+     symmetric coupling, read in the design and then use both the -syntax_only and
+     -keep_capacitive_coupling options of the read_parasitics command. PrimeTime
+
+
+
+PrimeTime® User Guide                                                                         401
+T-2022.03
+                                                                                       Feedback
+Chapter 11: Back-Annotation
+Reading Parasitic Files
+
+
+     checks for asymmetric coupling and issues warning messages when this type of issue is
+     identified. Ensure the SPEF files contain valid coupling capacitance before proceeding.
+     The reduced and detailed RC networks specified in SPEF files are used to compute
+     effective capacitance dynamically during delay calculation. The capacitance value
+     reported by most report commands, such as the report_timing and report_net
+     command, is the lumped capacitance, also known as Ctotal. Ctotal is the sum of all
+     capacitance values of a net as specified in the SPEF, to which pin capacitance is also
+     added.
+     Parasitic data files are often very large and time-consuming for PrimeTime to read. To
+     minimize the read time, make sure that the data file is on a local disk that can be accessed
+     directly, not across a network. To avoid using disk swap space, having enough memory
+     is also helpful. Compressing a SPEF file using gzip can improve overall processing time
+     because the file is much smaller.
+     For more information, see the following topics:
+     •   Reading Multiple Parasitic Files
+     •   Applying Location Transformations to Parasitic Data
+     •   Reading Parasitics With Multiple Physical Pins
+     •   Reading a Single Corner From Multicorner Parasitic Data
+     •   Checking the Annotated Nets
+     •   Scaling Parasitic Values
+     •   Reading Parasitics for Incremental Timing Analysis
+     •   Limitations of Parasitic Files
+
+
+     Reading Multiple Parasitic Files
+     You can read multiple parasitic files. For example, you might have separate parasitic files
+     for your subblocks and a separate file for your top-level interconnect. Parasitics for chip-
+     level timing are often read incrementally. Hierarchical parasitics for each instance are read
+     separately and stitched with top-level parasitics. Use the following recommended flow for
+     reading multiple hierarchical incremental parasitic files:
+     read_parasitics A.spef -path [all_instances -hierarchy BLKA]
+     read_parasitics B.spef
+     read_parasitics C.spef
+     read_parasitics D.spef
+     read_parasitics chip_file_name
+     report_annotated_parasitics -check
+
+
+
+
+PrimeTime® User Guide                                                                          402
+T-2022.03
+                                                                                    Feedback
+Chapter 11: Back-Annotation
+Reading Parasitic Files
+
+
+     When reading multiple parasitic files, PrimeTime stitches subsequent parasitic annotations
+     that occur only on nonterminal nodes. For example, in Figure 120, the annotation specified
+     by the block2.spef file is valid because it does not occur at a terminal node.
+
+Figure 120    Second annotation is valid
+
+
+
+
+     However, in Figure 121, the annotation specified by block2.spef occurs at a terminal node
+     and is therefore invalid. PrimeTime ignores this annotation and issues a PARA-114 error
+     message.
+
+
+
+
+PrimeTime® User Guide                                                                      403
+T-2022.03
+                                                                                        Feedback
+Chapter 11: Back-Annotation
+Reading Parasitic Files
+
+
+Figure 121    Second annotation is invalid
+
+
+
+
+     Applying Location Transformations to Parasitic Data
+     By default, the read_parasitics command gets information about the location and
+     orientation of macros from the GPD or SPEF parasitic data file, if that information is
+     available.
+     You can apply location transformations, such as offsets, rotations, and flips, to the parasitic
+     data. To do this, use the read_parasitics command with the following options:
+
+     read_parasitics
+       -x_offset x_offset_in_nm
+       -y_offset y_offset_in_nm
+       -rotation rotate_none | rotate_90 | rotate_180 | rotate_270
+       -axis_flip flip_x | flip_y | flip_both | flip_none
+
+     Figure 122 shows the transformations specified by the -axis_flip flip_x and
+     -axis_flip flip_y options.
+
+
+
+
+PrimeTime® User Guide                                                                           404
+T-2022.03
+                                                                                         Feedback
+Chapter 11: Back-Annotation
+Reading Parasitic Files
+
+
+Figure 122    Transformations specified by the -axis_flip flip_x and -axis_flip flip_y options
+
+
+
+
+                flip_x                     flip_y
+
+
+     To apply location transformations to multiple instances, specify the options in a list. Each
+     argument in the list applies a transformation to the corresponding instance specified by the
+     -path option. For example:
+     read_parasitics \
+       -path { n1 n2 n3 } \
+       -x_offset { 1000000 2000000 3000000 } \
+       -y_offset { 2000000 3000000 1000000 } \
+       -rotation { rotate_90 rotate_none rotate_270 } \
+       -axis_flip {flip_y flip_x flip_none}
+
+     In this example, instance n1 has an x-offset of 1,000,000 nm, a y-offset of 2,000,000
+     nm, a rotation of 90 degrees, and a flip across the y-axis. Instance n2 has an x-offset of
+     2,000,000 nm, a y-offset of 3,000,000 nm, a rotation of 0 degrees, and a flip across the x-
+     axis.
+
+
+     Reading Parasitics With Multiple Physical Pins
+     In some cases, a single logical port might be associated with multiple physical shapes.
+     For example, for a port-connected net, the wire might reach the block boundary at multiple
+     physical locations. Such ports are described as having multiple physical pins in the
+     detailed parasitics file.
+     In StarRC, multiple physical pin extraction is enabled by setting the following extraction
+     option:
+     MULTI_PHYSICAL_PINS_PREFIX: YES
+
+     Additional options are required. For details, see the “MULTI_PHYSICAL_PINS_PREFIX”
+     section in the StarRC User Guide and Command Reference.
+     To read SPEF or GPD parasitics with multiple physical pins into PrimeTime, set the
+     following variable before reading them in:
+     pt_shell> set_app_var parasitics_enable_multiple_physical_pins true
+
+
+
+
+PrimeTime® User Guide                                                                             405
+T-2022.03
+                                                                                      Feedback
+Chapter 11: Back-Annotation
+Reading Parasitic Files
+
+
+     In the detailed parasitics information, equivalent physical pins use a special SNPS_EEQ
+     (“electrically equivalent”) prefix in their port (*P) definitions. For example,
+     *D_NET in 4.0
+     *CONN
+     *P in                    I   *C 0 0
+     *P SNPS_EEQ_in_1         I   *C 0 0
+
+     In some cases, the detailed parasitics information includes a mapping table from port
+     name to equivalent pin name at the beginning of the file:
+     // comments
+     // start_MPIN_table
+     // TOP in SNPS_EEQ_irr_0
+     // BLKA in SNPS_EEQ_irr10 SNPS_EEQ_irr20
+     // end_MPIN_table
+
+     ...
+
+     *D_NET w 4.0
+     *CONN
+     *P blka1:in                    I   *C 0 0
+     *P blka1:SNPS_EEQ_in_1         I   *C 0 0
+     *P blka1:SNPS_EEQ_irr10        I   *C 0 0
+     *P blka1:SNPS_EEQ_irr20        I   *C 0 0
+
+     When SPEF or GPD parasitics are read in, the tool recognizes the equivalent physical
+     pins and maps them to the same logical netlist port. When multiple parasitics files are read
+     in and stitched together, the equivalent physical pins are connected correctly.
+     When these parasitics are subsequently written out (such as by the write_parasitics
+     command or when a HyperScale block model is written), the tool includes the equivalent
+     physical pin information.
+     This feature is not supported in the incremental SPEF reading flow, which uses the
+     read_parasitics -eco command.
+
+
+     Reading a Single Corner From Multicorner Parasitic Data
+     You can annotate your design with the parasitic data from a single corner of a multicorner
+     GPD or SPEF file. To do this,
+     1. Specify the corner name:
+         set_app_var parasitic_corner_name corner_name
+
+     2. Read the parasitic data with the -keep_capacitive_coupling option:
+         read_parasitics -format SPEF
+           -keep_capacitive_coupling multicorner_SPEF_file
+
+
+
+PrimeTime® User Guide                                                                        406
+T-2022.03
+                                                                                       Feedback
+Chapter 11: Back-Annotation
+Reading Parasitic Files
+
+
+         The tool reports the corner name in the read_parasitics report:
+         ****************************************
+         Report : read_parasitics multi_corner_file.spef
+             -keep_capacitive_coupling
+         ...
+         ****************************************
+             0 error(s)
+             Format is SPEF
+            Annotated corner name            :   name
+            Annotated nets                   :   ...
+            Annotated capacitances           :   ...
+            Annotated resistances            :   ...
+            Annotated coupling capacitances :    ...
+            Annotated PI models              :   ...
+            Annotated Elmore delays          :   ...
+
+
+     Checking the Annotated Nets
+     By default, the read_parasitics command does a check for incomplete annotated
+     nets on the nets it annotates. It then executes the report_annotated_parasitics
+     -check command. Use the -path option to take a list of instances so that multiple
+     instantiations of the same block-level design can all be annotated together. This can
+     significantly reduce both the runtime and memory required for reading parasitics in
+     PrimeTime. By executing the commands in the recommended flow and explicitly using
+     the report_annotated_parasitics -check command, all of the parasitic files are read
+     in, then the entire design is checked to confirm and report the successful annotation
+     of all nets. The report contains all nets, not just the nets that are annotated for the last
+     command.
+     Some messages issued during read_parasitics, report_annotated_parasitics
+     -check, read_sdf, and an implicit or explicit update_timing command have a default
+     limit each time the command is invoked. A summary of the messages affected and other
+     useful information is stored in the log file and also printed at the end of the PrimeTime
+     session. The sh_message_limit variable controls the default message limit and the
+     sh_limited_messages variable controls the messages affected by this feature.
+
+
+     Scaling Parasitic Values
+     Use the scale_parasitics command to scale parasitic resistor, ground capacitor, and
+     cross-coupling capacitor values by specified factors. You can perform a single parasitic
+     extraction and then use the scale_parasitics command in the PrimeTime tool to scale
+     the parasitic data for variation effects.
+     The scale_parasitics command works for all types of back-annotated parasitic data,
+     including SPEF, GPD, DSPF, and RSPF. Delay calculations use the scaled parasitics
+
+
+
+PrimeTime® User Guide                                                                          407
+T-2022.03
+                                                                                          Feedback
+Chapter 11: Back-Annotation
+Reading Parasitic Files
+
+
+     instead of the original parasitics. If you write out parasitics using the write_parasitics
+     command, the scaled parasitic values are written out.
+     You can scale the parasitics for the whole design or just a specific list of nets. If you scale
+     the whole design and then a specific net, the net-specific scaling applies to the original
+     value, not the globally scaled value.
+     If you use the scale_parasitics command multiple times, each command scales
+     the original values, not the previously scaled values. If you read in parasitics again for
+     previously scaled nets, the global scaling factors still apply, but net-specific scaling factors
+     are discarded.
+     To apply global scaling factors only to parasitic data read in by future read_parasitics
+     commands (without affecting existing parasitic data), use the scale_parasitics
+     command with the -dont_apply_to_annotated option.
+     To report or cancel scaling factors, use the report_scale_parasitics or
+     reset_scale_parasitics command.
+
+     Global Parasitic Scaling
+     To scale all resistor, ground capacitor, and coupling capacitor values in the design, use the
+     scale_parasitics command without specifying any nets. For example,
+     pt_shell> scale_parasitics \
+       -resistance_factor 1.10 \
+       -ground_capacitance_factor 1.10 \
+       -coupling_capacitance_factor 1.25
+
+     Scaling parasitic values globally triggers a full timing update. To minimize the runtime
+     cost, set the resistor, ground capacitor, and coupling capacitor scaling factors in a single
+     scale_parasitics command.
+
+     Net-Specific Parasitic Scaling
+     You can apply scaling factors to specific nets by using the scale_parasitics command
+     with a list of nets. Net-specific parasitic scaling usually triggers only an incremental timing
+     update, not a full update.
+     To scale the ground capacitor and resistor values on a net n2:
+     pt_shell> scale_parasitics [get_nets n2] \
+       -ground_capacitance_factor 1.3 \
+       -resistance_factor 1.22
+
+     To inspect the changes to the scaled parasitics, use the report_annotated_parasitics
+     -list_annotated net_list command.
+
+
+
+
+PrimeTime® User Guide                                                                             408
+T-2022.03
+                                                                                       Feedback
+Chapter 11: Back-Annotation
+Reading Parasitic Files
+
+
+     Reporting Scaled Parasitics
+     To query the current global and net-specific scaling factors, use the
+     report_scale_parasitics command:
+     pt_shell> scale_parasitics -coupling_capacitance_factor 1.1
+     ...
+     pt_shell> scale_parasitics -coupling_capacitance_factor 1.3 [get_nets n2]
+     ...
+     pt_shell> report_scale_parasitics
+     Global factors:
+     Coupling factor : 1.100000
+     Net                        Cap factor    Res factor     Coupling factor
+     -----------------------------------------------------------------------
+     n2                                                      1.300000
+
+     Resetting Scaled Parasitics
+     To reset the scaled nets to their original values, use the reset_scale_parasitics
+     command. You can reset all scaled nets or just specific nets:
+     pt_shell> reset_scale_parasitics [get_nets n1]
+
+     The reset_scale_parasitics command returns the values to the original values, not
+     previously scaled values.
+
+     Scaling Parasitics in One Block
+     This example shows how to scale each net in a physical block in your design. Foundries
+     can provide different scaling values for different operating conditions for a block, and you
+     can model these variation effects using parasitic scaling.
+     To use this methodology, link the top level of the design, named Chip in this example. You
+     can then switch to the physical block of interest by using a script like the following:
+     current_instance A
+
+     set gnets [get_nets *]          # Collection of nets for block A
+
+     scale_parasitics -ground_capacitance_factor 1.1 \
+       -resistance_factor 1.1 -coupling_capacitance_factor 1.1 $gnets
+
+     current_instance Chip
+
+     # Proceed with the analysis
+
+     Each net in block A is scaled as specified by the scale_parasitics command. You
+     can inspect the changes to the parasitics using the report_annotated_parasitics
+     -list_annotated command.
+
+
+
+
+PrimeTime® User Guide                                                                          409
+T-2022.03
+                                                                                      Feedback
+Chapter 11: Back-Annotation
+Reading Parasitic Files
+
+
+
+     Reading Parasitics for Incremental Timing Analysis
+     PrimeTime can perform an incremental update on a design that is already analyzed
+     when only a small number of nets are affected. The maximum number of nets that can
+     be affected without requiring a full timing update depends upon the total design size. For
+     example, if you have a full-chip annotated file and an engineering change order (ECO)
+     annotated file, and you want to analyze the effects of your ECO, you can run an analysis
+     with the report_timing command on a full-chip annotated file, and then repeat the
+     analysis with just the ECO changes applied. See Figure 123.
+
+Figure 123    Incremental update before and after engineering change
+
+              Design before ECO                   Design after ECO
+
+                    a         b                         a        b
+
+
+
+                    c         d                         c       d
+
+
+
+
+     To set the annotation on most or all nets, enter
+     pt_shell> read_parasitics full_chip.spef
+     pt_shell> report_timing
+
+     To override the annotations on a small number of nets, enter
+     pt_shell> read_parasitics eco.spef
+     pt_shell> report_timing
+
+
+     Limitations of Parasitic Files
+     PrimeTime supports the open Verilog International (OVI) SPEF format for parasitic
+     annotation.
+     The following limitations apply to RSPF and DSPF constructs:
+     •   SPICE inductors (Lxxx) and lines (Txxx) are allowed in the DSPF file, but they are
+         ignored.
+     •   Physical coordinates of pins and instances are ignored.
+     •   The BUSBIT construct is not supported.
+
+
+
+PrimeTime® User Guide                                                                         410
+T-2022.03
+                                                                                     Feedback
+Chapter 11: Back-Annotation
+Incomplete Annotated Parasitics
+
+
+     •   Instances listed in the RSPF and DSPF files in the SPICE section are ignored. They
+         are not checked to determine whether they match the current design loaded in
+         PrimeTime.
+     •   Resistors cannot be connected to ground. PrimeTime ignores such resistors and
+         displays a warning about them.
+     •   Capacitors must be connected to ground. PrimeTime ignores node-to-node coupling
+         capacitors and displays a warning about them.
+     The following limitations apply to SPEF constructs:
+     •   Inductors are ignored.
+     •   Poles and residue descriptions on reduced nets are not supported.
+     •   Resistors cannot be connected to ground. PrimeTime ignores resistors connected to
+         ground and displays a warning.
+     •   Cross-coupling capacitors are split to ground unless you are using PrimeTime SI and
+         crosstalk analysis is enabled.
+
+
+Incomplete Annotated Parasitics
+     PrimeTime can complete parasitics on nets that have incomplete parasitics. The following
+     conditions apply to RC network completion:
+     •   The nets that have an RC network must be back-annotated from a SPEF file.
+     •   PrimeTime cannot complete effective capacitance calculation for a net that has
+         incomplete parasitics. Instead, PrimeTime reverts to using wire load models for delay
+         calculation on these nets.
+     •   Partial parasitics can be completed on a net only if all the missing segments are
+         between two pins (either boundary pins or leaf pins). As shown in Figure 124, the
+         missing segment is completed with a fanout of two.
+
+
+
+
+PrimeTime® User Guide                                                                         411
+T-2022.03
+                                                                                           Feedback
+Chapter 11: Back-Annotation
+Incomplete Annotated Parasitics
+
+
+   Figure 124     Missing segment completed using the fanout of two
+
+
+                            R2           RES            R0
+                                   A                         A
+
+                                          CAP                         U2
+                             C2                              hier 2
+                                                   R0                               R0 = 0W
+                                                             A
+
+                                                                      U3
+                                                  R1
+                                                             A
+
+                                                     C1
+                                       hier 1                         U4
+
+
+
+         The shaded area shown in Figure 124 is completed when you use the
+         complete_net_parasitics command or the -complete_with option of the
+         read_parasitics command.
+
+
+     Selecting a Wire Load Model for Incomplete Nets
+     After the missing segments are identified, PrimeTime selects the wire load model to
+     complete the missing parts of the net as follows:
+     •   The wire load mode is taken from the top-level hierarchy. If the wire load mode does
+         not exist, the default from the main library is taken.
+     •   If the wire load mode is ‘enclosed,’ the wire load for the missing segment is the
+         hierarchy that encloses the missing segment.
+     •   If the wire load mode is ‘top,’ the wire load for the top level of hierarchy is used.
+     •   If the wire load model does not exist on the enclosing hierarchy, the wire load model of
+         the parent hierarchy is taken. If the parent hierarchy does not exist, the wire load model
+         of the parent of the parent is used, this process continues until the top-level hierarchy is
+         reached.
+     •   The default wire load model from the main library is used if the wire load model cannot
+         be obtained from the previous steps.
+     •   Zero resistance and capacitance are used if no wire load model could be obtained
+         using the -complete_with wlm option.
+
+
+
+
+PrimeTime® User Guide                                                                            412
+T-2022.03
+                                                                                       Feedback
+Chapter 11: Back-Annotation
+Incomplete Annotated Parasitics
+
+
+     Completing Missing Segments on the Net
+     PrimeTime completes multiple pin to pin segments with a single RC pair based on the
+     value of the option -complete_with, which can be zero or wlm (wire load model).
+     Here is a command sequence that completes the missing segments:
+     pt_shell> read_verilog design.v
+     pt_shell> read_parasitics incomplete_parasitics.spef
+     pt_shell> complete_net_parasitics -complete_with wlm
+
+     As shown in Figure 125, if the -complete_with wlm option is used, the resistance
+     (RES) and capacitance (CAP) values are estimated based on the wire load model. If
+     -complete_with zero is used, the values assigned to RES and CAP are zero. In both
+     cases, the resistance that connects the net to the loads is 0 ohms.
+
+Figure 125    Multidrive segments
+
+
+                                   RES1                         U2
+                             A1                 R0        A
+
+                                  CAP1
+                                                              hier 2
+                                           R0
+                                                     R0
+                                                                         R0 = 0W
+                                   RES2         R0               U3
+                             A2
+
+
+                                  CAP2
+
+                                  hier 1
+
+
+
+     You can see how networks get completed by comparing the attribute rc_network defined
+     for the incomplete nets before and after completion.
+     After the segment is completed, it cannot be undone. For this reason, if you are using
+     multiple read_parasitics commands, be sure to use the -complete_with option only
+     with the very last read_parasitics command. Otherwise, PrimeTime completes the
+     network before you have finished reading in all of the parasitic data files. To cancel the
+     effects of all read_parasitics and complete_net_parasitics commands, use the
+     remove_annotated_parasitics command.
+
+     Do not use the complete_net_parasitics command when you have parasitics
+     with errors. However, you can manually fix the SPEF file and reread them. Use the
+     complete_net_parasitics command only when the following assumption holds true:
+
+
+
+PrimeTime® User Guide                                                                         413
+T-2022.03
+                                                                                      Feedback
+Chapter 11: Back-Annotation
+Back-Annotation Order of Precedence
+
+
+     The relevant portion of a net’s delay is already annotated with detailed parasitics, and you
+     want PrimeTime to complete the remaining, less significant portion of the net with zero or
+     wire load model based resistance and capacitance.
+
+
+Back-Annotation Order of Precedence
+     In case of conflict between different types of annotated information, PrimeTime uses the
+     data on each net in the following order of highest to lowest precedence:
+     1. Annotated delays specified with an SDF file or the set_annotated_delay command.
+     2. Lumped resistance and capacitance values annotated with the set_resistance and
+        set_load commands.
+
+     3. Detailed parasitics annotated with the read_parasitics command.
+     4. Wire load models obtained from the logic library or specified with the
+        set_wire_load_model command.
+
+
+
+Reporting Annotated Parasitics
+     Parasitic data files can be large (100 MB or larger) and can contain many parasitics. To
+     verify that the tool back-annotated all cell drivers, run the report_annotated_parasitics
+     command.
+     To create a report for annotated parasitic data files and verify that all RC networks are
+     complete, use the report_annotated_parasitics -check command, as shown in the
+     following example:
+     ****************************************
+     Report : annotated_parasitics
+              -check
+     ...
+     ****************************************
+                       |         |         |   RC    |   Not   |
+         Pin type      | Total | RC pi | network |Annotated|
+     ------------------+---------+---------+---------+---------+
+     internal net drive|   23649 |       0 |   23649 |       0 |
+     ------------------+---------+---------+---------+---------+
+     design input port |      34 |       0 |      34 |       0 |
+     ------------------+---------+---------+---------+---------+
+                       |   23683 |       0 |   23683 |       0 |
+
+
+
+Removing Annotated Data
+     To remove annotations, use the commands in Table 22.
+
+
+PrimeTime® User Guide                                                                         414
+T-2022.03
+                                                                                       Feedback
+Chapter 11: Back-Annotation
+GPD Parasitic Explorer
+
+
+     Table 22      Commands for removing annotations
+
+To remove this type of annotation     Use this command
+
+Delays                                remove_annotated_delay
+
+Checks                                remove_annotated_check
+
+Transitions                           remove_annotated_transition
+
+Parasitics                            remove_annotated_parasitics
+
+All annotations                       reset_design
+
+
+
+     To remove all timing constraints and annotations but keep the parasitic data, use the
+     reset_design command with the -keep_parasitics option.
+
+
+
+GPD Parasitic Explorer
+     The Parasitic Explorer is an option that lets you query parasitic resistors and capacitors
+     in GPD format that have been back-annotated on the design by the read_parasitics
+     command. This feature supports the following capabilities:
+     •   get_resistors – Creates a collection of parasitic resistors from one or more nets.
+
+     •   get_ground_capacitors – Creates a collection of ground capacitors from one or more
+         nets.
+     •   get_coupling_capacitors – Creates a collection of coupling capacitors from one or
+         more net pairs.
+     •   Ability to query parasitic element attributes such as resistance, capacitance, subnode
+         name, layer name, layer number, and physical location
+     In addition, the Parasitic Explorer provides commands to query data in GPD directories
+     and control the reading and annotation of that data in the PrimeTime tool:
+     •   report_gpd_properties – Reports the properties of the parasitic data such as
+         completeness, the presence or absence of specific types of data, and the number of
+         nets, cells, and ports
+     •   set_gpd_config – Specifies the parasitic corners to be read and the thresholds for
+         filtering coupling capacitors during reading
+     •   report_gpd_config – Reports the option settings for reading the GPD data
+
+     •   reset_gpd_config – Resets the settings made by the set_gpd_config command
+
+
+
+
+PrimeTime® User Guide                                                                             415
+T-2022.03
+                                                                                           Feedback
+Chapter 11: Back-Annotation
+GPD Parasitic Explorer
+
+
+     •   get_gpd_corners – Reports the parasitic corner names defined in the GPD directory
+
+     •   get_gpd_layers – Reports the layer names defined in the GPD directory
+
+
+     Enabling the Parasitic Explorer Feature
+     To enable the Parasitic Explorer feature, set the parasitic_explorer_enable_analysis
+     variable to true:
+     pt_shell> set_app_var parasitic_explorer_enable_analysis true
+     true
+     pt_shell> read_parasitics \
+      -format gpd my_design_dir.gpd -keep_capacitive_coupling ...
+
+     By default, the variable is set to false and the feature is disabled.
+     If you set the variable to true before you read in the GPD parasitics, the PrimeTime tool
+     reads in the data from all parasitic corners and you can query the data from all corners.
+     If you set the variable to true after you read in the GPD parasitics, the PrimeTime tool still
+     enables the feature, but you can query parasitic data only from the current parasitic corner.
+
+
+     Parasitic Resistor and Capacitor Collections
+     To create a collection of parasitic resistors or capacitors, use the get_resistors,
+     get_ground_capacitors, or get_coupling_capacitors command. These commands
+     have options to do the following:
+     •   Specify the net or nets from which to get the collection
+     •   Specify a path from a node or to another node from which to get the collection
+     •   Specify the parasitic corner or corners of the data from which to get the collection
+     •   Filter the collection using a logical condition such as an attribute value test
+     For example,
+     get_resistors -of_objects [get_nets {net_rx*}] -parasitic_corners vhi85c
+
+     get_ground_capacitors -from_node U235/z -to_node n121:4
+
+     get_coupling_capacitors -of_objects n2 -filter "capacitance_max > 0.5e-3"
+
+     You must use either the -of_objects option or the -from_node and -to_node options
+     to specify the part of the design from which to get the parasitic resistors or capacitors.
+     The argument of the -of_objects option is one or more nets. The arguments of the
+     -from_node and -to_node options are pins, ports, or internal nodes of nets specified in
+     the form of net_name:index_number.
+
+
+PrimeTime® User Guide                                                                            416
+T-2022.03
+                                                                                    Feedback
+Chapter 11: Back-Annotation
+GPD Parasitic Explorer
+
+
+     Each command reports the contents of the collection in the same manner as the
+     query_objects command. By default, a maximum of 100 objects are displayed. You can
+     change the maximum by setting the collection_result_display_limit variable.
+     To query an attribute of an object, use the get_attribute command. For example, to get
+     the resistance value for a resistor:
+     pt_shell> get_attribute -class resistor [get_resistors ...] resistance
+
+     To list the available attributes of an object type, use the list_attributes command. For
+     example,
+     pt_shell> list_attributes -application -class resistor
+
+
+     Querying GPD Data Stored on Disk
+     You can query GPD data stored on disk, including parasitic data that has not yet been
+     read in and annotated on the design. These are the supported commands:
+     report_gpd_properties
+     set_gpd_config
+     report_gpd_config
+     reset_gpd_config
+     get_gpd_corners
+     get_gpd_layers
+
+     Reporting GPD Properties
+     The report_gpd_properties command reports general information about the data in a
+     specified GPD directory:
+     pt_shell> report_gpd_properties -gpd MyDesignA.gpd
+      ...
+     GPD Summary:
+     Properties                        Value
+     ------------------------------------------------------------
+     design_name                       MyDesignA
+     vendor_name                       Synopsys Inc.
+     program_name                      StarRC
+     program_version                   O-2017.06
+     program_timestamp                 July 1 2018 21:02:19
+     gpd_timestamp                     Tue Apr 10 18:26:45 2018
+     gpd_version                       2.6
+     number_of_nets                    288930
+     number_of_cells                   234730
+     ...
+
+     pt_shell> report_gpd_properties -layers -gpd MyDesignA.gpd
+      ...
+     Layer information:
+     Name                Properties              Value
+
+
+PrimeTime® User Guide                                                                        417
+T-2022.03
+                                                                                       Feedback
+Chapter 11: Back-Annotation
+GPD Parasitic Explorer
+
+
+     -------------------------------------------------------
+     SUBSTRATE           id                      0
+     SUBSTRATE           is_via                  No
+     poly                id                      1
+     poly                is_via                  No
+     M1                  id                      2
+     M1                  is_via                  No
+     ...
+
+     pt_shell> report_gpd_properties -parasitic_corners -gpd MyDesignA.gpd
+      ...
+     Corner information:
+     Name                Properties              Value
+     ------------------------------------------------------------------
+     CMINW125            process_name            /mydata/mypara/grd.min
+     CMINW125            temperature             125
+     CMINW125            global_temperature      25
+     CMINB40             process_name            /mydata/mypara/grd.min
+     CMINB40             temperature             -40
+     CMINB40             global_temperature      25
+     ...
+
+     Setting GPD Annotation Properties
+     The set_gpd_config command lets you override certain parameters for reading parasitic
+     data in GPD format using the read_parasitics -format gpd command. The default
+     parameters are defined in a file called the GPD configuration file. This file is generated by
+     the StarXtract -set_gpd_config command in the StarRC tool.
+     For example, the following command sets both absolute and relative thresholds for filtering
+     coupling capacitors:
+     pt_shell> set_gpd_config -gpd my_design1.gpd \
+      -absolute_coupling_threshold 3.0e-3 \
+      -relative_coupling_threshold 0.03
+
+     To report the GPD configuration that has been set, use the report_gpd_config
+     command:
+     pt_shell> report_gpd_config -gpd my_design.gpd
+      ...
+
+     Property                         Value
+     --------------------------------------------------------
+     absolute_coupling_threshold      0.003000
+     relative_coupling_threshold      0.030000
+     coupling_threshold_operation     and
+     netlist_select_nets              *
+     netlist_type                     {RCC *}
+     selected_parasitic_corners       TYP25 CWORST110 CBEST0
+     ...
+
+
+
+PrimeTime® User Guide                                                                          418
+T-2022.03
+                                                                                        Feedback
+Chapter 11: Back-Annotation
+GPD Parasitic Explorer
+
+
+     To include reporting of options that were set in the StarRC tool during parasitic extraction,
+     use the -include_starrc_options option:
+     pt_shell> report_gpd_config -gpd my_design.gpd -include_starrc_options
+      ...
+     Property                         Value                     StarRC
+     ------------------------------------------------------------------------
+     absolute_coupling_threshold      0.003000                  N
+     relative_coupling_threshold      0.030000                  N
+     coupling_threshold_operation     and                       N
+     netlist_select_nets              *                         N
+     netlist_type                     {RCC *}                   N
+     selected_parasitic_corners       TYP25 CWORST110 CBEST0    N
+     netlist_compress                 true                      Y
+     dp_string                        true                      Y
+     netlist_connect_section          false                     Y
+     pin_delimiter                    /                         Y
+     netlist_name_map                 true                      Y
+     netlist_incremental              false                     Y
+
+     To reset options previously set by the set_gpd_config command, use the
+     reset_gpd_config command:
+     pt_shell> reset_gpd_config -gpd my_design.gpd
+
+     Getting GPD Corners and Layers
+     To report the parasitic corners or layers in a GPD directory, use the get_gpd_corners or
+     get_gpd_layers command:
+     pt_shell> get_gpd_corners -gpd my_design1.gpd
+     CWORST110 TYP25 CBEST0
+
+     pt_shell> get_gpd_layers -gpd my_design1.gpd
+     M1 M2 M3 M4 VIA1 VIA2 VIA3
+
+     Parasitic Explorer Without a Netlist
+     The Parasitic Explorer supports reading parasitics in GPD format without a Verilog netlist
+     or logic library. You can query the parasitic resistors and capacitors in the network. The
+     tool derives the network connectivity from the GPD database itself instead of using the
+     Verilog netlist.
+     This is the no-netlist Parasitic Explorer flow:
+     # Enable Parasitic Explorer (without reading netlist)
+     set_app_var parasitic_explorer_enable_analysis true
+
+     # Read parasitics in GPD format
+     read_parasitics -format gpd my_gpd
+
+
+
+
+PrimeTime® User Guide                                                                          419
+T-2022.03
+                                                                                  Feedback
+Chapter 11: Back-Annotation
+GPD Parasitic Explorer
+
+
+     # Set current design to top-level module
+     current_design TOP
+
+     The read_parasitics command prepares for reading the parasitics but does not
+     actually do the reading. When you run the current_design TOP command, the tool
+     links the design and reads in the GPD parasitic data from the specified directory.
+     Then you can query the parasitics using get_resistors, get_ground_capacitors,
+     report_gpd_config, and so on.
+
+
+
+
+PrimeTime® User Guide                                                                     420
+T-2022.03
+

@@ -1,0 +1,894 @@
+                                                                                         Feedback
+
+
+
+
+23
+Using PrimeTime With SPICE
+     You can compare PrimeTime results with SPICE analysis by using the following
+     capabilities:
+     •   Simulation Link to Correlate PrimeTime and SPICE Results
+     •   Generating a SPICE Deck With the write_spice_deck Command
+
+
+Simulation Link to Correlate PrimeTime and SPICE Results
+     PrimeTime static timing analysis operates by using a gate-level netlist representation of
+     the design, combined with library-based timing characterization of the gate-level cells.
+     By analyzing timing at the gate level, the tool performs exhaustive timing analysis of very
+     large designs in a reasonable amount of time.
+     There can be cases where you want to perform transistor-level timing analysis using circuit
+     simulation. This high level of accuracy might be useful for the following purposes:
+     •   Validation of library characterization methodology in PrimeTime for a new process
+         technology node
+     •   Further analysis of the quality of signals, such as high-fanout nets in a clock network
+     •   Further analysis of signal integrity effects, such as double switching for design fixing
+     Because it is not practical to perform SPICE simulation on a netlist with millions of gates,
+     PrimeTime provides a simulation link to perform the following SPICE analyses:
+     •   Summary of Simulation Link Commands
+     •   Correlating Path-Based Uncoupled PrimeTime and SPICE Analysis
+     •   Correlating Arc-Based Coupled PrimeTime SI and SPICE Analysis
+     •   Correlating PrimeTime SI and SPICE Noise Analysis
+     •   Distributing Simulations Across Multiple Machines
+
+
+
+
+PrimeTime® User Guide                                                                          1268
+T-2022.03
+                                                                                             Feedback
+Chapter 23: Using PrimeTime With SPICE
+Simulation Link to Correlate PrimeTime and SPICE Results
+
+
+
+     Summary of Simulation Link Commands
+     The following simulation link commands facilitate SPICE analysis in PrimeTime.
+     Table 77       Summary of simulation link commands
+
+Command                          Task
+
+sim_setup_library                Set up the SPICE models for simulation by specifying the library
+                                 name, subcircuit directory name, and header file name.
+
+sim_setup_simulator              Specify the name of the HSPICE simulator executable, simulator
+                                 options for comparisons between PrimeTime and the simulator.
+
+sim_validate_setup               Validate the simulation setup by performing a simulation on a
+                                 combinational gate. Specify the name of the cell, the test load, and
+                                 the input transition time used for simulation.
+
+sim_validate_path                Perform path-based uncoupled SPICE analysis on a specified path
+                                 segment and compare the simulation results against the static timing
+                                 results.
+
+sim_enable_si_correlation        Enable nets for coupled one-and-a-half-stage correlation.
+
+sim_validate_stage               Perform arc-based coupled SPICE analysis on a specified stage or
+                                 one-and-a-half stage and compare the simulation results against the
+                                 static timing results.
+
+sim_validate_noise               Compare PrimeTime SI noise analysis results with SPICE results.
+
+
+
+     Correlating Path-Based Uncoupled PrimeTime and SPICE
+     Analysis
+     With the PrimeTime simulation link, you can perform path-based uncoupled SPICE
+     analysis by following these steps:
+     1. Configure PrimeTime static timing analysis by using the following commands:
+         # Disable use of nonconditional timing arcs between pins that have
+         # at least one conditional timing arc
+         set_app_var timing_disable_cond_default_arcs true
+
+         # Report all paths through parallel cell arcs
+         set_app_var timing_report_use_worst_parallel_cell_arc false
+
+         # Enable waveform propagation
+         set_app_var delay_calc_waveform_analysis_mode full_design
+
+         # Store waveform data when CCS waveform propagation is enabled
+         set_app_var timing_keep_waveform_on_points true
+
+
+PrimeTime® User Guide                                                                               1269
+T-2022.03
+                                                                                        Feedback
+Chapter 23: Using PrimeTime With SPICE
+Simulation Link to Correlate PrimeTime and SPICE Results
+
+
+
+         # Disable advanced on-chip variation (AOCV)
+         set_app_var timing_aocvm_enable_analysis false
+
+         # Disable AOCV for SPICE correlation at specific corners
+         remove_ocvm
+
+         # Reset user-specified derate factors
+         reset_timing_derate
+
+     2. Set up the SPICE simulation library by using the sim_setup_library command,
+        which specifies the location of the library subcircuits and header file for simulation. For
+        example:
+         pt_shell> sim_setup_library -library mylib \
+                   -sub_circuit my_subckt_dir -header my_header_file
+
+     3. Specify the path to the SPICE simulator. For example:
+         pt_shell> sim_setup_simulator \
+                   -simulator /abc/tools/bin/hspice \
+                   -simulator_type hspice
+
+     4. Validate the simulation setup by using the sim_validate_setup command, which
+        performs simulation on a combinational gate in the library. This command ensures
+        that the SPICE setup for the simulation link is consistent to that used in the library
+        characterization. For example:
+         pt_shell> sim_validate_setup -lib_cell k04_lib/inv7Q \
+                   -from A -to Y \
+                   -capacitance 0.35 -transition_time 0.12
+
+         PrimeTime invokes the simulation link for the specified cell and compares against
+         PrimeTime static timing analysis results. To check that the SPICE environment
+         is consistent to that used in library characterization, specify the slew and load
+         capacitance values that match an index point in the library.
+     5. Create a collection of path-based analysis paths for simulation by using the
+        get_timing_paths command with the -pba_mode path option. For example:
+         pt_shell> set my_paths \
+                   [get_timing_paths -pba_mode path -delay_type max]
+
+     6. Submit the paths for SPICE analysis by using the sim_validate_path command,
+        which simulates the specified path segment and compares the delay and transition
+        times. For example:
+         pt_shell> sim_validate_path -transition_time $my_paths
+
+
+
+
+PrimeTime® User Guide                                                                            1270
+T-2022.03
+                                                                                         Feedback
+Chapter 23: Using PrimeTime With SPICE
+Simulation Link to Correlate PrimeTime and SPICE Results
+
+
+         Alternatively, you can compare a path segment by using the -from and -to options.
+         For example:
+         pt_shell> sim_validate_path -from u2/A -to u5/Z \
+                   -transition_time $my_paths
+
+         The validation report shows the SPICE simulated value (Ref), PrimeTime value (Val),
+         absolute difference (Diff), and percentage difference (%) for delay and transition time.
+         For example:
+   Comparing path number     0 :
+   Pin      Sense        Transition time                        Delay
+                    Ref     Val      Diff  %         Ref      Val       Diff   %
+   -------------------------------------------------------------------------------
+   U3/A       f 0.0197 0.01870 -0.00100 -5.12 0.017613 # 0.01749 -0.000117 -0.67
+   U4/A       r 0.0175 0.01730 -0.00025 -1.45 0.014172 # 0.01404 -0.000129 -0.91
+   U5/A       f    0.13 0.1371     0.0031 2.33 0.083447 # 0.08412 0.000681 0.82
+   U5/Z       f   0.239 0.2431 0.00365 1.53        0.131 # 0.1345     0.00267 2.03
+   -------------------------------------------------------------------------------
+   Path segment 0.0830 0.08385 0.000842 1.01     0.24713    0.2502    0.00310 1.26
+
+     Notes:
+     •   If a path starts at an input port, set up a simple combinational cell, such as a buffer
+         or inverter, as the driving cell on the input port by using the set_driving_cell
+         command. For example:
+         pt_shell> set_driving_cell -lib_cell IBUF2 [get_ports in1]
+
+     •   The runtime for SPICE simulation is expected to be longer than the report_timing
+         command on the same paths.
+     •   Path-based SPICE simulation of crosstalk is not supported due to timing window
+         alignment required at every stage in SPICE. Voltage and temperature scaling are also
+         not supported.
+
+
+     Correlating Arc-Based Coupled PrimeTime SI and SPICE Analysis
+     With the PrimeTime SI simulation link, you can analyze the signal integrity behavior of
+     coupled delay in SPICE, write out a SPICE netlist based on the victim net arc, simulate
+     it with the HSPICE simulator, and automatically compare the HSPICE and PrimeTime SI
+     results.
+     By using PrimeTime SI, you can select a net arc or multiple net arcs for simulation. A
+     one-and-a-half-stage delay is recommended for correlation purposes. This feature is
+     applicable only if the net has an annotated coupled RC network. Filtered aggressors are
+     not considered effective during calculation, and their coupling capacitances are grounded
+     in the SPICE netlist.
+
+
+
+
+PrimeTime® User Guide                                                                              1271
+T-2022.03
+                                                                                        Feedback
+Chapter 23: Using PrimeTime With SPICE
+Simulation Link to Correlate PrimeTime and SPICE Results
+
+
+     Arc-based coupled SPICE analysis requires that PrimeTime SI is enabled. Voltage and
+     temperature scaling are not supported.
+     To perform arc-based coupled SPICE analysis, follow these steps:
+     1. Configure PrimeTime SI analysis by using the following commands:
+         # Enable PrimeTime SI analysis
+         set_app_var si_enable_analysis true
+
+         # Disable use of nonconditional timing arcs between pins that have
+         # at least one conditional timing arc
+         set_app_var timing_disable_cond_default_arcs true
+
+         # Report all paths through parallel cell arcs
+         set_app_var timing_report_use_worst_parallel_cell_arc false
+
+         # Enable waveform propagation
+         set_app_var delay_calc_waveform_analysis_mode full_design
+
+         # Store waveform data when CCS waveform propagation is enabled
+         set_app_var timing_keep_waveform_on_points true
+
+         # Disable advanced on-chip variation (AOCV)
+         set_app_var timing_aocvm_enable_analysis false
+
+         # Disable AOCV for SPICE correlation at specific corners
+         remove_ocvm
+
+         # Reset user-specified derate factors
+         reset_timing_derate
+
+     2. Set up the SPICE simulation library by using the sim_setup_library command,
+        which specifies the location of the library subcircuits and header file for simulation. For
+        example:
+         pt_shell> sim_setup_library -library mylib \
+                   -sub_circuit my_subckt_dir -header my_header_file
+
+     3. Specify the path to the SPICE simulator. For example:
+         pt_shell> sim_setup_simulator \
+                   -simulator /abc/tools/bin/hspice \
+                   -simulator_type hspice
+
+     4. Validate the simulation setup by using the sim_validate_setup command, which
+        performs simulation on a combinational gate in the library. This command ensures
+
+
+
+
+PrimeTime® User Guide                                                                          1272
+T-2022.03
+                                                                                         Feedback
+Chapter 23: Using PrimeTime With SPICE
+Simulation Link to Correlate PrimeTime and SPICE Results
+
+
+         that the SPICE setup for the simulation link is consistent to that used in the library
+         characterization. For example:
+         pt_shell> sim_validate_setup -lib_cell k04_lib/inv7Q \
+                   -from A -to Y \
+                   -capacitance 0.35 -transition_time 0.12
+
+         PrimeTime invokes the simulation link for the specified cell and compares against
+         PrimeTime static timing analysis results. To check that the SPICE environment
+         is consistent to that used in library characterization, specify the slew and load
+         capacitance values that match an index point in the library.
+     5. Create a collection of coupled net arcs for simulation by using the get_timing_arcs
+        command. For example:
+         pt_shell> set my_arcs [get_timing_arcs -from U1/Z -to U2/A]
+
+         Note:
+            It is not recommended to perform arc-based correlation on stages driven by
+            ports.
+     6. Enable coupled one-and-a-half-stage correlation for $net, and perform a timing update.
+        For example:
+         pt_shell> sim_enable_si_correlation \
+                   [get_nets -of [get_attribute $my_arcs from_pin]]
+         pt_shell> update_timing -full
+
+     7. Perform SPICE analysis by using the sim_validate_stage command, which
+        simulates the specified one-and-a-half stage and compares the stage delay. The
+        validation report shows the SPICE simulated value (Ref), PrimeTime value (Val),
+        absolute difference (Diff), and percentage difference (%) for delay. For example:
+         pt_shell> sim_validate_stage $my_arcs
+
+         Pin            Sense                Delay
+                                Ref           Val          Diff        %
+         ----------------------------------------------------------------
+         U2/Z        f      0.59594 #    0.594371   -0.00156873    -0.26
+         ----------------------------------------------------------------
+         Tolerance   MET                                      0     3.00
+
+         If the arc includes the receiver stage, one-and-a-half stage analysis is done. If the
+         arc does not include the receiver stage, one stage correlation is reported instead. For
+         example:
+         pt_shell> set my_arcs [get_timing_arcs -from U1/Z -to FF1/D]
+         pt_shell> sim_validate_stage $my_arcs
+
+         Pin             Sense                             Delay
+
+
+
+PrimeTime® User Guide                                                                             1273
+T-2022.03
+                                                                                     Feedback
+Chapter 23: Using PrimeTime With SPICE
+Simulation Link to Correlate PrimeTime and SPICE Results
+
+
+                                 Ref           Val          Diff        %
+         -------------------------------------------------------------------
+         FF1/D         f      0.59594 #    0.594371   -0.00156873    -0.26
+         -------------------------------------------------------------------
+         Tolerance   MET                                         0    3.00
+
+
+     Correlating PrimeTime SI and SPICE Noise Analysis
+     To compare PrimeTime SI noise analysis results with SPICE results, run the
+     sim_validate_noise command. This command compares the noise bump height and
+     area reported by both tools.
+     Use the following flow for noise correlation:
+     # Specify the nets on which to compare noise analysis
+     sim_enable_si_correlation [get_nets -of_objects net_driver_pin]
+
+     # Run timing and noise analysis
+     update_timing -full
+     update_noise -full
+
+     # Specify the timing arcs and run noise correlation
+     set net_arc [get_timing_arcs -from net_driver_pin -to net_receiver_pin]
+     sim_validate_noise $net_arc -area [-verbose] \
+       -analysis_type above_low | below_high
+
+
+     Distributing Simulations Across Multiple Machines
+     If you need to run simulations for many collection objects, you can use the
+     sim_setup_distributed command to distribute their simulations across multiple
+     machines.
+     For example,
+     pt_shell> sim_setup_distributed \
+                 -mode grd \
+                 -submit_command {qsub -V -cwd -P bnormal} \
+                 -sim_per_job 2
+
+     pt_shell> sim_validate_path $twelve_paths
+
+     The -sim_per_job option specifies the number of collection object simulations per
+     submitted job. The total number of submitted jobs depends on the number of collection
+     objects given to the simulation command. (The sample spaces of variation simulations are
+     not split across jobs.)
+     When the distributed simulation jobs complete, the tool prints a job summary:
+     Summary:
+     ----------------------------------------
+
+
+PrimeTime® User Guide                                                                     1274
+T-2022.03
+                                                                                      Feedback
+Chapter 23: Using PrimeTime With SPICE
+Generating a SPICE Deck With the write_spice_deck Command
+
+
+     Total number of simulations       : 12
+     Simulation per farm job           : 2
+     Total number of farm jobs         : 6
+     Completed number of farm jobs     : 4
+     Failed number of farm jobs        : 0
+     Timed out farm jobs               : 2
+     ----------------------------------------
+
+     The following commands support distributed simulation:
+     •   sim_validate_noise
+
+     •   sim_validate_path
+
+     •   sim_validate_setup
+
+     •   sim_validate_stage
+
+     •   sim_analyze_path
+
+     The sim_setup_distributed command provides additional options to limit queued jobs
+     and retry failed jobs. For details, see the man page.
+     Note the following limitation of the sim_setup_distributed command:
+     •   The -from and -to options of the sim_validate_path command are not supported.
+
+
+Generating a SPICE Deck With the write_spice_deck Command
+     To generate a SPICE deck, run the write_spice_deck command. This command
+     requires a PrimeTime SI license. The command generates a SPICE netlist that includes
+     the cells of a specified path or arc, together with the resistors, ground capacitors, and
+     coupling capacitors to aggressor nets related to the nets in the timing path or arc. The
+     command also provides options to generate the stimuli to sensitize the victim path and
+     aggressors.
+     To learn about generating and using the SPICE deck, see
+     •   Writing a SPICE Deck for a Timing Path
+     •   Writing a SPICE Deck for a Timing Arc
+     •   Library Sensitization in write_spice_deck
+     •   Library Driver Waveform
+     •   Additional Required Information for SPICE Simulation
+     •   Example of write_spice_deck Output
+     •   Limitations of Using write_spice_deck for SPICE Correlation
+
+
+PrimeTime® User Guide                                                                       1275
+T-2022.03
+                                                                                        Feedback
+Chapter 23: Using PrimeTime With SPICE
+Generating a SPICE Deck With the write_spice_deck Command
+
+
+
+     Writing a SPICE Deck for a Timing Path
+     To analyze crosstalk delay effects (but not static noise effects) for a timing path, generate
+     a SPICE deck that represents the timing path. Use the get_timing_paths command to
+     collect paths for the write_spice_deck command. For example:
+     pt_shell> write_spice_deck -header header.spi \
+               -output testcase.spi \
+               -logic_one_voltage 1.5 \
+               -logic_zero_voltage 0.0 \
+               -sub_circuit_file ./SPICE/subckt.spi \
+               [get_timing_paths -from A2 -to buf5/A]
+
+     To collect specific paths or transitions, use the get_timing_paths command with a
+     combination of the -from, -to, or -delay_type options. If you do not use any of these
+     options, the get_timing_paths command collects the path with the worst timing slack.
+     To generate the circuit stimulus waveforms for a particular set of victim and aggressor
+     transitions, use the -delay_type option of the get_timing_paths command. The option,
+     when set to max_rise, max_fall, min_rise, or min_fall, specifies the type of delay
+     (maximum or minimum) and the type of transition considered at the path endpoint (rising
+     or falling). For crosstalk occurring at the path endpoint, this option setting specifies the
+     crosstalk conditions shown in the following figure. For each victim net along the path,
+     the write_spice_deck command sensitizes the aggressor nets appropriately to test the
+     specified maximum or minimum delay transition.
+
+
+
+
+PrimeTime® User Guide                                                                          1276
+T-2022.03
+                                                                                         Feedback
+Chapter 23: Using PrimeTime With SPICE
+Generating a SPICE Deck With the write_spice_deck Command
+
+
+Figure 454     Specifying crosstalk delay transitions for paths
+
+
+
+        Aggressor                                          Aggressor
+        net                                                net
+
+
+
+        Victim                                            Victim
+        net                                               net
+
+
+             [get_timing_paths -delay_type max_rise]         [get_timing_paths -delay_type max_fall]
+
+
+
+        Aggressor                                         Aggressor
+        net                                               net
+
+
+
+        Victim                                            Victim
+        net                                               net
+
+
+             [get_timing_paths -delay_type min_rise]         [get_timing_paths -delay_type min_fall]
+
+
+
+     The generated SPICE deck includes all cross-coupled aggressor nets and capacitors
+     along the full path. A long or complex path with a lot of coupling capacitors can result
+     in a very large data file, too large to be practical for SPICE simulation. In that case, try
+     using get_timing_arcs to select just a portion of the path that has the victim net and the
+     immediate surrounding circuitry.
+
+
+     Writing a SPICE Deck for a Timing Arc
+     To analyze crosstalk delay effects or static noise effects for a timing arc, generate a
+     SPICE deck that represents the timing arc. Use the get_timing_arcs command with
+     a combination of the -from, -to, and -of_objects options to specify the arc for the
+     write_spice_deck command:
+     pt_shell> write_spice_deck -header header.spi \
+               -analysis_type above_high \
+               -output ../SIMUL_BEYOND_HIGH/new_general.spi \
+               -logic_one_voltage 1.5 -logic_zero_voltage 0.0 \
+
+
+
+PrimeTime® User Guide                                                                           1277
+T-2022.03
+                                                                                         Feedback
+Chapter 23: Using PrimeTime With SPICE
+Generating a SPICE Deck With the write_spice_deck Command
+
+
+                    -sub_circuit_file ./SPICE/subckt.spi \
+                    [get_timing_arcs -to buf5/A]
+
+     To specify the type of analysis, use the -analysis_type option with the following values:
+     •   For crosstalk delay analysis, use max_rise, max_fall, min_rise, or min_fall.
+
+   Figure 455   Crosstalk delay transitions for arcs
+
+
+           Aggressor                                        Aggressor
+           net                                              net
+
+
+
+           Victim                                           Victim
+           net                                              net
+
+                       -analysis_type max_rise                          -analysis_type max_fall
+
+
+           Aggressor                                        Aggressor
+           net                                              net
+
+
+           Victim                                           Victim
+           net                                              net
+
+                       -analysis_type min_rise                          -analysis_type min_fall
+
+
+
+
+PrimeTime® User Guide                                                                             1278
+T-2022.03
+                                                                                          Feedback
+Chapter 23: Using PrimeTime With SPICE
+Generating a SPICE Deck With the write_spice_deck Command
+
+
+     •   For static noise analysis, use above_high, below_high, above_low, or below_low.
+
+   Figure 456    Crosstalk noise transitions for arcs
+
+
+           Aggressor                                           Aggressor
+           net                                                 net
+
+
+
+           Victim                                             Victim
+           net                                                net
+
+                     -analysis_type above_high                          -analysis_type below_high
+
+
+            Aggressor                                          Aggressor
+            net                                                net
+
+
+
+            Victim                                             Victim
+            net                                                net
+
+                     -analysis_type above_low                           -analysis_type below_low
+
+
+
+     By default, the write_spice_deck command places an aggressor transition in the middle
+     of the arrival timing window, not necessarily at the time with worst-case crosstalk effects.
+     to get agreement between PrimeTime SI and SPICE, it is necessary to “sweep” the
+     transition time using a sequence of SPICE simulations, to find the worst-case transition
+     time.
+     To reduce the simulation effort, use the -align_aggressors option of the
+     write_spice_deck command. This places the aggressor transitions where they produce
+     the worst-case crosstalk effects for the conditions specified by the -analysis_type
+     option. The specified condition can be max_rise, max_fall, min_rise, or min_fall
+     for crosstalk delay analysis or above_high, below_high, above_low, or below_low for
+     crosstalk noise analysis. The aggressor alignment feature is available for timing stages
+     obtained by the get_timing_arcs command, but not for timing paths obtained by the
+     get_timing_paths command.
+
+     Aggressor alignment is done only for a net timing arc (an arc from the output pin of a cell,
+     through a net, to the input pin of another cell), not for a cell timing arc (an arc from an input
+     pin to an output pin of a cell), even though the coupled RC network of the driven net is
+     written.
+
+
+
+PrimeTime® User Guide                                                                              1279
+T-2022.03
+                                                                                         Feedback
+Chapter 23: Using PrimeTime With SPICE
+Generating a SPICE Deck With the write_spice_deck Command
+
+
+     When the write_spice_deck command uses aggressor alignment for a net arc, it
+     chooses the same driving cell arc that was used during the update_timing command in
+     PrimeTime. Aggressor alignment does not work for an aggressor that is directly driven with
+     the set_driving_ cell command.
+
+
+     Library Sensitization in write_spice_deck
+     The write_spice_deck command can use the stimulus information available in the library
+     for sensitizing the logic cells of a timing path or a stage. This sensitizes the timing arc with
+     the same stimulus used when the arc was characterized. As a result, the PrimeTime-to-
+     SPICE correlation for both coupled and uncoupled analysis is more accurate.
+     PrimeTime uses the sensitization information contained in the library. In the absence
+     of library-specified sensitization, it applies default sensitization based on the “when”
+     conditions of the timing arc and the logic functions for the combinational logic or the binary
+     state table for sequential logic.
+     For more information about the cell sensitization syntax in Liberty format, see the Library
+     Compiler User Guide.
+     The following example demonstrates how the write_spice_deck command uses library-
+     defined sensitization information. In this example, the information is specified in the library
+     as follows:
+     sensitization (2in_1out){
+     pin_names (IN1, IN2, OUT);
+     vector (0, "0 0 0") ;
+     vector (1, "0 0 1") ;
+     vector (2, "0 1 0") ;
+     vector (3, "0 1 1") ;
+     vector (4, "1 0 0") ;
+     vector (5, "1 0 1") ;
+     vector (6, "1 1 0") ;
+     vector (7, "1 1 1") ;
+
+      cell(my_cell){
+           sensitization_master : 2in_1out;
+           pin_name_map (A, B, Z);
+             ...
+        pin(Z) {
+             ...
+           timing() {
+                 related_pin : A;
+                 wave_rise (0, 4, 2, 6, 3);
+                 wave_fall (1, 5, 3, 6);
+                 wave_rise_sampling_index : 4;
+                 wave_fall_sampling_index : 3;
+           }
+         }
+      }
+
+
+PrimeTime® User Guide                                                                           1280
+T-2022.03
+                                                                                           Feedback
+Chapter 23: Using PrimeTime With SPICE
+Generating a SPICE Deck With the write_spice_deck Command
+
+
+     The sensitization template 2in_1out defines eight vectors. Each vector defines a logic
+     value for the cell pins in the order corresponding to the pin_names list.
+     The cell(my_cell) statement instantiates the sensitization template 2in_1out and maps
+     its pins A, B, and Z to IN1, IN2, and OUT, respectively.
+     For the timing arc from A to Z, the wave_rise attribute defines waveforms at pins A
+     and B that result in a rising edge at pin Z, using a sequential list of vectors previously
+     defined in the 2in_1out template. The wave_rise_sampling_index attribute defines the
+     transition number corresponding to wave_rise on which the delay and slew values are
+     to be measured for the timing arc. In this example, it is set to the fourth transition. The
+     sensitization for a falling transition at the output is similarly defined by the wave_fall and
+     wave_fall_sampling_index attributes.
+
+     The following figure shows the interpretation of the wave_rise attribute in PrimeTime SI.
+     The vector sequence (0, 4, 2, 6, 3) represents the waveforms applied to pins A and B to
+     generate a rising edge at pin Z. The delay and slew measurements of the A-to-Z timing
+     arc occur on the fourth sequence transition (in this case, the transition between vector ID
+     number 6 and vector ID number 3).
+
+Figure 457      Usage of wave_rise in library sensitization definition
+             wave_rise (0,4,2,6,3)
+                                                     Default timing interval
+                                                                                 Fourth transition
+             From sensitization template:
+             Vector ID       A B Z
+                 0           0 0 0
+                 4           1 0 0
+                 2           0 1 0                      A
+                 6           1 1 0
+                 3           0 1 1
+
+
+
+                                                        B
+                            A                                                              A-to-Z
+                                                                                           timing arc
+                                   Z
+                            B                           Z
+
+
+
+     PrimeTime SI assigns a time interval between transitions to a fixed interval such that the
+     associated logic cell has sufficient time to settle down and initialize itself to a proper state.
+     A different time interval can be specified with the wave_rise_timing_interval attribute.
+     The following example shows how to set the time interval to 0.5 library time units:
+     wave_rise_timing_interval : 0.5;
+
+
+
+
+PrimeTime® User Guide                                                                                1281
+T-2022.03
+                                                                                         Feedback
+Chapter 23: Using PrimeTime With SPICE
+Generating a SPICE Deck With the write_spice_deck Command
+
+
+     Due to the adaptive time-stepping used by SPICE simulators, providing more simulation
+     time than necessary for the logic to stabilize does not increase simulation runtime.
+
+
+     Library Driver Waveform
+     When the write_spice_deck command sensitizes the input of a cell, it uses the same
+     waveform that was used for characterization of the timing data. PrimeTime SI gets the
+     predriver modeling information from the library, if available.
+     If the library does not contain the predriver information, the standard Synopsys predriver
+     is used by default. To specify the predriver type explicitly in PrimeTime SI, use the
+     set_library_driver_waveform command.
+
+     The -type setting of the set_library_driver_waveform command specifies the
+     predriver type, either a simple ramp or the standard Synopsys predriver. If you specify one
+     or more library objects (a collection of libraries or library cells) in the command, it applies
+     only to those objects. Otherwise, the command applies to the whole design.
+     The library driver setting affects not only the write_spice_deck command, but also the
+     predriver used for advanced delay calculation using CCS models. For more information,
+     see PrimeTime SI Crosstalk Delay Calculation Using CCS Models.
+
+
+     Additional Required Information for SPICE Simulation
+     Before you use the deck generated by the write_spice_deck command, you must add
+     the following information:
+     •   SPICE subcircuit definitions for all gates used in the SPICE deck; you can use the
+         .include statement.
+
+     •   SPICE models for all transistors and other devices used in the gates
+     •   Definitions for all power and ground nets in the SPICE deck; the header of the SPICE
+         deck contains comment lines that show how to define VDD as power and VSS as
+         ground. All generated ground capacitors are connected to net 0, and all generated
+         piecewise linear (PWL) delay models are relative to net 0.
+     Check all comment lines in the SPICE deck output for notes, warnings, and error
+     messages. Typical errors include missing subcircuit files, missing definitions in the
+     subcircuit file, incompatible pin order, or an unconstrained path that prevents PrimeTime SI
+     from determining the arrival window.
+     PrimeTime SI tries to generate all required stimuli for the SPICE deck. However, it
+     might not be able to do so in certain cases, such as for a RAM lacking a definition of the
+     appropriate data.
+
+
+
+
+PrimeTime® User Guide                                                                          1282
+T-2022.03
+                                                                                       Feedback
+Chapter 23: Using PrimeTime With SPICE
+Generating a SPICE Deck With the write_spice_deck Command
+
+
+
+     Example of write_spice_deck Output
+     Here is an example of the write_spice_deck command:
+     pt_shell> write_spice_deck -output my_output \
+               -sub_circuit_file spice_subckt \
+               -logic_one_voltage 1.8 \
+               [get_timing_paths]
+
+     This example produces a SPICE deck file named my_output, based on the definitions
+     given in the SPICE subcircuit file called spice_subckt. The -logic_one_voltage
+     option specifies the upper voltage swing of the gate input pins to 1.8 volts, which affects
+     piecewise linear (PWL) model generation.
+     The following example shows the output file generated by this command and the
+     applicable input SPICE subcircuit definitions.
+
+Example 90 SPICE deck output
+     MAX. critical path section: (falling) SecIn -> (falling)
+     SecondReg/D.
+     *.global vdd vss
+     *vvdd vdd 0 1.8
+     *vvss vss 0 0
+     .include "./spice/spi_deck.subckt"
+
+     ***   critical path 0 has 7 pins.
+     ********** Arrival Window Info. for pin 'SecIn' **********
+     * {myclock} pos_edge {min_r_f 0.1 0.1} {max_r_f 0.1 0.1}
+     * --clock-- {0 2}
+     ******************************************
+     * !!! INFO: PrimeTime created the following critical path falling
+     input port 'SecIn' waveform.
+     * For rising pwl
+     * vSecIn SecIn 0 pwl(0.0ns 0 10.0995ns 0 10.1005ns 1.8)
+     * For falling pwl
+     vSecIn SecIn 0 pwl(0.0ns 1.8 10.0995ns 1.8 10.1005ns 0)
+     ******************************************
+     * resistor(s) for net 'SecIn'.
+     r0      SecIn:4      SecIn:8       4.000000
+     r1      SecIn:3      SecIn:4       4.000000
+     r2      PreInv/A     SecIn:3       4.000000
+     r3      SecIn:5      SecIn:6       1.368000
+     r4      SecIn:6      SecIn:8       0.049228
+     r5      SecIn:5      SecIn         0.053363
+     * ground capacitors(s) for net 'SecIn'.
+     c0      PreInv/A     0       0.052000ff
+     * c1    SecIn:4      0       0.000000ff
+     c2      SecIn        0       0.081000ff
+     c3      SecIn:5      0       0.404000ff
+     c4      SecIn:6      0       0.009000ff
+
+
+
+PrimeTime® User Guide                                                                         1283
+T-2022.03
+                                                                                  Feedback
+Chapter 23: Using PrimeTime With SPICE
+Generating a SPICE Deck With the write_spice_deck Command
+
+
+     * c5    SecIn:8      0       0.000000ff
+     c6      SecIn:3      0       0.026000ff
+     * cross capacitance of net 'SecIn'.
+     cc0      SecIn:4       PreInv/Y      0.008000ff
+     cc1      SecIn:4       PreNet:14     0.026000ff
+     cc2      SecIn:4       PreNet:8      0.023000ff
+     cc3      SecIn:4       PreNet:4      0.023000ff
+     cc4      SecIn:8       PreInv/Y      0.009000ff
+     cc5      SecIn:8       PreNet:14     0.029000ff
+     cc6      SecIn:8       PreNet:8      0.026000ff
+     cc7      SecIn:8       PreNet:4      0.026000ff
+     cc8      SecIn:3       PreInv/Y      0.008000ff
+     cc9      SecIn:3       PreNet:14     0.026000ff
+     cc10     SecIn:3       PreNet:8      0.023000ff
+     cc11     SecIn:3       PreNet:4      0.023000ff
+
+Example 91 SPICE subcircuit input file
+     .SUBCKT buf1a3 A Y
+     MU11 N1N4 A VSS VSS n L=0.24 W=1.66
+     MU12 N1N4 A VDD VDD p L=0.24 W=2.50
+     MU21 Y N1N4 VSS VSS n L=0.24 W=1.66
+     MU22 Y N1N4 VDD VDD p L=0.24 W=2.50
+     .ENDS
+     .SUBCKT fdf1a6 CLK D Q
+     M1 N1N56 TP2 N1N119 VSS n L=0.24 W=1.00
+     M2 N1N119 D VSS VSS n L=0.24 W=1.00
+     M3 N1N56 TP3 N1N35 VSS n L=0.24 W=0.58
+     M4 N1N35 TP7 VSS VSS n L=0.24 W=0.58
+     M5 TP7 N1N56 VSS VSS n L=0.24 W=1.00
+     M6 TP7 TP3 N1N46 VSS n L=0.24 W=0.58
+     M7 N1N46 TP2 N1N37 VSS n L=0.24 W=0.58
+     M8 N1N37 N1N108 VSS VSS n L=0.24 W=0.58
+     M9 TP3 TP2 VDD VDD p L=0.24 W=0.78
+     .ENDS
+     .SUBCKT inv1a6 A Y
+     M1 Y A VSS VSS n L=0.24 W=3.32
+     M2 Y A VDD VDD p L=0.24 W=5.00
+     .ENDS
+     .SUBCKT or2c3 A B Y
+     M1I551 N1I551N10 B VSS VSS n L=0.24 W=1.66
+     M1I552 Y A N1I551N10 VSS n L=0.24 W=1.66
+     M1I553 Y A VDD VDD p L=0.24 W=2.50
+     M1I554 Y B VDD VDD p L=0.24 W=2.50
+     .ENDS
+
+
+     Limitations of Using write_spice_deck for SPICE Correlation
+     The write_spice_deck command is useful for creating a structural representation of the
+     victim path and its aggressor nets. However, you cannot expect to run a single SPICE
+
+
+
+
+PrimeTime® User Guide                                                                   1284
+T-2022.03
+                                                                                      Feedback
+Chapter 23: Using PrimeTime With SPICE
+Generating a SPICE Deck With the write_spice_deck Command
+
+
+     deck simulation for a direct, one-to-one comparison with the PrimeTime SI results because
+     of the following reasons:
+     •   The path that you select might be so long, with many cross-coupling capacitors, that
+         even a single SPICE simulation run might take too long to be practical.
+     •   PrimeTime SI does the calculation using multiple iterations, taking into consideration
+         the whole environment of the victim path, using multiple switching cycles. The SPICE
+         deck generator can generate only one victim path (with its aggressor nets) and
+         consider only one switching cycle of the path.
+     •   Other factors, such as the slew propagation scheme and accuracy of the library, can
+         affect the comparison between the PrimeTime SI and SPICE results.
+
+
+
+
+PrimeTime® User Guide                                                                       1285
+T-2022.03
+

@@ -1,0 +1,3930 @@
+                                                                                      Feedback
+
+
+
+
+4
+Managing Performance and Capacity
+     To learn how to manage the performance and capacity of the PrimeTime tool, see
+     •   High Capacity Mode Options
+     •   Advanced Data Management
+     •   Threaded Multicore Analysis
+     •   Distributed Multi-Scenario Analysis
+     •   HyperGrid Distributed Analysis
+     •   Reporting the CPU Time and Memory Usage
+     •   Flow Summary Reports
+     •   Profiling the Performance of Tcl Scripts
+
+
+High Capacity Mode Options
+     By default, PrimeTime runs in high capacity mode, which reduces the peak memory
+     footprint and makes runtime trade-offs between performance and capacity, without
+     affecting the final results. High capacity mode is compatible with all analysis flows,
+     including flat and hierarchical flows; however, it is most useful with clock reconvergence
+     pessimism removal (CRPR) enabled.
+     In high capacity mode, the tool temporarily stores data to a local disk partition specified
+     by the pt_tmp_dir variable; the default is the /tmp directory. When you exit the session,
+     the consumed disk space is automatically released. For effective use of this mode, the
+     available capacity of the local disk on the host machine should be as large as the physical
+     RAM. However, actual disk usage is dependent on the design, constraints, and tool
+     settings.
+     To specify the tradeoff between capacity and performance in high capacity mode, set the
+     sh_high_capacity_effort variable to low, medium, high, or default (where default
+     is equivalent to medium). A higher effort setting results in lower peak memory usage
+     but longer runtime. You must set this variable before using the set_program_options
+     command.
+
+
+
+PrimeTime® User Guide                                                                             82
+T-2022.03
+                                                                                         Feedback
+Chapter 4: Managing Performance and Capacity
+Advanced Data Management
+
+
+     To disable high capacity mode, run the set_program_options command with the
+     -disable_high_capacity option. The sh_high_capacity_enabled read-only variable
+     shows whether high capacity mode is enabled:
+     pt_shell> set_program_options -disable_high_capacity
+     Information: high capacity analysis mode disabled. (PTHC-001)
+     pt_shell> printvar sh_high_capacity_enabled
+     sh_high_capacity_enabled = "false"
+
+
+
+Advanced Data Management
+     The PrimeTime tool provides a more efficient method of storing design data, called
+     advanced data management, that reduces in-memory consumption and allows larger
+     designs to be analyzed.
+     This feature is recommended for designs with over 100 million instances, particularly those
+     using parametric on-chip variation (POCV) analysis with moment-based modeling. There
+     is a small increase in runtime and disk space usage when this feature is enabled.
+     To use this feature, set the following variable before any design data is loaded:
+     pt_shell> set_app_var timing_enable_advanced_data_management true
+
+     As a convenience, when you set this variable to true, the tool also sets the
+     sh_high_capacity_effort variable to high. (The default high capacity effort level is
+     medium).
+
+     This feature requires a PrimeTime-ELT license.
+
+
+Threaded Multicore Analysis
+     PrimeTime can perform threaded multicore analysis, which improves performance on
+     a shared memory server by running multiple threads on the available cores. The tool
+     executes multiple tasks in parallel to yield faster turnaround for the following commands:
+     get_timing_paths
+     read_parasitics
+     read_verilog
+     report_analysis_coverage
+     report_attribute
+     report_constraint
+     report_timing
+     save_session
+     update_timing
+     update_noise
+     write_sdf
+
+     To learn how to use threaded multicore analysis, see
+
+
+PrimeTime® User Guide                                                                             83
+T-2022.03
+                                                                                       Feedback
+Chapter 4: Managing Performance and Capacity
+Threaded Multicore Analysis
+
+
+     •   Configuring Threaded Multicore Analysis
+     •   Executing Commands in Parallel
+     •   Threaded Multicore Parasitics Reading
+     •   Threaded Multicore Path-Based Analysis
+
+
+     Configuring Threaded Multicore Analysis
+     By default, the tool uses threaded multicore analysis to improve performance. This feature
+     allows multiple simultaneous execution threads to perform work in parallel.
+     By default, the maximum number of CPU cores used per process is four. The -max_cores
+     option of the set_host_options command allows you to specify this limit. For example,
+     pt_shell> set_host_options -max_cores 32
+     Information: Checked out license 'PrimeTime-ADV' (PT-019)
+
+     Values greater than 16 require a PrimeTime-ADV license, and values greater than 32
+     require one or more PrimeTime-APX licenses. The tool retains the licenses even if the
+     maximum number of cores is later reduced below the threshold. For details, see Local-
+     Process Licensing.
+     If the limit exceeds the number of CPU cores provided by the current machine, it is
+     reduced to the number of available cores. (This adjustment considers only the presence of
+     the cores; machine loading is not taken into account.)
+     Overthreading allows the number of simultaneous threads to temporarily exceed the
+     maximum core count for short intervals. It is enabled by default. If overthreading is not
+     permitted in your compute environment, disable it by setting the following variable:
+     pt_shell> set_app_var multi_core_allow_overthreading false
+
+     Disabling overthreading can result in reduced multicore performance.
+
+
+     Executing Commands in Parallel
+     You can use parallel command execution for Tcl procedures and for post-update reporting
+     and analysis, but not for commands that update the design such as ECOs, timing updates,
+     or noise updates.
+     When using parallel command execution, the maximum number of parallel commands
+     executed at one time is determined by the -max_cores option of the set_host_options
+     command.
+     Parallel command execution is most effective when you launch the longest running
+     command first.
+
+
+PrimeTime® User Guide                                                                            84
+T-2022.03
+                                                                                       Feedback
+Chapter 4: Managing Performance and Capacity
+Threaded Multicore Analysis
+
+
+     To execute commands in parallel, use the following commands in your scripts:
+     •   The parallel_execute Command
+     •   The redirect -bg (Background) Command
+     •   The parallel_foreach_in_collection Command
+
+     The parallel_execute Command
+     To run a set of commands in parallel, use the parallel_execute command. For example:
+     parallel_execute {
+       {save_session design_dir/my_session} /dev/null
+       {report_timing -max 10000 -nworst 10} report_timing.log
+       {report_constraints -all_violators} report_constraints.log
+       {report_qor} report_qor.log
+     }
+
+     After all commands running in parallel are complete, the tool returns to the pt_shell
+     prompt.
+     The parallel_execute command dynamically allocates cores to the commands as they
+     run. This improves processing efficiency when a mix of command types is given. More
+     specifically,
+     •   When a mix of multicore and non-multicore commands is specified, processing cores
+         are dynamically allocated to the commands that can use them.
+     •   When a command completes, its processing cores can be reallocated to other
+         commands that are still running.
+     You can include command blocks that contain multiple commands. This is useful for
+     commands that have dependencies on each other, or to parallelize more complex code
+     structures. For example,
+     parallel_execute {
+       {
+         set paths [get_timing_paths ...]
+         foreach_in_collection path $paths {
+           ...
+         }
+       } paths.txt
+       ...
+     }
+
+     If you specify set_host_options -max_cores 1, the tool runs in single-core analysis
+     mode and executes all commands within the parallel_execute command in series in the
+     specified order.
+
+
+
+
+PrimeTime® User Guide                                                                         85
+T-2022.03
+                                                                                  Feedback
+Chapter 4: Managing Performance and Capacity
+Threaded Multicore Analysis
+
+
+     The redirect -bg (Background) Command
+     To run a post-update command in the background, use the redirect -bg command:
+     update_timing -full
+     redirect -bg -file rpt_file1 {report_cmd1}
+     redirect -bg -file rpt_file2 {report_cmd2}
+     redirect -bg -file rpt_file3 {report_cmd3}
+     ...
+
+     The main pt_shell keeps running while the redirect -bg command queues the jobs and
+     waits for available cores.
+     If you specify set_host_options -max_cores 1, the tool runs in single-core analysis
+     mode; the redirect command disregards the -bg option and runs the commands in the
+     foreground.
+     If you issue an exit command while there is at least one active background redirect
+     -bg command, the tool blocks the exit request until all background commands complete.
+
+     The parallel_foreach_in_collection Command
+     To speed up iterations over collections of objects, use the
+     parallel_foreach_in_collection command. This command is similar to the
+     foreach_in_collection command but with the addition of parallel processing on
+     multiple cores. You can use this command with the post_eval command, which specifies
+     a script that is executed in sequence by the manager process, as shown in the following
+     syntax:
+     parallel_foreach_in_collection iterator_variable collections {
+       body_script_executed_by_workers_in_parallel
+       ...
+       post_eval {
+         script_executed_by_manager_in_sequence
+         ...
+       }
+     }
+
+     The following example shows how to use the parallel_foreach_in_collection
+     command to find and report the endpoint with the most violating paths.
+
+
+
+
+PrimeTime® User Guide                                                                      86
+T-2022.03
+                                                                                        Feedback
+Chapter 4: Managing Performance and Capacity
+Threaded Multicore Analysis
+
+
+Figure 10     Example of parallel_foreach_in_collection and post_eval commands
+
+            set endpoints [add_to_collection [all_registers –data_pins –async_pins]
+              [all_outputs] ]
+            set most_violators 0
+            set ep_with_most_violators {}
+            parallel_foreach_in_collection endpoint $endpoints {
+              set paths [get_timing_paths -to $endpoint –nw 1000   Body script, executed by
+                                          –slack_lesser_than 0]    workers in parallel
+              set num_violators [sizeof_collection $paths]
+              post_eval {                                                 post_eval (PE) script,
+                if { $num_violators > $most_violators } {
+                  set most_violators $num_violators                       executed by the master
+                  set ep_with_most_violators $endpoint                    in sequence
+                }
+              }
+            }
+            echo "endpoint [get_object_name $ep_with_most_violators]
+                  has $most_violators violators"
+
+
+
+
+     The following figure shows the parallel_foreach_in_collection command execution
+     timing, where the processing time proceeds from left to right. The blue boxes represent
+     iterations of the body script executed in parallel by worker processes.
+
+Figure 11     Execution of parallel_foreach_in_collection
+
+            Worker1         body(1)
+
+
+            Worker2        body(2)          body(4)            body(N)
+
+
+            Worker3               body(3)
+
+
+            Master                           pe(1) pe(2)                           pe(N)
+
+                                               Total runtime
+
+
+     The parallel_foreach_in_collection command automatically schedules and
+     balances the execution of N iterations to optimize the utilization of available cores.
+     While executing the body script, the worker processes submit the script specified by the
+     post_eval command to the manager process (represented by the purple boxes in the
+     preceding figure). Then each worker proceeds with its next loop iteration without waiting.
+     The manager process executes the post_eval commands in sequence. Therefore, for
+     maximum performance, keep post_eval commands as fast as possible and limited to
+
+
+PrimeTime® User Guide                                                                              87
+T-2022.03
+                                                                                        Feedback
+Chapter 4: Managing Performance and Capacity
+Threaded Multicore Analysis
+
+
+     only parts of the script that cannot be parallelized, such as changing constraints, setting
+     user-defined attributes, and modifying persistent variables to aggregate results. It is also
+     important to avoid excessive variable transfer, especially when dealing with large lists and
+     arrays.
+     For information about converting an existing foreach_in_collection loop to a
+     parallel_foreach_in_collection loop, see the man page for the latter command.
+
+
+     Threaded Multicore Parasitics Reading
+     By default, the read_parasitics command runs in a separate process launched by the
+     tool, performed in parallel with other commands such as read_sdc. To get the maximum
+     runtime benefit, use the read_parasitics command immediately after linking the
+     design. You can disable parallel parasitic data reading by using the set_host_options
+     -max_cores 1 command.
+
+     The temporary files written during the parasitic reading process are large parasitic files
+     that are stored in the pt_tmp_dir directory. These files are automatically deleted by the tool
+     at the end of the session. By default, the tool writes the log of the parasitic commands to
+     the parasitics_command.log file in the current working directory; to specify a different log
+     file, set the parasitics_log_file variable.
+
+
+     Threaded Multicore Path-Based Analysis
+     PrimeTime runs threaded multicore analysis for path-based analysis when you run
+     the get_timing_paths or report_timing commands with the -pba_mode path or
+     -pba_mode exhaustive option. This feature is supported for all command variations of
+     path-specific and exhaustive recalculation. For example:
+     •   get_timing_paths -pba_mode exhaustive ...
+
+     •   get_timing_paths -pba_mode path ...
+
+     •   get_timing_paths -pba_mode path $path_collection
+
+     •   report_timing -pba_mode exhaustive ...
+
+     •   report_timing -pba_mode path ...
+
+     •   report_timing -pba_mode path $path_collection
+
+     If multiple cores are not available, PrimeTime runs the standard single-core path-based
+     analysis.
+
+
+
+
+PrimeTime® User Guide                                                                            88
+T-2022.03
+                                                                                       Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+
+Distributed Multi-Scenario Analysis
+     Verifying a chip design requires several PrimeTime runs to check correct operation under
+     different operating conditions and different operating modes. A specific combination of
+     operating conditions and operating modes for a given chip design is called a scenario.
+     The number of scenarios for a design is
+         Scenarios = [Sets of operating conditions] X [Modes]
+     The PrimeTime tool can analyze several scenarios in parallel with distributed multi-
+     scenario analysis (DMSA). Instead of analyzing each scenario in sequence, DMSA uses
+     a manager PrimeTime process that sets up, executes, and controls multiple worker
+     processes—one for each scenario. You can distribute the processing of scenarios onto
+     different hosts running in parallel, reducing the overall turnaround time. Total runtime is
+     reduced when you share common data between different scenarios.
+     A single script can control many scenarios, making it easier to set up and manage different
+     sets of analyses. This capability does not use multithreading (breaking a single process
+     into pieces that can be executed in parallel). Instead, it provides an efficient way to
+     specify the analysis of different operating conditions and modes for a given design and to
+     distribute those analysis tasks onto different hosts.
+     To learn how to use DMSA, see
+     •   Definition of Terms
+     •   Overview of the DMSA Flow
+     •   Distributed Processing Setup
+     •   DMSA Batch Mode Script Example
+     •   Baseline Image Generation and Storage
+     •   Host Resource Affinity
+     •   Scenario Variables and Attributes
+     •   Merged Reporting
+     •   Loading Scenario Design Data Into the Manager
+     •   Saving and Restoring Your Session
+     •   License Resource Management
+     •   Worker Process Fault Handling
+     •   Messages and Log Files
+
+
+
+PrimeTime® User Guide                                                                              89
+T-2022.03
+                                                                                     Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+     •   DMSA Variables and Commands
+     •   Limitations of DMSA
+
+
+     Definition of Terms
+     The following terms describe aspects of distributed processing:
+     baseline image
+         Image that is produced by combining the netlist image and the common data
+         files for a scenario.
+     command focus
+         Current set of scenarios to which analysis commands are applied. The
+         command focus can consist of all scenarios in the session or just a subset of
+         those scenarios.
+     current image
+         Image that is automatically saved to disk when there are more scenarios than
+         hosts, and the worker process must switch to work on another scenario.
+     manager
+         Process that manages the distribution of scenario analysis processes.
+     scenario
+         Specific combination of operating conditions and operating modes.
+     session
+         Current set of scenarios selected for analysis.
+     task
+         Self-contained piece of work defined by the manager for a worker to execute.
+     worker
+         Process started and controlled by the manager to perform timing analysis for
+         one scenario; also called a worker process.
+
+
+
+
+PrimeTime® User Guide                                                                       90
+T-2022.03
+                                                                                            Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+Figure 12      Relationships Between Scenarios, Session, and Command Focus
+
+
+
+
+            scenario1       scenario2           scenario3           scenario4          scenario5
+
+
+
+
+       Scenario – A specified combination   Command focus – A list of           Session – A list of scenarios
+       of operating condition and mode      scenarios currently affected by     that can be analyzed in the
+       settings.                            analysis commands in the            session.
+       create_scenario -name name \         master.                             current_session {list}
+         -common_data {scripts} \           current_scenario {list}
+          -specific_data {scripts}
+
+
+
+     A scenario describes the specific combination of operating conditions and operating
+     modes to use when analyzing the design specified by the configuration. There is no limit
+     to the number of scenarios that you can create (subject to memory limitations of the
+     manager). To create a scenario, use the create_scenario command, which specifies the
+     scenario name and the names of the scripts that apply the analysis conditions and mode
+     settings for the scenario.
+     The scripts are divided into two groups: common-data scripts and specific-data scripts.
+     The common-data scripts are shared between two or more scenarios, whereas the
+     specific-data scripts are specific to the particular scenario and are not shared. This
+     grouping helps the manager process manage tasks and to share information between
+     different scenarios, minimizing the amount of duplicated effort for different scenarios.
+     A session describes the set of scenarios you want to analyze in parallel. You can select
+     the scenarios for the current session using the current_session command. The current
+     session can consist of all defined scenarios or just a subset.
+     The command focus is the set of scenarios affected by PrimeTime analysis commands
+     entered at the PrimeTime prompt in the manager process. The command focus
+     can consist of all scenarios in the current session or just a subset specified by the
+     current_scenario command. By default, all scenarios of the current session are in the
+     command focus.
+
+
+     Overview of the DMSA Flow
+     To learn about the basics of the multi-scenario flow, see
+
+
+
+PrimeTime® User Guide                                                                                91
+T-2022.03
+                                                                                           Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+     •   Preparing to Run DMSA
+     •   DMSA Usage Flow
+
+     Preparing to Run DMSA
+     Before you start your multi-scenario analysis, you must set the search path and create
+     a .synopsys_pt.setup file:
+     •   Setting the Search Path
+     •   .synopsys_pt.setup File
+     Setting the Search Path
+     In multi-scenario analysis, you can set the search_path variable only at the manager.
+     When reading in the search path, the manager resolves all relative paths in the context of
+     the manager. The manager process then automatically sets the fully resolved search path
+     at the worker process. For example, you might launch the manager in the /remote1/test/
+     ms directory, and set the search_path variable with the following command:
+     set search_path ". .. ../scripts"
+
+     The manager automatically sets the search path of the worker to the following:
+     /remote1/test/ms /remote1/test /remote1/ms/scripts
+
+     The recommended flow in multi-scenario analysis is to set the search path to specify the
+     location of
+     •   All files for your scenarios and configurations
+     •   All Tcl scripts and netlist, SDF, library, and parasitic files to be read in a worker context
+     For best results, avoid using relative paths in worker context scripts.
+     .synopsys_pt.setup File
+     The manager and workers source the same set of .synopsys_pt.setup files in the following
+     order:
+     1. PrimeTime install setup file at
+         install_dir/admin/setup/.synopsys_pt.setup
+     2. Setup file in your home directory at
+         ~/.synopsys_pt.setup
+     3. Setup file in the manager launch directory at
+         $sh_launch_dir/.synopsys_pt.setup
+
+
+
+PrimeTime® User Guide                                                                                92
+T-2022.03
+                                                                                   Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+     To conditionally execute commands in certain scalar or distributed analysis modes only,
+     check the value of the sh_host_mode variable to see whether it is set to scalar, manager,
+     or worker. For example:
+     if { $sh_host_mode eq "manager" } {
+        set multi_scenario_working_directory "./work"
+     }
+
+     DMSA Usage Flow
+     You can use the DMSA capability for timing analysis in PrimeTime and PrimeTime SI as
+     well as for power analysis in PrimePower. This dramatically reduces the turnaround time.
+     For more information about using DMSA in PrimePower, see the “Distributed Peak Power
+     Analysis” section in the PrimePower User Guide.
+     From the pt_shell prompt of the manager PrimeTime process, you can initiate and control
+     up to 256 worker processes (see Limitations of DMSA).
+
+
+
+
+PrimeTime® User Guide                                                                       93
+T-2022.03
+                                                                                         Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+Figure 13       Typical Multi-Scenario Analysis Flow
+
+
+            1      Start multi-scenario mode
+
+
+
+            2      Create scenarios
+
+
+                                                                           Repeat for each additional
+            3      Configure the compute resources
+                                                                           computing resource
+
+
+            4      Verify the host options
+
+
+
+            5      Start hosts
+
+
+
+            6      Select scenarios for the session
+
+
+            7                                                             Parallel processing of each
+                   Change the scenarios in focus in the current session
+                                                                          scenario in command focus
+
+
+                   When parallel processing of the scenarios is
+            8      complete, view analysis reports and fix timing
+                   violations
+
+
+
+
+     A typical multi-scenario analysis has the following steps:
+     1. Start PrimeTime in the multi-scenario analysis mode by running the pt_shell
+        command with the -multi_scenario option. Alternatively, from a normal PrimeTime
+        session, set the multi_scenario_enable_analysis variable to true.
+     2. Create the scenarios with the create_scenario command. Each create_scenario
+        command specifies a scenario name and the PrimeTime script files that apply the
+        conditions for that scenario.
+     3. Configure the compute resources that you want to use for the timing update and
+        reporting by running the set_host_options command. This command does not start
+        the host, but it sets up the host options for that host.
+
+
+PrimeTime® User Guide                                                                              94
+T-2022.03
+                                                                                     Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+        In the following example, the host option is named ptopt030, rsh is used to connect
+        to the host, and a maximum of three cores per process are specified for the compute
+        resources:
+        pt_shell> set_host_options -name my_opts -max_cores 3 \
+                  -num_processes 4 -submit_command "/usr/bin/rsh -n" ptopt030
+
+        Specify the maximum number of cores by specifying the remote core count with
+        the set_host_options command in the manager script, as shown in the previous
+        example.
+     4. Verify the host options by running the report_host_usage command. This command
+        also reports peak memory and CPU usage for the local process and all distributed
+        processes that are already online. The report displays the host options specified, status
+        of the distributed processes, number of CPU cores each process uses, and licenses
+        used by the distributed hosts.
+        pt_shell> report_host_usage
+        ****************************************
+        Report : host_usage
+        ...
+        ****************************************
+
+        Options Name      Host              32Bit     Num Processes
+        --------------------------------------------------------------
+        my_opts           ptopt030          N         4
+
+        Usage limits (cores)
+        Options Name                                  #     Effective
+        -------------------------------------------------------------------
+        (local process)                               -     2
+        my_opts5                                            -
+        ----------------------------------------------------------------------
+        Total                                               2
+
+        Memory usage
+        Options Name     #        Peak mem (MB)
+        ----------------------------------------
+        (local process) -         24.93
+
+        Performance
+        Options Name     #          CPU time (s)            Elapsed Time (s)
+        ---------------------------------------------------------------------
+        (local process) -           3                       25
+
+     5. Request compute resources and bring the hosts online by running the start_hosts
+        command.
+
+
+
+
+PrimeTime® User Guide                                                                         95
+T-2022.03
+                                                                                 Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+        Note:
+            If you set the multi_scenario_working_directory and
+            multi_scenario_merged_error_log variables, do so before you start the
+            compute resources.
+        To provide more information about the hosts such as the status and process
+        information, use the report_host_usage command after starting the distributed
+        processes. For example:
+        pt_shell> set_host_options -name my_opts -max_cores 3 \
+                  -num_processes 4 -submit_command "/usr/bin/rsh -n" ptopt030
+        1
+        pt_shell> report_host_usage
+        ...
+        Options Name       Host              32Bit     Num Processes
+        --------------------------------------------------------------
+        my_opts            ptopt030          N         4
+
+        Options Name    #     Host Name       Job ID     Process ID   Status
+        ----------------------------------------------------------------------
+        my_opts         1     ptopt030        28857      28857        ONLINE
+                        2     ptopt030        28912      28912        ONLINE
+                        3     ptopt030        28966      28966        ONLINE
+                        4     ptopt030        29020      29020        ONLINE
+
+        Usage limits (cores)
+
+        Options Name                            #     Effective
+        ------------------------------------------------------------
+        (local process)                         -     2
+                                                1     -
+                                                2     -
+                                                3     -
+                                                4     -
+        ------------------------------------------------------------
+        Total                                         2
+
+        Memory usage
+
+        Options Name     #         Peak Memory (MB)
+        ---------------------------------------------
+        (local process)    -       24.93
+        my_opts            1       26.31
+                           2       26.31
+                           3       26.31
+                           4       26.31
+
+        Performance
+
+        Options Name       #          CPU Time (s)          Elapsed Time (s)
+        ---------------------------------------------------------------------
+
+
+
+PrimeTime® User Guide                                                                   96
+T-2022.03
+                                                                                    Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+         (local process)        -              3                         25
+         my_opts                1              1                         14
+                                2              3                         25
+                                3              3                         25
+                                4              1                         15
+
+         Note:
+            You must complete steps 1 through 5 before you can run the
+            current_session command in the next step.
+
+     6. Select the scenarios for the session using the current_session command. The
+        command specifies a list of scenarios previously created with the create_scenario
+        command.
+     7. (Optional) Change the scenarios in the current session that are in command focus,
+        using the current_scenario command. The command specifies a list of scenarios
+        previously selected with the current_session command. By default, all scenarios in
+        the current session are in command focus.
+     8. View the analysis report and fix validation issues.
+         a. Start processing the scenarios by executing the remote_execute command or
+            performing a merged report command at the manager. For more information about
+            merged reports, see Merged Reporting.
+         b. When the processing of all scenarios by the worker processes is complete,
+            you can view the analysis reports. Locate the reports generated by the
+            remote_execute command under the directory you specified with the
+            multi_scenario_working_directory variable, as described in Distributed
+            Processing Setup. Alternatively, if you issue the remote_execute command with
+            the -verbose option, all information is displayed directly to the console at the
+            manager. The output of all merged reporting commands is displayed directly in the
+            console at the manager.
+         c. Use ECO commands to fix timing and design rule violations. For more information
+            about ECO commands, see ECO Flow.
+
+
+     Distributed Processing Setup
+     For distributed processing of multiple scenarios, you must first invoke the PrimeTime tool
+     in DMSA mode. You then manage your compute resource, define the working directory,
+     create the scenarios, and specify the current session and command focus. For details, see
+     •   Starting the Distributed Multi-Scenario Analysis Mode
+     •   Managing Compute Resources
+     •   Creating Scenarios
+
+
+PrimeTime® User Guide                                                                         97
+T-2022.03
+                                                                                        Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+     •   Specifying the Current Session and Command Focus
+     •   Executing Commands Remotely
+
+     Starting the Distributed Multi-Scenario Analysis Mode
+     To start the PrimeTime tool in DMSA mode, use the -multi_scenario option when you
+     start the PrimeTime shell:
+     % pt_shell -multi_scenario
+
+     PrimeTime starts up and displays the pt_shell prompt just as in a single scenario session.
+     A distributed multi-scenario analysis is carried out by one manager PrimeTime process
+     and multiple PrimeTime worker processes. The manager and worker processes interact
+     with each other using full-duplex network communications.
+     The manager process generates analysis tasks and manages the distribution of those
+     tasks to the worker processes. It does not perform timing analysis and does not hold any
+     data other than the netlist and the multi-scenario data entered. The command set of the
+     manager is therefore restricted to commands that perform manager functions.
+     To specify the directory in which to store working files for distributed processing, use the
+     multi_scenario_working_directory variable.
+
+     To specify the file in which to write all error, warning, and information messages issued by
+     the workers, set the multi_scenario_merged_error_log variable. Any message issued
+     by more than one worker is merged into a single entry in the merged error log. For details,
+     see Merged Error Log.
+     The multi_scenario_merged_error_log variable limits the number of messages of a
+     particular type written to the log on a per task basis. The default is 100.
+     Upon startup, every PrimeTime process, both manager and worker, looks for and sources
+     the .synopsys_pt.setup setup file just as in normal mode. Each process also writes its own
+     separate log file. For more information, see Log Files.
+
+     Managing Compute Resources
+     In distributed analysis, the manager process uses one or more worker processes to
+     perform the work. These worker processes can be configured, launched in a variety of
+     compute environments, queried for their status, and terminated as needed.
+     The manager generates tasks for the worker processes to execute. Any one task can
+     apply to only one scenario and any one worker process can be configured for only one
+     scenario at a time. If there are more scenarios than worker processes to run them, some
+     workers need to swap out one scenario for another so that all are executed.
+     It is important to avoid specifying more processes on a host than the number of available
+     CPUs. Otherwise, much time is spent swapping worker processes in and out. For optimal
+
+
+
+PrimeTime® User Guide                                                                               98
+T-2022.03
+                                                                                       Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+     system performance of DMSA, match the number of worker processes, scenarios in
+     command focus, and available CPUs so that every scenario is executed in its own worker
+     process on its own CPU.
+     Setting Up Distributed Host Options
+     You can allocate worker processes as compute resources with the set_host_options
+     command. Each worker process invoked by the manager is a single PrimeTime session
+     that is accessible only by the manager process. It is not possible to manually launch a
+     PrimeTime process in worker mode.
+     To specify worker processes, use the set_host_options -num_processes command:
+     pt_shell> set_host_options -num_processes process_count ...
+
+     The -num_processes option indicates that the specification applies to worker processes
+     instead of the local process.
+     The set_host_options command provides additional options to configure the worker
+     processes. For example, the -protocol option specifies the compute environment to use
+     for the processes:
+
+     -protocol value    Type                       Description
+
+     auto (default)     Automatic                  Infers protocol from the -submit_command
+                                                   value
+
+     rsh                Unmanaged (direct login)   Remote shell login
+
+     ssh                Unmanaged (direct login)   Secure Shell login
+
+     lsf                Managed (compute farm)     Load Sharing Facility
+
+     netbatch           Managed (compute farm)     NetBatch
+
+     pbs                Managed (compute farm)     PBS Professional
+
+     rtda               Managed (compute farm)     RunTime Design Automation
+
+     sge                Managed (compute farm)     Grid Engine
+
+     slurm              Managed (compute farm)     Slurm Workload Manager
+
+     custom             Custom                     Custom job submission command or script
+
+
+     Managed compute resources enables the tool to allocate pooled resources as they
+     become available.
+     The set_host_options command provides a variety of additional options to configure
+     the job submission command, define a name for the worker processes, and define load-
+
+
+PrimeTime® User Guide                                                                          99
+T-2022.03
+                                                                                                  Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+     sharing characteristics of the worker processes. For details, including command examples,
+     see the set_host_options man page.
+     You can use multiple set_host_options -num_processes commands to create multiple
+     sets of processes to launch, each with its own host options, and optionally assign a name
+     to each set by using the -name option.
+     The following commands configure four worker processes, two using SSH to a specific
+     machine, and two more on an LSF compute farm:
+     set_host_options \
+       -num_processes 2 \
+       -name my_local \
+       -max_cores 2 \
+       -protocol ssh \
+       workstation23.internal.mycompany.com
+
+     set_host_options \
+       -num_processes 2 \
+       -name my_farm \
+       -max_cores 2 \
+       -protocol lsf \
+       -submit_command "[sh which bsub] -n 2 -R rusage" \
+       -terminate_command "[sh which bkill]"
+
+     You can specify the maximum number of cores each worker process can use for threaded
+     multicore analysis by specifying the -max_cores option along with the -num_processes
+     option.
+     You can additionally configure the manager and worker processes by setting the following
+     variables.
+
+Variable                                       Description
+
+distributed_cleanup_variables_for_swap         Controls cleaning up the state of variables when
+                                               scenarios are swapped.
+
+distributed_custom_protocol_error_detecti Specifies the maximum time that the distributed manager
+on_timeout                                waits for custom protocol worker processes to come
+                                               online.
+
+distributed_farm_check_pending_workers_in Specifies the maximum time that the distributed manager
+terval                                    waits for a worker processes launched on a compute
+                                               farm to come online.
+
+distributed_farm_protocol_error_detection Specifies the maximum time that the distributed manager
+_timeout                                  waits for a worker processes launched on a compute
+                                               farm to come online.
+
+distributed_heartbeat_period                   Specifies the interval at which the distributed workers
+                                               send heartbeats to the manager process.
+
+
+
+
+PrimeTime® User Guide                                                                                    100
+T-2022.03
+                                                                                                  Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+Variable                                       Description
+
+distributed_heartbeat_timeout                  Specifies the heartbeat timeout (in missed heartbeats).
+                                               If the manager misses these many heartbeats
+                                               (consecutively) from a worker, then the worker is
+                                               assumed to have failed.
+
+distributed_logging                            Specifies the verbosity of logging during distributed
+                                               analysis.
+
+distributed_sh_protocol_error_detection_t Specifies the maximum time that the distributed manager
+imeout                                    waits for sh, rsh, and ssh protocol worker processes to
+                                               come online.
+
+distributed_worker_exit_action                 Controls the behavior of the exit command at distributed
+                                               worker processes.
+
+
+
+     For details, see their man pages.
+     To remove host options and terminate their associated processes, use the
+     remove_host_options command. For example, to remove and stop host1 and host3:
+     pt_shell> remove_host_options {host1 host3}
+
+     Configuring the Distributed Environment
+     To configure the distributed environment (remote launch script, worker startup script,
+     and maximum levels of collection attributes), use the set_distributed_parameters
+     command. Set the configuration before you run the start_hosts command.
+     Starting the Compute Resources
+     To start the hosts specified by the set_host_options command, use the start_hosts
+     command, which requests compute resources and brings the hosts online. The
+     start_hosts command continues to run until one of the following events occurs:
+
+     •     All requested remote host processes become available
+     •     The number of remote host processes that become available reaches the -min_hosts
+           value specified in the start_hosts command (if specified)
+     •     The number of seconds reaches the -timeout value specified in the start_hosts
+           command (default 21600)
+     The number of available hosts directly affects the ability of the PrimeTime tool to
+     simultaneously analyze scenarios. When there are too few hosts available, expensive
+     image swapping occurs until enough hosts become available.
+     When you run the start_hosts command, any previously added hosts begin to transition
+     through the states of their life cycle, as shown in the following diagram.
+
+
+
+
+PrimeTime® User Guide                                                                                     101
+T-2022.03
+                                                                                        Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+Figure 14    Life cycle states
+
+            Set up the host options with the
+            set_host_options command
+
+
+            Start the remote host processes using the
+            start_hosts command
+
+
+
+            Remote processes start up and form
+            connections back to the master
+
+
+            Remote processes accepted online by the
+            start_hosts command
+
+
+
+             Remote processes transition to the
+                                                               Remote processes transition
+             available state and can accept tasks to
+                                                               to the terminate state
+             process
+
+
+     DMSA Virtual Workers
+     When the number of scenarios exceeds the number of available hosts, at least two
+     scenarios must be assigned to run on a host. If multiple commands are executed in those
+     scenarios, the tool must perform save and restore operations to swap designs in and out
+     of memory for executing each command, which can consume significant runtime and
+     network resources.
+     In this situation, you can avoid the additional runtime and delay by setting a “load factor” in
+     the set_host_options command:
+     pt_shell> set_host_options -load_factor 2 ...
+
+     The default load factor is 1, which disables the feature. Setting a value of 2 reduces save
+     and restore operations at the cost of more memory.
+     The feature works by creating virtual workers in memory that can each handle one
+     scenario. A setting of 2 doubles the number of workers by creating one virtual worker in
+     memory for each real worker. If the real and virtual workers can accept all the scenarios at
+     the same time, there is no need for save and restore operations.
+     The following set_host_options command examples demonstrate this feature. The
+     -submit_command option shows the syntax for submitting jobs to an LSF farm with a
+     specific memory allocation; use the appropriate syntax for your installation.
+
+
+PrimeTime® User Guide                                                                           102
+T-2022.03
+                                                                                      Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+     •   2 scenarios, multiple commands per scenario:
+         set_host_options -num_processes 2 \
+           -submit_command {bsub -n 16 -R "rusage[mem=16384]"}
+
+         The number of processes equals the number of scenarios, so there is no benefit from
+         increasing the load factor.
+     •   4 scenarios, multiple commands per scenario:
+         set_host_options -num_processes 2 -load_factor 2 \
+           -submit_command {bsub -n 16 -R "rusage[mem=32768]"}
+
+         This command doubles the number of workers from 2 to 4 by creating a virtual worker
+         for each real worker. It also doubles the memory allocation to accommodate the virtual
+         workers. No save and restore operations are needed because the 4 workers can
+         accept the 4 scenarios at the same time.
+     •   6 scenarios, multiple commands per scenario:
+         set_host_options -num_processes 2 -load_factor 2 \
+           -submit_command {bsub -n 16 -R "rusage[mem=32768]"}
+
+         This command doubles the number of workers from 2 to 4, which reduces the need for
+         save and restore operations. However, it does not eliminate them completely because
+         the 4 workers cannot accept all 6 scenarios at the same time.
+     To optimize the time benefit, make the total number of workers equal to the number of
+     scenarios (possibly using multiple set_host_options commands) and allocate enough
+     memory on the hosts for the virtual workers.
+
+     Creating Scenarios
+     A scenario is a specific combination of operating conditions and operating modes for a
+     given configuration. Create a scenario with the create_scenario command. For example:
+     pt_shell> create_scenario -name scen1 \
+               -common_data {common_s.pt} \
+               -specific_data {specific1.pt}
+
+     There are two types of scripts associated with the scenario:
+     •   Scripts that handle common data shared by multiple scenarios and included in the
+         baseline image generation process (see Baseline Image Generation and Storage)
+     •   Scripts that handle specific data applied only to the specified scenario
+     The manager shares common data between groups of scenarios where appropriate,
+     thereby reducing the total runtime for all scenarios. For example, consider the following
+     figure.
+
+
+
+PrimeTime® User Guide                                                                            103
+T-2022.03
+                                                                                                 Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+Figure 15     Multi-Scenario Setup Example
+
+        common_s.pt script                           common_f.pt script
+
+                                                s_min.db                                           f_min.db
+                                                slow-min lib.                                      fast-min lib
+                     Slow process                                     Fast process
+                       variation                s_max.db                variation                  f_max.db
+                                                slow-max lib.                                      fast-max lib
+
+      specific1.pt               specific2.pt              specific3.pt           specific4.pt
+      script                     script                    script                 script
+
+
+
+                     read mode                   write mode               read mode                 write mode
+                     scenario s1                 scenario s2              scenario s3               scenario s4
+
+
+     This design is to be analyzed at two process variation extremes, called slow and fast, and
+     two operating modes, called read and write. Thus, the four scenarios to be analyzed are
+     slow-read, slow-write, fast-read, and fast-write.
+     The common_all.pt script reads in the design and applies constraints that are common to
+     all scenarios. The common_s.pt script is shared between some, but not all, scenarios. The
+     specific1.pt script directly contributes to specifying conditions of an individual scenario.
+
+     Use the -image option of the create_scenario command to create scenarios from
+     a previously saved scenario image. This image can be generated from a standard
+     PrimeTime session, a session saved from the DMSA manager, or a session saved from
+     the current image generated during a DMSA session.
+     If you need to create voltage scaling groups, do so before you use the link_design
+     command in one of the scripts used to set up a scenario.
+     Removing Scenarios
+     To remove a scenario previously created with the create_scenario command, use the
+     remove_scenario command:
+     pt_shell> remove_scenario s1
+
+     Specifying the Current Session and Command Focus
+     To specify the set of scenarios analyze, use the current_session command:
+     pt_shell> current_session {s2 s3 s4}
+
+
+
+
+PrimeTime® User Guide                                                                                    104
+T-2022.03
+                                                                                       Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+     The command lists the scenarios to be part of the current session. By default, all the listed
+     scenarios are in command focus, the scenarios currently affected by analysis commands
+     in the manager. To further narrow the command focus, use the current_scenario
+     command:
+     pt_shell> current_scenario {s3}
+
+     This command is useful during interactive analysis. For example, you might want to modify
+     the load on a particular net and then recheck the path timing in just that scenario or a
+     subset of all scenarios in the current session.
+     You can restore the command focus to all scenarios in the session as follows:
+     pt_shell> current_scenario -all
+
+     To check the distributed processing setup before you begin DMSA, use the
+     report_multi_scenario_design command, which creates a detailed report about user-
+     defined multi-scenario objects and attributes.
+
+     Executing Commands Remotely
+     To explicitly run commands in the worker context, use the remote_execute command.
+     Enclose the list of commands as a Tcl string. Separate the command with semicolons so
+     that they execute one at a time.
+     To evaluate subexpressions and variables remotely, generate the command string using
+     curly braces. For example:
+     remote_execute {
+       # variable all_in evaluated at worker
+       report_timing -from $all_in -to [all_outputs]
+     }
+
+     In this example, the report_timing command is evaluated at the worker, and the all_in
+     variable and the all_outputs expression are evaluated in a worker context.
+     To evaluate expressions and variables locally at the manager, enclose the command string
+     in quotation marks. All manager evaluations must return a string. For example:
+     remote_execute "
+       # variable all_out evaluated at manager
+       report_timing -to $all_out
+     "
+
+     In this example, the report_timing command is evaluated at the worker, and the
+     all_out variable is evaluated at the manager. Upon issuing the remote_execute
+     command, the manager generates tasks for execution in all scenarios in command focus.
+     The following example shows how to use the remote_execute command.
+
+
+
+
+PrimeTime® User Guide                                                                          105
+T-2022.03
+                                                                                      Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+     remote_execute {set x 10}
+     # Send tasks for execution in all scenarios in command focus
+     set x 20
+     remote_execute {report_timing -nworst $x}
+     # Leads to report_timing -nworst 10 getting executed at the workers
+
+     remote_execute "report_timing -nworst $x"
+     # Leads to report_timing -nworst 20 getting executed at the workers
+
+     If you use the -pre_commands option, the remote_execute command executes the
+     specified commands before the remote execution command.
+     remote_execute -pre_commands {cmd1; cmd2; cmd3} "report_timing"
+     # On the worker host, execute cmd1, cmd2, and cmd3 before
+     # executing report_timing on the manager
+
+     If you use the -post_commands option, the listed commands are executed after the
+     commands specified for remote execution.
+     remote_execute -post_commands {cmd1; cmd2; cmd3} "report_timing"
+     # On the worker host, execute cmd1, cmd2, and cmd3 after
+     # executing report_timing on the manager
+
+     You can use the remote_execute command with the -verbose option to return all worker
+     data to the manager terminal screen, instead of piping it to the out.log file in the working
+     directory of the DMSA file system hierarchy.
+     The ability to execute netlist editing commands remotely extends to all PrimeTime
+     commands, except when using the following commands:
+     •   Explicit save_session (worker only)
+     •   Explicit restore_session
+     •   remove_design
+
+
+     DMSA Batch Mode Script Example
+     In batch mode, PrimeTime commands are contained in a script invoked when the tool is
+     started. For example,
+     % pt_shell -multi_scenario -file script.tcl
+
+     The following script is a typical multi-scenario manager script.
+     set multi_scenario_working_directory "./ms_session_1"
+     set multi_scenario_merged_error_log "merged_errors.log"
+
+     script.tcl
+     ########################################
+     # Start of specifying the set-up
+
+
+
+PrimeTime® User Guide                                                                         106
+T-2022.03
+                                                                     Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+     # Start of specifying the first task
+     ########################################
+     set search_path "./scripts"
+
+     # Add 2 32-bit hosts to the compute resources; one host
+     # from platinum1 and another host from platinum2
+     set_host_options -32bit -num_processes 1 platinum1
+     set_host_options -32bit -num_processes 1 platinum2
+
+     # Generates a detailed report that describes all host options
+     # that you have added.
+     report_host_usage
+
+     # Start the compute resources for processing the scenarios
+     start_hosts
+
+     # Create the scenarios
+     create_scenario \
+        -name s1 \
+        -common_data common_data_scenarios_s1_s3.tcl \
+        -specific_data specific_data_scenario_s1.tcl
+     create_scenario \
+        -name s2 \
+        -common_data common_data_scenarios_s2_s4.tcl \
+        -specific_data specific_data_scenario_s2.tcl
+
+     create_scenario \
+        -name s3 \
+        -common_data common_data_scenarios_s1_s3.tcl \
+        -specific_data specific_data_scenario_s3.tcl
+
+     create_scenario \
+        -name s4 \
+        -common_data common_data_scenarios_s2_s4.tcl \
+        -specific_data specific_data_scenario_s4.tcl
+
+     #############################
+     # End of specifying the setup
+     #############################
+     # Set the scenarios for the current session
+     current_session {s1 s2}
+
+     # cmd1,cmd2,cmd3, are placeholders for typical PrimeTime commands or
+     # scripts that need to be executed on s1 and s2
+     #
+     # remote_execute -pre_commands {"cmd1" "cmd2" "cmd3"} {report_timing}
+     # For example:
+
+     remote_execute -pre_commands {source constraint_group1.tcl\
+        source constraint_group2.tcl} {report_timing}
+     ##################################
+     # End of specifying the first task
+     ##################################
+
+
+PrimeTime® User Guide                                                        107
+T-2022.03
+                                                                                        Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+     quit
+     # analysis is finished
+     # all workers are inactivated and licenses are returned
+
+     A task is a self-contained block of work that a worker process executes to perform some
+     function. A worker process starts execution of a task for the specified scenario as soon as
+     it gets the licenses appropriate to that task.
+     This script performs the following functions:
+     1. The initial set command sets the search path at the manager (used for finding scripts).
+     2. The set_host_options command specifies the host options for the compute
+        resources.
+     3. The report_host_usage command generates a detailed report that describes all of
+        the host options that have been set.
+     4. The start_hosts command starts the host processes specified by the
+        set_host_options command.
+
+     5. The create_scenario commands create four scenarios named s1 through s4. Each
+        command specifies the common-data and specific-data scripts for the scenario.
+     6. The current_session command selects s1 and s2 for the current session, which is
+        also the command focus by default. (You could use the current_scenario command
+        to narrow the focus further.)
+     7. The remote_execute -pre_commands command begins the task generation process
+        and execution of those tasks in scenarios s1 and s2. The resulting logs contain all the
+        output from the commands that were executed.
+         Because the -pre_commands option is specified, the two source commands are
+         executed before the report_timing command. The command list can contain
+         any valid PrimeTime commands or sourcing of scripts that contain valid PrimeTime
+         commands, excluding commands that alter the netlist or save or restore the session.
+     8. The quit command terminates the worker processes and manager processes in an
+        orderly manner and releases the checked-out PrimeTime licenses.
+     The script writes out the report and log files in the following directory paths (assuming the
+     manager pt_shell was launched from the directory /mypath).
+     •   Manager command log:
+         /mypath/pt_shell_command.log
+
+     •   Errors generated by the workers and returned to the manager and merged for
+         reporting:
+         /mypath/ms_session_1/merged_errors.log
+
+
+
+PrimeTime® User Guide                                                                           108
+T-2022.03
+                                                                                       Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+     •   Worker output log for work done for the session:
+         /mypath/ms_session_1/default_session/out.log
+
+     •   Worker output logs generated for s1 and s2:
+         /mypath/ms_session_1/s1/out.log
+         /mypath/ms_session_1/s2/out.log
+
+     •   Worker command logs:
+         /mypath/ms_session_1/pt_shell_command_log/
+            platinum1_pt_shell_command.log
+         /mypath/ms_session_1/pt_shell_command_log/
+            platinum2_pt_shell_command.log
+
+
+     Baseline Image Generation and Storage
+     The first task that the manager generates and delegates to a worker process is baseline
+     image generation. The baseline image consists of a netlist representation and the
+     common data files for that scenario. In many cases, the same image can be shared by
+     multiple scenarios.
+     Before any other types of tasks can proceed, baseline image generation must be
+     completed successfully. Failure of image generation also results in failure of the multi-
+     scenario analysis for those scenarios that depend on the image.
+     For each scenario in command focus that provides a baseline image, that image is written
+     to the scenario_name/baseline_image directory under the multi-scenario working directory.
+     After baseline image generation, the manager generates and delegates to worker
+     processes the execution of the user-specified commands in the scenarios that are in
+     command focus.
+     When there are more scenarios than processes available to execute the scenario
+     tasks, the worker process saves a current image for one scenario while it proceeds
+     with task execution for a different scenario. The worker process saves the image in the
+     scenario_name/current_image directory under the multi-scenario working directory.
+
+
+     Host Resource Affinity
+     Automatic reconfiguring of worker processes to run different tasks in different scenarios
+     can be an expensive operation. The multi-scenario process tries to minimize the swapping
+     out of scenarios, but is subject to the limitations imposed by the number of scenarios in
+     command focus and the number of worker processes added. A significant imbalance of
+     scenarios to worker processes can degrade system performance.
+
+
+
+
+PrimeTime® User Guide                                                                            109
+T-2022.03
+                                                                                        Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+     You can achieve optimal performance from DMSA if there is a worker process for every
+     scenario in command focus, a CPU available to execute each worker process, and
+     a license for each feature needed for every worker process. This results in all worker
+     processes executing concurrently, allowing maximum throughput.
+     You can optionally assign scenarios an “affinity” for execution on a specified hosts,
+     allowing more efficient allocation of limited computing resources. For example, suppose
+     that you need to run four scenarios, S1 through S4, having different memory and core
+     processing requirements. By default, you need to make four hosts available, each with
+     enough CPU power and memory to accommodate the largest job, as shown in the
+     following figure.
+
+Figure 16        Random Scenario-to-Host Distribution (Default)
+
+
+            S1        S2                        8 core     8 core                              S4
+                                                16 GB      16 GB                   S1
+
+
+            S3          S4
+                                                8 core     8 core                   S2         S3
+                                 Random         16 GB      16 GB
+             Scenarios          assignment
+                                                       Hosts                      Scenario allocation
+
+     You can optionally assign smaller jobs to smaller hosts, and thereby use fewer resources
+     while achieving the same turnaround time, as shown in the following figure.
+
+Figure 17        Directed Scenario-to-Host Distribution Using Affinity
+
+                                                SmallHosts
+            S1        S2                      4 core      4 core
+                              Directed        8 GB        8 GB                     S2         S1
+                             assignment
+
+
+            S3          S4                    8 core      8 core                    S3         S4
+                                              16 GB       16 GB
+
+             Scenarios                           BigHosts                        Scenario allocation
+
+
+     To specify the host resource affinity for scenarios, use commands similar to the following:
+     set_host_options -name SmallHosts -max_cores 8 -num_processes 2 \
+      -submit_command {bsub -n 8 -R "rusage[mem=4000] span[ptile=1]"}
+
+     set_host_options -name BigHosts -max_cores 16 -num_processes 2 \
+
+
+PrimeTime® User Guide                                                                          110
+T-2022.03
+                                                                                      Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+      -submit_command {bsub -n 16 -R "rusage[mem=8000] span[ptile=1]"}
+     ...
+     create_scenario -name S1 -affinity SmallHosts ...
+     create_scenario -name S2 -affinity SmallHosts ...
+     create_scenario -name S3 -affinity BigHosts ...
+     create_scenario -name S4 -affinity BigHosts ...
+
+     To report the scenario affinity settings, use the report_multi_scenario_design
+     -scenario command.
+
+
+     Scenario Variables and Attributes
+     You can set variables in either the manager or any of its workers during DMSA, as
+     described in the following sections:
+     •   Manager Context Variables
+     •   Worker Context Variables and Expressions
+     •   Setting Distributed Variables
+     •   Getting Distributed Variable Values
+     •   Merging Distributed Variable Values
+     •   Synchronizing Object Attributes Across Scenarios
+
+     Manager Context Variables
+     Here is an example of a manager context variable.
+     set x {"ffa/CP ffb/CP ffc/CP"}
+     report_timing -from $x
+
+     Notice how x is forced to be a string.
+
+     Worker Context Variables and Expressions
+     The manager has no knowledge of variables residing on the worker, but can pass variable
+     or expression strings to the worker for remote evaluation. To pass a token to the worker for
+     remote evaluation, use curly braces.
+     Suppose you have the following scenarios:
+     •   Scenario 1: x has value of ff1/CP
+     •   Scenario 2: x has value of ff2/CP
+     The report_timing -from {$x} command reports the worst paths from all paths starting
+     at ff1/CP in the context of scenario 1, and all paths starting at ff2/CP in the context of
+     scenario 2.
+
+
+PrimeTime® User Guide                                                                        111
+T-2022.03
+                                                                                      Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+     Setting Distributed Variables
+     To set variables at the worker level from the manager, use the
+     set_distributed_variables command. The variable can be a Tcl variable, collection,
+     array, or list.
+     To set variables in multiple scenarios from the manager, first create a Tcl array of
+     the required values for those scenarios, then use the set_distributed_variables
+     command to distribute the settings to the scenarios.
+     For example, suppose that you want to set variables x and y at the worker level to different
+     values in two different scenarios. Create an array, indexed by scenario name, containing
+     the values to set in the workers. From the manager, execute the following commands:
+     pt_shell> array set x {s1 10 s2 0}
+     pt_shell> array set y {s1 0 s2 15}
+     pt_shell> set_distributed_variables {x y}
+
+     This sends the values specified in the arrays x and y from the manager to the workers,
+     and creates the variables x and y at the workers if they do not already exist, and sets them
+     to the specified values.
+     To create and set a single variable, there is no need to create an array. For example,
+     pt_shell> set my_var 2.5
+     2.5
+
+     pt_shell> set_distributed_variables my_var
+
+     Getting Distributed Variable Values
+     To get the values of variables set in scenarios in command focus, use the
+     get_distributed_variables command. The retrieved values are returned to the
+     manager process and stored in a Tcl array, indexed by scenario name.
+     For example, the following session retrieves slack attribute values from two scenarios:
+     current_session {scen1 scen2}
+
+     remote_execute {
+       set pin_slack1 [get_attribute -class pin UI/Z slack];
+       set pin_slack2 [get_attribute -class pin U2/Z slack]
+     }
+
+     get_distributed_variables {
+       pin_slack1 pin_slack2
+     }
+
+     The session returns two arrays, pin_slack1 and pin_slack2. Indexing pin_slack1(scen1)
+     returns the scalar value of slack at U1/Z in context of scenario scen1. Indexing
+
+
+
+PrimeTime® User Guide                                                                          112
+T-2022.03
+                                                                                      Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+     pin_slack1(scen2) returns the scalar value of slack at U1/Z in the context of scenario
+     scen2.
+     When retrieving a collection, you need to specify which attributes to retrieve from the
+     collection. For example, the following session retrieves timing paths from two scenarios:
+     current_session {scen1 scen2}
+     remote_execute {
+       set mypaths [get_timing_paths -nworst 100]
+     }
+     get_distributed_variables mypaths -attributes (slack)
+
+     The session returns an array called mypaths. Indexing mypaths(scen1) yields a collection
+     of the 100 worst paths from scenario scen1, ordered by slack. Similarly, indexing
+     paths(scen2) yields a collection of the 100 worst paths from scen2.
+
+     Merging Distributed Variable Values
+     By default, the get_distributed_variables command brings back a scenario variable
+     as an array. With the -merge_type option, the values are merged back into a variable
+     instead.
+     For example, to keep the minimum (most negative) value of the worst_slack variable
+     from all scenarios:
+     pt_shell> get_distributed_variables {worst_slack} -merge_type min
+     1
+     pt_shell> echo $worst_slack
+     -0.7081
+
+     You can also merge arrays of one or more dimensions and keep the worst value for each
+     array entry. For example, you have the following array settings in three scenarios:
+     scenario best_case:
+     set slacks(min,pinA) -0.2044
+     set slacks(max,pinA) 0.3084
+
+     scenario typ_case:
+     set slacks(min,pinA) -0.0523
+     set slacks(max,pinA) 0.0901
+
+     scenario worst_case:
+     set slacks(min,pinA) 0.1015
+     set slacks(max,pinA) -0.7081
+
+     To report the most negative values, use these commands:
+     pt_shell> get_distributed_variables {slacks} -merge_type min
+     1
+     pt_shell> echo $slacks(min, pinA)
+     -0.2044
+
+
+
+PrimeTime® User Guide                                                                         113
+T-2022.03
+                                                                                       Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+     pt_shell> echo $slacks(max, pinA)
+     -0.7081
+
+     The -merge_type option can also merge together lists of values from the scenarios. For
+     example, to obtain a list of all clock names from every scenario, use these commands:
+     pt_shell> remote_execute {set clock_names \
+       [get_object_name [all_clocks]]}
+     pt_shell> get_distributed_variables clock_names -merge_type list
+     1
+     pt_shell> echo $clock_names
+     CLK33 CLK66 CLK50 CLK100 ATPGCLOCK JTAGCLK
+
+     The get_distributed_variables command supports the following merge types:
+     -merge_type min
+     -merge_type max
+     -merge_type average
+     -merge_type sum
+     -merge_type list
+     -merge_type unique_list
+     -merge_type none
+
+     You can use the -null_merge_method override option to specify what happens
+     when merging null (empty) entries: ignore the null entry, allow the null value to override
+     other entries, or issue an error message. For details, see the man page for the
+     get_distributed_variables command.
+
+     Note that a null data value is different from an undefined value. If array entries are
+     undefined, the -null_merge_method option does not apply; the merging process operates
+     normally on the remaining data values.
+
+     Synchronizing Object Attributes Across Scenarios
+     You can easily set an object attribute to the same value across all scenarios for a specified
+     object, or for each member of a collection of objects.
+     For example, to synchronize the dont_touch attribute of cell U72 to true across all
+     scenarios in the current command focus, use the following command:
+     pt_shell> synchronize_attribute -class cell {U72} dont_touch
+
+     This command works in the DMSA manager and can be used to synchronize the settings
+     for a user-defined attribute or the dont_touch application attribute across all scenarios
+     in the current command focus. It cannot be used on application attributes other than
+     dont_touch.
+
+     The -merge_type option can be set to min or max to specify the synchronizing action.
+     The default is max, which synchronizes the attributes to the maximum value found for the
+
+
+
+
+PrimeTime® User Guide                                                                             114
+T-2022.03
+                                                                                         Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+     attribute across the scenarios, or the last string in alphanumeric order for a string attribute,
+     or true for a Boolean attribute.
+
+
+     Merged Reporting
+     Running reporting commands in multi-scenario analysis can generate large amounts of
+     data from each scenario, making it difficult to identify critical information. To help manage
+     these large data sets, the tool supports merged reporting.
+     Merged reporting automatically eliminates redundant data and sorts the data in numeric
+     order, allowing you to treat all the scenarios as a single virtual PrimeTime instance. This
+     feature works with these commands:
+     get_timing_paths
+     report_analysis_coverage
+     report_clock_timing
+     report_constraint
+     report_min_pulse_width
+     report_si_bottleneck
+     report_timing
+
+     To get a merged timing report, issue the report_timing command at the manager as
+     you would in an ordinary single-scenario session. This is called executing the command
+     in the manager context. The manager and worker processes work together to execute
+     the report_timing command in all the scenarios in command focus, producing a final
+     merged report displayed at the manager console. Each report shows the scenario name
+     from which it came.
+     You can optionally specify one or more commands to run in the worker context before or
+     after the merged reporting command. For example,
+     pt_shell> remote_execute -pre_commands {source my_constraints.tcl} \
+      -post_commands {source my_data_proc.tcl} {report_timing}
+
+     This runs the my_constraints.tcl script before and the my_data_proc.tcl script after
+     the report_timing command, all in the worker context.
+     In situations where there are more scenarios than worker processes, using these options
+     can reduce the amount of swapping scenarios in and out of hosts because all of the
+     scenario-specific tasks (pre-commands, reporting command, and post-commands) are
+     performed together in a single loading of the image onto the host.
+     To learn about the reporting commands in DMSA, see
+     •   get_timing_paths
+     •   report_analysis_coverage
+     •   report_clock_timing
+
+
+PrimeTime® User Guide                                                                            115
+T-2022.03
+                                                                                         Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+     •   report_constraint
+     •   report_si_bottleneck
+     •   report_timing
+
+     get_timing_paths
+     Using the get_timing_paths command from the manager process returns a collection of
+     timing path objects from each scenario, based on the parameters you set in the command.
+     The timing path collection is condensed to meet the requirements you specify (such as
+     using -nworst or -max paths). It returns a merged output collection of the worst timing
+     paths across all scenarios according to the reporting criteria set.
+     To find the scenario name for a particular timing path object, query the scenario_name
+     attribute of the timing path object. To specify the attributes to be included in the timing path
+     collection, use the -attributes option with the get_timing_paths command. By default,
+     only the full_name, scenario_name, and object_class attributes are included.
+
+     report_analysis_coverage
+     The report_analysis_coverage command reports the coverage of timing checks over
+     all active scenarios in the current session. The timing check is defined by the constrained
+     pin, the related pin, and the type of the constraint. The timing check status is reported as:
+     •   Violated if the arrival time does not meet the timing requirements
+     •   Met if the timing requirements are satisfied
+     •   Untested if the timing check was skipped
+     Timing checks are included in the Untested category only if they are untested in all
+     scenarios. If a timing check is tested in at least one scenario, it is reported as either
+     Violated or Met, even if untested in some scenarios. This allows meaningful reporting with
+     significantly different behavior, such as functional versus test modes.
+     The merged report includes the scenario names, as shown in the following example.
+
+Example 2     Summary merged analysis coverage report
+     pt_shell> report_analysis_coverage
+     ...
+     Scenarios: SLOW_OPER, NOM_OPER, FAST_TEST
+
+     Type of Check      Total      Met        Violated     Untested
+     ---------------------------------------------------------------
+     setup                8      3 (37.5%)     3 (37.5%)    2 ( 25%)
+     hold                 8      3 (37.5%)     3 (37.5%)    2 ( 25%)
+     ---------------------------------------------------------------
+     All Checks          16      6 (37.5%)     6 (37.5%)    4 ( 25%)
+
+
+
+
+PrimeTime® User Guide                                                                            116
+T-2022.03
+                                                                                      Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+     If a timing check is untested in all scenarios in the command focus, instead of a list of
+     scenarios, the all tag is listed in the scenario column; however, if a timing check is tested
+     in at least one scenario, the check is reported as tested, either violated or met, because it
+     has been successfully exercised in some scenarios. The following example shows a report
+     where some scenarios are met and others are untested.
+
+Example 3    Detailed merged analysis coverage report
+     pt_shell> report_analysis_coverage -status_details {untested met} \
+                 -sort_by slack
+     ...
+     Scenarios: scen1, scen2, scen3
+
+     Type of Check      Total       Met        Violated      Untested
+     -------------------------------------------------------------------
+     setup                15      2 ( 13%)     12 ( 80%)      1 ( 7%)
+     hold                 15     12 ( 80%)      2 ( 13%)      1 ( 7%)
+     -------------------------------------------------------------------
+     All Checks           30     14 ( 47%)     14 ( 47%)      2 ( 7%)
+
+     Constrained Related           Check
+     Pin          Pin       Clock Type    Scenario Slack     Reason
+     ------------------------------------------------------------------------
+     ffd/CR       CP(rise)         hold   scen2    untested constant_disabled
+                                          scen1
+     ffd/CR       CP(rise)         setup scen2     untested constant_disabled
+                                          scen1
+     ffa/D        CP(rise) clk2    hold   scen2    0.14
+     ffa/D        CP(rise) CLK     hold   scen2    0.14
+     ffb/D        CP(rise) CLK     hold   scen2    0.14
+     ffb/D        CP(rise) clk2    hold   scen2    0.14
+     ffd/D        CP(rise) CLK     hold   scen2    0.14
+     ffd/D        CP(rise) clk2    hold   scen2    0.14
+     ffa/D        CP(rise) clk3    hold   scen1    0.15
+     ffb/D        CP(rise) clk3    hold   scen1    0.15
+     ffc/D        CP(rise) clk3    hold   scen1    0.15
+     ffc/D        CP(rise) CLK     hold   scen1    0.15
+     ffd/D        CP(rise) clk3    hold   scen1    0.15
+     ffd/CR       CP(rise) CLK     setup scen3     9.10
+     ffd/CR       CP(rise) clk2    setup scen3     9.15
+     ffc/D        CP(rise) clk2    hold   scen2    9.40
+
+     report_clock_timing
+     The report_clock_timing command executed by the manager process returns a
+     merged report that displays the timing attributes of clock networks in a design. The
+     output for the merged report_clock_timing report is similar to the single-core analysis
+
+
+
+
+PrimeTime® User Guide                                                                         117
+T-2022.03
+                                                                                    Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+     report_clock_timing report; however, the merged report contains a list of scenarios,
+     which are displayed under the Scen column.
+
+Example 4    Merged report_clock_timing report
+     pt_shell> report_clock_timing -type latency -nworst 3
+     ...
+     Scenarios: scen1, scen2
+     Clock: CLKA
+                                                --- Latency ---
+     Clock Pin           Scen    Trans   Source   Network   Total
+     --------------------------------------------------------------------
+      1_1/CP             scen1   0.00    0.11     25.36     25.47   rp-+
+      f1_3/CP            scen2   0.00    0.11     23.96     24.07   rp-+
+      gclk_ff/CP         scen1   0.00    0.10     22.96     23.06   rpi-+
+
+     report_constraint
+     The report_constraint command executed by the manager process returns a merged
+     report that displays constraint-based information for all scenarios in command focus. It
+     reports the size of the worst violation and the design object that caused the violation.
+     The merging process for the report_constraint command for DMSA treats all the
+     scenarios in command focus as if they are a single virtual PrimeTime instance. When
+     an object is constrained in more than one scenario, these constraints are considered
+     duplicates. PrimeTime reports the worst violating instance of each relevant object.
+     For example, for a max_capacitance report, PrimeTime reports on the most critical
+     instance for each pin. When there are multiple instances of the same pin across multiple
+     scenarios, PrimeTime retains the worst violator and uses the scenario name as a tie-
+     breaker for consistent results. When you specify the -verbose or -all_violators option,
+     PrimeTime reports the scenario name for the constraint violators.
+
+Example 5    DMSA merged constraint report
+     pt_shell> report_constraint -all_violators -path_type slack_only
+     ...
+     max_delay/setup ('default' group)
+
+     Endpoint                        Scenario      Slack
+     ------------------------------------------------------------------
+     QA                               scen1        -1.80 (VIOLATED)
+     QB                               scen1        -1.79 (VIOLATED)
+
+     max_delay/setup ('CLK' group)
+
+     Endpoint                        Scenario      Slack
+     ---------------------------------------------------------------
+     ffd/D                            scen1        -4.12 (VIOLATED)
+     ffc/D                            scen2        -4.01 (VIOLATED)
+     ffb/D                            scen1        -3.73 (VIOLATED)
+
+
+
+PrimeTime® User Guide                                                                       118
+T-2022.03
+                                                                                      Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+     ffa/D                                     scen2          -3.60    (VIOLATED)
+     min_delay/hold ('CLK' group)
+
+     Endpoint                        Scenario      Slack
+     ---------------------------------------------------------------
+     ffd/CR                          scen1         -0.40 (VIOLATED)
+
+     If you specify the report_constraint command in summary mode for DMSA when
+     handling setup checks, the report shows the worst setup constraint for all scenarios per
+     group. The hold information displays the sum of the worst total endpoint cost per clock
+     group over all scenarios. Example 6 shows the summary output for the merged DMSA
+     constraint report shown in Example 7.
+
+Example 6    DMSA merged summary report
+     pt_shell> report_constraint
+     ...
+                                                   Weighted
+     Group (max_delay/setup)     Cost     Weight   Cost
+     ---------------------------------------------------------
+     default                      1.80      -      1.80
+     CLK                          4.12      -      4.12
+     ---------------------------------------------------------
+     max_delay/setup                               5.92
+
+                                                   Weighted
+     Group (min_delay/hold)     Cost      Weight   Cost
+     ---------------------------------------------------------
+     CLK                         0.40       -      0.40
+     ---------------------------------------------------------
+     min_delay/hold                                0.40
+
+     Constraint                                    Cost
+     ---------------------------------------------------------
+     max_delay/setup                               5.92 (VIOLATED)
+     min_delay/hold                                0.40 (VIOLATED)
+
+     The following example shows the output of an all-violators constraint report with the
+     max_capacitance option for a multi-scenario analysis:
+
+Example 7    DMSA merged constraint report
+     pt_shell> report_constraint -all_violators -path_type slack_only \
+               -max_capacitance
+     ...
+     Scenarios: scen1 scen2
+     max_capacitance
+                                           Required        Actual
+     Pin       Scenario     Capacitance    Capacitance     Slack
+     ---------------------------------------------------------------------
+     RESET     scen2         0.40           7.00          -6.60 (VIOLATED)
+     ffa/QN    scen2         0.40           6.00          -5.60 (VIOLATED)
+
+
+
+PrimeTime® User Guide                                                                           119
+T-2022.03
+                                                                                      Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+     ffb/QN      scen1             0.50               5.00              -4.50 (VIOLATED)
+     ffc/QN      scen1             0.50               4.00              -3.50 (VIOLATED)
+     o/Z         scen1             0.50               4.00              -3.50 (VIOLATED)
+     p/Z         scen1             0.50               4.00              -3.50 (VIOLATED)
+
+     report_min_pulse_width
+     To locate the pins with the most critical minimum pulse width violations, use the
+     report_min_pulse_width command. The tool prunes, sorts, and reports the pins with
+     the worst pulse width violations across all scenarios in focus, as shown in the following
+     example.
+     pt_shell> current_session {scen1 scen2}
+
+     pt_shell> report_min_pulse_width
+     ...
+     Scenarios: scen1 scen2
+
+        clock_tree_pulse_width
+                                      Required      Actual
+        Pin               Scenario    pulse width   pulse width   Slack
+        --------------------------------------------------------------------
+        u2/i (high)       scen1       10.00 4.99    -5.01         (VIOLATED)
+        u1/zn (high)      scen1       10.00 4.99    -5.01         (VIOLATED)
+        p1/i (high)       scen2       10.00 4.99    -5.01         (VIOLATED)
+        u2/zn (high)      scen2       10.00 4.99    -5.01         (VIOLATED)
+
+     report_si_bottleneck
+     To locate nets that are most critical in crosstalk delay, use the report_si_bottleneck
+     command. With it, you need minimal net repair effort to identify and fix most problems.
+     Across all scenarios, sorting and printing is performed with duplicates pruned to leave a
+     unique set of nets across the scenarios.
+     The following example executes the report_si_bottleneck command at the manager.
+     pt_shell> report_si_bottleneck \
+              -cost_type total_victim_delay_bump -max \
+              -slack_lesser_than 2 -significant_digits 6
+     ...
+
+      Bottleneck Cost:       total_victim_delay_bump
+
+      Net                 Scenario Name     Cost
+      ----------------------------------------------
+      OutFirstReg               s1          0.919074
+      Reg                       s2          0.639971
+      PreNet                    s1          0.367737
+      Comb                      s4          0.021904
+      InReg                     s3          0.000039
+      InComb                    s2          0.000033
+
+
+
+PrimeTime® User Guide                                                                            120
+T-2022.03
+                                                                                       Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+     report_timing
+     The report_timing command executed by the manager process returns a merged
+     report that eliminates redundant data across scenarios and sorts the data in order of
+     slack, effectively treating the scenarios in the command focus as a single analysis. The
+     merging process allows you to treat all the scenarios in command focus as if they are a
+     single virtual PrimeTime instance. To do this, PrimeTime reports the worst paths from all
+     scenarios while maintaining the limits imposed by the -nworst, -max_paths, and other
+     options of the report_timing command.
+     When the same path is reported from multiple scenarios, PrimeTime keeps only the most
+     critical instance of that path in the merged report and shows the scenario in which that
+     instance of the path was the most critical. This way, the resulting report is more evenly
+     spread across the design instead of focused on one portion of the design that is critical in
+     all scenarios. To prevent merging of paths, use the -dont_merge_duplicates option of
+     the report_timing command.
+     PrimeTime considers two paths from two scenarios to be instances of the same path if the
+     two paths meet all of the following criteria:
+     •   Path group
+     •   Sequence of pins along the data portion of the path
+     •   Transitions at every pin along the data portion of the path
+     •   Launch clock
+     •   Capture clock
+     •   Constraint type
+     The following example shows the merged report_timing command that was issued at
+     the manager and a multi-scenario analysis run with two scenarios, func_bc and func_wc:
+     pt_shell> report_timing -delay_type min -nworst 2 \
+               -max_paths 2 -group mrx_clk_pad_I
+     ...
+     Start of Manager/Worker Task Processing
+     -------------------------------------
+     Started   : Command execution in scenario 'func_wc'
+     Started   : Command execution in scenario 'func_bc'
+     Succeeded : Command execution in scenario 'func_bc'
+     Succeeded : Command execution in scenario 'func_wc'
+     -----------------------------------
+     End of Manager/Worker Task Processing
+
+         Startpoint: txethmac1/WillTransmit_reg
+              (rising edge-triggered flip-flop clocked by mtx_clk_pad_i)
+         Endpoint: WillTransmit_q_reg
+              (rising edge-triggered flip-flop clocked by mrx_clk_pad_i)
+
+
+PrimeTime® User Guide                                                                          121
+T-2022.03
+                                                                       Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+        Path Group: mrx_clk_pad_i
+        Path Type: min
+        Scenario: func_bc
+        Min Data Paths Derating Factor : 1.00
+        Min Clock Paths Derating Factor : 1.00
+        Max Clock Paths Derating Factor : 1.05
+
+       Point                                         Incr         Path
+       ------------------------------------------------------------------
+       clock mtx_clk_pad_i (rise edge)               0.00         0.00
+      library hold time -                            0.06         0.67
+       data required time                                         0.67
+       ------------------------------------------------------------------
+       data required time                                         0.67
+       data arrival time                                         -0.76
+       ------------------------------------------------------------------
+       slack (MET)                                                0.10
+
+        Startpoint: txethmac1/WillTransmit_reg
+              (rising edge-triggered flip-flop clocked by mtx_clk_pad_i)
+        Endpoint: WillTransmit_q_reg
+              (rising edge-triggered flip-flop clocked by mrx_clk_pad_i)
+        Path Group: mrx_clk_pad_i
+        Path Type: min
+        Scenario: func_wc
+        Min Data Paths Derating Factor : 0.95
+        Min Clock Paths Derating Factor : 0.95
+        Max Clock Paths Derating Factor : 1.00
+        Point                                               Incr      Path
+        ------------------------------------------------------------------
+        clock mtx_clk_pad_i (rise edge)                     0.00      0.00
+        clock network delay (propagated)                    1.0      51.05
+        txethmac1/WillTransmit_reg/CP (_SDFCNQD1)           0.00      1.05 r
+        txethmac1/WillTransmit_reg/Q (_SDFCNQD1)            0.44      1.49 f
+        txethmac1/WillTransmit (eth_txethmac_test_1)        0.00      1.49 f
+        WillTransmit_q_reg/D (_SDFQD1)                      0.00      1.49 f
+        data arrival time1.49
+
+        clock mrx_clk_pad_i (rise edge)                    0.00      0.00
+        clock network delay (propagated                    1.31      1.31
+        clock reconvergence pessimism                      0.00      1.31
+        WillTransmit_q_reg/CP (_SDFQD1)                    1.31 r
+        library hold time                                  0.06      1.37
+        data required time                                 1.37
+        ------------------------------------------------------------------
+        data required time                                 1.37
+        data arrival time                                 -1.49
+        ------------------------------------------------------------------
+        slack (MET)                                        0.12
+
+
+
+
+PrimeTime® User Guide                                                          122
+T-2022.03
+                                                                                   Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+     For information about how to use the report_timing options to control the output reports,
+     see
+     •   Standard Option Handling
+     •   Complex Option Handling
+     Standard Option Handling
+     All of the options of the report_timing command are available for merged reporting, with
+     a few exceptions (see Limitations of DMSA). Provided collections are not being passed to
+     the options, they can be specified at the manager just as in a single scenario session of
+     PrimeTime. For example:
+     pt_shell> report_timing -nworst 10
+     pt_shell> report_timing -nworst 10 -max_paths 15
+     pt_shell> report_timing -delay_type max_rise \
+               -path_type full_clock -nosplit
+     pt_shell> report_timing -from UI/CP -rise_to U2/D \
+               -significant_digits 5
+
+     As in the remote_execute command, to evaluate subexpressions and variables remotely,
+     generate the options using curly braces. For example:
+     report_timing -from {$all_in} -to {[all_outputs]}
+
+     In this example, the report_timing command is a merged reporting command that
+     collates data from the worker and generates a merged report at the manager. The all_in
+     variable and the all_outputs expression are evaluated in a worker context.
+     To evaluate expressions and variables locally at the manager, enclose the command string
+     in quotation marks. All manager evaluations must return a string. For example,
+     report_timing -to "$all_out"
+
+     Use the -pre_commands option so the collection is generated in the same task as the
+     report_timing command is executed. The merged report_timing command at the
+     manager then refers to the explicit collection using the name you specified.
+
+Example 8    Example of explicit and implicit collection
+     pt_shell> report_timing
+               -pre_commands {set start_pins [get_pins U1/*]}
+               -from {$start_pins}
+
+     The implicit collection is referred to in the merged report_timing command at the
+     manager using curly braces around the worker expression. At the worker, the implicit
+     collection is generated and passed to the -from option of the report_timing command.
+     For example:
+     pt_shell> report_timing -from {[get_pins U1/A]}
+
+
+
+PrimeTime® User Guide                                                                      123
+T-2022.03
+                                                                                      Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+     Complex Option Handling
+     To allow for evaluating manager and workers variables and expressions from the multi-
+     scenario manager, the following options have been altered at the multi-scenario manager:
+     -from           -rise_from             -fall_from
+     -through        -rise_through          -fall_through
+     -to             -rise_to               -fall_to
+     -exclude        -rise_exclude          -fall_exclude
+
+     In a single scenario session of PrimeTime, these variables accept a list as an argument;
+     however, in multi-scenario merged reporting, these variables accept a string as an
+     argument. For example:
+     # Single scenario session of PrimeTime
+     report_timing -from {ffa ffb} # in this case, the argument
+                                   # to -from is a list.
+
+     # Multi-scenario merged reporting
+     report_timing -from {ffa ffb} # in this case, the argument
+                                   # to -from is treated as a string.
+
+
+     Loading Scenario Design Data Into the Manager
+     By default, the manager in a DMSA analysis does not load the design data. This reduces
+     the memory and runtime requirements and is sufficient for most merged reporting and
+     ECO tasks.
+     For more complex tasks, you can use the load_distributed_design and
+     cache_distributed_attribute_data commands to load design and library data at the
+     manager:
+     •   Loading Netlist and Library Data
+     •   Loading Scenario-Specific Design Data
+
+     Loading Netlist and Library Data
+     The load_distributed_design command loads the netlist and library data that is the
+     same across all scenarios, such as pin directions and timing arcs. It loads the netlist and
+     libraries from the first scenario in the current_scenarios list. Data that is not guaranteed
+     to be identical across scenarios, such as timing or slack data, is not loaded.
+     Once the netlist and library data is loaded,
+     •   Netlist objects can be obtained with the get_cells, get_pins, get_timing_arcs, and
+         similar commands.
+     •   Library objects can be obtained with the get_lib_cells, get_lib_pins, and
+         get_lib_timing_arcs commands.
+
+
+PrimeTime® User Guide                                                                         124
+T-2022.03
+                                                                                        Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+     •   The get_timing_paths command returned true timing_path collection objects
+         (instead of abstracted timing path objects stored internally as text), and most attributes
+         of the paths and paths points can be queried as in non-DMSA analysis.
+     •   The netlist topology can be explored with the all_fanin and all_fanout commands.
+     •   In the PrimeTime GUI, the ECO and Path Analyzer features can be used.
+     For example,
+     pt_shell> load_distributed_design
+     ...
+     pt_shell> set mypaths [get_timing_paths -max_paths 50 ...]
+     ...
+     pt_shell> report_timing $mypaths -path_type full_clock_expanded -voltage
+     ...
+     pt_shell> get_nets -hierarchical -of_objects [get_cells ...]
+     ...
+     pt_shell> get_attribute [get_cells buf1] number_of_pins
+     ...
+
+     The following diagram shows the additional netlist and path query capabilities when you
+     load netlist and library data into the manager.
+
+
+
+
+PrimeTime® User Guide                                                                           125
+T-2022.03
+                                                                                           Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+Figure 18     Netlist and Path Query After Loading Scenario Data Into Distributed Manager
+
+               Start pt_shell in DMSA mode                   Enter DMSA mode from pt_shell
+
+                 Start DMSA master shell                      Start standard PrimeTime shell
+                 pt_shell -multi_scenario                     pt_shell
+
+
+                                                  set multi_scenario_enable_analysis true
+
+
+                                                  create_scenario              Set up scenarios
+                                                  start_host                   Set up hosts
+
+
+                                                  current_session              Launch scenarios
+                                                  remote_execute
+
+
+
+
+                                             S1        S2                 Sn
+
+
+
+
+                                                            Merged reporting       Text-only
+                                                            report_timing          timing reports
+
+
+                             Load scenario data to master          Load netlist from
+                             load_distributed_design               scenario to master
+
+
+            Netlist query                 Path query
+            get_attribute,                set P1 [get_timing_paths ...]                  Query attributes and
+            get_nets, get_cells,          report_timing $P1 ...                          paths in master
+            get_pins, ...                 set PNTS [get_attr $P1 points]
+
+
+
+     All scenario netlists must be identical (but the constraints and operating conditions can
+     vary). If there are any netlist differences, or if there is no current scenario at the manager,
+     the tool issues an error:
+     Error: Restore session at manager failed due to: Scenario has a
+     different signature compared to known signatures. (MS-037)
+
+     Loading a netlist at the manager reserves a PrimeTime license for the DMSA manager,
+     meaning that this license (or part of it in the case of core-based licensing) is not shared
+
+
+PrimeTime® User Guide                                                                               126
+T-2022.03
+                                                                                      Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+     with any worker processes running DMSA scenarios. In contrast, without loading the
+     netlist, a PrimeTime license checked out by the manager at startup is shared with remote
+     workers.
+     To remove loaded distributed data, use the remove_distributed_design command.
+
+     Loading Scenario-Specific Design Data
+     The cache_distribute_attribute_data command loads scenario-specific design data
+     from the currently active scenarios into the manager. This command requires that the
+     design data already be loaded using the load_distributed_design command.
+     To conserve memory, the command loads only the attributes you specify into the manager.
+     For example,
+     pt_shell> current_scenario {scen0 scen1 scen2}
+
+     pt_shell> cache_distributed_attribute_data \
+                -attributes max_rise_slack -class pin
+     Start of Manager/Worker Task Processing
+     ...
+     End of Manager/Worker Task Processing
+
+     The supported -class values are port, cell, pin, and net.
+     After loading the attribute data into the manager, you can query it normally to obtain values
+     for all scenarios in focus, or use subscripted querying to obtain per-scenario values:
+     pt_shell> get_attribute $my_pin max_rise_slack
+     {scen0 48.816082 scen1 45.250504 scen2 46.121669}
+
+     pt_shell> get_attribute $my_pin max_rise_slack(scen1)
+     45.250504
+
+     Multiple calls to the cache_distributed_attribute_data command are cumulative.
+     To remove some or all of the attribute data from memory at the manager, use the
+     purge_distributed_attribute_data command. For details, see the man page.
+
+
+     Saving and Restoring Your Session
+     You can find the images generated by the master-issued save_session command in the
+     $sh_launch_dir/images/scen1 and $sh_launch_dir/images/scen2 directories. You can then
+     reload these images into a single scenario PrimeTime session.
+     The save and restore features allow you to explicitly restore a saved image into a DMSA
+     scenario. This is achieved with the addition of the create_scenario -image option. By
+     using the -image option, you can load any single-core analysis PrimeTime image that has
+     been produced by the save_session command (either inside or outside of DMSA). Load
+
+
+
+PrimeTime® User Guide                                                                         127
+T-2022.03
+                                                                                       Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+     this image into DMSA directly as a scenario. You can then operate upon it in the normal
+     way within the context of DMSA.
+
+
+     License Resource Management
+     In a DMSA analysis, the manager performs all license management. It acquires any
+     licenses needed by the worker processes from the central license server, then dynamically
+     distributes them to the worker processes.
+     You can use the following licensing features in a DMSA analysis:
+     •   Distributed Core-Based Licensing – Each PrimeTime-ADV or PrimeTime-APX license
+         enables 32 or 64 cores respectively across the scenarios, regardless of how the
+         cores are distributed across the scenarios. This often reduces the overall license
+         requirements of the analysis.
+     •   Incremental License Handling – Lowers the license limit; any licenses over the limit are
+         returned to the license server pool.
+     •   License Pooling – Checks out licenses for different features from different license
+         servers.
+     •   License Autoreduction – Instructs the manager to automatically reduce the number of
+         licenses for features checked out to a minimum when those licenses are not needed.
+     •   License Queuing – Waits for licenses to become available if all of them are currently in
+         use.
+
+     Limiting License Usage in a DMSA Analysis
+     To limit the maximum number of licenses the manager can acquire for use by the worker
+     processes, use the set_license_limit command at the manager:
+     pt_shell> set_license_limit PrimeTime -quantity 5
+
+     By default, licenses are checked out only when the workers begin processing tasks. To
+     check out licenses immediately, use the get_license command at the manager:
+     pt_shell> get_license PrimeTime-SI -quantity 5
+
+     For best DMSA analysis throughput, match the license limit to the number of worker
+     processes. This ensures that all worker processes can execute concurrently.
+
+     See Also
+     •   Manually Controlling License Usage for more information on manually controlling
+         license usage
+
+
+
+
+PrimeTime® User Guide                                                                          128
+T-2022.03
+                                                                                         Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+
+     Worker Process Fault Handling
+     When a fault occurs in a worker process that causes an abnormal termination, the tool
+     takes action as determined by the multi_scenario_fault_handling variable, which you
+     can set to ignore or exit.
+     When the variable is set to ignore (the default) and a critical fault occurs in a worker
+     process, the abnormally terminated scenarios and the scenarios that depend on those that
+     terminated are excluded from further analysis within the context of the current session.
+     A warning message is displayed showing which scenarios abnormally terminated. The
+     session then proceeds to analyze the remaining scenarios that are in command focus. The
+     following situations might occur:
+     •   If all scenarios in command focus of the current session abnormally terminate, any
+         subsequent distributed command issued at the manager fails, and an error message
+         explains that there are no scenarios in command focus. You need to change the
+         command focus within the context of the current session and analyze the selected
+         scenarios.
+     •   If all scenarios in the current session abnormally terminate, the current session
+         terminates and you receive a warning saying the session is removed. Any subsequent
+         distributed commands issued at the manager causes an error message explaining that
+         there is no current session.
+     •   Critical faults cause resources to go offline. If the resources available are reduced to
+         the point where none are online, the session must terminate and you receive an error
+         message explaining that the current session has terminated.
+     When the variable is set to exit and a critical fault occurs in a worker process, the active
+     command completes its task and then the manager process terminates the entire analysis.
+     An information message is displayed explaining what occurred.
+     Merged Reporting and Worker Fault Handling
+     Merged reporting is a mechanism that works with all the scenarios in command focus
+     to eliminate redundant data automatically across scenarios and sort the data in order
+     of criticality. This allows you to treat all the scenarios in command focus as if they are a
+     single virtual PrimeTime instance.
+     Due to the distributed feature, if one or more worker processes terminate abnormally,
+     the relevant information for the reporting command is not available. Therefore, when
+     a scenario terminates abnormally, you receive a warning message, and PrimeTime
+     removes this scenario from the current session. It then automatically reissues the reporting
+     command to the remaining scenarios in command focus. Any reporting command
+     issued afterwards is applied only to the remaining scenarios in command focus and any
+     abnormally terminated scenarios are excluded from further analysis.
+
+
+
+
+PrimeTime® User Guide                                                                               129
+T-2022.03
+                                                                                      Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+     Netlist Editing Commands and Worker Fault Handling
+     Before a netlist change is committed to any scenario from the manager, it must be
+     possible to commit the change to all scenarios. Thus, PrimeTime first checks that the
+     netlist change could be successful in all scenarios and next it commits the change.
+     If a scenario terminates abnormally while PrimeTime is checking the possibility of
+     successfully executing the netlist change, this scenario is removed from the command
+     focus, and the netlist editing command is automatically reissued to the remaining
+     scenarios in command focus.
+     If all of the checking processes succeeded in all scenarios, but there was a scenario that
+     terminated abnormally when PrimeTime went to commit the change, a warning message
+     is issued, and all the remaining scenarios in command focus apply the netlist change.
+     Subsequent netlist editing commands are applied only to the remaining scenarios in
+     command focus and any abnormally terminated scenarios are excluded from further
+     analysis.
+     remote_execute Command and Worker Fault Handling
+     DMSA supports execution of any number of commands on all scenarios in command
+     focus by using the remote_execute command. If the remote_execute command
+     encounters a scenario that terminated abnormally, a warning message is issued, the
+     scenario is removed from the current session, and subsequent calls to the command apply
+     only to the remaining scenarios in command focus. Abnormal termination of one or more
+     scenarios has no effect on command execution in other scenarios.
+     Other Commands and Worker Fault Handling
+     The following commands do not come under the categories that have been listed, but they
+     are handled in a similar way when an abnormal termination occurs.
+     •   get_distributed_variables command
+
+         When a scenario terminates abnormally, you receive a warning message, and the
+         scenario is removed from the current session. PrimeTime then automatically reissues
+         the command to the remaining scenarios in command focus.
+     •   get_timing_paths command
+
+         When a scenario terminates abnormally, you receive a warning message, and the
+         scenario is removed from the current session. PrimeTime then automatically reissues
+         the command to the remaining scenarios in command focus.
+     •   save_session command
+
+         When a scenario terminates abnormally, you receive a warning message, and the
+         scenario is removed from the current session. PrimeTime then automatically reissues
+         the command to the remaining scenarios in command focus.
+
+
+
+PrimeTime® User Guide                                                                        130
+T-2022.03
+                                                                                         Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+     •   set_distributed_variables command
+
+         When a scenario terminates abnormally, you receive a warning message, and the
+         scenario is removed from the current session. The command executes as normal for
+         the remaining scenarios in command focus.
+
+
+     Messages and Log Files
+     Multi-scenario analysis has the potential to generate large amounts of data. To avoid
+     overloading you with data at the manager, all data is written to a set of log files. A limited
+     set of interactive messages are displayed at the manager.
+     If you use the -verbose option, the remote_execute command sends all data to the
+     manager terminal.
+     To learn about the types of messages and log files available in DMSA, see
+     •   Interactive Messages
+     •   Progress Messages
+     •   User Control of Task Execution Status Messages
+     •   Error Messages
+     •   Warning Messages
+     •   Log Files
+     •   Command Output Redirection
+
+     Interactive Messages
+     While a task is executing on the workers, the workers send messages back to the
+     manager to indicate their progress.
+
+     Progress Messages
+     As the workers progress through each analysis stage, the workers send confidence
+     messages to update you on the progress of the analysis. For example:
+     pt_shell> current_session {scen1 scen2}
+     pt_shell> remote_execute {cmd1}
+
+     Start of Manager/Worker Task Processing
+     ----------------------------------------
+     Started   : Netlist image generation for session 'session'
+     Succeeded : Netlist image generation for session 'session'
+     Started   : Baseline image generation for scenario 'scen1'
+     Succeeded : Baseline image generation for scenario 'scen1'
+
+
+
+PrimeTime® User Guide                                                                             131
+T-2022.03
+                                                                                         Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+     User Control of Task Execution Status Messages
+     You can control the verbosity of DMSA task execution status messages. You can set the
+     multi_scenario_message_verbosity_level variable to one of two values, default and
+     low. When you set to the default, all task execution status messages are displayed. For
+     example:
+     Start of Manager/Worker Task Processing
+     -----------------------------------------------
+     Started    : Command execution in scenario 'wc'
+     Started    : Command execution in scenario 'bc'
+     Succeeded : Command execution in scenario 'bc'
+     Succeeded : Command execution in scenario 'wc'
+     -----------------------------------------------
+     End of Manager/Worker Task Processing
+
+     When you set the variable to low, only error, fatal, and failure messages are displayed. You
+     might find this useful for Tcl scripts where you need more control over the output. If this
+     variable is changed by a Tcl script, it is desirable to change the variable back to its original
+     value after completing the script or procedure to avoid confusion.
+
+     Error Messages
+     When an error occurs on a worker for a given scenario, the error is reported in full at the
+     manager together with the name of that scenario. For example:
+     pt_shell> current_session {scen1 scen2}
+     pt_shell> remote_execute {cmd1}
+
+     Start of Manager/Worker Task Processing
+     -------------------------------------
+     Started   : Netlist image generation for session 'session'
+     Error    : Problem in read_verilog. No designs were read
+     (DBR-011) (default_session)
+
+     Warning Messages
+     When a warning occurs on a worker for a given scenario, the warning is reported at the
+     manager only if it is the first time that this warning has occurred in that scenario. For
+     example:
+     pt_shell> current_session {scen1 scen2}
+     pt_shell> remote_execute {cmd1}
+
+     Start of Manager/Worker Task Processing
+     ----------------------------------------
+     Started   : Netlist image generation for session 'session'
+     Succeeded : Netlist image generation for session 'session'
+     Started   : Baseline image generation for scenario 'scen1'
+     Warning   : RC-009 has occurred on scenario 'scen1'
+
+
+
+
+PrimeTime® User Guide                                                                            132
+T-2022.03
+                                                                                            Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+     Log Files
+     You can examine all information generated by the workers in the log, output log, command
+     log, or merged error log file. The root working directory for all multi-scenario analysis
+     data, including log files, is determined by the multi_scenario_working_directory
+     variable. If you do not explicitly set this variable, it is set to the current directory from which
+     the PrimeTime manager was invoked. You must have write permission to the working
+     directory, and the directory must be accessible by the manager and to all workers.
+     Output Log
+     Each scenario has its own output log file, which is located in the scenario working
+     directory. For example, for a scenario named s1, the log is the following:
+     multi_scenario_working_directory/s1/out.log
+
+     You cannot set or change the name of the output log. The output log for a particular
+     scenario contains all errors, warnings, and information messages, which is all of the
+     information that you normally see in the terminal window of a conventional single analysis
+     PrimeTime run.
+     Command Log
+     Each remote process has its own command log file that you can find in the command_log
+     directory under the working directory. For example, for a process launched on a host
+     named srv1 that is the sixth process to be launched, the command log would be in the
+     following file:
+     multi_scenario_working_directory/command_log/srv1_6_pt_shell_command.log
+
+     You cannot set or change the name of the command log of remote processes. The
+     command log for a particular process contains all commands executed on that process.
+     You can locate the managers command log in the following file:
+     $sh_launch_dir/pt_shell_command.log
+
+     The sh_source_logging variable, when set to true, causes individual commands from
+     sourced scripts to be written to the command log file.
+     Merged Error Log
+     Large numbers of errors, warnings, and information messages can occur during a multi-
+     scenario analysis. To help you debug these messages, you can set the merged error log
+     variable at the manager. For example, the following command creates a merged error file
+     in multi_scenario_working_directory/error.log:
+     pt_shell> set_app_var multi_scenario_merged_error_log "error.log"
+
+     When this variable is set, all error messages from the start of a particular task to the end of
+     the task are merged together. If the same error message occurs on a number of scenarios,
+
+
+
+PrimeTime® User Guide                                                                               133
+T-2022.03
+                                                                                        Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+     the message is printed to the merged error file only one time, with a list of the scenarios in
+     which the message occurred.
+     Note:
+        You must set the multi_scenario_working_directory and
+        multi_scenario_merged_error_log variables before issuing the
+        start_hosts command.
+
+     Command Output Redirection
+     Command output redirection is supported in multi-scenario analysis. Be sure to redirect
+     output to different destination files for each process. Otherwise, an error occurs when two
+     different processes attempt to control the same file at the same time.
+     Note:
+        When using output redirection, be sure use a relative path. Do not use an
+        absolute path; if you do, all worker processes attempt to write to the same file,
+        which could lead to read/write conflicts and cause the worker processes to fail.
+     As with the previous log file example, the value of the
+     multi_scenario_working_directory variable is used along with the scenario name to
+     determine the output destination file name. The following examples demonstrate the file
+     naming conventions.
+     Example 1: Interactive redirection
+     pt_shell> set x myfile
+     pt_shell> remote_execute {report_timing} > $x.out
+
+     The output of the remote_execute command is directed to a file named myfile.out in the
+     current working directory. The $x variable is evaluated only at the manager process.
+     Example 2: Script-based redirection
+     The multi_scenario_working_directory variable has been set to /mypath, and
+     there are two scenarios in command focus, s3 and s4. The manager issues the
+     remote_execute {"source myscript.tcl"} command, which sources the myscript.tcl
+     Tcl script in the scenarios in command focus. The myscript.tcl script contains the following
+     line:
+     report_timing > rt.log
+
+     The output of the report_timing command goes into the following files:
+     /mypath/s3/rt.log
+     /mypath/s4/rt.log
+
+
+
+
+PrimeTime® User Guide                                                                           134
+T-2022.03
+                                                                                          Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+
+     DMSA Variables and Commands
+     For lists of commands and variables that you can use with DMSA, see
+     •     DMSA Variables
+     •     DMSA Commands
+     •     Commands Not Allowed on Worker Processes
+
+     DMSA Variables
+     To customize multi-scenario reporting, set the following variables.
+
+Variable                                 Description
+
+multi_scenario_merged_error_limit        Specifies the maximum number of errors of a particular
+                                         type to be written to the command log on a per-task basis.
+                                         Default is 100.
+
+multi_scenario_merged_error_log          Specifies a file location where error, warning, and
+                                         informational messages are stored for data produced by the
+                                         workers. Default is "". Set this variable before running the
+                                         start_hosts command.
+
+multi_scenario_working_directory         Specifies a working directory that can be used by all
+                                         workers and the manager for which you have write
+                                         permissions. The default is the current working directory.
+                                         Set this variable before running the start_hosts
+                                         command.
+
+sh_host_mode                             Specifies the working mode: scalar, manager, or worker.
+                                         This variable is read-only. You can use this variable
+                                         in your scripts to determine if you are operating in a
+                                         normal PrimeTime session or on the manager or worker.
+                                         For example, to set the working directory from only the
+                                         manager, you could use the following:
+                                         if {$sh_host_mode eq "manager"} {
+                                         set multi_scenario_working_directory "/home/wd"
+                                         }
+
+
+
+     DMSA Commands
+     The following table lists the commands that you use throughout the DMSA flow.
+
+
+
+
+PrimeTime® User Guide                                                                                 135
+T-2022.03
+                                                                                      Feedback
+Chapter 4: Managing Performance and Capacity
+Distributed Multi-Scenario Analysis
+
+
+     Table 4       DMSA commands
+
+Category           Command                        Description
+
+Scenario setup     create_scenario                Creates a single scenario. This command is
+                                                  required.
+
+                   remove_scenario                Removes one or more specified scenarios.
+
+                   remove_multi_scenario_design   Removes all multi-scenario data specified,
+                                                  including the session, all scenarios, and the
+                                                  configuration.
+
+                   report_multi_scenario_design   Reports the current user-defined
+                                                  multi-scenario analysis.
+
+Host and license   set_host_options               Define the compute resources. This
+configuration                                     command is required.
+
+                   remove_host_options            Removes all distributed hosts added to the
+                                                  farm's pool.
+
+                   set_license_limit              Limits the number of licenses the manager
+                                                  process acquires for worker usage.
+
+                   start_hosts                    Starts the worker processes on the hosts
+                                                  specified by the set_host_options
+                                                  command. This command is required.
+
+                   report_host_usage              Reports host and resource usage.
+
+Analysis focus     current_scenario               Changes the command focus to the selected
+                                                  scenarios within the current session; returns a
+                                                  list of all scenarios in command focus.
+
+                   current_session                Puts a particular group of scenarios in focus
+                                                  for analysis. The scenarios in focus receive
+                                                  and interpret commands from the manager;
+                                                  returns a list of all scenarios in the current
+                                                  session. This command is required.
+
+                   remove_current_session         Removes the previously set session;
+                                                  defocuses all scenarios.
+                                                  Scenarios stay in memory until removed by
+                                                  the remove_scenario or quit command.
+
+Worker context     remote_execute                 Batch or interactive mode; from the manager,
+                                                  creates a command buffer to be executed in
+                                                  the worker context.
+
+
+
+
+PrimeTime® User Guide                                                                          136
+T-2022.03
+                                                                                            Feedback
+Chapter 4: Managing Performance and Capacity
+HyperGrid Distributed Analysis
+
+
+       Commands Not Allowed on Worker Processes
+       You cannot run the following commands on worker processes.
+
+Command                Description
+
+exit                   Exits pt_shell.
+
+quit                   Quits pt_shell.
+
+remove_design          Removes one or more designs from memory.
+
+remove_lib             Removes one or more libraries from memory.
+
+rename_design          Renames a design.
+
+restore_session        Restores a pt_shell session previously created with the save_session
+                       command.
+
+
+
+       Limitations of DMSA
+       The DMSA feature has the following limitations:
+       •   The maximum number of worker processes that the manager process can control is
+           256 concurrent hosts.
+       •   Usage of the GUI is not supported.
+
+
+HyperGrid Distributed Analysis
+       Timing analysis for very large designs is challenging. If the design contains physical
+       design blocks, you can use hierarchical timing analysis to first verify the blocks individually,
+       then verify the top-level design with block models.
+       HyperGrid distributed analysis can analyze very large designs in a single run by
+       parallelizing the analysis across multiple worker processes running on different hosts. The
+       entire design can be explored and reported with the same commands used in a regular
+       PrimeTime analysis.
+       HyperGrid distributed analysis can be used for designs that are not suitable for
+       hierarchical timing analysis flows. It can also be used as an additional final verification in
+       hierarchical flows.
+       This feature requires a PrimeTime-ADV-PLUS license.
+
+
+
+
+PrimeTime® User Guide                                                                               137
+T-2022.03
+                                                                                         Feedback
+Chapter 4: Managing Performance and Capacity
+HyperGrid Distributed Analysis
+
+
+     The following topics provide more information about HyperGrid distributed analysis:
+     •   Overview of the HyperGrid Flow
+     •   Preparing for Distributed Analysis
+     •   Running the Distributed Analysis
+     •   Querying Attributes in a HyperGrid Analysis
+     •   Saving a Distributed Session
+     •   Commands With HyperGrid Distributed Analysis Support
+     •   Limitations of HyperGrid Distributed Analysis
+
+
+     Overview of the HyperGrid Flow
+     HyperGrid distributes the analysis of a very large design across multiple machines, using
+     the same analysis script and generating the same reports as full-flat analysis.
+     The following topics describe how HyperGrid performs distributed analysis:
+     •   Partitioning the Design
+     •   The Manager Process and the Worker Processes
+     •   The Distributed Analysis Working Directory
+
+     Partitioning the Design
+     In a HyperGrid distributed analysis, the process of splitting up the design is called
+     partitioning.
+     HyperGrid partitioning is not restricted by logical design hierarchy. Instead, it partitions
+     by fanin logic cones to clock and data endpoints. Fanin cones can traverse through
+     hierarchical blocks. Different partitions can contain different portions of the same block.
+
+
+
+
+PrimeTime® User Guide                                                                               138
+T-2022.03
+                                                                                         Feedback
+Chapter 4: Managing Performance and Capacity
+HyperGrid Distributed Analysis
+
+
+Figure 19        HyperGrid Partitioning, Using Fanin Logic Cones to Endpoints
+                                                          TOP
+                                                                          BLK
+
+
+
+         TOP
+                          BLK
+
+
+
+
+                                                          TOP
+                                                                          BLK
+
+
+
+
+                   (Clock fanin cones
+                  omitted for simplicity)
+
+
+     Each partition includes the fanin logic cones to a set of clock/data endpoints. The
+     partitioning process uses netlist, detailed parasitics, and constraints data to ensure the full
+     timing context of the design logic is considered.
+     In addition, the fanin logic cones include the following:
+     •    Side load stages, which model the receiver load of paths that diverge to endpoints
+          outside the current partition:
+
+
+
+
+           CLK
+
+
+
+     •    Aggressor stages, which model cross-coupled timing and noise interactions between
+          partitions:
+
+
+
+
+           CLK
+
+
+
+          HyperGrid synchronizes signal integrity effects between partitions as needed.
+     Different endpoints in different partitions can share common startpoints. In this case, some
+     portion of the startpoint fanout is included in both partitions.
+     By their nature, clock fanin cones tend to have fewer startpoints and more side load pins
+     than data fanin cones.
+
+
+PrimeTime® User Guide                                                                            139
+T-2022.03
+                                                                                                          Feedback
+Chapter 4: Managing Performance and Capacity
+HyperGrid Distributed Analysis
+
+
+     The Manager Process and the Worker Processes
+     HyperGrid distributed analysis uses a single manager process that invokes and controls
+     multiple worker processes.
+     The manager process is the process invoked by the user. It does the following:
+     •     Determines how to partition the design
+     •     Invokes the worker processes (one for each partition)
+     •     Generates full-design reports by querying the workers for information and merging it
+           together
+     The worker processes are invoked by the manager process. A worker process does the
+     following:
+     •     Reads the design data for a specific partition
+     •     Performs timing and noise updates
+     •     Gathers and returns results for queries sent by the manager process
+     Figure 20 shows how a full-flat analysis script is run in a HyperGrid distributed analysis.
+
+Figure 20         Analysis Script Execution in a HyperGrid Distributed Analysis
+                                                                    Logical
+          Master                            Define partitions
+                                                                update_timing
+                                                                                   Merged command   Merged command
+
+                             Read and
+          Worker 1          link design                     Build partitions
+                           (netlist only)             Read partition design data        Gather           Gather
+         Worker ...                                                                      data             data
+                                                        Full update_timing
+         Worker N                                          of partition logic
+
+
+         run_top_flat.tcl:          Read
+         set link_path              netlist
+         read_verilog                (1)          Create
+         link_design
+                                                 partitions
+         read_parasitics                            (2)
+         read_sdc                                                                           Merged
+         load_upf                                                                          reporting
+         update_timing                                                                    commands
+         check_timing                                                                         (3)
+         report_timing
+         report_constraint
+
+
+
+     HyperGrid distributed analysis always uses core-based licensing. See Distributed Core-
+     Based Licensing for details.
+
+
+
+
+PrimeTime® User Guide                                                                                                140
+T-2022.03
+                                                                                           Feedback
+Chapter 4: Managing Performance and Capacity
+HyperGrid Distributed Analysis
+
+
+     The Distributed Analysis Working Directory
+     In HyperGrid distributed analysis, the distributed analysis working directory contains tool-
+     generated scripts and log files data for the partitions.
+     The directory structure in the working directory is as follows:
+
+                           WORK/
+
+
+         partition0/   partition1/             partitionN/
+
+
+                         RUN.ptsh          parasitics.log          out.log
+
+     After the design is linked, the out.log file in each partition directory shows the partition's
+     characteristics. For example,
+     Partitioning for DSTA Worker
+     Design: bit_coin
+              Leaf Pins and Ports: 999296
+                Hierarchical Pins: 163677
+                       Leaf Cells: 234424
+               Hierarchical Cells: 5739
+                             Nets: 254436
+             Number of Partitions: 4
+     -------------------------
+
+     Partition#: 2
+              Leaf Pins: 258846         25.90%
+                   Topo Pins: 237420    23.75%
+                   Receiver Pins: 2963          0.29%
+                   Dangling Pins: 15426         1.54%
+                   Pre Dangling Pins: 4253      0.42%
+              Leaf Nets: 64281          25.26%
+                   Topo Nets: 55087     21.65%
+                   Receiver Nets: 744 0.29%
+                   Dangling Nets: 6866          2.69%
+                   Pre Dangling Nets: 1584      0.62%
+              Leaf Cells: 63052          26.89%
+
+
+
+     Preparing for Distributed Analysis
+     The following topics describe how to prepare for HyperGrid distributed analysis:
+     •     Creating a Wrapper Script
+
+     Creating a Wrapper Script
+     HyperGrid distributed analysis requires a wrapper script that enables HyperGrid,
+     configures and starts the worker processes, then runs the actual analysis script in
+     distributed mode.
+
+
+
+PrimeTime® User Guide                                                                                 141
+T-2022.03
+                                                                                       Feedback
+Chapter 4: Managing Performance and Capacity
+HyperGrid Distributed Analysis
+
+
+     An example wrapper script is as follows:
+     # enable Hypergrid analysis
+     set_app_var distributed_enable_analysis true
+     set_app_var distributed_working_directory ./MY_WORK_DIR
+
+     # start worker processes
+     set_host_options \
+       -num_process 4 \
+       -max_cores 4 \
+       -submit {...compute farm submission command...}
+     start_hosts
+
+     # run the timing analysis script, distributed across the workers
+     start_dsta \
+       -script run_top_flat.tcl
+
+     The important commands in the wrapper script are as follows:
+     •   The distributed_enable_analysis variable enables HyperGrid distributed analysis.
+     •   The distributed_working_directory variable sets the location of the working
+         directory. The default directory name is dsta_working_dir.
+     •   The set_host_options command configures the remote worker processes, and the
+         start_hosts command starts them. For details on how to configure worker processes,
+         see Setting Up Distributed Host Options.
+     •   The start_dsta command begins distributed analysis. Specifically, it does the
+         following:
+         ◦   Partitions the design (at the master)
+         ◦   Loads partitioned design data (at the workers)
+         ◦   Runs the specified analysis script (at the master, communicating with the workers)
+     In the wrapper script, any commands that follow the start_dsta command are executed
+     as distributed reporting commands when the specified analysis script completes.
+
+
+     Running the Distributed Analysis
+     To run a HyperGrid distributed analysis,
+     1. Create a wrapper script, as described in Preparing for Distributed Analysis.
+     2. Run the wrapper script in a new PrimeTime session:
+         % pt_shell -f wrapper.tcl
+
+
+
+
+PrimeTime® User Guide                                                                        142
+T-2022.03
+                                                                                          Feedback
+Chapter 4: Managing Performance and Capacity
+HyperGrid Distributed Analysis
+
+
+     If the analysis script (called by the wrapper script) redirects command output to files before
+     the update_timing command, the target file names must be relative paths. Otherwise,
+     conflicts will occur as multiple worker processes attempt to write to the same file while
+     reading and constraining the design.
+     If the analysis script runs the exit or quit command, the distributed analysis session is
+     ended.
+
+
+     Querying Attributes in a HyperGrid Analysis
+     In a distributed analysis, the manager process maintains a logical netlist representation of
+     the full design, but it does not compute any timing information.
+     When an attribute is queried at the manager process, the tool behavior depends on where
+     the attribute data is stored:
+     •   If the attribute data is available from the logical netlist representation at the manager
+         process (such as object names or port/pin directions), then the query returns
+         immediately.
+     •   If the attribute data is available only from partition-level analysis (such as timing or
+         noise information), then the data must be obtained by requesting it from the worker
+         processes.
+     To improve performance for partition-sourced attributes, HyperGrid provides attribute
+     caching functionality that minimizes the amount of data transfer needed from worker
+     processes.
+     Automatic Attribute Caching in foreach_in_collection
+     When an attribute query is performed inside a foreach_in_collection loop at the
+     manager process, HyperGrid detects the queried attribute and caches its values from the
+     partitions for faster subsequent loop iterations. For example,
+     foreach_in_collection my_pin $all_pins_in_design {
+       ...
+       # the 'max_rise_slack' attribute is automatically cached
+       set slack [get_attribute [get_pin $my_pin] max_rise_slack]
+     }
+
+     The attribute data is cached only for the loop collection objects, and only for the duration
+     of the loop. When the loop completes, the cache is released. This minimizes memory
+     overhead while still providing a performance improvement.
+
+
+
+
+PrimeTime® User Guide                                                                               143
+T-2022.03
+                                                                                       Feedback
+Chapter 4: Managing Performance and Capacity
+HyperGrid Distributed Analysis
+
+
+     Explicit Attribute Caching
+     Scripts can explicitly cache attribute data at the manager process by using the
+     cache_distributed_attribute_data command. For example,
+
+     For example,
+     # explicitly cache pin slack attributes
+     cache_distributed_attribute_data \
+       -class pin \
+       -attributes {min_rise_slack max_rise_slack}
+
+     while {...} {
+       ...
+       set slack [get_attribute [get_pin $my_pin] max_rise_slack]
+     }
+
+     These explicitly cached attributes are available to all subsequent commands until explicitly
+     released by the purge_distributed_attribute_data command.
+     For details, see the man pages.
+
+
+     Saving a Distributed Session
+     You can use the save_session command to save a HyperGrid distributed analysis
+     session to disk.
+     The resulting directory contains the data from the manager process and all worker
+     processes. Due to overhead in the distributed design data, the size of a distributed
+     analysis session directory is larger than an equivalent full-flat session directory.
+     When you restore a distributed session, the tool re-creates the original distributed analysis
+     with the same partitions, starting worker processes with the same set_host_options
+     specifications as in the original distributed analysis.
+     To restore a saved distributed session,
+     1. (Optional) Set the location of the distributed analysis working directory:
+        pt_shell> set_app_var distributed_working_directory ./MY_WORK_DIR
+
+     2. Use the restore_session command in the usual way:
+        pt_shell> restore_session my_distributed_session
+
+
+
+
+PrimeTime® User Guide                                                                          144
+T-2022.03
+                                                                                    Feedback
+Chapter 4: Managing Performance and Capacity
+HyperGrid Distributed Analysis
+
+
+
+     Commands With HyperGrid Distributed Analysis Support
+     The following tool commands support HyperGrid distributed analysis:
+     check_noise
+     check_timing
+     get_attribute
+     get_clock_relationship
+     get_timing_paths
+     report_analysis_coverage
+     report_annotated_parasitics -list_annotated
+     report_attribute
+     report_clock_gating_check
+     report_constraint
+     report_crpr
+     report_delay_calculation
+     report_global_slack
+     report_global_timing
+     report_min_period
+     report_min_pulse_width
+     report_net
+     report_noise
+     report_noise_calculation
+     report_qor
+     report timing
+     restore_session
+     save_session
+     write_rh_file
+
+     The following commands are supported for querying and exploring multivoltage
+     information at the manager process:
+     add_power_state
+     add_pst_state
+     create_pst
+     create_supply_set
+     get_supply_groups
+     get_supply_nets
+     get_supply_ports
+     get_supply_sets
+     report_power_domain
+     report_power_pin_info
+     report_power_switch
+     report_pst
+     report_supply_group
+     report_supply_net
+     report_supply_set
+     report_timing -supply_net_group
+     set_retention
+     set_retention_control
+     set_retention_elements
+
+
+
+
+PrimeTime® User Guide                                                                     145
+T-2022.03
+                                                                                    Feedback
+Chapter 4: Managing Performance and Capacity
+Reporting the CPU Time and Memory Usage
+
+
+
+     Limitations of HyperGrid Distributed Analysis
+     HyperGrid distributed analysis does not support the following PrimeTime flows and
+     features:
+     •   AOCV depth adjustment (distance adjustment is supported)
+     •   ECO fixing (automatic or manual), netlist editing commands
+     •   ETM models
+     •   HyperScale hierarchical analysis
+     •   HyperTrace accelerated PBA
+     •   SMVA/DVFS simultaneous multivoltage analysis
+
+
+Reporting the CPU Time and Memory Usage
+     The amount of memory and CPU resources that PrimeTime uses to perform static timing
+     analysis depends on several factors such as the size of your design, which analysis mode
+     you are using, and your reporting requirements. PrimeTime provides performance and
+     capacity information for distributed processes. Regardless of whether you use single-
+     core analysis, multicore analysis, or distributed multi-scenario analysis, you can monitor
+     memory and CPU usage in PrimeTime.
+     To report the overall processor time (in seconds) associated with the current pt_shell
+     process, use the cputime command. To report the total memory (in KB) allocated by
+     the current pt_shell process, use the mem command. When specifying the memory
+     requirements for subsequent PrimeTime sessions, use this reported memory value with an
+     additional 20 percent allowance for efficient operation of the operating system.
+     To report all the host options set in a distributed multi-scenario analysis (DMSA) flow,
+     use the report_host_usage command. This command also reports peak memory, CPU
+     usage, and elapsed time for the local process. In DMSA, it also reports peak memory,
+     CPU usage, and elapsed time for all distributed processes. The report displays the host
+     options specified, status of the distributed processes, number of CPU cores each process
+     uses, and licenses used by the distributed hosts.
+     For processes that are configured to using multiple CPU cores on the same host machine,
+     such as a single-core or threaded multicore analysis, the report_host_usage command
+     provides the resource usage for the current PrimeTime session. Here is an example of the
+     report output for a single-core or threaded multicore analysis flow.
+     pt_shell> report_host_usage
+     ****************************************
+     Report : host_usage
+     ...
+
+
+PrimeTime® User Guide                                                                       146
+T-2022.03
+                                                                                  Feedback
+Chapter 4: Managing Performance and Capacity
+Reporting the CPU Time and Memory Usage
+
+
+     ****************************************
+     Usage limits (cores)
+
+     Options Name                 #     Effective
+     ----------------------------------------------
+     (local process)              -     1
+     ----------------------------------------------
+     Total                              1
+
+     Memory usage
+     Options Name     #        Peak Memory (MB)
+     -------------------------------------------
+     (local process) -         35.88
+
+     Performance
+     Options Name     #          CPU Time (s)     Elapsed Time (s)
+     --------------------------------------------------------------
+     (local process) -           4                33
+
+     In DMSA flows, resources can be spread over several hosts. Therefore, the resource
+     usage data is provided for each distributed process. Here is an example of the
+     report_host_usage output for a DMSA flow.
+     pt_shell> report_host_usage
+     ****************************************
+     Report : host_usage
+     ...
+     ****************************************
+
+     Options Name       Host Name         32Bit     Num Processes
+     --------------------------------------------------------------
+     my_opts1          >>farm<<           N         2
+
+     Options Name    #    Host Name      Job ID     Process ID   Status
+     --------------------------------------------------------------------
+     my_opts1        1    ptopt018       136604     1394         ONLINE
+                     2    ptopt018       136605     1393         ONLINE
+
+     Usage limits (cores)
+
+     Options Name                #    Effective
+     --------------------------------------------
+     local process)              -     1
+     my_opts1                    1     4
+                                 2     4
+     --------------------------------------------
+     Total                             9
+
+     Memory usage
+
+     Options Name     #         Peak Memory (MB)
+     --------------------------------------------
+
+
+
+PrimeTime® User Guide                                                                     147
+T-2022.03
+                                                                                       Feedback
+Chapter 4: Managing Performance and Capacity
+Flow Summary Reports
+
+
+      (local process)      -           25.56
+      my_opts1             1           32.45
+                           2           32.21
+
+     Performance
+     Options Name     #          CPU Time (s)      Elapsed time (s)
+     ---------------------------------------------------------------
+      (local process) -           3                25
+      my_opts1          1         1                14
+                        2         2                15
+
+     When you exit PrimeTime, the tool reports the peak memory, CPU usage, and the elapsed
+     time for the session:
+     Maximum memory usage for this session: 31.08 MB
+     CPU usage for this session: 23 seconds
+     Elapsed time for this session: 211 seconds
+
+     When exiting a DMSA session, the tool reports information about the distributed
+     processes:
+     Maximum memory usage for distributed processes:
+     my_opts1        1   ptopt018           2021.88 MB
+     my_opts2        2   ptopt018           2022.21 MB
+                     3   ptopt018           3056.27 MB
+     my_opts3        4   >>farm<<           2034.92 MB
+                     5   >>farm<<           2120.90 MB
+
+     CPU time usage for distributed processes:
+     my_opts1        1   ptopt018           1562 seconds
+     my_opts2        2   ptopt018           1578 seconds
+                     3   ptopt018           1711 seconds
+     my_opts3        4   >>farm<<           1592 seconds
+                     5   >>farm<<           1621 seconds
+
+     Elapsed time for distributed processes:
+     my_opts1        1   ptopt018            1834 seconds
+     my_opts2        2   ptopt018            1833 seconds
+                     3   ptopt018            1830 seconds
+     my_opts3        4   >>farm<<            1750 seconds
+                     5   >>farm<<            1765 seconds
+
+     Maximum memory usage for this session: 4378.52 MB
+     CPU usage for this session:    1800 seconds
+     Elapsed time for this session: 1980 seconds
+
+
+
+Flow Summary Reports
+     Modern-day analysis flows are complicated. The full analysis flow is split across many
+     scripts: tool configuration, design read and link, design constraints, and reporting. Many
+     times, scripts are nested and call more scripts. Determining the runtime consumed by
+
+
+PrimeTime® User Guide                                                                         148
+T-2022.03
+                                                                                     Feedback
+Chapter 4: Managing Performance and Capacity
+Flow Summary Reports
+
+
+     major steps in the flow is hard; tracking down where an unexpected implicit update occurs
+     is even harder.
+     Fortunately, the PrimeTime tool provides a flow summary feature that
+     •   Generates a structured summary of script execution throughout the analysis flow
+     •   Highlights notable tool events (design link, tool updates, and so on)
+     •   Reports the runtime used by scripts and notable commands within them
+     •   Highlights repeated commands that consume nontrivial runtime as a group
+     •   Incurs little performance overhead (less than 5 percent)
+
+
+     The Flow Summary Report Structure
+     A flow summary is a textual representation of script execution, with annotations added for
+     notable and time-consuming events.
+     Flow Summary Context Levels
+     The opening START marker represents where the flow summary feature was first enabled,
+     and subsequent Indentation levels correspond to nested script execution:
+     START {
+     | source read_design.pt {
+     | | <<< Event: Invoking link_design; File: read_design.pt; Line: 3; "link"
+     | } 0.6s
+     | source constraints.pt {
+     | | source multicycles.pt {
+     | | | <<< Event: Invoking logical_update_timing; File: multicycles.pt; Line: 3;
+                "all_fanout -flat -endpoints_only -from _sel17"
+     | | } 0.1s
+     | } 0.5s
+     | <<< Event: Invoking update_timing; File: run.pt; Line: 8; "update_timing"
+     | update_timing: 14.9s
+     | uncaptured: 0.2s
+     } 16.3s
+
+     You can use a text editor that supports finding matching opening/closing braces to easily
+     navigate along context levels in the summary.
+     Event Markers
+     “<<< Event” markers indicate notable tool events, along with the command (including
+     script and line number) that caused them:
+     START {
+     | source read_design.pt {
+     | | <<< Event: Invoking link_design; File: read_design.pt; Line: 3; "link"
+     | } 0.6s
+     | source constraints.pt {
+     | | source multicycles.pt {
+
+
+
+PrimeTime® User Guide                                                                        149
+T-2022.03
+                                                                                 Feedback
+Chapter 4: Managing Performance and Capacity
+Flow Summary Reports
+
+
+     | | | <<< Event: Invoking logical_update_timing; File: multicycles.pt; Line: 3;
+                "all_fanout -flat -endpoints_only -from _sel17"
+     | | } 0.1s
+     | } 0.5s
+     | <<< Event: Invoking update_timing; File: run.pt; Line: 8; "update_timing"
+     | update_timing: 14.9s
+     | uncaptured: 0.2s
+     } 16.3s
+
+     The possible event types are:
+     •   Invoking link_design
+
+     •   Invoking update_timing
+
+     •   Halting background parasitics read
+
+     •   Invalidating update (logical)
+
+     •   Invalidating update (full)
+
+     •   Invoking logical update_timing
+
+     •   Invoking update_noise
+
+     •   Forcing full update
+
+     •   helper_command > 30s
+
+     Notable Command Markers
+     Commands that consume nontrivial amounts of runtime (10 seconds or more) are explicitly
+     noted with their runtime:
+     START {
+     | source read_design.pt {
+     | | <<< Event: Invoking link_design; File: read_design.pt; Line: 3; "link"
+     | } 0.6s
+     | source constraints.pt {
+     | | source multicycles.pt {
+     | | | <<< Event: Invoking logical_update_timing; File: multicycles.pt; Line: 3;
+                "all_fanout -flat -endpoints_only -from _sel17"
+     | | } 0.1s
+     | } 0.5s
+     | <<< Event: Invoking update_timing; File: run.pt; Line: 8; "update_timing"
+     | update_timing: 14.9s
+     | uncaptured: 0.2s
+     } 16.3s
+
+     In this example, note that the update_timing command produced both a timing-update
+     event and a notable command entry.
+
+
+
+
+PrimeTime® User Guide                                                                   150
+T-2022.03
+                                                                                            Feedback
+Chapter 4: Managing Performance and Capacity
+Flow Summary Reports
+
+
+     Uncaptured Command Markers
+     In general, fast commands are not explicitly listed. Instead, their total runtime is
+     summarized by an “uncaptured” runtime marker:
+     START {
+     | source read_design.pt {
+     | | <<< Event: Invoking link_design; File: read_design.pt; Line: 3; "link"
+     | } 0.6s
+     | source constraints.pt {
+     | | source multicycles.pt {
+     | | | <<< Event: Invoking logical_update_timing; File: multicycles.pt; Line: 3;
+                "all_fanout -flat -endpoints_only -from _sel17"
+     | | } 0.1s
+     | } 0.5s
+     | <<< Event: Invoking update_timing; File: run.pt; Line: 8; "update_timing"
+     | update_timing: 14.9s
+     | uncaptured: 0.2s
+     } 16.5s
+
+     Command Bundles
+     If there are multiple fast commands whose cumulative runtime becomes notable (greater
+     than 10 seconds), they are grouped into command bundles:
+
+     # commands in thisfile.tcl:                    source thisfile.tcl {
+     get_pins x           → 3s                        report_timing x 2: 12s
+     report_timing        → 8s                        <<< Event: Invoking report_timing
+     report_timing        → 4s                            File: ...; Line: ...
+     report_timing        → 15s                       report_timing x 2: 14s
+     report_timing        → 9s                        --uncaptured -- : 9s
+     get_pins y           → 2s                      }
+     report_timing        → 5s
+     get_pins z           → 4s
+
+
+
+     Commands are not bundled across notable command entries. This keeps the report
+     aligned with the actual order of command execution.
+     Helper Commands
+     A helper command is a command that is typically used to provide information to other
+     commands. They are: get_pins, get_nets, get_ports, get_cells, all_fanin, and
+     all_fanout.
+
+     Helper commands are normally not interesting by themselves, except when they
+     contribute unexpectedly to runtime. For this reason, only helper commands of 30 seconds
+     or more are considered notable, and they are reported using a special “notable helper
+     command” event marker.
+     Helper command bundles contain helper commands of less than 30 seconds. Only helper
+     command bundles that are 30 seconds or more are considered notable and are explicitly
+     reported.
+
+
+PrimeTime® User Guide                                                                             151
+T-2022.03
+                                                                                        Feedback
+Chapter 4: Managing Performance and Capacity
+Flow Summary Reports
+
+
+     If a helper command has both notable (30 seconds or more) and fast command
+     executions, the notable commands are explicitly reported, and the surrounding fast
+     commands are grouped and processed in the usual way:
+
+     # commands in thisfile.tcl:                    source thisfile.tcl {
+     get_pins             → 3s                        <<< Event: get_pins > 30s;
+     get_pins             → 4s                            File: ...; Line: ...;
+     get_pins             → 35s                           "get_pins -hier -filter ..."
+     get_pins             → 8s                        get_pins: 35s
+     get_pins             → 8s                        get_pins x 4: 32s
+     get_pins             → 8s                        --uncaptured -- : 7s
+     get_pins             → 8s                      }
+
+
+
+     Runtimes
+     The flow summary shows runtime information for commands (notable and uncaptured)
+     and closing context levels:
+     START {
+     | source read_design.pt {
+     | | <<< Event: Invoking link_design; File: read_design.pt; Line: 3; "link"
+     | } 0.6s
+     | source constraints.pt {
+     | | source multicycles.pt {
+     | | | <<< Event: Invoking logical_update_timing; File: multicycles.pt; Line: 3;
+                "all_fanout -flat -endpoints_only -from _sel17"
+     | | } 0.1s
+     | } 0.5s
+     | <<< Event: Invoking update_timing; File: run.pt; Line: 8; "update_timing"
+     | update_timing: 14.9s
+     | uncaptured: 0.2s
+     } 16.3s
+
+     All runtime values are elapsed wall clock time measurements.
+
+
+     Generating a Flow Summary Report
+     To start a new flow summary report, set the sh_flow_summary_file variable to the file
+     name where the summary should be written to:
+     pt_shell> # start a new flow summary file
+     pt_shell> file delete ./summary.txt
+     pt_shell> set_app_var sh_flow_summary_file {./summary.txt}
+     Information: Writing flow summary to summary.txt.
+
+     By default, this variable is set to an empty string value, which disables the feature.
+     If the specified file already exists, subsequent flow summary information is appended to
+     the end. This allows you to turn the feature on and off throughout your flow to include only
+     the areas of interest. But as a result, any previous summary file must be deleted to start a
+     new file.
+
+
+PrimeTime® User Guide                                                                         152
+T-2022.03
+                                                                                       Feedback
+Chapter 4: Managing Performance and Capacity
+Flow Summary Reports
+
+
+     The flow summary is written out incrementally during tool execution. This allow you to
+     examine the flow summary of an in-progress analysis.
+     To stop writing information to a flow summary report, set the sh_flow_summary_file
+     variable to an empty string:
+     pt_shell> # stop the current flow summary
+     pt_shell> set_app_var sh_flow_summary_file {}
+     Information: Closing flow summary file summary.txt.
+
+     When you stop a flow summary report, the tool adds a final line to the output file with the
+     total overhead of the flow summary feature itself:
+     Runtime overhead of flow summary utility is: 3.1 s
+
+
+     Defining Custom Flow Segments
+     Custom flow segments allow you to group part of a script into an additional named context
+     level of structure. This allows you to separate parts of a long script, or gain insight into
+     where uncaptured runtime is occurring.
+     To do this, use the define_custom_flow_segment command to define named start and
+     end points in a script:
+
+     # ...preceding commands...                               START {
+                                                              | ...preceding commands...
+     define_custom_flow_segment \                             | CUSTOM_SEGMENT_drc_max_tran
+       -start -name drc_max_tran                               {
+     get_pins -hier -filter "..."       → 750s                | | get_pins: 750s
+     foreach_in_collection {                                  | | report_timing x 21567:
+       report_timing                                           500s
+     }                                  → 500s                | | --uncaptured -- : 70s
+     ...write to file...                → 70s                 | } 1320s
+     define_custom_flow_segment \                             | ...following commands...
+       -end -name drc_max_tran                                } 2000s
+
+     # ...following commands...
+
+
+
+     Custom flow segments can contain nested flow segments and calls to other scripts:
+     CUSTOM_SEGMENT_drc {
+     | source max_transition.pt {
+     | | CUSTOM_SEGMENT_drc_max_transition {
+     | | | ...
+     | | } 100s
+     | } 100s
+     | source max_capacitance.pt {
+     | | CUSTOM_SEGMENT_drc_max_capacitance {
+     | | | ...
+     | | } 50s
+
+
+PrimeTime® User Guide                                                                          153
+T-2022.03
+                                                                                       Feedback
+Chapter 4: Managing Performance and Capacity
+Flow Summary Reports
+
+
+     | } 50s
+     } 150s
+
+     A flow segment should start and end in the same script file context. For nested flow
+     segments, flow segments must be closed in order (lower-level before higher-level).
+
+
+     Writing to Multiple Flow Summary Reports
+     To stop writing information to the current flow summary report and start writing to a new
+     one, set the sh_flow_summary_file variable to the new file name:
+     pt_shell> # switch to a new flow summary report
+     pt_shell> set_app_var sh_flow_summary_file {multicycles.txt}
+     Information: Closing flow summary file summary.txt.
+     Information: Writing flow summary to multicycles.txt.
+
+     If an existing flow summary report is in progress, it is automatically closed.
+     When stopping and starting flow summary reports from context levels below the top level,
+     note the following:
+     •   If a flow summary report is stopped in a lower context level, the pending levels are
+         closed and written to the report.
+     •   If a flow summary report is started from a lower context level, the currently pending
+         context levels are not written as opening levels in the report. Instead, the current
+         context is treated as the top level, and “<end of source preceding flow summary>”
+         messages indicate where existing contexts are exited.
+     For example,
+
+# commands in run.tcl:                         START {
+set_app_var \                                  | ...
+  sh_flow_summary_file {top.txt}               | source constraints.pt {
+source constraints.tcl                         | | ...
+...                                            | | source multicycles.pt {
+                                               | | | ...
+# commands in constraints.tcl                  | | } 14.0s
+...                                            | } 25.1s
+source multicycles.tcl                         } 25.7s
+                                               Runtime overhead of flow summary is: 0.0 s
+# commands in multicycles.tcl                  START {
+set_app_var \                                  <end of source preceding flow summary> 0.0s
+  sh_flow_summary_file {mcp.txt}               <end of source preceding flow summary> 0.0s
+set_multicycle ...                             | ...
+set_multicycle ...                             } 14.3s
+set_app_var \                                  Runtime overhead of flow summary is: 0.0 s
+  sh_flow_summary_file {top.txt}
+
+
+
+
+PrimeTime® User Guide                                                                            154
+T-2022.03
+                                                                                           Feedback
+Chapter 4: Managing Performance and Capacity
+Profiling the Performance of Tcl Scripts
+
+
+
+     Limitations
+     Note the following limitations:
+     •   Time values are rounded to the nearest 0.1 second for printing. As a result, individual
+         values might not sum precisely to total values.
+     •   Tcl procedures do not introduce explicit levels in the flow summary, although the activity
+         within them is summarized normally.
+     •   The parallel_execute and parallel_foreach_in_collection commands are
+         listed as single commands without details about the worker threads
+
+
+Profiling the Performance of Tcl Scripts
+     To identify runtime and memory bottlenecks in your Tcl scripts, you can perform Tcl
+     profiling during your timing runs. This capability can help you fix performance and capacity
+     issues.
+     To perform Tcl profiling:
+     1. Start collecting profiling data by running the start_profile command.
+         By default, start_profile tracks commands that take more than 0.1 second to run
+         or use more than 100 KB of memory. If you use the -verbose option, start_profile
+         tracks all commands.
+     2. Run the Tcl scripts that you want to analyze.
+     3. Stop collecting profiling data by using the stop_profile, exit, or quit command.
+     4. Evaluate the automatically generated Tcl profile and stopwatch reports. By default, the
+        tool writes these files to the profile subdirectory of the current working directory.
+         Table 5        Tcl profile and stopwatch reports
+
+   File name                                   Description
+
+   tcl_profile_summary_latest.html             Tcl profile report summary page in HTML format.
+                                               Shows the start and stop times of the profiling and
+                                               provides links to the report sorted by CPU time,
+                                               calls, elapsed time, or memory usage.
+
+   tcl_profile_summary_latest.txt              Summary page in plain text that shows the start and
+                                               stop times of the profiling and paths to the report
+                                               files.
+
+   tcl_profile_sorted_by_cpu_time*.txt         Tcl profile report sorted by CPU time.
+
+
+
+
+PrimeTime® User Guide                                                                                155
+T-2022.03
+                                                                                               Feedback
+Chapter 4: Managing Performance and Capacity
+Profiling the Performance of Tcl Scripts
+
+
+   File name                                   Description
+
+   tcl_profile_sorted_by_delta_mem_*.txt       Tcl profile report sorted by memory usage.
+
+   tcl_profile_sorted_by_elapsed_time_*.txt    Tcl profile report sorted by elapsed time.
+
+   tcl_profile_sorted_by_num_calls_*.txt       Tcl profile report sorted by number of calls.
+
+   tcl_stopwatch_*.txt                         Stopwatch report in plain text.
+
+
+     Here is an example of the Tcl script profile report summary. The get_timing_paths
+     command was called one time from the gtp_only.tcl script and took 8 seconds to execute,
+     which is shown in the Elapsed column.
+
+Example 9      Tcl script profile report summary
+                                                               Delta
+     Procedure/Command                 Calls Elapsed    CPU    Memory
+     ------------------------------------------------------------------
+     <total>                           1      39       19      268
+       link_design                     2      14        0        0
+       read_parasitics                 1       0        0        0
+       update_timing                   1       9        9       32
+       source gtp_only.tcl             1       8        7      143
+       get_timing_paths                1       8        7      143
+           source gtp_only.tcl
+       save_session                    1       4        0       18
+       link_design                     1       2        1       30
+       read_verilog                    1       0        0       44
+       source write_constraints.pt     1       0        0        0
+
+     The stopwatch report (tcl_stopwatch_*.txt), is an ASCII text file that shows the time,
+     performance, and memory metrics of each command. Here is an example of a stopwatch
+     report.
+
+
+
+
+PrimeTime® User Guide                                                                                156
+T-2022.03
+                                                                                     Feedback
+Chapter 4: Managing Performance and Capacity
+Profiling the Performance of Tcl Scripts
+
+
+Figure 21    Stopwatch Report Example
+         ###EVNT-1:args=
+         STOPWATCH[START]: CUR_datetime    = Wed Apr 01 03:11:21 2015                 Begin profiling
+         STOPWATCH[START]: CUR_elapsed     = 2.81 s
+         STOPWATCH[START]: DELTA_elapsed   = 0.00 s
+         STOPWATCH[START]: CUR_cputime     = 2.54 s
+         STOPWATCH[START]: DELTA_cputime   = 0.00 s
+         STOPWATCH[START]: CUR_peakmem     = 26.57 MB
+         STOPWATCH[START]: DELTA_peakmem   = 0.00 MB
+         …
+         ###EVNT-12642:args=
+         STOPWATCH[start_update_timing]: CUR_datetime     = Wed Apr 01 03:11:46 2015
+         STOPWATCH[start_update_timing]: CUR_elapsed      = 20.40 s                   Stopwatch entry
+         STOPWATCH[start_update_timing]: DELTA_elapsed    = 0.00 s                    when command
+         STOPWATCH[start_update_timing]: CUR_cputime      = 5.54 s
+         STOPWATCH[start_update_timing]: DELTA_cputime    = 0.00 s                    begins
+         STOPWATCH[start_update_timing]: CUR_peakmem      = 100.60 MB                 execution
+         STOPWATCH[start_update_timing]: DELTA_peakmem    = 0.00 MB
+         ###EVNT-12643:args=
+         STOPWATCH[after_update_timing]: CUR_datetime     = Wed Apr 01 03:11:46 2015 Stopwatch entry
+         STOPWATCH[after_update_timing]: CUR_elapsed      = 29.28 s
+         STOPWATCH[after_update_timing]: DELTA_elapsed    = 8.88 s                    when command
+         STOPWATCH[after_update_timing]: CUR_cputime      = 14.15 s                   completes
+         STOPWATCH[after_update_timing]: DELTA_cputime    = 8.61 s
+         STOPWATCH[after_update_timing]: CUR_peakmem      = 132.60 MB                 execution
+         STOPWATCH[after_update_timing]: DELTA_peakmem    = 32.00 MB
+         ###EVNT-12644:args= /u/tests/tcl_prof/gtp_only.tcl
+         STOPWATCH[start_source]: CUR_datetime    = Wed Apr 01 03:11:54 2015
+         STOPWATCH[start_source]: CUR_elapsed     = 29.28 s
+         STOPWATCH[start_source]: DELTA_elapsed    = 0.00 s
+         STOPWATCH[start_source]: CUR_cputime     = 14.15 s
+         STOPWATCH[start_source]: DELTA_cputime    = 0.00 s
+         STOPWATCH[start_source]: CUR_peakmem     = 132.60 MB
+         STOPWATCH[start_source]: DELTA_peakmem    = 0.00 MB
+         ###EVNT-12645:args= -nworst 2000 -max 500                           Command
+         STOPWATCH[start_get_timing_paths]: CUR_datetime     = Wed Apr 01 03:11:54 2015
+         STOPWATCH[start_get_timing_paths]: CUR_elapsed      = 29.28 s
+         STOPWATCH[start_get_timing_paths]: DELTA_elapsed    = 0.00 s
+         STOPWATCH[start_get_timing_paths]: CUR_cputime      = 14.15 s
+         STOPWATCH[start_get_timing_paths]: DELTA_cputime    = 0.00 s
+         STOPWATCH[start_get_timing_paths]: CUR_peakmem      = 132.60 MB
+         STOPWATCH[start_get_timing_paths]: DELTA_peakmem    = 0.00 MB
+         ###EVNT-12646:args= -nworst 2000 -max 500                           Command options
+         STOPWATCH[after_get_timing_paths]: CUR_datetime     = Wed Apr 01 03:11:54 2015
+         STOPWATCH[after_get_timing_paths]: CUR_elapsed      = 36.91 s       Current metrics and
+         STOPWATCH[after_get_timing_paths]: DELTA_elapsed    = 7.63 s
+         STOPWATCH[after_get_timing_paths]: CUR_cputime      = 21.63 s       differences compared to
+         STOPWATCH[after_get_timing_paths]: DELTA_cputime    = 7.48 s        previous stopwatch entry
+         STOPWATCH[after_get_timing_paths]: CUR_peakmem      = 276.54 MB
+         STOPWATCH[after_get_timing_paths]: DELTA_peakmem    = 143.94 MB
+         ###EVNT-12651:args= /u/tests/tcl_prof/gtp_only.tcl
+         STOPWATCH[after_source]: CUR_datetime    = Wed Apr 01 03:11:54 2015
+         STOPWATCH[after_source]: CUR_elapsed     = 36.91 s
+         STOPWATCH[after_source]: DELTA_elapsed    = 0.00 s
+         STOPWATCH[after_source]: CUR_cputime     = 21.63 s
+         STOPWATCH[after_source]: DELTA_cputime    = 0.00 s
+         STOPWATCH[after_source]: CUR_peakmem     = 276.54 MB
+         STOPWATCH[after_source]: DELTA_peakmem    = 0.00 MB
+         …
+         ###EVNT-12664:args=
+         STOPWATCH[STOP]: CUR_datetime    = Wed Apr 01 03:11:59 2015                  End profiling
+         STOPWATCH[STOP]: CUR_elapsed     = 41.89 s
+         STOPWATCH[STOP]: DELTA_elapsed   = 0.00 s
+         STOPWATCH[STOP]: CUR_cputime     = 21.68 s
+         STOPWATCH[STOP]: DELTA_cputime   = 0.00 s
+         STOPWATCH[STOP]: CUR_peakmem     = 294.82 MB
+         STOPWATCH[STOP]: DELTA_peakmem   = 0.00 MB
+
+
+
+
+PrimeTime® User Guide                                                                        157
+T-2022.03
+

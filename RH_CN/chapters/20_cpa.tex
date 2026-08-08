@@ -1,0 +1,298 @@
+﻿% 第 20 章 Chip-Package Analysis (CPA)（原书 20-529 … 20-541）
+\bichapter{芯片-封装分析（CPA）}{Chip-Package Analysis (CPA)}
+\label{chap:cpa}
+
+\section{引言}
+\subsection*{Introduction}
+
+RedHawk-CPA（简称 ``CPA''）提供高分辨率（per-bump 级）封装 PDN 提取与协同仿真能力。封装模型为 RLCK 形式，便于系统级芯片+封装协同仿真。除模型提取外，还可获得叠加在物理版图上的 bump 级电阻与电感详细色阶图。提取的快速周转时间，加上 bump 级寄生数据，使该工具非常适合封装的 what-if 分析。CPA 模型可方便导入 RedHawk 以进行系统级高分辨率分析。
+
+图~\ref{fig:rh-cpa-overview} 为 RedHawk-CPA 分析流程概述。
+
+\figplaceholder{Figure 20-1}{RedHawk 中 CPA 模型生成概述}
+\label{fig:rh-cpa-overview}
+
+CPA 分析的主要特性：
+\begin{itemize}
+  \item 面向 RedHawk 的快速、高分辨率（per-bump 级）RLCK 提取
+  \item 原生创建带标注的 ploc 与 \texttt{REDHAWK\_PKG} subckt 封装，支持 ``一键'' 将模型导入 RedHawk
+  \item 无缝将 CPA 模型导入 RedHawk，便于芯片-封装协同仿真
+  \item 基于 pin 位置匹配的自动芯片-封装连接与分组，配备带 ``Use Pin Names'' 功能的强大 GUI
+  \item 可指定或从 GSR 文件导入电压调节模块（VRM）电压
+  \item 利用 RedHawk 矩阵求解器
+  \item 静态 Pad 电流感知的封装 DC IR 仿真
+  \item 动态 Pad 电流感知的封装 AC Hotspot 仿真
+  \item 3D 快速有限元（FFEM）引擎
+  \item 辅助封装设计与优化
+  \item 包含封装 decap
+  \item 大型封装快速周转
+  \item ``Impedance Analysis'' 功能
+  \item 输出网表规模缩减
+  \item 带摘要的综合 HTML 报告
+  \item 增强的 Pad 电压与电流图及直方图
+  \item per-bump 分辨率的高分辨率电阻与电感图
+  \item 其他报告功能：
+  \begin{itemize}
+    \item DC IR 摘要文本报告按电压排序
+    \item 在 HTML 中报告封装未连接 pin
+    \item 高级 wirebond 元件处理
+  \end{itemize}
+\end{itemize}
+
+\subsection{协同仿真流程}
+\subsubsection*{Co-simulation Flows}
+
+RedHawk 支持两类芯片-封装协同仿真分析流程：
+\begin{itemize}
+  \item DC IR
+  \item AC hotspot
+\end{itemize}
+
+两种流程均须首先完成封装提取。CPA 提取模型数据库可用后，可按以下各节启动协同仿真流程。
+
+\section{集成芯片-封装分析与芯片热建模}
+\subsection*{Integrated Chip Package Analysis and Chip Thermal Modeling}
+
+在 RedHawk GUI 中，热分析与 CPA 共用同一几何编辑 UI，帮助用户更高效地进行热分析。CPA 用户可使用信号完整性分析的同一数据文件夹与文件进行热分析设置与执行。图~\ref{fig:rh-cpa-ctm-gui} 与图~\ref{fig:rh-chip-pkg-temp} 为 GUI 界面示例。
+
+\begin{itemize}
+  \item 集成 GUI 支持通过 RedHawk GUI 导入封装版图并生成 CPA 模型。
+  \item 同一 GUI 用于查看封装版图、pin 电阻与 pin 电感图，以及芯片视图。
+  \item 提供自动与芯片版图挂接，保持 pin-to-pin 映射。
+  \item 检测到 GSR 关键字 \gsr{CPA_FILES} 时激活集成芯片与封装 GUI。
+  \item 仍支持基于 \gsr{CPA_MODEL} 关键字与独立芯片/封装 GUI 的 legacy 流程。
+  \item 为保持兼容性，独立 RedHawk-CPA 生成的 CPA 模型可用于集成流程。若独立 RedHawk-CPA 项目位于 \texttt{<old\_project\_path>}，将 \gsr{CPA_FILES} 关键字指定为：
+\begin{lstlisting}
+CPA_FILES {
+     PACKAGE <old_project_path>/Result/adsCPA/dB/
+layout_filename.xfl
+     MODEL <old_project_path>/Result/adsCPA
+}
+\end{lstlisting}
+  \item 所有独立 RedHawk 流程（无 \gsr{CPA_FILES} 关键字）显示常规 GUI（不启用封装视图）。
+\end{itemize}
+
+\figplaceholder{Figure 20-2}{集成 CPA CTM GUI 界面}
+\label{fig:rh-cpa-ctm-gui}
+
+\figplaceholder{Figure 20-3}{芯片与封装温度图}
+\label{fig:rh-chip-pkg-temp}
+
+集成热能力可执行以下热分析：
+\begin{itemize}
+  \item 基于 BGA 基板中精确金属分布的自动热模型生成与分析。
+  \item 与 RedHawk 提供的真实温度依赖、layer 感知芯片功耗图（CTM）接口，并回标用于芯片电迁移（EM）可靠性分析。
+  \item 提供 pre-layout 封装建模与分析。
+  \item 在 ``Options'' GUI 页面包含 GSR 关键字设置，便于网格与性能控制。
+  \item 色阶图文本显示提供 Text Color 选项，允许用户为色阶图上的文本指定合适颜色。
+\end{itemize}
+
+\subsection{CTM Viewer}
+\subsubsection*{CTM Viewer}
+
+CPA 热分析使用增强的 CTM Viewer，包含以下功能：
+\begin{itemize}
+  \item 导入 CTM\_Viewer 不支持的上版 v0 格式 legacy \texttt{.ctm} 时增加保护；
+  \item 导入无效 \texttt{.ctm} 文件时显示消息 ``Please import a valid Layer-aware CTM file!'';
+  \item 当 \texttt{.tar} 或 \texttt{.tar.gz} 格式的 ctm 可读时可启动 CTM Viewer；
+  \item 点击 CTM Viewer 时清理终端消息。
+\end{itemize}
+
+\subsection{温度感知 CTM}
+\subsubsection*{Temperature-Aware CTM}
+
+Multi-Heat Source Editor 对话框支持通过 GUI 选项 Enable T-aware CTM 直接采用 \texttt{.ctm} 进行热分析，如图~\ref{fig:rh-multi-heat} 所示。Enable T-aware CTM 复选框为可选。点击 Save T-aware CTM 按钮后默认自动选中。此外，导出的 \texttt{.ctm} 文件路径显示在 Enable T-aware CTM 复选框下方文本框中。勾选此选项可使用 \texttt{.ctm} 功耗进行热仿真；否则使用 multi-heat source 功耗。
+
+\figplaceholder{Figure 20-4}{Multi-Heat source editor}
+\label{fig:rh-multi-heat}
+
+导出的 ctm 文件可通过 Die 选项卡 $\rightarrow$ CTM 导回集成热分析。注意该 \texttt{.ctm} 无法由 CTM Viewer 查看。Clear 按钮删除 block 表中所有带功耗分配的 block。
+
+\subsection{热分析配置}
+\subsubsection*{Configuration for Thermal Analysis}
+
+GSR 关键字设置 \gsr{THERMAL_ANALYSIS 1} 开启热分析。
+
+为向后兼容，独立 Sentinel-TI 生成的热模型可用于 CPA 流程。若独立 Sentinel-TI 项目位于 \texttt{<old\_proejct\_path>}，将 \gsr{CPA_FILES} 关键字定义为：
+\begin{lstlisting}
+CPA_FILES {
+     PACKAGE <old_proj_path>/layout_filename.xfl
+     MODEL <old_proj_path>
+}
+\end{lstlisting}
+然后将 \texttt{<old\_proj\_path>/Results\_TI} 重命名为 \texttt{<old\_project\_path>/thermal}。
+
+\subsection{配置与结果}
+\subsubsection*{Configuration and Results}
+
+须使用 Setup$\rightarrow$Thermal Setup 与 Do Extraction$\rightarrow$Thermal-Sim 按钮设置封装并运行热分析。
+
+\figplaceholder{Figure 20-5}{热分析配置按钮}
+\label{fig:rh-thermal-buttons}
+
+\paragraph{Setup$\rightarrow$Thermal Setup：}
+此菜单命令打开 Thermal Setup 对话框，右侧有六个选项卡：PKG Config、Die、Material、Boundary、Heat Sink 与 Simulation。在弹出窗口中可设置 PKG Config、为 Die 分配 CTM，或部署恒定功耗或多热源、施加外部条件、启用 heat sink，并设置热仿真选项。
+
+\paragraph{Do Extraction$\rightarrow$Thermal-Sim：}
+此菜单命令首先执行电气 DRC 检查。若发现违例，会在继续提取前准备 DRC 报告。热仿真用户可忽略电气 DRC 报告以继续热仿真。仿真完成后，在 \texttt{<project\_path>/thermal} 文件中生成三个色阶图——节点温度、热通量与功耗密度。
+
+\paragraph{View Result 按钮}
+热仿真完成后，可使用 Temp、HeatF、PwrD View Result 按钮图形化查看热结果：
+\begin{itemize}
+  \item Temp：显示每层金属的温度等值线。
+  \item HeatF：显示热通量矢量图。
+  \item PwrD：显示 die 各层的功耗密度等值线。
+\end{itemize}
+
+RedHawk 内不提供热仿真的 TCL 命令。
+
+\subsection{Via、Bump 与 Ball 的 Visible 选项}
+\subsubsection*{Visible option for Vias, Bumps and Balls}
+
+Via、Solder Bump 与 Solder Ball 管理器的 Property 页面提供 Visible 选项，用于在 GUI 中启用/禁用 via、bump 与 ball 的可见性。
+
+\subsection{缩放到 pin}
+\subsubsection*{Zoom to a pin}
+
+RedHawk CPA GUI 可显示 PKG/Die Pad Info 报告窗口，如图~\ref{fig:rh-pkg-die-pad}，可查看 ploc 连接的封装 pin 属性，包括封装网络与封装 pin $(x, y)$ 坐标。右键点击 pin 并在上下文菜单中选择 Zoom to this pin，版图视图将高亮显示所选 pin。
+
+\figplaceholder{Figure 20-6}{Pkg/Die Pad Info 对话框}
+\label{fig:rh-pkg-die-pad}
+
+\subsection{集成芯片与封装 GUI}
+\subsubsection*{Integrated Chip and Package GUI}
+
+集成 GUI 同时显示芯片与封装版图及 map 视图，特性包括：
+\begin{itemize}
+  \item 集成 GUI 支持通过 RedHawk GUI 导入封装版图并生成 CPA 模型。
+  \item 同一 GUI 用于查看封装版图、pin 电阻与 pin 电感图，以及芯片视图。
+  \item 提供自动与芯片版图挂接，保持 pin-to-pin 映射。
+  \item 检测到 GSR 关键字 \gsr{CPA_FILES} 时激活集成芯片与封装 GUI。
+  \item 仍支持基于 \gsr{CPA_MODEL} 关键字与独立芯片/封装 GUI 的 legacy 流程。
+  \item 为保持兼容性，独立 RedHawk-CPA 生成的 CPA 模型可用于集成流程。若独立 RedHawk-CPA 项目位于 \texttt{<old\_project\_path>}，将 \gsr{CPA_FILES} 关键字指定为：
+\begin{lstlisting}
+CPA_FILES {
+     PACKAGE <old_project_path>/Result/adsCPA/dB/
+layout_filename.xfl
+     MODEL <old_project_path>/Result/adsCPA
+}
+\end{lstlisting}
+  \item 所有独立 RedHawk 流程（无 \gsr{CPA_FILES} 关键字）显示常规 GUI（不启用封装视图）。
+\end{itemize}
+
+\section{DC IR 协同仿真}
+\subsection*{DC IR Co-simulation}
+
+\subsection{芯片与封装自动连接与 Pin 分组}
+\subsubsection*{Chip and Pkg Auto-Connection and Pin Grouping}
+
+RedHawk-CPA 可使用 pin 名自动将 ploc 连接到封装，对话框如图~\ref{fig:rh-pin-matching}。当封装与 ploc 具有相同 pin 名时尤其推荐。对于 $>$4K P/G bump 的封装，默认 pin 分组限制为 4000。可在 ``Die Model Connection'' 窗口中覆盖默认分组。
+
+\figplaceholder{Figure 20-7}{CPA 中的 pin 匹配对话框}
+\label{fig:rh-pin-matching}
+
+以下 TCL 命令用于从 RedHawk 内部启动 CPA：
+\begin{lstlisting}
+perform cpa -static
+\end{lstlisting}
+
+以下命令用于从 UNIX 命令行启动 CPA：
+\begin{lstlisting}
+rhcpa <toplevel_CPA_folder> <static_pad_current_file> -static
+\end{lstlisting}
+其中：
+\begin{itemize}
+  \item \texttt{<toplevel\_CPA\_folder>}：指定包含 CPA 提取数据库的文件夹。默认文件夹名为 \texttt{adsCPA}。
+  \item \texttt{<static\_pad\_current\_fil>}：指定 RedHawk 生成的静态 pad 电流文件名。
+  \item \opt{-static}：启动 DC IR 协同仿真
+\end{itemize}
+
+上述命令加载 dB 并启动 RedHawk-CPA 对话框，如图~\ref{fig:rh-cpa-dialog}。
+
+\figplaceholder{Figure 20-8}{CPA 对话框}
+\label{fig:rh-cpa-dialog}
+
+选择 ``IR Co-analysis'' 按钮与 ``VRM Current'' 按钮。
+
+VRM 与 Die 电流对话框将显示，已填入供电电压与 die pad 静态电流，如图~\ref{fig:rh-vrm-die-current}。
+
+\figplaceholder{Figure 20-9}{VRM 与 die 电流对话框}
+\label{fig:rh-vrm-die-current}
+
+在 CPA 对话框中点击 ``Run Analysis'' 执行封装 IR 分析。仿真完成后，可在对话框中选择并查看封装 IR drop 图、结果摘要与基于 HTML 的报告。
+
+\section{AC Hotspot 协同仿真}
+\subsection*{AC Hotspot Co-simulation}
+
+以下命令可从 RedHawk 内部启动 CPA：
+\begin{lstlisting}
+perform cpa -hotspot
+\end{lstlisting}
+
+以下命令用于从 UNIX 命令行启动 CPA：
+\begin{lstlisting}
+rhcpa <toplevel_CPA_folder> <dynamic_pad_current_file> -hotspot
+\end{lstlisting}
+其中：
+\begin{itemize}
+  \item \texttt{<toplevel\_CPA\_folder>}：指定包含 CPA 提取数据库的文件夹。默认文件夹名为 \texttt{adsCPA}。
+  \item \texttt{<dynamic\_pad\_current\_file>}：RedHawk 生成的动态 pad 电流文件。
+  \item \opt{-hotspot}：启动 AC hotspot 协同仿真的命令
+\end{itemize}
+
+上述命令加载 dB 并启动 RedHawk-CPA 对话框。
+
+在 CPA 对话框中选择 ``AC Hotspot'' 按钮。
+
+无动态 pad 电流的所有封装 pin 列表将显示在文本文件中，如图~\ref{fig:rh-cpa-pad-pins}。
+
+\figplaceholder{Figure 20-10}{CPA pad pin 列表}
+\label{fig:rh-cpa-pad-pins}
+
+Impedance Analysis 在用户指定频率范围内仿真封装版图。可在 die 侧定义 port 并查看所定义 die port 的封装阻抗响应。Impedance analysis 可在 RedHawk-CPA 中 channel extraction 之后运行。运行 hotspot 分析前须指定所需 die 侧 port 与频率范围，如图~\ref{fig:rh-impedance-freq}。
+
+\figplaceholder{Figure 20-11}{阻抗与频率扫描对话框}
+\label{fig:rh-impedance-freq}
+
+可通过 CPA 对话框中的 ``Observation Setup'' 探测元件 pin 的电压与电流波形，以及平面电压。点击 ``pin Voltage'' 按钮，pin 电压将显示在对话框中，如图~\ref{fig:rh-cpa-pin-voltage}。
+
+\figplaceholder{Figure 20-12}{CPA Observation Setup——Pin voltage}
+\label{fig:rh-cpa-pin-voltage}
+
+点击 ``Pin Current'' 按钮，pin 电流将显示在对话框中，如图~\ref{fig:rh-cpa-pin-current}。
+
+\figplaceholder{Figure 20-13}{CPA Observation Setup——pin current}
+\label{fig:rh-cpa-pin-current}
+
+可使用内置 S-utility 查看阻抗曲线，如图~\ref{fig:rh-impedance-plots}。
+
+\figplaceholder{Figure 20-14}{使用 S-utility 的阻抗图}
+\label{fig:rh-impedance-plots}
+
+在 CPA 对话框中点击 ``Run Analysis'' 执行封装 AC hotspot 分析。仿真完成后，除 HTML 报告外，还可选择并查看封装电压与平面电流图、探测点电压与电流波形。平面电压对话框如图~\ref{fig:rh-cpa-plane-voltage}。
+
+\figplaceholder{Figure 20-15}{CPA Observation Setup——Plane voltage}
+\label{fig:rh-cpa-plane-voltage}
+
+\section{基于 HTML 的报告}
+\subsection*{HTML-based Reporting}
+
+channel extraction、IR drop 分析与 AC hotspot 分析流程均提供综合 HTML 报告。主要特性：
+\begin{itemize}
+  \item DC IR 摘要文本报告按电压排序。
+  \item 封装未连接 pin 报告在文件 \texttt{Result/adsCPA/Extraction/Die\_Pkg\_Connection\_Info.txt} 中。
+  \item 封装 decap 值直接在 Channel Extraction 报告的 ``Component Spice Models'' 段中报告。
+  \item 打开报告需要 Firefox 或 Conqueror 浏览器。点击 ``HTML Report'' 按钮时，HTML 文件路径显示在底部消息窗口，可直接访问并打开文件。
+  \item 注意：与 HTML 文件同位置的 ``Images'' 子文件夹为分发所必需。
+\end{itemize}
+
+输出报告包括：
+\begin{itemize}
+  \item 一般项目信息
+  \item 工具版本与构建数据
+  \item 机器详情
+  \item 各层几何数据
+  \item 分析用网络
+  \item 电气设置
+  \item 仿真结果
+\end{itemize}

@@ -1,0 +1,1841 @@
+Optimization
+DC Explorer provides fast synthesis to speed up the development of high-quality RTL.
+With much faster runtime than full synthesis, the tool allows you to perform what-if
+analyses of various configurations to meet the design’s functional, timing, and area
+requirements. You use the compile_exploration command to synthesize a design. DC
+Explorer optimizes all endpoints concurrently, using different optimization engines to attain
+linear runtime performance relative to the design size.
+To learn the many factors affecting the optimization results, see
+•
+Compile Strategies
+•
+Performing a Top-Down Compile
+•
+Performing a Bottom-Up Compile
+•
+Performing Optimization for High-Performance Designs
+•
+Performing Manual High-Fanout Synthesis
+•
+Resolving Multiple Instances of a Design Reference
+•
+Defining Library Subset Restrictions
+•
+Optimizing Multicorner-Multimode Designs
+•
+Performing Optimization With Floorplan Physical Constraints
+•
+Performing Power Optimization
+•
+Pipelined-Logic Retiming
+•
+Additional Optimization Features
+Compile Strategies
+You can use various strategies to compile your hierarchical design. The basic strategies
+are
+•
+Top-down compile
+The top-level design and all its subdesigns are compiled together.
+
+Compile Strategies
+•
+Bottom-up compile
+The individual subdesigns are compiled separately, starting from the bottom of the
+hierarchy and proceeding up through the levels of the hierarchy until the top-level
+design is compiled.
+The top-down compile strategy is demonstrated, using the simple design shown in
+Figure 51.
+Figure 51
+Design to Illustrate Compile Strategies
+The top-level or global specifications for this design, given in Table 21, are defined by the
+script shown in Example 38. These specifications apply to TOP and all its subdesigns.
+Table 21
+Design Specifications for Design TOP
+Specification type
+Value
+Operating condition
+WCCOM
+Clock frequency
+40 MHz
+Input delay time
+3 ns
+Output delay time
+2 ns
+Input drive strength
+drive_of (IV)
+Output load
+1.5 pF
+Example 38
+Constraints File for Design TOP (defaults.com)
+set_operating_conditions WCCOM
+create_clock -period 25 clk
+set_input_delay 3 -clock clk \
+   [remove_from_collection [all_inputs] [get_ports clk]]
+
+Performing a Top-Down Compile
+set_output_delay 2 -clock clk [all_outputs]
+set_load 1.5 [all_outputs]
+set_driving_cell -lib_cell IV [all_inputs]
+set_drive 0 clk
+Note:
+To prevent buffering of the clock network, the script sets the input drive
+resistance of the clock port (clk) to 0 (infinite drive strength).
+See Also
+•
+Performing a Top-Down Compile
+•
+Performing a Bottom-Up Compile
+Performing a Top-Down Compile
+You can use the top-down compile strategy for designs that are not memory or CPU
+limited. Top-level designs that are memory limited can often be compiled using this
+strategy if you first replace some of the subdesigns with block abstractions. Replacing a
+subdesign with a block abstraction can reduce the memory requirements for the subdesign
+instantiation in the top-level design.
+The top-down compile strategy has these advantages:
+•
+Provides a push-button approach
+•
+Takes care of interblock dependencies automatically
+However, the top-down compile strategy requires more memory and might result in longer
+runtimes for designs with over 100K gates.
+To implement a top-down compile, carry out the following steps:
+1. Load the entire design.
+2. Apply attributes and constraints to the top level.
+Attributes and constraints implement the design specification.
+Note:
+You can assign local attributes and constraints to subdesigns, provided that
+those attributes and constraints are defined with respect to the top-level
+design.
+
+Performing a Bottom-Up Compile
+3. Compile the design.
+Note:
+If your top-level design contains one or more block abstractions, use the
+compile flow described in Using Hierarchical Models.
+A top-down compile script for the TOP design is shown in .The script contains comments
+that identify each of the steps. The constraints are applied by including the constraint file
+(defaults.con) shown in the example of Compile Strategies.
+Example 39
+Top-Down Compile Script
+/* read in the entire design */
+read_verilog E.v
+read_verilog D.v
+read_verilog C.v
+read_verilog B.v
+read_verilog A.v
+read_verilog TOP.v
+current_design TOP
+link
+report_design_mismatch
+/* apply constraints and attributes */
+source defaults.con
+/* compile the design */
+compile_exploration
+See Also
+•
+Compile Strategies
+•
+Using Hierarchical Models
+•
+Working With Designs in Memory
+•
+Defining the Design Environment
+•
+Defining Design Constraints
+Performing a Bottom-Up Compile
+The recommended strategy is a top-down compile flow. However, to address design
+and runtime challenges or use a divide-and-conquer synthesis approach, you can use a
+bottom-up compile, also known as a hierarchical compile flow. In the bottom-up compile
+
+Performing a Bottom-Up Compile
+flow, you compile the subblocks separately and then incorporate them in the top-level
+design. DC Explorer can read the following types of hierarchical blocks:
+•
+Netlist generated in DC Explorer
+•
+Block abstractions generated in the DC Explorer or IC Compiler tool
+You can compile the subblock and provide it to the top-level design as a full .ddc netlist
+or a block abstraction. Alternatively, you can continue working on the subblock in the IC
+Compiler tool to create a block abstraction, which you can then provide to the top-level
+design. Timing and physical information of the subblock are propagated to the top-level for
+physical synthesis. In addition, you can provide placement location for a subblock during
+top-level synthesis to maintain correlation with IC Compiler.
+In the hierarchical or bottom-up flow, use the compile_exploration -scan -
+gate_clock command to perform top-level design integration. The tool automatically
+propagates block-level timing and placement to the top level and uses them to drive
+optimization. In addition, you can specify the placement location for the subblock. During
+top-level optimizations, the tool considers placement and can use the same physical
+constraints as your back-end tool.
+To learn more about the bottom-up compile flow, see
+•
+Overview of Bottom-Up Compile
+•
+Compiling the Subblock
+•
+Compiling the Design at the Top Level
+See Also
+•
+Compile Strategies
+•
+Overview of Hierarchical Models
+Overview of Bottom-Up Compile
+In the bottom-up flow, compile the subblock and save the mapped subblock as a netlist
+in .ddc format and then work on the subblock (.ddc netlist) in the IC Compiler tool to
+generate a block abstraction.
+Alternatively, you can compile the subblock and save the mapped subblock as a block
+abstraction in .ddc format.
+
+Performing a Bottom-Up Compile
+Top-level synthesis can accept the following types of mapped subblocks:
+•
+.ddc netlist synthesized in DC Explorer
+•
+Block abstraction created in DC Explorer
+•
+Block abstraction created in the IC Compiler tool
+Note:
+The IC Compiler tool cannot accept DC Explorer block abstractions.
+Figure 52 provides an overview of the hierarchical flow for designs containing block
+abstractions.
+
+Performing a Bottom-Up Compile
+Figure 52
+Overview of the Hierarchical Flow for Designs Containing Block Abstractions
+
+Performing a Bottom-Up Compile
+The bottom-up flow requires the following main tasks:
+1. Compiling the Subblock
+Compile the subdesigns individually.
+2. Compiling the Design at the Top Level
+Read in the top-level design and any compiled subdesigns not already in memory;
+compile the top-level design.
+Compiling the Subblock
+Follow the steps described in this procedure to compile subblocks.
+To compile the subblock,
+1. Specify the logic and physical libraries.
+2. Read in the subblock (Verilog, VHDL, netlist, or .ddc) and set the current design to the
+subblock.
+3. Apply block-level timing constraints and power constraints.
+4. (Optional) Provide physical constraints.
+5. (Optional) Visually verify the floorplan.
+Use the Design Vision layout window to visually verify that your pre-synthesis floorplan
+is laid out according to your expectations. The layout view automatically displays
+floorplan constraints read in with extract_physical_constraints or read in with Tcl
+commands. You need to link all applicable designs and libraries to obtain an accurate
+floorplan.
+6. Perform a test-ready and clock-gating compile of the subblock by using the
+compile_exploration -scan -gate_clock command.
+7. Run the uniquify -force command to create a unique design name for each cell
+instance to avoid name collisions when integrating the design at the top level.
+8. Apply the Verilog naming rules to all the design objects before writing out the design
+data files by using the change_names -rules verilog -hierarchy command.
+
+Performing a Bottom-Up Compile
+The steps you continue from this point forward depend on which of the following tasks you
+want to perform:
+•
+Creating a full .ddc netlist for the subblock
+Save the mapped subblock in the .ddc format by using the write_file -format ddc
+command. During top-level synthesis, read in the mapped subblock or add it to the
+link_library variable, as shown in Compiling the Design at the Top Level.
+•
+Generating a Block Abstraction for the Subblock
+To generate a block abstraction for the subblock, continue with the steps in this task.
+•
+Generating a Block Abstraction for the Subblock in IC Compiler
+To implement the subblock in the IC Compiler tool, continue with the steps in this task.
+For information, see the Viewing the Floorplan topic in Design Vision User Guide.
+See Also
+•
+Specifying Logic Libraries
+•
+Specifying Physical Libraries
+•
+Using Floorplan Physical Constraints
+•
+Compiling the Design at the Top Level
+Generating a Block Abstraction for the Subblock
+To generate a block abstraction for the subblock, continue with the following steps after
+completing the steps in Compiling the Subblock:
+1. Generate the block abstraction by running the create_block_abstraction command.
+The create_block_abstraction command identifies the interface logic of the current
+design and annotates the design in memory with the interface logic.
+2. Save the block abstraction by using the write_file command.
+For example,
+de_shell> write_file -hierarchy -format ddc -output myfile.mapped.ddc
+You should use the write_file command to save the block abstraction after you
+create it. The write_file command writes the complete design, including the block
+abstraction information, into a .ddc file.
+To integrate the block abstraction, continue with the steps in Compiling the Design at the
+Top Level.
+
+Performing a Bottom-Up Compile
+Generating a Block Abstraction for the Subblock in IC Compiler
+You can continue to implement the subblock in the IC Compiler tool. To create a block
+abstraction for top-level integration, perform the following steps. For more information
+about IC Compiler commands, see the IC Compiler documentation.
+1. Write out the block-level design in DC Explorer by using the write_file -format ddc
+command.
+2. In the IC Compiler environment, set up the design and Milkyway libraries.
+3. Read in the .ddc format of the mapped subblock and block SCANDEF information
+generated in topographical mode.
+4. Create the floorplan by using IC Compiler commands or read in floorplan information
+from a DEF file by using the read_def command.
+5. Perform placement by running the place_opt command.
+6. Perform clock tree synthesis by running the clock_opt command.
+7. Route the design by running the route_opt command.
+8. Create the block abstraction by running the create_block_abstraction command.
+9. Create the CEL view by running the save_mw_cel command.
+For more information about IC Compiler commands, see the IC Compiler documentation.
+Compiling the Design at the Top Level
+To compile the design at the top level,
+1. Specify the logic and physical libraries.
+If you are using a block abstraction created by the IC Compiler tool, you need to
+add the Milkyway design library that contains the block abstraction CEL view to the
+Milkyway reference library list at the top level.
+2. If you are using block abstractions created either in the DC Explorer or IC Compiler
+tool, use the set_top_implementation_options command to specify which blocks
+should be integrated with the top-level design as block abstractions.
+•
+Block abstraction created in DC Explorer (.ddc)
+Use the -block_references option with the set_top_implementation_options
+command before opening the block. If you do not use this command, the full block
+netlist is loaded.
+•
+Block abstraction created in the IC Compiler tool (CEL)
+
+Performing a Bottom-Up Compile
+Use the set_top_implementation_options command to set the top-level design
+options for linking. If you do not use this command, the tool cannot link to the IC
+Compiler block abstraction.
+The block abstraction is automatically loaded when you link the top-level design if
+the Milkyway design library that contains the block abstraction CEL view was added
+to the Milkyway reference library list at the top level.
+Note:
+To ignore the timing paths that are entirely in block abstractions
+during top-level synthesis, see the Ignoring Timing Paths Within Block
+Abstractions topic.
+3. (Optional) Ignore register-to-register paths that are entirely within block abstractions by
+setting the timing_ignore_paths_within_block_abstraction variable to true.
+4. Read in the top-level design (Verilog, VHDL, netlist, or .ddc) file.
+5. Read in the mapped subblock.
+The subblock can be any of the following:
+•
+Complete netlist in .ddc format created in DC Explorer.
+If the set_top_implementation_options command options are not set for the
+block, the full netlist .ddc is read in for the block.
+•
+Block abstraction in .ddc format created in DC Explorer.
+You must use the set_top_implementation_options command before the .ddc
+file is loaded to load the block as a block abstraction. Only the interface logic is
+loaded, not the full block.
+•
+Block abstraction created in IC Compiler.
+You must use the set_top_implementation_options command before linking the
+top-level design. The block abstraction is automatically loaded when you link the top
+level if the Milkyway design library that contains the block abstraction CEL view was
+added to the Milkyway reference library list at the top level.
+Note:
+You can add the .ddc file to the link_library variable instead of
+reading it in directly. If you do this, the tool automatically loads it when it
+is linked to the top level.
+6. Set the current design to the top-level design.
+7. (Optional) To specify that the subblock should be treated as a physical subblock, use
+the set_physical_hierarchy command for complete netlists in .ddc format.
+
+Performing Optimization for High-Performance Designs
+When you do this, top-level synthesis preserves both the logical structure and cell
+placement inside the block. If you do not want to treat a netlist as a physical block, omit
+the set_physical_hierarchy command.
+8. Use the link command to link the subblocks specified in the previous step to the top
+level.
+9. Apply the top-level timing and power constraints.
+10. (Optional) Provide physical constraints.
+You can specify locations for the subblock by using the set_cell_location command
+or by using the extract_physical_constraints command to extract physical
+information from the Design Exchange Format (DEF) file.
+11. (Optional) Visually verify the floorplan.
+Use the Design Vision layout window to visually verify that your pre-synthesis floorplan
+is laid out according to your expectations. The layout view automatically displays
+floorplan constraints read in with extract_physical_constraints or read in with Tcl
+commands. You need to link all applicable designs and libraries to obtain an accurate
+floorplan.
+12. Run the compile_exploration -scan -gate_clock command.
+13. Write out the top-level netlist by using the write_file -format ddc command.
+The write_file command merges the changes with the original .ddc design and
+writes the complete block as a new .ddc file.
+For information, see the Viewing the Floorplan topic in Design Vision User Guide.
+See Also
+•
+Specifying Logic Libraries
+•
+Specifying Physical Libraries
+•
+Ignoring Timing Paths Within Block Abstractions
+•
+Using Floorplan Physical Constraints
+Performing Optimization for High-Performance Designs
+You can use the compile_exploration command to perform optimization for better
+quality of results (QoR), especially for high-performance designs that have significantly
+tight timing constraints. This command allows you to apply the best possible set of timing-
+centric variables during compile for critical delay optimization and to improve area QoR.
+
+Performing Optimization for High-Performance Designs
+The default compile generates good results for most designs. If your design does not meet
+the optimization goals after design exploration, try the following techniques:
+•
+Datapath Optimization
+•
+Optimizing for Minimum Area
+Datapath Optimization
+Datapath design is commonly used in applications that contain extensive data
+manipulation, such as 3-D, multimedia, and digital signal processing (DSP). Datapath
+extraction transforms arithmetic operators, such as addition, subtraction, and
+multiplication, into datapath blocks to be implemented by a datapath generator. This
+transformation improves the QoR by utilizing the carry-save arithmetic technique.
+Datapath optimization is enabled by default when you run the compile_exploration
+command. DC Explorer uses the datapath generator to build arithmetic components
+for optimal QoR considering the bit-level timing context during optimization. To
+use this datapath generator with the compile_exploration command, include
+the dw_foundation.sldb library in the synthetic library list. If necessary, use the set
+synthetic_library dw_foundation.sldb command. A DesignWare license is required.
+By default, if the dw_foundation.sldb library is not in the synthetic library list but the
+DesignWare license has been successfully checked out, the dw_foundation.sldb library
+is automatically added to the synthetic library list. This behavior applies to the current
+command only. The user-specified synthetic library and link library lists are not affected.
+DC Explorer enables datapath extraction and explores various datapath and resource-
+sharing options during compile. The datapath optimization provides the following benefits:
+•
+Shares datapath operators
+•
+Extracts the datapath
+•
+Explores better solutions that might involve a different resource-sharing configuration
+•
+Allows the tool to make better tradeoffs between resource sharing and datapath
+optimization
+Optimizing for Minimum Area
+If your design has timing constraints, these constraints always take precedence over area
+requirements. For area-critical designs, specify realistic constraints. To fine-tune the area,
+you can leave the hierarchy intact and let DC Explorer perform boundary optimization by
+default. For greater area reduction, you might have to remove hierarchical boundaries.
+
+Performing Optimization for High-Performance Designs
+If your design does not meet the area constraints, you can try the following methods to
+optimize across hierarchical boundaries:
+•
+Boundary Optimization
+•
+Hierarchy Removal
+Boundary Optimization
+By default, DC Explorer performs optimization across hierarchical boundaries (boundary
+optimization). You can also use the following command to run boundary optimization:
+de_shell> set_boundary_optimization subdesign true
+When you enable boundary optimization, DC Explorer propagates constants, unconnected
+pins, and complement information. In designs that have many constants (VCC and GND)
+connected to the inputs of subdesigns, propagation can reduce area. Figure 53 shows this
+relationship.
+Figure 53
+Benefits of Boundary Optimization
+To enable area reduction with boundary optimization disabled, set the
+compile_optimize_unloaded_seq_logic_with_no_bound_opt variable to true to
+remove unconnected logic. The default is false. When this variable is set to true, the tool
+•
+Removes unconnected registers across design hierarchies
+•
+Removes unused bits and infers smaller-sized multibit registers by propagating
+unconnected logic through multibit registers
+Hierarchy Removal
+By default, DC Explorer automatically ungroups small design hierarchies in the first pass
+of the compile, and it ungroups hierarchies along critical paths using delay-based auto-
+ungrouping strategy in the second pass of the compile. Ungrouping removes hierarchy
+boundaries and allows DC Explorer to optimize over a larger number of gates. You can
+
+Performing Manual High-Fanout Synthesis
+also ungroup specific hierarchies before optimization by using the set_ungroup command
+to designate which cells to be ungrouped.
+By default, all DesignWare hierarchies are unconditionally ungrouped in the
+second pass of the compile. You can prevent this ungrouping by setting the
+compile_ultra_ungroup_dw variable to false, changing it from its default of true.
+See Also
+•
+Removing Levels of Hierarchy
+Performing Manual High-Fanout Synthesis
+To control the creation and removal of buffer trees, use the create_buffer_tree
+command to manually run high-fanout synthesis. By default, the tool performs automatic
+high-fanout synthesis when you run the compile_exploration command.
+Note:
+You must have a mapped design to run manual high-fanout synthesis.
+The create_buffer_tree command removes the preexisting buffer trees in the
+design and re-creates the buffer trees. To preserve preexisting buffer trees, specify the
+-incremental option. In this case, the command constructs a buffer tree, if needed, on
+each net specified by the -from option to reduce the high fanout of each net, but it does
+not remove any existing buffers or inverters.
+To run manual high-fanout synthesis,
+1. Report the current buffer tree implementation on a mapped netlist by running the
+report_buffer_tree command .
+2. Identify any suboptimal buffering that was performed by the compile_exploration
+command.
+3. Remove the existing buffer trees and create additional buffer trees as needed using the
+remove_buffer_tree and create_buffer_tree commands, respectively.
+The inserted buffers and inverters might be optimized further by other optimization
+commands. To preserve specific buffers and inverters during optimization, set optimization
+restriction attributes such as size_only or dont_touch on them.
+Resolving Multiple Instances of a Design Reference
+In a hierarchical design, subdesigns are often referenced by more than one cell instance,
+that is, multiple references of the design can occur. For example, Figure 54 shows the
+design TOP, in which design C is referenced twice (U2/U3 and U2/U4).
+
+Resolving Multiple Instances of a Design Reference
+Figure 54
+Multiple Instances of a Design Reference
+Use the -multiple_designs option with check_design command to report information
+messages related to multiply-instantiated designs. The command lists all multiply
+instantiated designs along with instance names and associated attributes (dont_touch,
+black_box, and ungroup). The following methods are available for handling designs with
+multiple instances:
+•
+Uniquify Method
+DC Explorer automatically uniquifies designs as part of the compile process. However,
+you can still manually force the tool to uniquify designs before compile by running the
+uniquify command, but this step contributes to longer runtimes because the tool
+automatically uniquifies the designs again when compiling the design. You cannot turn
+off the uniquify process.
+•
+Compile-Once-Don’t-Touch Method
+This method uses the set_dont_touch command to preserve the compiled subdesign
+while the remaining designs are compiled.
+•
+Ungroup Method
+This method uses the ungroup command to remove the hierarchy.
+See Also
+•
+Preserving Subdesigns
+
+Resolving Multiple Instances of a Design Reference
+Uniquify Method
+The uniquify process copies and renames any multiply referenced design so that each
+instance references a unique design. The process removes the original design from
+memory after it creates the new, unique designs. The original design and any collections
+that contain it or its objects are no longer accessible.
+The tool automatically uniquifies designs as part of the compile process. The uniquification
+process can resolve multiple references throughout the hierarchy the current design
+(except those that have a dont_touch attribute). After this process finishes, the tool can
+optimize each design copy based on the unique environment of its cell instance.
+You can also create unique copies for specific references by using the -reference option
+of the uniquify command, or you can specify specific cells by using the -cell option.
+DC Explorer makes unique copies for cells specified with the -reference or the -cell
+option even if they are marked with the dont_touch attribute.
+The uniquify command accepts instance objects; that is, cells at a lower level of
+hierarchy. When you use the -cell option with an instance object, the complete path to
+the instance is uniquified. For example, the following command uniquifies both instances
+mid1 and mid1/bot1, assuming that mid1 is not unique:
+de_shell> uniquify -cell mid1/bot1
+DC Explorer uses the naming convention specified in the uniquify_naming_style
+variable to generate the name for each copy of the subdesign. The default naming
+convention is %s_%d, which is defined as follows:
+%s
+The original name of the subdesign, or the name specified in the -base_name option.
+%d
+The smallest integer value that forms a unique subdesign name.
+The following command sequence resolves the multiple instances of design C in design
+TOP shown in the figure of Resolving Multiple Instances of a Design Reference; it uses the
+automatic uniquify method to create new designs C_0 and C_1 by copying design C and
+then replaces design C with the two copies in memory.
+de_shell> current_design top
+de_shell> compile_exploration
+Figure 55 shows the result of running this command sequence.
+
+Resolving Multiple Instances of a Design Reference
+Figure 55
+Uniquify Results
+Compared with the compile-once-don’t-touch method, the uniquify method has the
+following characteristics:
+•
+Requires more memory
+•
+Takes longer to compile
+Compile-Once-Don’t-Touch Method
+If the environments around the instances of a multiply referenced design are sufficiently
+similar, use the compile-once-don’t-touch method. In this method, you compile the design,
+using the environment of one of its instances, and then you use the set_dont_touch
+command to preserve the subdesign during the remaining optimization.
+To use the compile-once-don’t-touch method to resolve multiple instances, follow these
+steps:
+1. Compile the referenced subdesign.
+2. Use the set_dont_touch command to set the dont_touch attribute on all instances
+that reference the compiled subdesign.
+3. Compile the entire design.
+For example, the following command sequence resolves the multiple instances of design
+C in design TOP by using the compile-once-don’t-touch method (assuming U2/U3 has the
+
+Resolving Multiple Instances of a Design Reference
+worst-case environment). In this case, no copies of the original subdesign are loaded into
+memory.
+de_shell> current_design top
+...
+de_shell> current_design C
+de_shell> compile_exploration
+de_shell> current_design top
+de_shell> set_dont_touch {U2/U3 U2/U4}
+de_shell> compile_exploration
+Figure 56 shows the result of running this command sequence. The X drawn over the C
+design, which has already been compiled, indicates that the dont_touch attribute has
+been set. This design is not modified when the top-level design is compiled.
+Figure 56
+Compile-Once-DOn’t-Touch Results
+The compile-once-don’t-touch method has the following advantages:
+•
+Compiles the reference design one time
+•
+Requires less memory than the uniquify method
+•
+Takes less time to compile than the uniquify method
+The principal disadvantage of the compile-once-don’t-touch method is that the
+characterization might not apply well to all instances. Another disadvantage is that you
+cannot ungroup objects that have the dont_touch attribute.
+
+Resolving Multiple Instances of a Design Reference
+See Also
+•
+Preserving Subdesigns
+Ungroup Method
+The ungroup method has the same effect as the uniquify method (it makes unique copies
+of the design), but in addition, it removes levels of hierarchy. This method uses the
+ungroup command to produce a flattened netlist.
+After ungrouping the instances of a subdesign, you can recompile the top-level design.
+For example, the following command sequence uses the ungroup method to resolve the
+multiple instances of design C in design TOP:
+de_shell> current_design B
+de_shell> ungroup {U3 U4}
+de_shell> current_design top
+de_shell> compile_exploration
+Figure 57 shows the result of running this command sequence.
+Figure 57
+Ungroup Results
+The ungroup method has the following characteristics:
+•
+Requires more memory and takes longer to compile than the compile-once-don’t-touch
+method
+•
+Provides the best synthesis results
+
+Resolving Multiple Instances of a Design Reference
+The disadvantage of using the ungroup method is the removal of user-defined design
+hierarchy.
+See Also
+•
+Removing Levels of Hierarchy
+Preserving Subdesigns
+To preserve a subdesign during optimization, use the set_dont_touch command. The
+command places the dont_touch attribute on cells, nets, references, and designs in
+the current design to prevent these objects from being modified or replaced during
+optimization.
+Note:
+Any block abstractions in your design are automatically marked with the
+dont_touch attribute. Also, the cells of block abstractions are marked as don’t
+touch.
+Use the set_dont_touch command to specify subdesigns not to be optimized with the
+rest of the design hierarchy. The dont_touch attribute does not prevent or disable timing
+through the design.
+When you use the set_dont_touch command, remember the following points:
+•
+Setting the dont_touch attribute on a hierarchical cell sets an implicit don’t touch value
+on all cells below that cell.
+•
+Setting the dont_touch attribute on a library cell sets an implicit don’t touch value on
+all instances of that cell.
+•
+Setting the dont_touch attribute on a net sets an implicit don’t touch value only on
+mapped combinational cells connected to that net. If the net is connected only to
+generic logic, optimization might remove the net.
+•
+Setting the dont_touch attribute on a reference sets an implicit don’t touch value on all
+cells using that reference during subsequent optimizations of the design.
+•
+Setting the dont_touch attribute on a design has an effect only when the design is
+instantiated within another design as a level of hierarchy. In this case, the dont_touch
+attribute on the design implies that all cells under that level of hierarchy are subject to
+the dont_touch attribute. Setting the dont_touch attribute on the top-level design has
+no effect because the top-level design is not instantiated within any other design.
+•
+You cannot ungroup objects marked with the dont_touch attribute by using the
+ungroup command. The automatic ungrouping of DC Explorer has no effect on don’t
+touch objects.
+
+Defining Library Subset Restrictions
+Note:
+The dont_touch attribute is ignored on synthetic part cells (for example,
+many of the cells read in from an HDL description) and on nets that have
+unmapped cells on them. During compilation, warnings appear for don’t touch
+nets connected to unmapped cells (generic logic).
+To remove the dont_touch attribute, use the remove_attribute command or the
+set_dont_touch command set to false.
+See Also
+•
+Using Hierarchical Models
+Defining Library Subset Restrictions
+You can restrict the mapping and optimization of sequential cells and instantiated
+combinational cells to a user-specified subset of library cells in a target library. To
+define one or more subsets of library cells, use the -family_name option with the
+define_libcell_subset command. The command groups the library cells into a subset
+only if they meet the following criteria:
+•
+They must be sequential cells or instantiated combinational cells.
+•
+They cannot belong to another subset.
+•
+They must have the same functional identification.
+After the library cells are grouped into a subset, they are not available for general mapping
+during compilation. DC Explorer uses these library cells exclusively to map the sequential
+cells and instantiated combinational cells specified by the set_libcell_subset command
+during optimization. To specify a list of cells to be optimized, use the -object_list option
+with the set_libcell_subset command. The specified cells must be either unmapped or
+instantiated as one of the library cells in the subset.
+When you run the define_libcell_subset and set_libcell_subset commands, DC
+Explorer restricts all optimizations, including cell sizing and cell swapping, to the cells
+specified in the library subset. This subset restriction applies only to cells that are created,
+mapped, or modified during optimization, but not to any portions of the design that are not
+optimized.
+In the following example, the define_libcell_subset command groups the
+SDFLOP1 and SDFLOP2 logic library cells into a subset called specialflops. Next, the
+set_libcell_subset command sets the specialflops library subset for the reg01 and
+reg02 instances.
+de_shell> define_libcell_subset -libcell_list {SDFLOP1 SDFLOP2} \
+   -family_name specialflops
+
+Optimizing Multicorner-Multimode Designs
+de_shell> set_libcell_subset -libcell_list [get_cells {reg01 reg02}] \
+   -family_name specialflops
+To report information about user-defined library subsets, use the report_libcell_subset
+command. The following example reports the library subset for the reg01 sequential cell:
+de_shell> report_libcell_subset -object_list [get_cells reg01]
+To remove a library subset constraint from specified cells or a user-defined library subset,
+use the remove_libcell_subset command. The following example removes the library
+subset constraint from the reg01 and reg02 instances:
+de_shell> remove_libcell_subset -object_list [get_cells {reg01 reg02}]
+The following example removes the user-defined specialflops library subset:
+de_shell> remove_libcell_subset -family_name specialflops
+Optimizing Multicorner-Multimode Designs
+DC Explorer analyzes and optimizes multicorner-multimode designs across multiple
+modes and multiple corners concurrently. This feature provides ease-of-use and
+compatibility between flows in the DC Explorer and IC Compiler tools due to the similar
+user interface.
+The following topics describe multicorner-multimode design optimization:
+•
+Multicorner-Multimode Concepts
+•
+Unsupported Features for Multicorner-Multimode Designs
+•
+Basic Multicorner-Multimode Flow
+•
+Handling Libraries in the Multicorner-Multimode Flow
+•
+Defining Scenarios
+•
+Managing Scenarios
+•
+Concurrent Multicorner-Multimode Optimization and Timing Analysis
+•
+Reporting Commands for Multicorner-Multimode Designs
+•
+Supported SDC Commands for Multicorner-Multimode Designs
+•
+Using Block Abstractions in Multicorner-Multimode Designs
+
+Optimizing Multicorner-Multimode Designs
+Multicorner-Multimode Concepts
+Designs that operate under multiple operating conditions (or corners) and in multiple
+modes are referred to as multicorner-multimode designs.
+The following terms are commonly used to describe multicorner-multimode technology:
+•
+Corner
+A corner is an operating condition consisting of a set of process, voltage, and
+temperature (PVT) conditions. Corners are not dependent on functional settings; they
+are meant to capture variations in the manufacturing process, along with expected
+variations in the voltage and temperature of the environment in which the chip
+operates.
+•
+Mode
+A mode is defined by a set of clocks, supply voltages, timing constraints, and libraries.
+It can also have annotation data, such as SDF or parasitics files. Multicorner-multimode
+designs can operate in many modes, such as the test mode, mission mode, standby
+mode, and so forth.
+•
+Scenario
+A scenario is a combination of modal constraints and corner specifications. In a design,
+the tool uses a scenario or a set of scenarios as the unit for multicorner-multimode
+analysis and optimization. Some constraints can be part of both the mode and corner
+specifications. Optimization of multicorner-multimode design involves managing the
+scenarios of the design.
+See Also
+•
+Managing Scenarios
+Unsupported Features for Multicorner-Multimode Designs
+DC Explorer does not support the following features for multicorner-multimode designs:
+•
+Power-driven clock gating
+If you use the compile_exploration -gate_clock command, clock-gate insertion is
+performed on the design, independent of the scenarios.
+•
+Clock tree estimation
+•
+k-factor scaling
+
+Optimizing Multicorner-Multimode Designs
+Because multicorner-multimode design libraries do not support k-factor scaling,
+the operating conditions that you specify for each scenario must match the nominal
+operating conditions of one of the libraries in the link library list.
+•
+The set_min_library command for individual scenarios.
+The library settings defined by the set_min_library command apply to all scenarios.
+•
+The -leakage_power and -dynamic_power options of the set_scenario_options
+command
+If you specify these options, the tool ignores the options and issues warning messages.
+Basic Multicorner-Multimode Flow
+Figure 58 shows the basic multicorner-multimode flow. The key steps involved in
+multicorner-multimode optimization are creating scenario definitions. At a minimum,
+a scenario definition includes commands that specify the scenario name, operating
+conditions, TLUPlus libraries, and constraints. You can create more than one scenario.
+For each scenario, you specify constraints specific to the scenario mode and operating
+conditions specific to the scenario corner.
+
+Optimizing Multicorner-Multimode Designs
+Figure 58
+Basic Multicorner-Multimode Flow
+Example 40 shows a basic script for the multicorner-multimode flow.
+Example 40
+Basic Script to Run the Multicorner-Multimode Flow
+#......path settings......
+set search_path ". $DESIGN_ROOT $lib_path/dbs \
+   $lib_path/mwlibs/macros/LM"
+set target_library "stdcell.setup.ftyp.db \
+   stdcell.setup.typ.db stdcell.setup.typhv.db"
+set link_library [concat * $target_library \
+   setup.ftyp.130v.100c.db setup.typhv.130v.100c.db \
+   setup.typ.130v.100c.db]
+set_min_library stdcell.setup.typ.db -min_version stdcell.hold.typ.db
+
+Optimizing Multicorner-Multimode Designs
+
+#......MW setup......
+#......load design......
+
+create_scenario s1
+set_operating_conditions WORST -library stdcell.setup.typ.db:stdcell_typ
+set_tlu_plus_files -max_tluplus design.tlup -tech2itf_map layermap.txt
+read_sdc s1.sdc
+set_scenario_options -scenarios s1-setup false -hold false
+
+create_scenario s2
+set_operating_conditions BEST -library stdcell.setup.ftyp.db:stdcell_ftyp
+set_tlu_plus_files -max_tluplus design.tlup -tech2itf_map layermap.txt
+read_sdc s2.sdc
+
+create_scenario s3
+set_operating_conditions NOM -library stdcell.setup.ftyp.db:stdcell_ftyp
+set_tlu_plus_files -max_tluplus design.tlup -tech2itf_map layermap.txt
+read_sdc s3.sdc
+
+set_active_scenarios {s1 s2}
+report_scenarios
+compile_exploration -scan -gate_clock
+report_qor
+report_constraint
+report_timing -scenarios [all_scenarios]
+...
+compile_exploration -scan
+Handling Libraries in the Multicorner-Multimode Flow
+The following topics describe how to handle libraries in multicorner-multimode designs:
+•
+Using Link Libraries With the Same PVT Nominal Values
+•
+Using Distinct PVT Values
+•
+Defining Minimum Libraries
+•
+Automatic Detection of Driving Cell Libraries
+Using Link Libraries With the Same PVT Nominal Values
+The link library contains all the libraries for linking the design in all scenarios. Because
+a scenario can often use several libraries, such as a standard cell library and a macro
+library, the tool automatically groups the libraries into sets and identifies which set to link
+for each scenario.
+The tool groups libraries that have the same PVT values into the same set. The tool uses
+the PVT values of the maximum operating conditions in a scenario definition to select
+the appropriate set for the scenario. If the tool finds no suitable cell in the link libraries, it
+
+Optimizing Multicorner-Multimode Designs
+issues an error message. You should verify the operating conditions and library setup to fix
+that error before optimizing the design.
+Link Library Example
+This table shows the libraries in the link library list, the nominal PVT values, and the
+operating conditions specified in the library. The design has instances of combinational,
+sequential, and macro cells.
+Table 22
+Link Libraries With PVT Values and Operating Conditions
+Link library (in order)
+Nominal PVT
+Operating conditions in library (PVT)
+Combo_cells_slow.db
+1/0.85/130
+WORST (1/0.85/130)
+Sequentials_fast.db
+1/1.30/100
+None
+Macros_fast.db
+1/1.30/100
+None
+Macros_slow.db
+1/0.85/130
+None
+Combo_cells_fast.db
+1/1.30/100
+BEST (1/1.3/100)
+Sequentials_slow.db
+1/0.85/130
+None
+The following example creates the s1 scenario with cell instances linked to the
+Combo_cells_slow, Macros_slow, and Sequentials_slow libraries, and the slow library is
+defined in the Combo_cells_slow file.
+de_shell> create_scenario s1
+de_shell> set_operating_conditions -max WORST -library slow
+Using the -library option with the set_operating_conditions command helps the tool
+identify the correct PVT values for the operating conditions. During linking, the tool uses
+the PVT values of the maximum operating conditions to find the correct matches in the link
+library list.
+Using this library linking method, you can link libraries that do not have operating condition
+definitions. The method also enables you to have multiple library files, for example, one
+library file for standard cells and another for macros.
+Preventing Inconsistent Libraries
+For designs with multiple libraries, if library cells with the same name do not have identical
+functions, same pin names, and same pin order, the tool issues a warning indicating
+inconsistent libraries.
+
+Optimizing Multicorner-Multimode Designs
+You should run the check_library command to check for inconsistent libraries before
+running the multicorner-multimode flow. For example,
+de_shell> set_check_library_options -mcmm
+de_shell> check_library -logic_library_name {a.db b.db}
+When you specify the -mcmm option with the set_check_library_options command,
+the check_library command performs multicorner-multimode specific checks, such
+as identifying inconsistencies of operating conditions or power-down functions. When
+inconsistencies are detected, the tool generates a report that lists the inconsistencies and
+issues an information message.
+Setting the dont_use Attribute on Library Cells
+If you set the dont_use attribute on a library cell, the multicorner-multimode flow requires
+that all characterizations of this cell have the dont_use attribute. Otherwise, the tool
+might consider the libraries inconsistent. You can use the wildcard character (*) to set the
+dont_use attribute as follows:
+de_shell> set_dont_use */AN2
+When library cells that have the dont_use attribute have a different pin order from the
+library cells of various corners, the tool continues with the flow without issuing any error or
+warning messages. If you remove the dont_use attribute on these cells, the tool issues an
+MV-087 error message.
+See Also
+•
+Using Distinct PVT Values
+•
+Automatic Detection of Driving Cell Libraries
+•
+Defining Minimum Libraries
+Using Distinct PVT Values
+To ensure cell instances are linked correctly, use distinct nominal PVT values for operating
+conditions. The tool uses the PVT values to group the link libraries into sets, such
+as maximum libraries of different corners into one set. When the maximum libraries
+for individual scenarios do not have distinct PVT values, the cell instances might be
+incorrectly linked. That is, the cell instances are linked to the first cell with a matching type
+in that set even though the set_operating_conditions library -library command
+specifies a scenario-specific library.
+Example 41 shows the script that creates indistinct PVT values using the link libraries and
+operating conditions in Table 23 and Table 24. The tool groups the Ftyp.db and TypHV.db
+libraries into one set where Ftyp.db is the first library in the set. The cell instances in
+scenario s2 are not linked to the library cells in TypHV.db as intended, they are incorrectly
+linked to the library cells in Ftyp.db.
+
+Optimizing Multicorner-Multimode Designs
+Table 23
+Link Libraries With Nominal PVT Values and Operating Conditions
+Link library (in order)
+Nominal PVT
+Operating conditions (PVT)
+Ftyp.db
+1/1.30/100
+WORST (1/1.30/100)
+Typ.db
+1/0.85/100
+WORST (1/0.85/100)
+TypHV.db
+1/1.30/100
+WORST (1/1.30/100)
+HoldTyp.db
+1/0.85/100
+BEST (1/0.85/100)
+Table 24
+Scenarios and Their Operating Conditions
+Scenario s1
+Scenario s2
+Scenario s3
+Scenario s4
+Max Opcond
+(Library)
+WORST (Typ.db)
+WORST
+(TypHV.db)
+WORST (Ftyp.db)
+WORST (Typ.db)
+Min Opcond
+(Library)
+None
+None
+None
+BEST (HoldTyp.db)
+Example 41
+Indistinct PVT Values Causing Linking Problems
+create_scenario s1
+set_operating_conditions WORST -library Typ.db:Typ
+create_scenario s2
+set_operating_conditions WORST -library TypHV.db:TypHV
+create_scenario s3
+set_operating_conditions WORST -library Ftyp.db:Ftyp
+create_scenario s4
+set_operating_conditions \
+   -max WORST -max_library Typ.db:Typ \
+   -min BEST -min_library HoldTyp.db:HoldTyp
+Ambiguous Libraries Warning
+The tool issues a warning if your design uses any libraries containing cells with the same
+name and same nominal PVT values. The warning states that the libraries are ambiguous
+and identifies which libraries are being used and which are being ignored.
+See Also
+•
+Using Link Libraries With the Same PVT Nominal Values
+•
+Automatic Detection of Driving Cell Libraries
+•
+Defining Minimum Libraries
+
+Optimizing Multicorner-Multimode Designs
+Defining Minimum Libraries
+To define a minimum library for each scenario, use the set_operating_conditions
+command. If you use the set_min_library command to define a minimum library for a
+scenario, the tool uses that library as the minimum library for all scenarios even if you do
+not define that library for all the scenarios.
+A minimum library can be associated with multiple maximum libraries. As shown in
+Table 25, the Fast_0yr.db minimum library is associated with the Slow.db maximum library
+of scenario s1 and the SlowHV.db maximum library of scenario s2.
+Table 25
+Supported Library Configuration
+Scenario s1
+Scenario s2
+Maximum library
+Slow.db
+SlowHV.db
+Minimum library
+Fast_0yr.db
+Fast_0yr.db
+However, you cannot associate two different minimum libraries, Fast_0yr.db and
+Fast_10yr.db, with the Slow.db maximum library in two separate scenarios as shown in
+Table 26. The tool applies the first minimum library to both scenarios in this case.
+Table 26
+Unsupported Multiple Minimum Library
+Configuration
+Scenario s1
+Scenario s2
+Maximum library
+Slow.db
+Slow.db
+Minimum library
+Fast_0yr.db
+Fast_10yr.db
+See Also
+•
+Using Distinct PVT Values
+•
+Using Link Libraries With the Same PVT Nominal Values
+•
+Automatic Detection of Driving Cell Libraries
+Automatic Detection of Driving Cell Libraries
+To build timing arcs for driving cells, specify different libraries for different scenarios by
+using the -library option with the set_driving_cell command. The tool searches for
+the specified library in the link library set. If the specified library does not exist, the tool
+issues an error message.
+
+Optimizing Multicorner-Multimode Designs
+The tool can automatically detect the driving cell library. If you do not specify the -library
+option with the set_driving_cell command, the tool searches all the libraries for the
+matching operating conditions. The first library in the link library set that matches the
+operating conditions is used. If no library in the link library set matches the operating
+conditions, the first library in the link library set that contains the matching library cell is
+used. If no library in the link library set contains the matching library cell, the tool issues an
+error message.
+See Also
+•
+Using Distinct PVT Values
+•
+Defining Minimum Libraries
+•
+Using Link Libraries With the Same PVT Nominal Values
+Defining Scenarios
+To setup a design for a multicorner-multimode flow, you must specify the TLUPlus files,
+operating conditions, and SDC constraints for each scenario. DC Explorer uses the
+nominal process, voltage, and temperature (PVT) values to group the libraries into
+different sets. Libraries with the same PVT values are grouped into the same set. For each
+scenario, the PVT values of the maximum operating conditions are used to select the
+appropriate set.
+To create scenario definitions,
+1. Create a scenario name by using the create_scenario command.
+When the first scenario is created, all previous scenario-specific constraints are
+removed from the design. For example,
+de_shell> create_scenario s1
+Warning: Any existing scenario-specific constraints
+are discarded. (MV-020)
+Current scenario is: s1
+2. Specify the operating conditions for each scenario by using the
+set_operating_conditions command. For example,
+de_shell> set_operating_conditions WORST \
+   -library stdcell.setup.typ.db:stdcell_typ
+3. Specify TLUPlus files for each scenario by using the set_tlu_plus_files command.
+For example,
+de_shell> set_tlu_plus_files \
+   -max_tluplus design.tlup -tech2itf_map layermap.txt
+
+Optimizing Multicorner-Multimode Designs
+To enable temperature scaling, the TLUPlus files must contain the
+GLOBAL_TEMPERATURE and CRT1 variables, as shown in the following example. The
+CRT2 variable is optional.
+TECHNOLOGY = 90nm_lib
+GLOBAL_TEMPERATURE = 105.0
+CONDUCTOR metal8 {THICKNESS= 0.8000
+CRT1=4.39e-3 CRT2=4.39e-7
+...
+4. Specify the design constraints for each scenario. For example,
+de_shell> read_sdc s1.sdc
+The tool discards any previous scenario-specific constraints when you run the
+create_scenario command in step 1.
+5. (Optional) Set the scenario options, such as setup and hold delay optimizations by
+using the set_scenario_options command.
+6. (Optional) Specify the correct net RC and pin-to-pin delay information by using the
+read_sdf command.
+See Also
+•
+Managing Scenarios
+Managing Scenarios
+After you created scenario definitions, you can manage the scenarios as described in
+these sections.
+•
+Setting the Current Scenario
+•
+Defining Active Scenarios
+•
+Enabling Scenario Reduction
+•
+Specifying Scenario Options
+Setting the Current Scenario
+To specify the current scenario, use the current_scenario command. When you define
+more than one scenario, the tool performs concurrent analysis and optimization across all
+scenarios, independent of the current scenario setting.
+Defining Active Scenarios
+During concurrent analysis and optimization, you can reduce memory usage and runtime
+by restricting the number of active scenarios to those that are essential or dominant. An
+
+Optimizing Multicorner-Multimode Designs
+essential or dominant scenario has the worst slack among all the scenarios for at least one
+of its constrained objects, such as delay constraints associated with a pin, the design rule
+constraints for a net, and leakage power. The scenario that has the worst slack value for
+one of its constrained objects is a dominant scenario.
+You use the set_active_scenarios command to define active scenarios. Other
+commands related to active scenarios are all_scenarios and all_active_scenarios.
+Enabling Scenario Reduction
+By default, the tool uses the current scenario for optimization. To enable scenario
+reduction, you first set the de_enable_physical_flow variable to true to enable the
+physical flow.
+Note:
+You need a DC-Extension license to run scenario reduction.
+In the physical flow, restricting concurrent analysis and optimization to a subset of
+dominant scenarios does not lead to significant differences in QoR. The tool analyzes all
+the active scenarios to determine a set of dominant scenarios, based on the number of
+violating endpoints, and then optimizes the design for timing, power, and design rules.
+You can choose a preferred scenario by using the set_preferred_scenario command.
+When you set the preferred scenario, the tool treats it as the most constraining scenario.
+It still performs scenario reduction to determine the dominant scenarios but treats the
+preferred scenario as the most constraining one.
+Specifying Scenario Options
+To define specific constraint options for optimization in a scenario, use the
+set_scenario_options command. You can apply the constraint options to more than
+one scenario at a time by using the -scenarios option. The constraint options can be
+specified on both active and inactive scenarios. If you do not specify any scenario, the
+options are applied to the current scenario only.
+To enable or disable the maximum delay optimization for the specified scenarios, use the
+-setup option. The default for the -setup option is true, which enables maximum delay
+optimization. The following example disables maximum delay optimization on specific
+scenarios:
+de_shell> set_scenario_options -setup false -scenarios scenario_list
+To enable or disable the minimum delay optimization for the specified scenarios, use the
+-hold option. The default for the -hold option is true. When you set the -hold option to
+false, the tool ignores the hold or minimum delay violations in the specified scenarios.
+To report the scenario options, use the report_scenario_options command. To remove
+the specified scenarios, use the remove_scenario command. All scenario-specific
+constraints defined in the removed scenario are deleted.
+
+Optimizing Multicorner-Multimode Designs
+See Also
+•
+Defining Scenarios
+Concurrent Multicorner-Multimode Optimization and Timing
+Analysis
+The tool can perform concurrent multicorner-multimode optimization on the worst
+violations across all scenarios, eliminating the convergence problems observed in
+sequential approaches.
+Timing analysis is carried out on all scenarios concurrently, and cost is measured across
+all scenarios for timing and design rules. As a result, the timing and constraint reports
+show worst-case timing across all scenarios.
+To run timing analysis, use one of the following two methods:
+•
+Traditional minimum-maximum analysis
+Define your analysis type by using the bc_wc keyword. For example,
+de_shell> set_operating_conditions -analysis_type bc_wc
+•
+Early-late analysis
+Define your analysis type by using the on_chip_variation keyword. For example,
+de_shell> set_operating_conditions -analysis_type on_chip_variation
+The PrimeTime tool also uses this on-chip variation (OCV) method.
+Reporting Commands for Multicorner-Multimode Designs
+To report the scenario setup information for multicorner-multimode designs, including
+the logic libraries, operating conditions, and TLUPlus files, use the report_scenarios
+command. This command reports all the defined scenarios. To report the scenario options
+set by the set_scenario_options command, use the report_scenario_options
+command to specify a list of scenarios. By default, this command reports scenario options
+for the current, active scenario.
+Table 27 lists the reporting commands that support the -scenario option to report
+scenario-specific information:
+Table 27
+Reporting Commands That Support the -scenario Option
+Commands
+report_timing
+report_path_group
+
+Optimizing Multicorner-Multimode Designs
+Table 27
+Reporting Commands That Support the -scenario Option (Continued)
+Commands
+report_timing_derate
+report_extraction_options
+report_constraint
+report_tlu_plus_files
+report_clock
+Table 28 lists the reporting commands that report scenario-specific details for the current
+scenario. The header section of the report contains the name of the current scenario:
+Table 28
+Commands That Report the Current Scenario
+Commands
+report_net
+report_delay_estimation_options
+report_annotated_check
+report_transitive_fanout
+report_annotated_transition
+report_disable_timing
+report_annotated_delay
+report_net
+report_attribute
+report_power_calculation
+report_case_analysis
+report_timing_derate
+report_ideal_network
+report_timing_requirements
+report_internal_loads
+report_transitive_fanin
+report_clock_gating_check
+report_crpr
+report_delay_calculation
+report_clock_timing
+Supported SDC Commands for Multicorner-Multimode Designs
+Table 29 lists the SDC commands supported in the multicorner-multimode flow.
+Table 29
+Supported SDC Commands
+Commands
+all_clocks
+set_false_path
+create_clock
+set_fanout_load
+
+Optimizing Multicorner-Multimode Designs
+Table 29
+Supported SDC Commands (Continued)
+Commands
+create_generated_clock
+set_input_delay
+get_clocks
+set_input_transition
+group_path
+set_load
+set_annotated_delay
+set_max_capacitance
+set_case_analysis
+set_max_delay
+set_clock_gating_check
+set_max_transition
+set_clock_latency
+set_min_delay
+set_clock_transition
+set_multicycle_path
+set_clock_uncertainty
+set_output_delay
+set_data_check
+set_propagated_clock
+set_disable_timing
+set_resistance
+set_drive
+set_timing_derate
+Using Block Abstractions in Multicorner-Multimode Designs
+Block abstractions are compatible with multicorner-multimode scenarios. You can apply
+multicorner-multimode constraints to a block abstraction and use the block abstraction in a
+top-level design.
+Note:
+You must set the de_enable_physical_flow variable to true when using
+block abstractions in multicorner-multimode designs.
+When you use block abstractions with multicorner-multimode scenarios, follow these
+guidelines:
+•
+For each top-level multicorner-multimode scenario, an identically named scenario must
+exist in each of the block abstraction blocks used in the design.
+When a mismatch occurs, use the select_block_scenario command to map the
+scenarios in the block abstraction to the top-level design. Mapping scenarios enables
+
+Optimizing Multicorner-Multimode Designs
+the tool to support name mismatches between the top-level design and the block
+abstraction.
+To reset user-specified multicorner-multimode scenario mapping, use the -reset
+option.
+•
+A block abstraction can have additional scenarios that are not used at the top level.
+•
+If a top-level design without multicorner-multimode scenarios, only block
+abstractions without multicorner-multimode scenarios can be used. Using the
+select_block_scenario command to specify scenario mapping allows you to use
+multicorner-multimode block abstractions even if the top-level design does not have
+multicorner-multimode scenarios.
+•
+For each TLUPlus file that is used, the block abstraction stores the extraction data and
+the specified operating conditions. In the top-level design, you cannot use additional
+TLUPlus files or define additional temperature corners for the existing TLUPlus files.
+•
+A top-level design with multicorner-multimode scenarios can be used with block
+abstractions that do not have any multicorner-multimode scenario definition. No log
+message is issued in this case, and the same block data is used in all the top-level
+scenarios.
+To learn how to use block abstractions with multicorner-multimode scenarios at the top
+level, see Using Block Abstractions With Scenarios at the Top Level.
+See Also
+•
+Using Block Abstractions With Scenarios at the Top Level
+•
+Using Hierarchical Models
+Using Block Abstractions With Scenarios at the Top Level
+Follow these steps to use a block abstraction at the top level when it has scenario
+definitions:
+1. Set the current design to the top-level design.
+2. Remove all scenarios by using the remove_scenario -all command.
+3. Define scenarios for the top-level design.
+The scenarios defined in the top-level design must match the scenario definitions in the
+block abstraction blocks of the design. In the top-level design, all the scenarios must be
+defined before the next step.
+
+Performing Optimization With Floorplan Physical Constraints
+1. Perform optimization by using the compile_exploration command.
+At the beginning of compilation, the compile_exploration command performs the
+following checks to ensure no scenario mismatches between the top-level design
+and the block abstractions. The compilation is terminated when any of the following
+mismatches is encountered:
+•
+The number of scenarios in the top-level design does not match the number of
+scenarios in the block abstraction blocks.
+If the tool detects that the top-level design has more scenarios than the block
+abstraction blocks, the tool issues an error message and compilation is terminated.
+•
+The scenario definitions in the top-level design are not consistent with the scenario
+definitions in the block abstraction blocks.
+If scenarios are not defined in the top-level design and the block abstraction blocks
+have scenario definitions, the tool issues an error message and compilation is
+terminated.
+You can also use the check_scenarios command to check consistency between
+scenarios.
+See Also
+•
+Using Block Abstractions in Multicorner-Multimode Designs
+Performing Optimization With Floorplan Physical Constraints
+The principal reason for using floorplan physical constraints is to accurately represent the
+placement area and to improve timing correlation with the post-layout design. Running
+placement-driven optimization improves the QoR and correlation between DC Explorer
+and Design Compiler topographical mode, especially for designs with complex floorplans.
+By default, the optimization does not include any floorplan information. You can provide
+high-level floorplan physical constraints that determine core area and shape, port
+locations, macro locations and orientations, voltage areas, placement blockages,
+and placement bounds. These constraints can be derived from IC Compiler floorplan
+information, extracted from an existing Design Exchange Format (DEF) file, or created
+manually.
+To perform optimization with flo0orplan physical constraints, follow these steps:
+1. Set up the physical libraries.
+2. Enable the physical flow capability (physical mode) by setting the
+de_enable_physical_flow variable.
+
+Performing Power Optimization
+de_shell> set_app_var de_enable_physical_flow true
+3. (Optional) Provide floorplan physical constraints.
+If no floorplan physical constraints are specified, the tool automatically derives the
+floorplan information.
+4. Run the compile_exploration command.
+de_shell> compile_exploration
+See Also
+•
+Specifying Physical Libraries
+•
+Using Floorplan Physical Constraints
+•
+Congestion Reporting in the Physical Flow
+Performing Power Optimization
+When performing power optimization, you can enable clock gating, run leakage power
+optimization, and annotate the switching activity information of design objects. DC
+Explorer does not support the IEEE 1801 Unified Power Format (UPF), but it can handle
+previously instantiated power management cells, such as isolation cells and level-shifter
+cells.
+•
+To enable clock gating, enter
+de_shell> compile_exploration -gate_clock
+•
+To enable leakage power optimization, use the set_multi_vth_constraint
+command. For example,
+de_shell> set_multi_vth_constraint -lvth_groups {lvt svt} \
+   -lvth_percentage 15 -type soft -cost cell_count
+When running this command in DC Explorer, you should specify the cell_count
+keyword with the -cost option for the percentage of low threshold-voltage cells in the
+design.
+•
+To annotate the switching activity information of the design nets, use the
+set_switching_activity command. For example,
+de_shell> set_switching_activity [get_net net1] \
+   -static_probability 0.2 -toggle_rate 10 -period 1000
+Note:
+DC Explorer does not support SAIF files.
+
+Pipelined-Logic Retiming
+For information, see also the Power Compiler User Guide and Design Vision User Guide.
+Pipelined-Logic Retiming
+You enable pipelined-logic retiming by using the set_optimize_registers command.
+When you describe circuits at the RTL level before logic synthesis, it is very difficult
+and time-consuming to find the optimal register locations and code them into the HDL
+description. With register retiming, the locations of the flip-flops in a sequential design can
+be automatically adjusted to equalize as nearly as possible the delays of the stages.
+The retiming techniques that the set_optimize_registers command uses are
+particularly useful to pipeline datapath blocks. You first specify the required number
+of pipeline stages and place all the pipeline registers at the inputs or outputs of the
+combinational logic in your RTL. During retiming, the tool moves these pipeline registers
+into the combinational logic, balances the delay of each pipeline stage, and archives the
+optimal timing and area results based on the given clock period.
+Register retiming leaves the behavior of the circuit at the primary inputs and primary
+outputs unchanged (unless you add pipeline stages or choose special options that do
+not preserve the reset state of the design). Therefore, you do not need to change any
+simulation testbenches developed for the original RTL design.
+However, retiming changes the location, contents, and names of registers in the design. A
+verification strategy that uses internal register inputs and outputs as reference points will
+no longer work. Retiming can also change the function of hierarchical cells inside a design
+and add clock, clear, set, and enable pins to the interfaces of the hierarchical cells.
+Pipelined-Logic Retiming Command
+You can use the set_optimize_registers command followed by the
+compile_exploration command to enable pipelined-logic retiming.
+This command sequence performs retiming during synthesis when you run
+the compile_exploration command after reading the RTL. You must run the
+set_optimize_registers command before running compile_exploration. The
+set_optimize_registers command sets the optimize_registers attribute on the
+specified design or on the current design so that the attribute is automatically invoked
+during compile and the design is retimed during optimization.
+This method is also known as one-pass retiming because retiming is performed in one
+step by the compile_exploration command.
+
+Pipelined-Logic Retiming
+Register Retiming Example
+During retiming, registers are moved forward or backward through the combinational
+logic of a design. The following figures illustrate an example of delay reduction through
+backward retiming of a register.
+Figure 59
+Circuit Before Retiming
+Figure 60
+Circuit After Retiming
+
+Pipelined-Logic Retiming
+In this example, before register retiming, there are four levels of combinational logic and
+only one register at the endpoint of the critical path. After retiming, the register that has
+been replaced by four registers has been moved back through two levels of logic, and the
+critical path now consists of two stages. The critical path delay in each stage is less than
+the critical path delay in the initial single stage design. As in this example, delay reduction
+through retiming often leads to an increase in the number of registers in the design, but
+usually this increase is small.
+Retiming Registers Containing Path Group Constraints
+Registers with path group constraints can be retimed if the new registers inherit the
+constraints from the original registers and contain no other timing exceptions except those
+defined on the path groups. Registers that belong to different path groups are considered
+separately during pipelined-logic retiming.
+The tool allows the following pipelined-logic retiming for registers with path group
+constraints:
+•
+Forward moves
+The tool allows forward moves when the registers belong to the same path groups;
+otherwise, no retiming is performed. Registers created as a result of combinational
+
+Pipelined-Logic Retiming
+logic through forward moves inherit the path group constraints from the original
+registers before retiming. For example,
+•
+Backward moves
+
+Pipelined-Logic Retiming
+Duplicate registers created as a result of backward moves inherit the path group
+constraints from the original registers before retiming. For example,
+•
+Retiming in multicorner-multimode designs
+The tool identifies registers that belong to the same path groups in all scenarios and
+performs retiming. Retiming is not allowed across path groups.
+As shown in the following table, the reg_0 and reg_1 registers share the same path
+group specifications of all multicorner-multimode scenarios, so they are grouped
+together during retiming. However, the reg_2 and reg_3 registers do not share the
+same path group specifications; they remain two separate groups.
+
+Pipelined-Logic Retiming
+•
+Forward moves in multicorner-multimode designs
+The tool allows forward moves only when the registers share the same path group
+specifications across all scenarios. For example,
+The tool does not allow retiming in the following situations:
+•
+Path groups are created using registers pins instead of registers. For example,
+de_shell> create_path_group -to A_reg/D
+•
+Path groups include paths originating from and ending at the same register. For
+example,
+de_shell> create_path_group \
+   -from A [get_cells ff_reg*] -to [get_cells ff_reg*]
+
+Additional Optimization Features
+Additional Optimization Features
+You can use the optimization techniques described in these topics to improve optimization
+results:
+•
+Preserving Subdesigns
+•
+Fixing Multiple-Port Nets
+•
+Optimizing Multibit Registers
+•
+Congestion Reporting in the Physical Flow
+•
+Controlling Path Group Creation
+For information, see also the Design Compiler User Guide.
+Preserving Subdesigns
+To preserve a subdesign during optimization, use the set_dont_touch command. The
+command places the dont_touch attribute on cells, nets, references, and designs in
+the current design to prevent these objects from being modified or replaced during
+optimization.
+Note:
+Any block abstractions in your design are automatically marked with the
+dont_touch attribute. Also, the cells of block abstractions are marked as don’t
+touch.
+Use the set_dont_touch command to specify subdesigns not to be optimized with the
+rest of the design hierarchy. The dont_touch attribute does not prevent or disable timing
+through the design.
+When you use the set_dont_touch command, remember the following points:
+•
+Setting the dont_touch attribute on a hierarchical cell sets an implicit don’t touch value
+on all cells below that cell.
+•
+Setting the dont_touch attribute on a library cell sets an implicit don’t touch value on
+all instances of that cell.
+•
+Setting the dont_touch attribute on a net sets an implicit don’t touch value only on
+mapped combinational cells connected to that net. If the net is connected only to
+generic logic, optimization might remove the net.
+•
+Setting the dont_touch attribute on a reference sets an implicit don’t touch value on all
+cells using that reference during subsequent optimizations of the design.
+
+Additional Optimization Features
+•
+Setting the dont_touch attribute on a design has an effect only when the design is
+instantiated within another design as a level of hierarchy. In this case, the dont_touch
+attribute on the design implies that all cells under that level of hierarchy are subject to
+the dont_touch attribute. Setting the dont_touch attribute on the top-level design has
+no effect because the top-level design is not instantiated within any other design.
+•
+You cannot ungroup objects marked with the dont_touch attribute by using the
+ungroup command. The automatic ungrouping of DC Explorer has no effect on don’t
+touch objects.
+Note:
+The dont_touch attribute is ignored on synthetic part cells (for example,
+many of the cells read in from an HDL description) and on nets that have
+unmapped cells on them. During compilation, warnings appear for don’t touch
+nets connected to unmapped cells (generic logic).
+To remove the dont_touch attribute, use the remove_attribute command or the
+set_dont_touch command set to false.
+See Also
+•
+Using Hierarchical Models
+Fixing Multiple-Port Nets
+To fix nets connected to multiple ports, you can use the set_fix_multiple_port_nets
+command to insert buffers or inverters to the nets, to duplicate the logic, or to rewire the
+logic.
+As shown in the following figure, nets that are connected to multiple ports include
+•
+Feedthrough nets, where an input port feeds into an output port
+•
+Nets connected to multiple output ports, logically equivalent outputs
+
+Additional Optimization Features
+Figure 61
+Nets Connected to Multiple Ports
+These multiple-port nets, which are represented with the assign statements in the gate-
+level netlist, might cause design rule violations in back-end tools. To prevent multiple-port
+nets in the netlist, follow these steps:
+1. Enable the tool to fix multiple-port nets and constant-driven ports by setting the
+compile_advanced_fixed_multiple_port_nets variable to true.
+The default is set to true in DC Explorer.
+2. Use the set_fix_multiple_port_nets command with the appropriate options to set
+the fix_multiple_port_nets attribute on the designs.
+For example, the following command specifies to insert buffers to both feedthrough
+nets and logic constants and to restrict each driver cell to only one output port on the
+current design:
+de_shell> set_fix_multiple_port_nets -all -buffer_constants
+•
+To disable fixing the multiple-port nets in clock network, specify the
+-exclude_clock_network option.
+•
+To disable rewiring the logic before buffer insertion, specify the -no_rewire option.
+3. Compile the design by running the compile_exploration command.
+The tool fixes multiple-port nets in the designs marked with the
+fix_multiple_port_nets attribute by inserting buffers, duplicating the logic, or
+rewiring the logic according to the specified options.
+
+Additional Optimization Features
+When DC Explorer fixes multiple-port nets and constant-driven ports, the tool performs the
+following tasks in sequence:
+1. Rewire the connections to ensure that each of these nets is connected to one
+hierarchical port.
+The tool first performs rewiring to avoid unnecessary buffering. The tool also rewires
+across the hierarchy because boundary optimization is enabled by default.
+2. Insert buffers or inverters to the nets that are not fixed by rewiring.
+This figure shows that the tool fixes a feedthrough in Design B by rewiring across the
+hierarchy.
+Figure 62
+Feedthrough Fixed by Rewiring Across the Hierarchy
+This table summarizes the options of the set_fix_multiple_port_nets command.
+Table 30
+set_fix_multiple_port_nets Command Options
+To do this
+Use this option
+Disable fixing multiple-port nets.
+-default
+Insert buffers to prevent feedthrough nets.
+-feedthroughs
+Insert buffers so that each driver cell drives one output port.
+-outputs
+Duplicate logic constants so that each logic constant drives one output
+port.
+-constants
+Equivalent to -feedthroughs -outputs -constants
+-all
+Insert buffers to logic constants instead of duplicating the logic.
+-buffer_constants
+
+Additional Optimization Features
+Table 30
+set_fix_multiple_port_nets Command Options (Continued)
+To do this
+Use this option
+Disable rewiring before the tool fixes multiple-port nets and
+constant-driven ports.
+-no_rewire
+Exclude fixing the multiple-port nets in clock network.
+-exclude_clock_network
+Optimizing Multibit Registers
+DC Explorer can replace single-bit register cells with multibit register cells if such cells
+are available in the logic library. Using multibit register cells in place of single-bit cells can
+reduce clock tree power, the number of clock tree buffers, clock tree net length, and area.
+Multibit Registers
+The tool represents register bits using single-bit registers. You can instruct the tool to
+organize multiple register bits into groups called multibit components in the RTL bus
+inference flow. The register bits in the group are targeted for implementation using multibit
+registers. For example, a group of eight register bits can be implemented as one 8-bit
+library register or two 4-bit library registers.
+Replacing single-bit cells with multibit cells, as shown in Figure 63, can reduce
+•
+Clock tree power and the number of clock tree buffers
+•
+The total clock tree net length
+•
+Area due to shared transistors and optimized transistor-level layout
+These benefits must be balanced against the loss of optimization flexibility in placing the
+register bits and routing the connections.
+Figure 63
+Replacing Two Multiple Single-Bit Register Cells With One Multibit Register
+
+Additional Optimization Features
+Running the RTL Bus Inference Flow
+When you run the RTL bus inference flow, the tool groups the register bits belonging
+to each bus (as defined in the RTL) into multibit components. The bits in each multibit
+component are targeted for implementation using multibit registers. The actual
+replacement of register bits occurs during execution of the compile_exploration
+command. You can also group bits manually by using the create_multibit command.
+To run the RTL bus inference flow,
+1. Direct the tool how to infer multibit registers from the RTL buses by setting the
+hdlin_infer_multibit variable.
+The following example specifies to infer multibit registers for all buses:
+de_shell> set_app_var hdlin_infer_multibit default_all
+2. Read the RTL.
+3. (Optional) Specify the inference mode and the minimum width for multibit registers by
+using the set_multibit_options command.
+The command sets the multibit_mode and minimum_multi_width directives for
+multibit registers in the current design.
+4. (Optional) Manually group specific single-bit cells or instances into multibit components
+by using the create_multibit command.
+You must have a mapped design or GTECH netlist to use this command. The
+instances and cells must not belong to another multibit component. For example,
+de_shell> create_multibit x_reg[0] x_reg[1] -name my_multi
+5. (Optional) Exclude a particular set of single-bit registers from being grouped into a
+multibit component by using the remove_multibit command.
+You must have a mapped design or GTECH netlist to use this command. For example,
+the following command removes the y_reg multibit component, causing its register bits
+to be ungrouped during multibit synthesis.
+de_shell> remove_multibit y_reg
+6. Compile the design by using the compile_exploration command.
+When you specify the -scan option, the command replaces single-bit cells with scan
+cells before multibit synthesis. For example,
+de_shell> compile_exploration -gate_clock -scan
+
+Additional Optimization Features
+7. Report multibit components by using the report_multibit command.
+The command reports all multibit components whether they are inferred by the tool
+from the RTL or created by the create_multibit command.
+Noncontiguous Multibit Mapping During Compile
+The compile_exploration command can map the noncontiguous bits of a multibit
+component to a multibit register. As shown in Figure 64, the command packs the
+noncontiguous A_reg[0] and A_reg[2] registers into the two-bit register, A_reg[2,0].
+Because the A_reg[1] register is marked with the size_only attribute, it is preserved as a
+single-bit register.
+Figure 64
+Noncontiguous Multibit Mapping
+For information, see also the Multibit Register Synthesis and Physical Implementation
+Application Note.
+Congestion Reporting in the Physical Flow
+DC Explorer performs congestion-driven placement to reduce routing congestion
+during the physical flow. To enable the physical flow capability (physical mode), set the
+de_enable_physical_flow variable to true, changing it from its default of false.
+Running congestion-driven placement improves the correlation between DC Explorer and
+the Design Compiler topographical mode, especially for designs with complex floorplans.
+To report the congestion status of the design in the physical flow, use the commands
+listed in Table 31. When you run these commands, the tool uses Zroute to estimate the
+congestion information.
+Table 31
+Commands for Congestion Reporting
+Command
+Description
+report_congestion
+Generates a global route congestion report.
+report_congestion_options
+Reports the specified congestion options for the current design.
+
+Additional Optimization Features
+Table 31
+Commands for Congestion Reporting (Continued)
+Command
+Description
+set_congestion_options
+Sets congestion options for congestion optimization.
+remove_congestion_options
+Removes the specified congestion options from the current design.
+In addition, you can use the commands in Table 32 to set route options for congestion
+estimation or to better understand what route options are used for the congested areas.
+Table 32
+Commands for Route Options
+Command
+Description
+set_route_zrt_common_options
+Sets the options that are common to global routing, track
+assignment, and detail routing.
+get_route_zrt_common_options
+Returns the value of a specified common route option.
+report_route_zrt_common_options
+Reports the settings of all common route options.
+set_route_zrt_global_options
+Sets the global route options.
+get_route_zrt_global_options
+Returns the value of a specified global route option.
+report_route_zrt_global_options
+Reports the settings of all global route options.
+create_route_guide
+-horizontal_track_utilization
+-vertical_track_utilization
+-track_utilization_layers
+Creates a route guide with the settings of these three options.
+Note:
+DC Explorer does not support the set_congestion_optimization command.
+In cases where the design is reported as significantly congested, you can further analyze
+congestion by generating a congestion map in the GUI. By viewing the congestion map,
+you can identify areas of high congestion and determine whether the design can be
+routed. For information about generating and analyzing the congestion map, see the
+Design Vision User Guide.
+Reading and Writing Cell Expansion Data
+During congestion optimization, cells in congested regions are expanded to occupy more
+space to create lower density areas. The tool generates cell expansion data so that the
+data can be used for better congestion correlation with the IC Compiler and IC Compiler II
+tools. The cell expansion data includes the area, width, and height of each expanded cell.
+
+Additional Optimization Features
+You can read and write the cell expansion data by using the read_cell_expansion and
+write_cell_expansion commands, respectively.
+For example, the following command writes cell expansion data to the out.exp file:
+de_shell> write_cell_expansion out.exp
+Table 33
+Commands for Reading and Writing Cell Expansion Data
+Command
+Description
+read_cell_expansion
+Reads the cell expansion data from a file to support ASCII flow.
+write_cell_expansion
+Writes the cell expansion data to a file to support ASCII flow.
+For information, see the following topics in the Design Vision User Guide:
+•
+Analyzing Congestion
+•
+Setting Zroute Options
+See Also
+•
+Performing Optimization With Floorplan Physical Constraints
+Controlling Path Group Creation
+Use the create_auto_path_groups command to automatically create specific path
+groups for I/Os, macros, and integrated clock-gating cells.
+Improving QoR
+You can direct the tool to automatically create path groups to improve QoR. To do so,
+specify the -mode rtl option with the create_auto_path_groups command after
+elaboration but before optimization.
+For example,
+de_shell> create_auto_path_groups -mode rtl
+de_shell> compile_exploration
+de_shell> remove_auto_path_groups
+de_shell> report_qor
+The command saves user-created path groups before automatically creating path groups,
+one path group per hierarchy in RTL mode. If there are multiple levels of hierarchy, the tool
+creates path groups for each level. To generate a QoR report with only user-specified path
+groups, use the remove_auto_path_groups command to remove the path groups created
+
+Additional Optimization Features
+by the tool. This command removes all path groups, but it keeps the path groups that you
+created with the group_path command.
+Preventing Path Group Creation
+To prevent the creation of specific path groups, specify the -exclude option to list a
+combination of the following values: IO, macro, and ICG. For example, the following
+command prevents the creation of specific path groups for I/Os and macros:
+de_shell> create_auto_path_groups -mode rtl -exclude {IO macro}
+In RTL mode, to prevent the creation of path groups for hierarchies that have a small
+number of registers, specify the -min_regs_per_hierarchy option. The option allows
+you to specify the minimum number of registers per hierarchy. No path group is created for
+hierarchies with a number of registers lower than this value. The default is 10.
+See Also
+•
+Reporting Quality of Results

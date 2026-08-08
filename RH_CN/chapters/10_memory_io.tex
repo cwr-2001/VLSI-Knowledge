@@ -1,0 +1,284 @@
+﻿% 第 10 章 存储器与 I/O 建模（原书 10-284 … 10-297）
+\bichapter{存储器与 I/O 建模}{Memory and I/O Modeling}
+\label{chap:memio}
+
+\section{引言}
+\subsection*{Introduction}
+
+RedHawk 采用高时间分辨率的整片瞬态分析来确定芯片动态压降（DvD），分析包括封装模型、片上 RLC 提取以及单元/宏的 VDD/VSS 开关电流剖面。在 90\,nm 及更先进工艺中，存储器与 I/O 单元的作用日益突出，是大开关电流的主要来源。
+
+嵌入式存储器在 SoC 中占用的版图面积比例持续上升。鉴于其复杂度与功耗不断增加，必须对嵌入式存储器块进行精确建模，才能在整片动态压降（DvD）分析中准确评估其影响。存储器块内部的压降对深亚微米设计构成严重问题；同时，存储器实例的高功耗需求会在周围逻辑中引起 DvD，进而影响时序与功能。在整片层面，需确保存储器块按其规格获得充足供电。
+
+I/O 单元是 I/O VDD 与 I/O VSS 大开关电流的主要贡献者。I/O VDD 通常与内核 VDD 隔离，但 I/O VSS 可能与内核 VSS 共享。若 VSS 共享，I/O 缓冲器同时开关产生的大电流会显著加剧内核 VSS 反弹，可能导致芯片功能或时序失效。I/O 缓冲器通常仅有 LEF 与 GDSII 数据。
+
+RedHawk 提供多种抽象层次的存储器与 I/O 建模选项——从用于精确块级分析的详细模型，到用于整片动态分析的更抽象模型。表~\ref{tab:memio-options} 概括了这些选项。
+
+\begin{table}[htbp]
+\centering
+\caption{RedHawk 存储器与 I/O 建模选项}
+\label{tab:memio-options}
+\small
+\begin{tabular}{lccc}
+\toprule
+\textbf{建模选项} & \textbf{电源网格} & \textbf{电流源/电容位置} & \textbf{存储器/I/O 电流值} \\
+\midrule
+黑盒（Black-box） & LEF/基于 pin & 在 pin 处 & 基于 .lib、AVM、sim2iprof 或指定功耗 \\
+灰盒（Grey box） & 按版图 & 在 pin 处 & 基于 .lib、AVM、sim2iprof 规范 \\
+白盒（White box） & 按版图 & 内部分布 & 基于 .lib、指定功耗或 APL \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+本章描述 RedHawk 的存储器与 I/O 表征流程，包括输入数据要求、数据准备与使用模型。RedHawk 中的存储器建模分为两部分：（1）电源网格提取以及电流源与 decap 的放置；（2）开关电流剖面、漏电流与 decap 值的生成。第一部分有多种工具可按所需抽象层次完成提取与电流源/decap 分配；第二部分有多种方法捕获功耗、平均静态电流与动态开关电流。图~\ref{fig:memio-method} 说明了存储器块的建模方法。
+
+\figplaceholder{Figure 10-1}{RedHawk 存储器与 I/O 建模方法}
+
+除 I/O 缓冲器外，VDD/VSS pad、gap filling pad、bump 与 RDL（再分布层）数据通常仅以 GDSII 形式提供，DEF 中无详细布线信息。RedHawk 可接受 GDSII 输入并通过 \texttt{gds2def}/\texttt{gds2rh} 转换为 DEF，如图~\ref{fig:gds2def-bump} 所示。详见附录 E「\texttt{gds2rh}/\texttt{gds2def}」与「\texttt{gds2rh -m} 与 \texttt{gds2def -m}」。
+
+\figplaceholder{Figure 10-2}{使用 gds2def/gds2rh 将 GDSII 中的 C4 bump 与 RDL 层转换为 DEF}
+
+\section{存储器与 I/O 建模方法}
+\subsection*{Memory and I/O Modeling Methodology}
+
+\subsection{黑盒建模}
+\subsubsection*{Black-box Modeling}
+
+在初始整片级分析中，建议将所有存储器、I/O 单元及 VDD/VSS pad 单元抽象为黑盒，以确保连接正确并调试数据相关问题。黑盒存储器与 I/O 消耗的物理内存显著更少、运行更快，便于在初始数据准备阶段进行多次迭代。
+
+以黑盒抽象运行存储器与 I/O 时，无需额外数据准备，也无需存储器块与 I/O 的设计表示（即 DEF 信息）。但所有存储器块与 I/O 须存在 LEF 与 LIB 模型；LEF 文件中的电源 pin 纳入存储器与 I/O 模型。黑盒建模不考虑存储器内部电源网格，全部电流需求按 LEF 定义的块电源 pin 分配。
+
+有时 I/O 与 VDD/VSS pad 的黑盒建模在 pin 上几何信息不完整，可能导致 VDD/VSS 短路或极大的静态 IR drop。此时应使用更详细的 I/O 建模抽象层次。
+
+\subsection{基于 Pin 与网格的抽象}
+\subsubsection*{Pin and Grid-Based Abstractions}
+
+在基于网格的建模中，存储器与 I/O 考虑其内部电源网格；电流抽取分布在连接到顶层网格的块电源 pin 上。当整片电源网格连通性通过存储器块与 I/O 的电源网格维持时，此方法特别有用。例如，若设计顶层电源网格在金属 3 和 4，而存储器块与 I/O 在金属 3 和 4 也有电源网格，则包含这些块及其电源网格可确保金属 3 和 4 电源走线的连通性；若将这些块黑盒化，则这些层电源走线的连续性与连通性将丢失。图~\ref{fig:mem-grid} 说明了存储器的这种情况。
+
+\figplaceholder{Figure 10-3}{含/不含内部电源网络的存储器建模对比}
+
+在基于网格的框架中，电流抽取仍考虑在存储器块 pin 处，适用于需要更快运行时间或内存受限的场景。将电流需求考虑至存储器或 I/O 较低金属层（而非 pin 处）会显著增加计算时间与物理内存，但相比黑盒建模的优势在于分析时考虑了存储器与 I/O 电源网格。
+
+要对存储器与 I/O 电源网格进行基于网格的抽象建模，使用 \texttt{gds2def}/\texttt{gds2rh} 从 GDSII 创建必要的设计文件。该工具需要以下输入：
+\begin{itemize}
+  \item 配置文件。存储器相关说明见附录 E「\texttt{gds2rh -m} 与 \texttt{gds2def -m}」；I/O 相关说明见下文。
+  \item 层映射文件：将 GDSII 层号映射到 LEF/DEF 定义的对应层。
+  \item 存储器块与 I/O 的 GDSII 文件。
+  \item 存储器块与 I/O 的 LEF 文件（GDSII 流程中可选）。对消耗电流的 I/O 单元需要；不消耗电流的 VDD/VSS pad 不需要。
+\end{itemize}
+
+\texttt{gds2def}/\texttt{gds2rh} 的输出为 DEF 文件（\texttt{<toplevel>.def}），包含存储器与 I/O 块的电源网络信息。该 DEF 应在动态分析输入的 DEF 文件列表中。若 LEF 可用且已定义，还会创建新 LEF 文件（\texttt{<toplevel>\_adsgds.lef}），包含 PINS 段等信息。
+
+\begin{noteBox}
+GDS2RH 不支持基于 Spice 的流程，也不支持基于 contact 的 pin 创建流程。客户应使用 Totem 晶体管级流程。
+\end{noteBox}
+
+以下各节详述存储器块与 I/O 单元的建模。
+
+\section{存储器块详细建模}
+\subsection*{Detailed Memory Block Modeling}
+
+\subsection{提取}
+\subsubsection*{Extraction}
+
+在详细建模中，提取存储器块的电源网格，并在块内适当位置放置电流源与去耦电容，从而准确考虑块内电流流动，并建模存储器动态开关对周围逻辑的影响。
+
+对存储器进行详细建模，使用 \texttt{gds2def -m} 或 \texttt{gds2rh -m} 生成详细视图。该工具需要：
+\begin{itemize}
+  \item 配置文件（见附录 E「\texttt{gds2rh -m} 与 \texttt{gds2def -m}」）。
+  \item 层映射文件。
+  \item 存储器块的 GDSII 文件。
+  \item 存储器块的 LEF 文件（用于提取 pin 信息）。
+\end{itemize}
+
+\texttt{gds2def -m}/\texttt{gds2rh -m} 的输出为每块存储器的一组 DEF、LEF 与 \texttt{*.pratio} 文件，包含电流源与创建的 decap 的放置信息、电源/地布线几何、单元抽象以及各单元相对功耗。\texttt{.pratio} 文件指定存储器中 P/G pin 的电流分配权重因子，应作为 RedHawk 分析输入。
+
+为提高精度，应提供带晶体管 x,y 坐标信息的层次化 SPICE 网表。网表中晶体管的尺寸与位置控制存储器模型内电流源的放置与属性。整片瞬态动态分析在计算上无法包含所有晶体管，因此 \texttt{gds2def -m}/\texttt{gds2rh -m} 按尺寸与位置将晶体管分组形成虚拟单元，在几乎不损失精度的情况下提供抽象层次。
+
+包含存储器电源网格并将电流源连接到较低金属层，可在整片级实现完整建模与精确瞬态动态分析。存储器块数量较少时，整片运行时间与物理内存通常不受影响；块数量很大时，因纳入块 P/G 网络较低金属层引入大量节点及被动元件，运行时间与内存可能成为问题。为此，\texttt{gds2def -m}/\texttt{gds2rh -m} 提供选择性提取金属层的高级特性，如下所述。
+
+\begin{itemize}
+  \item \textbf{仅提取指定层}：在配置文件中用关键字
+\begin{lstlisting}
+EXTRACTION_STARTING_LAYER <lowest_metal_layer> ? traceall?
+\end{lstlisting}
+  从起始层及更高层提取 P/G 网络；电流源与 decap 挂接到指定最低金属层。若低于起始层的金属用于连接到更高层，可使用 \texttt{traceall} 选项，在网络追踪时考虑所有金属层上的连接元件。
+
+  \begin{noteBox}
+  若指定 \texttt{traceall}，GDS2RH 与 GDS2DEF 行为不同：GDS2DEF 在追踪所有金属层后丢弃 \texttt{EXTRACTION\_STARTING\_LAYER} 以下所有几何；GDS2RH 内部调用 \texttt{APACHE\_PHYSICAL\_MODEL} 方法，不丢弃较低层几何，而是通过较低金属/via 层保持 ESL 层创建的 pin（电流源/吸收端）之间的连接，以改善块压降建模。
+  \end{noteBox}
+
+  \item \textbf{从特定区域选择性提取金属}：存储器阵列区域内电源网格的电流抽取通常很小，整片级压降分析可忽略而不显著影响精度。若阵列区域较低金属层几何仅形成到阵列内器件的局部连接，排除它们不影响整片分析。图~\ref{fig:mem-m2} 显示存储器块核心区域的金属 2 几何——这些几何不构成电源走线，而更像局部互连；排除它们不影响电源分析精度，但可显著减少节点数，节省物理内存与运行时间。
+
+  \figplaceholder{Figure 10-4}{存储器核心区域的金属 2 几何}
+
+  \texttt{gds2def -m}/\texttt{gds2rh -m} 可自动从 GDSII 识别存储器 bit cell 并确定阵列区域，仅从阵列区域提取特定层，而从块其余部分提取所有其他层。这有助于在高功耗区域（如行译码器、驱动器、灵敏放大器）保留所有金属几何，同时在所有层保持块与顶层电源网格的连通性。
+
+  使用这些功能，在配置文件中指定 \texttt{CORE\_EXTRACTION\_STARTING\_LAYER <layer\_name>}，从存储器阵列区域提取指定层及以上所有层；块其余部分遵循 \texttt{EXTRACTION\_STARTING\_LAYER} 指定的层。若两关键字均未指定，默认从层映射文件中指定的最低层开始在各自区域提取所有层。若仅指定 \texttt{EXTRACTION\_STARTING\_LAYER} 而未指定 \texttt{CORE\_EXTRACTION\_STARTING\_LAYER}，则从 \texttt{EXTRACTION\_STARTING\_LAYER} 指定层之上两层开始提取所有层。
+
+  使用 \texttt{CORE\_EXTRACTION\_STARTING\_LAYER} 需正确识别存储器阵列区域，可通过以下三种方法：
+  \begin{itemize}
+    \item \texttt{MEMORY\_CELL auto\_detect <cellname>}：对 Spice 网表中的 bit cell 使用自动检测。
+    \item \texttt{MEMORY\_BIT\_CELL auto\_detect <cellname>}：对 GDSII 中的 bit cell 使用自动 bit cell 检测。
+    \item \texttt{MEMORY\_BIT\_CELL \{ \}}：显式指定 bit cell 名称，工具从 GDSII 中 bit cell 位置识别阵列区域。
+    \item 对复杂存储器，自动检测可能不正确，可通过 \texttt{MEMORY\_CORE\_REGIONS <file\_name>} 显式指定构成存储器核心区域的矩形列表。
+  \end{itemize}
+
+  图~\ref{fig:mem-extract} 说明存储器块金属 1 P/G 网格的全局提取与排除阵列区域的 selective 提取（仅提取金属 3 及以上）。
+\end{itemize}
+
+\figplaceholder{Figure 10-5}{存储器块金属 1 P/G 网络的全局与选择性提取}
+
+\subsection{存储器用 GDS2DEF/GDS2RH 配置文件}
+\subsubsection*{GDS2DEF/GDS2RH Configuration File for Memories}
+
+本节汇总前述存储器建模模式所需的配置文件关键字。详细语法与用法见附录 E「创建 gds2rh/gds2def 配置文件」。
+
+\textbf{必需 GDS2DEF/GDS2RH 关键字：}
+\begin{itemize}
+  \item \texttt{TOP\_CELL}
+  \item \texttt{GDS\_FILE}
+  \item \texttt{GDS\_MAP\_FILE}
+  \item \texttt{LEF\_FILE}
+  \item \texttt{VDD\_NETS}
+  \item \texttt{GND\_NETS}
+\end{itemize}
+
+\textbf{可选 GDS2DEF/GDS2RH 关键字：}
+\begin{itemize}
+  \item \texttt{OUTPUT\_DIRECTORY}、\texttt{DATATYPE}、\texttt{NET\_NAME\_CASE\_SENSITIVE 1}
+  \item \texttt{EXTRACTION\_STARTING\_LAYER}、\texttt{GENERATE\_PLOC}
+  \item \texttt{LEF\_PIN\_POWER}、\texttt{USE\_LEF\_PINS\_FOR\_TRACING}、\texttt{BUSBITCHARS}
+\end{itemize}
+
+\subsection{\texttt{gds2def -m}/\texttt{gds2rh -m} 配置文件语法}
+\subsubsection*{gds2def -m/ gds2rh -m Configuration File Syntax}
+
+以下描述运行程序所需及可选的配置文件关键字语法。
+
+\textbf{必需关键字：}
+\begin{lstlisting}
+TOP_CELL $cell
+GDS_FILE $cell.gds
+GDS_MAP_FILE layer_map_file
+LEF_FILE memory_lef_file
+VDD_NETS {
+    <power_net_name_to_be_used_in_output_DEF> {
+        <power_net_name> @ <gds_layer_number>
+        <gds_x_position> <gds_y_position>
+        (...)
+        <power_pin_name_in_LEF>
+        <power_net_name_in_GDS>
+        (...)
+    }
+}
+GND_NETS {
+    <ground_net_name_to_be_used_in_output_DEF> {
+        ...
+    }
+}
+\end{lstlisting}
+
+\textbf{可选关键字（节选）：}
+\begin{lstlisting}
+DATATYPE
+NET_NAME_CASE_SENSITIVE 1
+SPICE_NETLIST
+SPICE_XY_SCALE
+MEMORY_CELL [ auto_detect | OFF ]
+MEMORY_CELL { <names of memory cell subcircuit in core array> }
+NMOS_MODEL_NAME { <NMOS model names> }
+PMOS_MODEL_NAME { <PMOS model names> }
+WORD_LINE_DIMENSION <number of word lines>
+BUSBITCHARS <char>
+USE_LEF_PINS_FOR_TRACING 1
+MEMORY_CORE_REGIONS <file name>
+MEMORY_BIT_CELL [ auto_detect | OFF ]
+MEMORY_BIT_CELL { <names of bit cell(s)> }
+EXTRACTION_STARTING_LAYER <lowest metal layer> [traceall]
+CORE_EXTRACTION_STARTING_LAYER <lowest metal layer-memory>
+\end{lstlisting}
+
+与 Switch Memory 建模相关的关键字：\texttt{DEFINE\_SWITCH\_CELLS}、\texttt{EXTRACT\_SWITCH\_CELLS}、\texttt{LEF\_FILES}、\texttt{SWITCH\_CELLS}、\texttt{VP\_PAIRS}（用法见附录 E）。
+
+\subsection{电流剖面生成}
+\subsubsection*{Current Profile Generation}
+
+\subsubsection{静态分析}
+对于静态分析，需要功耗数值以估算存储器中的电流。RedHawk 可直接从存储器库模型估算，也可通过 GSR 关键字 \texttt{BLOCK\_POWER\_FOR\_SCALING} 指定功耗数值；基于 .lib 功耗数据生成的三角波形按 \texttt{BLOCK\_POWER\_FOR\_SCALING} 的值缩放。
+
+功耗可从（a）存储器数据手册、（b）存储器供应商或设计团队、（c）其他功耗估算工具获得。估算应考虑存储器块的不同工作模式，并包含漏电流。
+
+\subsubsection{动态分析}
+RedHawk 中的动态分析为真正的瞬态分析。每个实例需要各工作模式下随时间变化的电流剖面。存储器电流剖面有四种生成方式：
+\begin{enumerate}
+  \item \textbf{基于静态平均功耗的三角剖面}：精度最低但工作量最小；在无法提供更精确剖面时可使用。RedHawk 根据静态平均功耗生成单/双三角电流剖面。
+  \item \textbf{基于规则的开关电流剖面}：\texttt{avm}（Apache Virtual Memory）工具为不同工作模式生成开关电流剖面，需要配置文件（见第~\ref{chap:apl}~章「存储器与 IP 表征」），描述各模式的功耗、访问时间、建立时间与负载信息。AVM 为 SRAM、寄存器文件、DRAM 等嵌入式存储器族生成规则化电流剖面，并生成漏电流与 decap 信息。可在 RedHawk 外运行：
+\begin{lstlisting}
+avm <avm_configuration_file>
+\end{lstlisting}
+  或通过 GUI 或 TCL 接口在 RedHawk 内运行。
+  \item \textbf{精确开关电流剖面}：\texttt{sim2iprof} 使用第三方仿真输出（fsdb、hout、tr0、pwl 等）获取存储器 Read/Write/Standby 模式数据，生成用于 RedHawk 功耗分析的精确 \texttt{cell.current} 文件。详见附录 E「sim2iprof」。
+\end{enumerate}
+
+\section{I/O 单元详细建模}
+\subsection*{Detailed I/O Cell Modeling}
+
+\subsection{提取}
+\subsubsection*{Extraction}
+
+详细建模中提取 I/O 块电源网格，在块内放置电流源与 decap，准确考虑 I/O 块内电流流动，并建模 I/O 动态开关对周围逻辑的影响。
+
+I/O 详细建模与存储器类似，需使用 \texttt{gds2def}/\texttt{gds2rh} 生成详细视图，输入包括：
+\begin{itemize}
+  \item 配置文件（见第 8 章）。
+  \item 层映射文件。
+  \item I/O 块的 GDSII 文件。
+  \item I/O 块的 LEF 文件。
+\end{itemize}
+
+输出为每块 I/O 的 DEF、LEF 与 \texttt{*.pratio} 文件。\texttt{.pratio} 指定 P/G pin 间电流分配权重，应纳入 RedHawk 分析输入。
+
+为提高精度，还应提供：
+\begin{itemize}
+  \item 带晶体管 x,y 坐标的层次化 SPICE 网表；
+  \item 晶体管尺寸与位置控制 I/O 模型内电流源放置与属性；
+  \item 包含 I/O 电源网格并将电流源连接至较低金属层，可在整片级完整建模。I/O 数量在数百以内时，整片运行时间与物理内存通常影响不大。
+\end{itemize}
+
+\subsection{I/O 用 GDS2DEF/GDS2RH 配置文件}
+\subsubsection*{GDS2DEF/GDS2RH Configuration File for I/Os}
+
+本节描述前述 I/O 建模模式所需的配置文件。GDS2DEF/GDS2RH 还可从 bump 或 RDL 层提取 P/G 网格纳入 RedHawk 分析。
+
+\textbf{必需关键字：}\texttt{TOP\_CELL}、\texttt{GDS\_MAP\_FILE}、\texttt{VDD\_NETS}、\texttt{GND\_NETS}、\texttt{GDS\_FILE}。
+
+\textbf{可选关键字：}\texttt{APACHE\_PHYSICAL\_MODEL}、\texttt{ADJUST\_POLYGON}、\texttt{BUSBITCHARS}、\texttt{CREATE\_LEF\_MACRO\_FOR\_BOX\_CELLS}、\texttt{DEF\_FILE\_DEFINITIONS}、\texttt{EXTRACTION\_STARTING\_LAYER}、\texttt{GENERATE\_PLOC}、\texttt{INTERNAL\_DBUNIT}、\texttt{LEF\_FILE}、\texttt{LEF\_PIN\_POWER}、\texttt{MULTI\_TASKS}、\texttt{NET\_NAME\_CASE\_SENSITIVE}、\texttt{OUTPUT\_DIRECTORY}、\texttt{USE\_LEF\_PINS\_FOR\_TRACING}。
+
+详细语法见附录 E「创建 gds2rh/gds2def 配置文件」。
+
+\subsection{电流剖面生成}
+\subsubsection*{Current Profile Generation}
+
+\subsubsection{静态分析}
+静态分析需要功耗数值估算 I/O 电流。RedHawk 可从 I/O 库模型估算，或通过 GSR 关键字 \texttt{BLOCK\_POWER\_FOR\_SCALING} 指定。
+
+\subsubsection{动态分析}
+动态分析为高时间分辨率真瞬态分析，每个实例各工作模式需提供随时间变化的电流剖面：
+\begin{itemize}
+  \item \textbf{基于静态平均功耗的三角剖面}：精度最低，在无法提供其他剖面时可使用。
+  \item \textbf{基于 SPICE 的 APL 剖面}：可用 APL 表征 I/O 块；APL 根据配置文件中定义的参数自动生成输入向量，使用 NSPICE 表征。当前捕获 core VDD 与 VSS 电流剖面。若 core VSS 与 I/O VSS 共享，I/O 单元 core VSS 电流远大于 core VDD。RedHawk 支持 VDD 与 VSS 不对称电流剖面进行动态分析。借助 NSPICE 的大容量与快速运行，I/O 块表征通常不是问题。详见第~\ref{chap:apl}~章。
+\end{itemize}
+
+\subsection{包含 I/O 的结果与分析}
+\subsubsection*{Results and Analysis Including I/Os}
+
+纳入 I/O 后，RedHawk 可展示以下分析能力。图~\ref{fig:pd-no-io} 为无 I/O 缓冲器同时开关的功耗密度图；图~\ref{fig:pd-io} 为含开关 I/O 缓冲器的功耗密度图。DvD 分析后，功耗密度图显示实际发生开关的实例。功耗密度定义为每单位面积功耗，是潜在问题区域的良好指标——更高功耗密度表示更小区域内更集中的功耗需求。
+
+\figplaceholder{Figure 10-6}{无 I/O 同时开关的功耗密度图}
+\figplaceholder{Figure 10-7}{含 I/O 同时开关的功耗密度图}
+
+图~\ref{fig:static-ir-io} 显示 VSS 网络静态 IR drop；动态压降下 VSS 反弹可能高得多，如图~\ref{fig:dvd-no-io}（无开关 I/O，最大 VSS 反弹 150\,mV）与图~\ref{fig:dvd-io}（含开关 I/O，最大 VSS 反弹 200\,mV）。同样重要的是，高静态 IR drop 区域可能与高动态压降区域完全不同，说明 I/O 开关引起的 VSS 反弹不可忽略，尤其在 VSS 在 I/O 与内核间共享时。
+
+\figplaceholder{Figure 10-8}{含 I/O 同时开关的静态 IR drop；VSS 最大 30\,mV}
+\figplaceholder{Figure 10-9}{无 I/O 同时开关的动态压降；最大 VSS 反弹 150\,mV}
+\figplaceholder{Figure 10-10}{含 I/O 同时开关的动态压降；最大 VSS 反弹 200\,mV}

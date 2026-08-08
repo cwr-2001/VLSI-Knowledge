@@ -1,0 +1,456 @@
+% ============================================================
+\section{使用宏模型}
+\subsection*{Working With Macro Models}
+
+在先进工艺技术的设计中使用存储器与宏单元，以降低内存使用并改善轨分析性能。宏模型在 RedHawk Fusion 与 RedHawk-SC Fusion 分析流程中均受支持。
+
+关于使用宏模型，见下列主题：
+\begin{itemize}
+  \item 生成宏模型（Generating Macro Models）
+  \item 创建 Block Context（Creating Block Contexts）
+\end{itemize}
+
+\subsection{生成宏模型}
+\subsubsection*{Generating Macro Models}
+
+要在分析层次化设计时考虑存储器 block 内部的电流与功耗分布，使用 \cmd{exec\_gds2rh} 为存储器 block 生成 RedHawk 宏模型。该命令在底层调用 RedHawk \texttt{gds2rh} 实用程序，从存储器 block 抽取电源网格与电流源，抽象级别从用于准确 block 级分析的完全详细模型到用于全芯片动态分析的抽象模型不等。
+
+\begin{noteBox}
+要使用 RedHawk \texttt{gds2rh} 实用程序创建 RedHawk 宏模型，必须在运行 \cmd{exec\_gds2rh} 之前用 \appopt{rail.redhawk\_path} 指定 RedHawk 可执行程序路径。
+\end{noteBox}
+
+生成的宏模型保存在当前工作目录或配置文件中指定的目录。要使用生成的宏模型运行轨分析，在运行 \cmd{analyze\_rail} 之前设置 \appopt{rail.macro\_models} \texttt{-value \{cell1 path1\}}。
+
+关于如何运行 RedHawk \texttt{gds2rh} 实用程序，见 \textit{RedHawk User Manual}。
+
+\subsubsection{所需配置文件}
+\subsubsection*{Required Configuration File}
+
+要使用 \texttt{gds2rh} 生成 RedHawk 宏模型，必须提供包含下列信息的配置文件：
+\begin{itemize}
+  \item GDS II 文件
+  \item 顶层设计名
+  \item 层映射文件
+  \item 电源与地 net 名
+\end{itemize}
+
+每个存储器指定一个配置文件。确保配置文件包含正确的宏模型生成语法，否则工具发出错误消息并终止模型生成过程。
+
+配置文件示例：
+\begin{lstlisting}
+LEF_FILE {
+  ./lef/saed32sram.lef
+}
+GDS_FILE ./gds/SRAMLP2RW128x16.gds
+GDS_MAP_FILE ./redhawk.gdslayermap
+OUTPUT_DIRECTORY SRAMLP2RW128x16_output
+
+USE_LEF_PINS_FOR_TRACING   1
+
+VDD_NETS {
+ VDD
+}
+GND_NETS {
+   VSS
+}
+TOP_CELL SRAMLP2RW128x16
+\end{lstlisting}
+
+\subsubsection{示例}
+\subsubsection*{Examples}
+
+为 SRAMLP2RW128x16、SRAMLP2RW32x4、SRAMLP2RW64x32 与 SRAMLP2RW64x8 存储器生成 RedHawk 宏模型：
+\begin{lstlisting}
+## Specify the path to the RedHawk executable ##
+set_app_options -name rail.redhawk_path -value $env(REDHAWK_IMAGE)/bin
+
+## Specify one configuration file per memory ##
+exec_gds2rh -config_file SRAMLP2RW128x16.config
+exec_gds2rh -config_file SRAMLP2RW32x4.config
+exec_gds2rh -config_file SRAMLP2RW64x32.config
+exec_gds2rh -config_file SRAMLP2RW64x8.config
+\end{lstlisting}
+
+使用上一示例生成的宏模型运行顶层轨分析：
+\begin{lstlisting}
+## Run rail analysis at top level ##
+
+open_lib
+open_block top
+link_block
+
+## Specify rail analysis setting ##
+create_taps
+set_app_options -name rail.tech_file -value test.tech
+set_app_options -name rail.lib_files -value test.lib
+...
+## Set macro model file ##
+set_app_options -name rail.macro_models \
+  -value { SRAMLP2RW128x16 ./data_ SRAMLP2RW128x16
+           SRAMLP2RW32x4 ./data_SRAMLP2RW32x4
+           SRAMLP2RW64x32 ./data_SRAMLP2RW64x32
+           SRAMLP2RW64x8 ./data_ SRAMLP2RW64x8
+         }
+
+## Run rail analysis ##
+analyze_rail -voltage_drop static -all_nets
+
+## Check rail results ##
+open_rail_result
+gui_start
+\end{lstlisting}
+
+\subsection{创建 Block Context}
+\subsubsection*{Creating Block Contexts}
+
+宏模型用于缩短先进工艺技术设计的总周转时间。当全芯片签核压降分析在宏中报告违例时，在 block 级修复违例再重跑全芯片分析以验证修复可能耗时较长。
+
+为缩短周转时间，可为宏 block 创建 context 模型。Context 模型描述 block 与全芯片设计之间的关系（含物理与电气信息），使你可通过运行 block 级分析而非全芯片分析来验证修复。
+
+要创建 context 模型，使用 \cmd{create\_context\_for\_sub\_block}。
+
+要使用生成的 block context 运行压降分析，在运行 \cmd{analyze\_rail} 之前设置 \appopt{rail.pad\_files} 与 \appopt{rail.block\_context\_model\_file}。
+
+\begin{noteBox}
+为 block 创建全芯片 context 仅在 RedHawk Fusion 中受支持。
+\end{noteBox}
+
+图~\ref{fig:block-ctx} 示出 block 中的修复可有效改善顶层设计性能。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.5cm}
+\textit{（原书 Figure 211：Fixing Violations in Block Contexts）}\\[0.3em]
+\small 请参阅原版 PDF 插图。
+\vspace{1.5cm}}}
+\caption{在 Block Context 中修复违例}
+\label{fig:block-ctx}
+\end{figure}
+
+\subsubsection{Block Context 的内容}
+\subsubsection*{Content of Block Contexts}
+
+\cmd{create\_context\_for\_sub\_block} 对 block 的全芯片 context 建模，包括物理模型与电气模型。
+
+\begin{itemize}
+  \item \textbf{物理模型}：描述 block 与全芯片设计之间连接的位置。这些 tap 位置通过追踪 RedHawk 寄生数据得到。物理模型在 \cmd{create\_context\_for\_sub\_block} 完成后以 \texttt{.ploc} 格式生成。
+  \item \textbf{电气模型}：基于有效电阻与电容的模型。工具使用原生电阻引擎计算有效电阻，用于峰值动态压降分析期间的等效电流计算。默认工具为指定 block 建模全芯片 context。电容数据由 RedHawk 抽取引擎得到。
+
+要为指定 block 创建电气模型，对 \cmd{create\_context\_for\_sub\_block} 指定 \opt{-electric\_model\_file}。电气模型以 \texttt{.context} 格式写出。
+\end{itemize}
+
+\subsubsection{示例}
+\subsubsection*{Examples}
+
+为 \texttt{top/cell\_inst\_1} block 创建 block context。生成的物理与电气模型分别为 \texttt{block.ploc} 与 \texttt{block.context}：
+\begin{lstlisting}
+##Create block context in top block ##
+open_block top
+create_context_for_sub_block \
+    -block_instance top/cell_inst_1 block.ploc \
+    -nets {VDD_TOP VSS_TOP} \
+    -electric_model_file block.context
+close_block
+
+##Run IR analysis with block context information in block-level design ##
+open_block block
+set_app_options -name rail.pad_files -value block.ploc
+set_app_options -name rail.block_context_model_file \
+    -value block.context
+analyze_rail -nets {VDD_BLOCK VSS_BLOCK} \
+     -voltage_drop static -extra_gsr_option_file extra.gsr
+...
+\end{lstlisting}
+
+仅为 \texttt{top/cell\_inst\_1} block 创建物理模型：
+\begin{lstlisting}
+##Create block context in top block ##
+open_block top
+create_context_for_sub_block \
+  -block_instance top/cell_inst_1 block.ploc \
+  -nets {VDD_TOP VSS_TOP}
+close_block
+
+##Run IR analysis with block context information in block-level design ##
+open_block block
+set_app_options -name rail.pad_files -value block.ploc
+analyze_rail -nets {VDD_BLOCK VSS_BLOCK} \
+     -voltage_drop static -extra_gsr_option_file extra.gsr
+...
+\end{lstlisting}
+
+% ============================================================
+\section{执行签核分析}
+\subsection*{Performing Signoff Analysis}
+
+RedHawk Fusion 或 RedHawk-SC Fusion 不支持 RedHawk 签核分析能力，例如信号电迁移或浪涌电流（inrush current）分析。若拥有 RedHawk 签核许可证，可通过 \appopt{rail.allow\_redhawk\_license\_checkout} 在 Fusion Compiler 环境中启用下列 RedHawk 签核分析功能。未列入下列列表的签核分析功能只能用 RedHawk 独立工具运行。
+
+\begin{itemize}
+  \item 使用定制宏模型的动态分析
+  \item 使用 package 模型的动态分析
+  \item 使用 RTL 级 VCD 文件的分析
+\end{itemize}
+
+要执行 RedHawk 签核分析：
+\begin{enumerate}
+  \item 修改 GSR 文件或 RedHawk 运行脚本以包含相关配置设置。
+  \item 设置下列应用选项以启用 RedHawk 签核功能：
+\begin{lstlisting}
+fc_shell> set_app_options \
+ -name rail.allow_redhawk_license_checkout -value true
+\end{lstlisting}
+将 \appopt{rail.allow\_redhawk\_license\_checkout} 设为 \texttt{true} 允许 RedHawk 工具在 Fusion Compiler 内检索相关 RedHawk 许可证以执行签核功能。默认为关闭。
+  \item 运行带 \opt{-extra\_gsr\_option\_file} 或 \opt{-redhawk\_script\_file} 的 \cmd{analyze\_rail}，执行 GSR 或 RedHawk 脚本文件中定义的分析。按需指定其它设置。
+
+\begin{noteBox}
+无法在 Fusion Compiler GUI 中显示 RedHawk 签核分析结果。
+\end{noteBox}
+  \item 继续分析流程中的其它步骤。
+\end{enumerate}
+
+\begin{seeAlsoBox}
+RedHawk Fusion 与 RedHawk-SC Fusion 概述
+\end{seeAlsoBox}
+
+% ============================================================
+\section{写出分析与检查报告}
+\subsection*{Writing Analysis and Checking Reports}
+
+检查或分析完成后，运行 \cmd{report\_rail\_result} 将分析或检查结果写出到文本文件。报告文件中功耗单位为瓦特，电流单位为安培，电压单位为伏特。
+
+要为调试目的从顶层 \texttt{RAIL\_DATABASE} 显示 block 级轨结果，使用 \opt{-top\_design} 与 \opt{-block\_instance}。详见「显示 Block 级轨结果」。
+
+要仅写出热点区域内单元或几何的轨结果，使用 \cmd{get\_instance\_result} 与 \cmd{get\_geometry\_result}。详见「生成基于实例的分析报告」与「生成基于几何的分析报告」。
+
+使用 \opt{-type} 指定要报告的数据或错误类型。表~\ref{tab:report-types} 列出支持的数据与错误类型。
+
+使用 \opt{-limit} 限制要报告的元素数量。设为零则按降序将全部元素写出到输出文件。
+
+使用 \opt{-threshold} 过滤写出到报告文件的数据。工具将大于指定阈值的数据写出到输出文件。该选项仅对下列数据类型有效：
+\begin{itemize}
+  \item \texttt{pg\_pin\_power}
+  \item \texttt{voltage\_drop\_or\_rise}
+  \item \texttt{effective\_voltage\_drop}
+\end{itemize}
+
+使用 \opt{-supply\_nets} 将报告限制到指定电源 net。该选项仅对下列数据类型有效：
+\begin{itemize}
+  \item \texttt{effective\_voltage\_drop}
+  \item \texttt{instance\_minimum\_path\_resistance}
+  \item \texttt{minimum\_path\_resistance}
+  \item \texttt{pg\_pin\_power}
+  \item \texttt{voltage\_drop\_or\_rise}
+\end{itemize}
+
+\begin{table}[htbp]
+\centering
+\caption{\texttt{report\_rail\_result} 支持的数据与错误类型（原书 Table 69）}
+\label{tab:report-types}
+\small
+\begin{tabularx}{\textwidth}{@{}l X@{}}
+\toprule
+\textbf{类型} & \textbf{说明} \\
+\midrule
+\texttt{effective\_voltage\_drop} & 有效电压值，单位伏特。 \\
+\texttt{effective\_resistance} & 有效电阻值。 \\
+\texttt{instance\_minimum\_path\_resistance} & 每个实例上的最小路径电阻值。 \\
+\texttt{instance\_power} & 每个实例上的功耗值，单位瓦特。 \\
+\texttt{minimum\_path\_resistance} & 每个电源或地 pin 上的最小路径电阻值。 \\
+\texttt{missing\_vias} & 不同层上电源 net 布线重叠但无 via 连接的区域。 \\
+\texttt{pg\_pin\_power} & 每个电源或地 pin 上的功耗值，单位瓦特。 \\
+\texttt{unconnected\_instances} & 未连接到任何理想电压源的实例。 \\
+\texttt{voltage\_drop\_or\_rise} & 动态压降或电压上升违例，单位伏特。 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+在输出报告文件中，工具以不同格式列出数据。例如：
+
+\begin{itemize}
+  \item 对于 \texttt{effective\_voltage\_drop} 类型：
+    \begin{itemize}
+      \item 报告静态分析结果时，格式为：
+\begin{lstlisting}
+cell_instance_pg_pin_name mapped_pg_pin_name supply_net_name
+   effective_voltage_drop
+\end{lstlisting}
+      \item 报告动态分析结果时，格式为：
+\begin{lstlisting}
+cell_instance_pg_pin_name mapped_pg_pin_name supply_net_name
+   average_effective_voltage_drop_in_tw
+   max_effective_voltage_drop_in_tw
+   min_effective_voltage_drop_in_tw
+   max_effective_voltage_drop
+\end{lstlisting}
+    \end{itemize}
+  \item 对于 \texttt{instance\_minimum\_path\_resistance}，结果按 \texttt{Total\_R} 值排序，格式为：
+\begin{lstlisting}
+Supply_net Total_R(ohm) R_to_power(ohm) R_to_ground(ohm)
+   Location Pin_name Instance_name
+\end{lstlisting}
+  \item 对于 \texttt{minimum\_path\_resistance}：
+\begin{lstlisting}
+full_path_cell_instance_name/pg_pin_name resistance
+\end{lstlisting}
+  \item 对于 \texttt{missing\_vias}：
+\begin{lstlisting}
+net_name via_location_x_y top_metal_layer bottom_via_layer
+   delta_voltage
+\end{lstlisting}
+  \item 对于 \texttt{pg\_pin\_power}：
+\begin{lstlisting}
+full_path_cell_instance_name pg_pin_name power
+\end{lstlisting}
+  \item 对于 \texttt{voltage\_drop\_or\_rise}：
+\begin{lstlisting}
+full_path_cell_instance_name/pg_pin_name voltage
+\end{lstlisting}
+  \item 对于 \texttt{unconnected\_instances} 错误类型，格式取决于错误条件：
+    \begin{itemize}
+      \item 当电源与/或地 net 与理想电压源物理断开时：
+\begin{lstlisting}
+unconnected_type {net_names} instance_name instance bbox
+\end{lstlisting}
+      \item 当电源或地 net 浮空或逻辑浮空但物理仍连接到理想电压源时：
+\begin{lstlisting}
+unconnected_type {net_names} instance_name:pin_name instance bbox
+\end{lstlisting}
+    \end{itemize}
+\end{itemize}
+
+写出前五个 PG pin 功耗值到 \texttt{power.rpt}：
+\begin{lstlisting}
+fc_shell> open_rail_result
+fc_shell> report_rail_result -type pg_pin_power -limit 5 \
+   -supply_nets { VSS } power.rpt
+fc_shell> sh cat power.rpt
+FI2/vss 4.81004e-06
+FI6/vss 4.80959e-06
+FI3/vss 4.79702e-06
+FI4/vss 4.79684e-06
+FI1/vss 4.79594e-06
+...
+\end{lstlisting}
+
+写出 VDD 与 VSS 的有效压降值到 \texttt{inst\_effvd.rpt}：
+\begin{lstlisting}
+fc_shell> open_rail_result
+fc_shell> report_rail_result -type effective_voltage_drop \
+   -supply_nets { VDD VSS } inst_effvd.rpt
+\end{lstlisting}
+
+写出单元实例的最小路径电阻值到 \texttt{inst\_minres.rpt}：
+\begin{lstlisting}
+fc_shell> open_rail_result
+fc_shell> report_rail_result -type instance_minimum_path_resistance \
+   -supply_nets { VDD VSS } inst_minres.rpt
+fc_shell> sh cat inst_minres.rpt
+
+Rmax(ohm) = 162.738
+Rmin(ohm) = 4.418
+======================================================================
+Supply_net Total_R(ohm) R_to_power(ohm) R_to_ground(ohm)
+Location Pin_name Instance_name
+======================================================================
+VDD 162.738 152.686 10.052 586.000,
+496.235 VDDL dataout_44_u
+VSS 156.266 137.963 18.303 544.000,
+613.235 VSS GPRs/U2317
+...
+\end{lstlisting}
+
+\subsection{显示 Block 级轨结果}
+\subsubsection*{Displaying Block-Level Rail Results}
+
+对顶层设计执行轨分析后，工具将分析结果保存在顶层轨数据库中。要定位 block 级设计中报告的问题，运行带 \opt{-top\_design} 与 \opt{-block\_instance} 的 \cmd{open\_rail\_result}，从顶层轨数据库摘录 block 级实例数据。工具随后基于摘录的 block 级轨分析数据为指定 block 实例显示地图。
+
+\begin{noteBox}
+block 级轨结果的摘录保存在内存中，退出当前会话时删除。
+\end{noteBox}
+
+下例打开 \texttt{./RAIL\_DATABASE} 目录中名为 \texttt{REDHAWK\_RESULT} 的轨结果（顶层设计 \texttt{bit\_coin} 的轨分析结果），然后为 block 实例 \texttt{slice\_5} 创建轨分析数据摘录。注意：此例中必须打开实例 \texttt{slice\_5} 的 block 设计，而非顶层设计。
+\begin{lstlisting}
+fc_shell> open_lib block.nlib
+fc_shell> open_block block
+fc_shell> set_app_options -name rail.database -value RAIL_DATABASE
+fc_shell> open_rail_result REDHAWK_RESULT \
+   -top_design bit_coin \
+   -block_instance slice_5
+fc_shell> report_rail_result
+\end{lstlisting}
+
+\subsection{生成基于实例的分析报告}
+\subsubsection*{Generating Instance-Based Analysis Reports}
+
+使用 \cmd{get\_instance\_result}，将带轨数据的单元实例写出到输出文本文件，单位由 \cmd{report\_units} 定义。
+
+使用 \opt{-type} 指定要报告的分析或检查类型。支持的分析类型：\texttt{effective\_voltage\_drop}、\texttt{current}、\texttt{effective\_resistance}、\texttt{min\_path\_resistance} 与 \texttt{power}。
+
+\cmd{get\_instance\_result} 的常用选项：
+
+\begin{tabularx}{\textwidth}{@{}l X@{}}
+\toprule
+\textbf{选项} & \textbf{说明} \\
+\midrule
+\opt{-net} & （可选）指定要报告的 net。未指定时报告全部电源 net 的数据。 \\
+\opt{-touching} & （可选）报告触及指定矩形区域（格式 \texttt{\{\{x1 y1\} \{x2 y2\}\}}）的单元实例。 \\
+\opt{-top} \textit{value} & （可选）报告压降值最大的前 N 个单元实例。 \\
+\opt{-threshold} & （可选）报告压降值大于指定阈值的单元实例。所有分析类型均支持。 \\
+\opt{-percentage} & （可选）报告压降值大于理想压降值指定百分比的单元实例。仅 \texttt{voltage\_drop} 类型支持。默认为 0.1，即理想电源电压的 10\%。 \\
+\opt{-histogram} & （可选）在报告中包含显示每 net 平均压降值的直方图。 \\
+\opt{-collection} & （可选）将单元实例报告为单元集合，而非基于列的文本报告。 \\
+\bottomrule
+\end{tabularx}
+
+示例——报告指定区域内的实例压降结果：
+\begin{lstlisting}
+fc_shell> get_instance_result -net VDD -type voltage_drop \
+   -touching {{1610 1968} {1620 1969}}
+Isw2/Isw2_pktpro/U179070 -0.053533
+Isw2/Isw2_pktpro/U64076 -0.0535949
+...
+\end{lstlisting}
+
+\begin{seeAlsoBox}
+电压热点分析
+\end{seeAlsoBox}
+
+\subsection{生成基于几何的分析报告}
+\subsubsection*{Generating Geometry-Based Analysis Reports}
+
+使用 \cmd{get\_geometry\_result}，将带轨结果的几何信息写出到输出文件，单位由 \cmd{report\_units} 定义。
+
+一次只能指定一个 net；指定多于一个 net 时显示错误消息。使用 \opt{-type} 指定分析或检查类型。支持的分析类型：\texttt{voltage\_drop} 与 \texttt{min\_path\_resistance}。
+
+报告格式：
+\begin{lstlisting}
+geometry bbox_value
+\end{lstlisting}
+
+\cmd{get\_geometry\_result} 的常用选项：
+
+\begin{tabularx}{\textwidth}{@{}l X@{}}
+\toprule
+\textbf{选项} & \textbf{说明} \\
+\midrule
+\opt{-layer} & （可选）指定要报告的层名或层号。未指定时报告全部层。 \\
+\opt{-touching} & （可选）指定矩形区域（格式 \texttt{\{\{x1 y1\} \{x2 y2\}\}}），报告触及该区域的全部几何层。 \\
+\opt{-top} \textit{value} & （可选）报告压降值最大的前 N 个几何层。 \\
+\opt{-threshold} & （可选）指定阈值；报告压降值大于该阈值的几何层。 \\
+\opt{-percentage} & （可选）指定百分比；报告压降值大于理想电源电压该百分比的几何层。例如百分比为 0.1 时，报告大于理想电源电压 10\% 的几何。 \\
+\opt{-histogram} & （可选）在报告中包含显示每 net 平均压降值的直方图。 \\
+\bottomrule
+\end{tabularx}
+
+示例——写出指定区域内带压降值的几何数据：
+\begin{lstlisting}
+fc_shell> get_geometry_result -net VDD -type voltage_drop \
+   -touching {{1610 1968} {1620 1969}}
+{ { 1616.475 1967.000 } { 1617.525 1969.800 } } metal5 0.00448
+{ { 1608.810 1946.000 } { 1611.190 1974.000 } } metal7 0.00446
+{ { 1608.000 1946.000 } { 1612.000 1974.000 } } metal9 0.00446
+\end{lstlisting}
+
+\begin{seeAlsoBox}
+电压热点分析
+\end{seeAlsoBox}

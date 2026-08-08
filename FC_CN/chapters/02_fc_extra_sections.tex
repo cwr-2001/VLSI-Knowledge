@@ -1,0 +1,638 @@
+\section{分析库}
+\subsection*{Analyzing Libraries}
+
+Fusion Compiler 提供下列库分析能力，有助于达成设计的性能、功耗与面积目标：
+\begin{itemize}
+  \item 识别库单元族（library cell families）中的冗余（redundant）、离群（outlier）与等价（equivalent）单元，可在后续实现流程步骤中将其排除在优化之外。
+  \item 识别库单元族中的缺口（gaps），可作为反馈提供给库供应商，以改进参考库。
+  \item 比较不同库或同一库不同版本中等价单元的延迟、功耗、面积及其他特性，有助于确定适合设计实现的库。
+\end{itemize}
+
+库单元族是共享某些共同属性的单元集合。工具可基于下列方式识别库单元族：
+\begin{itemize}
+  \item 用户标识的库单元属性，例如功能（function）、阈值电压（threshold voltage）等；
+  \item 用户定义的库单元词法属性（lexical attributes）与设置；
+  \item 用户指定的自定义库单元族。
+\end{itemize}
+
+下图给出执行库分析的高层流程。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.2cm}
+\textit{（原书 Figure 8：Library Analysis Flow）}\\[0.3em]
+\small 库分析高层流程；请参阅原版 PDF。
+\vspace{1.2cm}}}
+\caption{库分析流程}
+\label{fig:fc-lib-analysis-flow}
+\end{figure}
+
+关于不同类型库分析流程的更多信息，见下列主题：
+\begin{itemize}
+  \item 库单元族中冗余、离群、等价与缺口简介
+  \item 识别库单元族中的冗余、离群、等价与缺口
+  \item 比较库
+\end{itemize}
+
+\subsection{库单元族中冗余、离群、等价与缺口简介}
+\subsubsection*{Introduction to Redundancies, Outliers, Equivalences, and Gaps in Library Cell Families}
+
+当功能相同的单元族按驱动强度（drive strength）递增排序时，特定单元属性值应单调递增或递减。例如，按驱动强度递增排序时，单元面积应单调递增，功耗应递增，而延迟（在相同输出负载与输入 slew 下）应递减。
+
+下图给出功能相同的单元族中，单元面积相对时序的单调分布。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.2cm}
+\textit{（原书 Figure 9：Monotonic Distribution in Library Cell Family）}\\[0.3em]
+\small 单元面积相对时序的单调分布；请参阅原版 PDF。
+\vspace{1.2cm}}}
+\caption{库单元族中的单调分布}
+\label{fig:fc-lib-monotonic}
+\end{figure}
+
+若某单元的全部度量（如面积、延迟、功耗等）均等于或劣于另一单元，则该单元被视为\textbf{冗余}（redundant），如下图所示（功能相同的单元族中单元面积相对时序的图）。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.2cm}
+\textit{（原书 Figure 10：Redundant Cell in Library Cell Family）}\\[0.3em]
+\small 冗余单元示意；请参阅原版 PDF。
+\vspace{1.2cm}}}
+\caption{库单元族中的冗余单元}
+\label{fig:fc-lib-redundant}
+\end{figure}
+
+若某单元的度量相对期望值有很大偏差，则该单元被视为\textbf{离群}（outlier），如下图所示（功能相同的单元族中单元面积相对时序的图）。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.2cm}
+\textit{（原书 Figure 11：Outlier Cell in Library Cell Family）}\\[0.3em]
+\small 离群单元示意；请参阅原版 PDF。
+\vspace{1.2cm}}}
+\caption{库单元族中的离群单元}
+\label{fig:fc-lib-outlier}
+\end{figure}
+
+若单元在所有工艺、电压与温度（process, voltage, and temperature，PVT）取值下全部属性均相同，则这些单元被视为\textbf{等价}（equivalent），如下图所示（功能相同的单元族中单元面积相对时序的图）。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.2cm}
+\textit{（原书 Figure 12：Equivalent Cells in Library Cell Family）}\\[0.3em]
+\small 等价单元示意；请参阅原版 PDF。
+\vspace{1.2cm}}}
+\caption{库单元族中的等价单元}
+\label{fig:fc-lib-equivalent}
+\end{figure}
+
+当相邻两个驱动强度之间存在很大差异时，即存在\textbf{缺口}（gap），如下图所示（功能相同的单元族中单元面积相对时序的图）。
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{1.2cm}
+\textit{（原书 Figure 13：Gap in Library Cell Family）}\\[0.3em]
+\small 驱动强度缺口示意；请参阅原版 PDF。
+\vspace{1.2cm}}}
+\caption{库单元族中的缺口}
+\label{fig:fc-lib-gap}
+\end{figure}
+
+\subsection{识别库单元族中的冗余、离群、等价与缺口}
+\subsubsection*{Identifying Redundancies, Outliers, Equivalences, and Gaps in Library Cell Families}
+
+要识别单元族中的冗余、离群、等价与缺口，执行下列步骤：
+
+\begin{enumerate}
+  \item 用 \cmd{create\_libset} 创建待分析库的集合（称为 \textbf{libset}），例如：
+\begin{lstlisting}
+fc_shell> create_libset -name myLibset -libs {abcd1 abcd2}
+\end{lstlisting}
+    执行库分析时，可指定 libset 名，而不必指定库列表。此外，工具在分析期间生成报告、绘图等时也使用 libset 名，而非库名列表。\\
+    可将同一单元库包含在多个 libset 中。
+
+  \item 用 \cmd{create\_environment} 设置库分析环境。\\
+    \cmd{create\_environment} 将预定义的 libset 与工艺标签（process label）、工艺编号（process number）、电压与温度关联，随后用于分析库。\\
+    可用下列方法之一指定分析环境的工艺标签、工艺编号、电压与温度：
+    \begin{itemize}
+      \item 用 \opt{-ppvt} 直接指定工艺标签、工艺编号、电压与温度，例如：
+\begin{lstlisting}
+fc_shell> create_environment -name env1 -libset myLibset \
+   -ppvt {{SS1p, 1.0, 0.6, 125}}
+\end{lstlisting}
+      \item 用 \opt{-op\_conds} 指定参考库中的预定义工作条件，例如：
+\begin{lstlisting}
+fc_shell> create_environment -name env2 -libset myLibset \
+   -op_conds SS1p6125
+\end{lstlisting}
+      \item 用 \opt{-corners} 指定 corner，由工具从中推断工艺标签、工艺编号、电压与温度，例如：
+\begin{lstlisting}
+fc_shell> create_environment -name env3 -libset myLibset \
+   -corners nworst
+\end{lstlisting}
+      \item 用 \opt{-auto\_infer\_design} 指定由工具从当前设计关联的 scenario 与 UPF 推断工艺标签、工艺编号、电压与温度，例如：
+\begin{lstlisting}
+fc_shell> create_environment -name env4 -libset myLibset \
+   -auto_infer_design
+\end{lstlisting}
+    \end{itemize}
+
+  \item （可选）为库单元指定命名约定，并用词法属性执行词法分类（lexical classification）。\\
+    库单元命名约定有助于工具在后续流程步骤中识别单元族。\\
+    例如，假定库中某单元名为 \texttt{AND2D4WSULVT}。该名称是 \texttt{AND2}、\texttt{D4}、\texttt{WS} 与 \texttt{ULVT} 字符串的拼接，分别表示与某词法属性关联的单元特性，如下表所示：
+
+\begin{table}[htbp]
+\centering
+\caption{示例库命名约定的词法属性}
+\label{tab:fc-lexical-attrs-1}
+\begin{tabularx}{\textwidth}{@{}c l X l@{}}
+\toprule
+\textbf{列} & \textbf{词法属性} & \textbf{允许模式} & \textbf{示例单元取值} \\
+\midrule
+1 & \texttt{lexical\_cell\_prefix\_name} & \texttt{[a-zA-Z0-9]*} & \texttt{AND2} \\
+2 & \texttt{lexical\_drive1\_name} & \texttt{D[0-9]*} & \texttt{D4} \\
+3 & \texttt{lexical\_well\_substrate\_bias\_architecure} & \texttt{WS} & \texttt{WS} \\
+4 & \texttt{lexical\_device\_threshold\_voltage} & \texttt{ULVT | SVT | LVT | MVT} & \texttt{ULVT} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+    可用 \cmd{set\_lib\_cell\_naming\_convention} 为该库指定命名约定，例如：
+\begin{lstlisting}
+fc_shell> set_lib_cell_naming_convention -library $lib \
+   -column 1 -pattern {[a-zA-Z0-9]*} -attribute \
+   "lexical_cell_prefix_name"
+fc_shell> set_lib_cell_naming_convention -library $lib \
+   -column 2 -pattern {D[0-9]*} -attribute "lexical_drive1_name"
+fc_shell> set_lib_cell_naming_convention -library $lib \
+   -column 3 -pattern {WS} -attribute \
+   "lexical_well_substrate_bias_architecure"
+fc_shell> set_lib_cell_naming_convention -library $lib \
+   -column 4 -pattern {ULVT|SVT|LVT|MVT} -attribute \
+   "lexical_device_threshold_voltage"
+\end{lstlisting}
+
+\begin{noteBox}
+预定义词法属性的完整列表见 \cmd{set\_lib\_cell\_naming\_convention} 命令的 man page。
+\end{noteBox}
+
+    指定命名约定后，用 \cmd{classify\_lib\_cell\_attributes} 执行词法分类，例如：
+\begin{lstlisting}
+fc_shell> classify_lib_cell_attributes -libset myLibset
+\end{lstlisting}
+    要用 \cmd{report\_lib\_cell\_classification\_attributes} 报告词法分类结果。\\
+    要用 \cmd{report\_lexical\_unclassified\_lib\_cells} 报告在给定命名约定下未被词法分类的库单元。若存在未分类单元，请补充命名约定并重新运行词法分类。
+
+  \item （可选）用 \cmd{set\_use\_for\_library\_analysis} 将特定单元排除在库分析之外。\\
+    默认情况下，工具在库分析期间排除仅物理单元（physical-only cells）。但你可排除更多单元，例如带有 \texttt{dont\_use} 设置的库单元：
+\begin{lstlisting}
+fc_shell> set exclude_cells [filter_collection [get_lib_cells $libs/*] \
+   "dont_use == true"]
+fc_shell> set_use_for_library_analysis $exclude_cells false
+\end{lstlisting}
+    要用 \cmd{report\_lexical\_ignored\_lib\_cells} 报告被排除的单元。
+
+  \item 用 \cmd{identify\_lib\_cell\_families} 识别全部库单元族。\\
+    要用 \cmd{report\_lib\_cell\_families -all\_initial} 报告工具识别的库单元族。\\
+    要手动定义库单元族，使用 \cmd{define\_lib\_cell\_family}。要用 \cmd{report\_lib\_cell\_families -all\_userdef} 报告这些用户定义的单元族。
+
+  \item 用 \cmd{run\_library\_analysis} 分析库，例如：
+\begin{lstlisting}
+fc_shell> run_library_analysis -name myLibset_run1 -environment env1
+\end{lstlisting}
+    用 \opt{-environment} 指定的环境名必须对应先前用 \cmd{create\_environment} 创建的环境。
+
+  \item 用 \cmd{find\_library\_redundancies} 识别库单元族中的冗余，例如：
+\begin{lstlisting}
+fc_shell> find_library_redundancies -analysis myLibset_run1
+\end{lstlisting}
+    用 \opt{-analysis} 指定的分析名必须对应先前用 \cmd{run\_library\_analysis} 执行的分析。\\
+    除冗余单元外，\cmd{find\_library\_redundancies} 还会识别库单元族中的离群单元与等价单元。
+
+  \item 用 \cmd{find\_library\_gaps} 识别库单元族中的缺口，例如：
+\begin{lstlisting}
+fc_shell> find_library_gaps -analysis myLibset_run1
+\end{lstlisting}
+    用 \opt{-analysis} 指定的分析名必须对应先前用 \cmd{run\_library\_analysis} 执行的分析。
+
+  \item 用 \cmd{report\_library\_analysis} 报告库分析期间识别的库单元缺口、冗余、离群与等价，例如：
+\begin{lstlisting}
+fc_shell> report_library_analysis -analysis myLibset_run1 \
+   -analysis_type redundancy -detail
+fc_shell> report_library_analysis -analysis myLibset_run1 \
+   -analysis_type outlier -detail
+fc_shell> report_library_analysis -analysis myLibset_run1 \
+   -analysis_type equivalent -detail
+fc_shell> report_library_analysis -analysis myLibset_run1 \
+   -analysis_type gap -detail
+\end{lstlisting}
+
+  \item 用 \cmd{gui\_plot\_lib\_cells\_attributes} 生成绘图，例如：
+\begin{lstlisting}
+fc_shell> gui_plot_lib_cells_attributes -libset myLibset \
+  -lib_cell_type all -x_attrib_name leakage -y_attrib_name \
+  avgsl_fall_delay \
+  -chart_type scatter
+\end{lstlisting}
+\end{enumerate}
+
+\subsection{比较库}
+\subsubsection*{Comparing Libraries}
+
+要比较库，执行下列步骤：
+
+\begin{enumerate}
+  \item 用 \cmd{create\_libset} 创建待分析库的集合（libset），例如：
+\begin{lstlisting}
+fc_shell> create_libset -name myLibset -libs {abcd1.db abcd2.db}
+\end{lstlisting}
+    执行库分析时，可指定 libset 名，而不必指定库列表。此外，工具在分析期间生成报告、绘图等时也使用 libset 名，而非库名列表。\\
+    可将同一单元库包含在多个 libset 中。
+
+  \item 用 \cmd{create\_environment} 设置库分析环境。\\
+    \cmd{create\_environment} 将预定义的 libset 与工艺标签、工艺编号、电压与温度关联，随后用于分析库。\\
+    可用下列方法之一指定分析环境的工艺标签、工艺编号、电压与温度：
+    \begin{itemize}
+      \item 用 \opt{-ppvt} 直接指定工艺标签、工艺编号、电压与温度，例如：
+\begin{lstlisting}
+fc_shell> create_environment -name env1 -libset myLibset \
+   -ppvt {{SS1p, 1.0, 0.6, 125}}
+\end{lstlisting}
+      \item 用 \opt{-op\_conds} 指定参考库中的预定义工作条件，例如：
+\begin{lstlisting}
+fc_shell> create_environment -name env2 -libset myLibset \
+   -op_conds SS1p6125
+\end{lstlisting}
+      \item 用 \opt{-corners} 指定 corner，由工具从中推断工艺标签、工艺编号、电压与温度，例如：
+\begin{lstlisting}
+fc_shell> create_environment -name env3 -libset myLibset \
+   -corners nworst
+\end{lstlisting}
+      \item 用 \opt{-auto\_infer\_design} 指定由工具从当前设计关联的 scenario 与 UPF 推断工艺标签、工艺编号、电压与温度，例如：
+\begin{lstlisting}
+fc_shell> create_environment -name env4 -libset myLibset \
+   -auto_infer_design
+\end{lstlisting}
+    \end{itemize}
+
+  \item （可选）为库单元指定命名约定，并用词法属性执行词法分类。\\
+    库单元命名约定有助于工具在后续流程步骤中识别单元族。\\
+    例如，假定库中某单元名为 \texttt{AND2D4WSULVT}。该名称是 \texttt{AND2}、\texttt{D4}、\texttt{WS} 与 \texttt{ULVT} 字符串的拼接，分别表示与某词法属性关联的单元特性，如下表所示：
+
+\begin{table}[htbp]
+\centering
+\caption{示例库命名约定的词法属性（比较库）}
+\label{tab:fc-lexical-attrs-2}
+\begin{tabularx}{\textwidth}{@{}c l X l@{}}
+\toprule
+\textbf{列} & \textbf{词法属性} & \textbf{允许模式} & \textbf{示例单元取值} \\
+\midrule
+1 & \texttt{lexical\_cell\_prefix\_name} & \texttt{[a-zA-Z0-9]*} & \texttt{AND2} \\
+2 & \texttt{lexical\_drive1\_name} & \texttt{D[0-9]*} & \texttt{D4} \\
+3 & \texttt{lexical\_well\_substrate\_bias\_architecure} & \texttt{WS} & \texttt{WS} \\
+4 & \texttt{lexical\_device\_threshold\_voltage} & \texttt{ULVT | SVT | LVT | MVT} & \texttt{ULVT} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+    可用 \cmd{set\_lib\_cell\_naming\_convention} 为该库指定命名约定，例如：
+\begin{lstlisting}
+fc_shell> set_lib_cell_naming_convention -library $lib \
+   -column 1 -pattern {[a-zA-Z0-9]*} -attribute \
+   "lexical_cell_prefix_name"
+fc_shell> set_lib_cell_naming_convention -library $lib \
+   -column 2 -pattern {D[0-9]*} -attribute "lexical_drive1_name"
+fc_shell> set_lib_cell_naming_convention -library $lib \
+   -column 3 -pattern {WS} -attribute \
+   "lexical_well_substrate_bias_architecure"
+fc_shell> set_lib_cell_naming_convention -library $lib \
+   -column 4 -pattern {ULVT|SVT|LVT|MVT} -attribute \
+   "lexical_device_threshold_voltage"
+\end{lstlisting}
+
+\begin{noteBox}
+预定义词法属性的完整列表见 \cmd{set\_lib\_cell\_naming\_convention} 命令的 man page。
+\end{noteBox}
+
+    指定命名约定后，用 \cmd{classify\_lib\_cell\_attributes} 执行词法分类，例如：
+\begin{lstlisting}
+fc_shell> classify_lib_cell_attributes -libset myLibset
+\end{lstlisting}
+    要用 \cmd{report\_lib\_cell\_classification\_attributes} 报告词法分类结果。\\
+    要用 \cmd{report\_lexical\_unclassified\_lib\_cells} 报告在给定命名约定下未被词法分类的库单元。若存在未分类单元，请补充命名约定并重新运行词法分类。
+
+  \item （可选）用 \cmd{set\_use\_for\_library\_analysis} 将特定单元排除在库分析之外。\\
+    默认情况下，工具在库分析期间排除仅物理单元。但你可排除更多单元，例如带有 \texttt{dont\_use} 设置的库单元：
+\begin{lstlisting}
+fc_shell> set exclude_cells [filter_collection [get_lib_cells $libs/*] \
+   "dont_use == true"]
+fc_shell> set_use_for_library_analysis $exclude_cells false
+\end{lstlisting}
+    要用 \cmd{report\_lexical\_ignored\_lib\_cells} 报告被排除的单元。
+
+  \item 用 \cmd{identify\_lib\_cell\_families} 识别全部库单元族。\\
+    要用 \cmd{report\_lib\_cell\_families -all\_initial} 报告工具识别的库单元族。\\
+    要手动定义库单元族，使用 \cmd{define\_lib\_cell\_family}；要用 \cmd{report\_lib\_cell\_families -all\_userdef} 报告这些用户定义的单元族。
+
+  \item 用 \cmd{run\_library\_analysis} 分析库，例如：
+\begin{lstlisting}
+fc_shell> run_library_analysis -name myLibset_run1 -environment env1
+\end{lstlisting}
+    用 \opt{-environment} 指定的环境名必须对应先前用 \cmd{create\_environment} 创建的环境。
+
+  \item 用 \cmd{compare\_libraries} 比较库。\\
+    此时必须用 \opt{-ref\_lib} 与 \opt{-target\_lib} 指定要比较的两个库。此外，必须用 \opt{-ref\_lib\_analysis} 与 \opt{-target\_lib\_analysis} 为每个库指定先前用 \cmd{run\_library\_analysis} 执行的库分析运行名，例如：
+\begin{lstlisting}
+fc_shell> compare_libraries -ref_lib $rvt_lib -ref_lib_analysis sa \
+   -target_lib $lvt_lib -target_lib_analysis sa -verbose -plot
+\end{lstlisting}
+    比较库时，可能遇到下列与参考库、目标库单元名称匹配相关的情况：
+    \begin{itemize}
+      \item 参考库与目标库中的单元名可完全匹配，例如同一库的两个不同版本。此时无需额外词法分类。
+      \item 参考库与目标库可具有相同命名约定，但其中一个库的词法属性较少。\\
+        例如，假定参考库中名为 \texttt{ND2D1SVT} 的单元与目标库中名为 \texttt{ND2D1} 的单元匹配。此时目标库单元名不含 \texttt{lexical\_device\_threshold\_voltage} 属性，如下表所示。
+
+\begin{table}[htbp]
+\centering
+\caption{参考库与目标库词法属性差异（属性缺失）}
+\label{tab:fc-lex-diff-missing}
+\begin{tabularx}{\textwidth}{@{}X l l@{}}
+\toprule
+\textbf{词法属性} & \textbf{参考库} & \textbf{目标库} \\
+\midrule
+\texttt{lexical\_cell\_prefix\_name} & \texttt{ND2} & \texttt{ND2} \\
+\texttt{lexical\_drive1\_name} & \texttt{D1} & \texttt{D1} \\
+\texttt{lexical\_device\_threshold\_voltage} & \texttt{SVT} & --- \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+        在此情况下，比较两个库时应忽略 \texttt{lexical\_device\_threshold\_voltage} 属性。为此，在运行 \cmd{compare\_libraries} 之前使用下列应用选项设置：
+\begin{lstlisting}
+fc_shell> set_app_options -name libra.complib.match_full_cell_name \
+ -value false
+fc_shell> set_app_options -name \
+ libra.complib.match_lexical_device_threshold_voltage -value false
+fc_shell> compare_libraries -ref_lib $rvt_lib -ref_lib_analysis sa \
+   -target_lib $lvt_lib -target_lib_analysis sa -verbose -plot
+\end{lstlisting}
+
+\begin{noteBox}
+控制库比较期间名称匹配的应用选项完整列表见 \cmd{compare\_libraries} 命令的 man page。
+\end{noteBox}
+
+      \item 参考库与目标库可具有相似命名约定，但词法属性取值可能并不相同。\\
+        例如，假定参考库中名为 \texttt{ND2D1SVT} 的单元与目标库中名为 \texttt{nand2\_svth\_x1} 的单元匹配。此时两库具有相同词法属性，但取值相似而不完全相同，如下表所示。
+
+\begin{table}[htbp]
+\centering
+\caption{参考库与目标库词法属性差异（取值不同）}
+\label{tab:fc-lex-diff-values}
+\begin{tabularx}{\textwidth}{@{}X l l@{}}
+\toprule
+\textbf{词法属性} & \textbf{参考库} & \textbf{目标库} \\
+\midrule
+\texttt{lexical\_cell\_prefix\_name} & \texttt{ND2} & \texttt{nand2} \\
+\texttt{lexical\_drive1\_name} & \texttt{D1} & \texttt{x1} \\
+\texttt{lexical\_device\_threshold\_voltage} & \texttt{SVT} & \texttt{svth} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+        在此情况下，必须创建包含下列信息的词法属性映射文件：
+\begin{lstlisting}
+lexical_cell_prefix_name      ND2  nand2
+lexical_drive1_name               D1   x1
+lexical_device_threshold_voltage  SVT  svth
+\end{lstlisting}
+        然后，运行 \cmd{compare\_libraries} 时必须用 \opt{-lex\_attr\_mapping} 指定该词法属性映射文件，例如：
+\begin{lstlisting}
+fc_shell> set_app_options -name libra.complib.match_full_cell_name \
+ -value false
+fc_shell> compare_libraries -ref_lib $rvt_lib -ref_lib_analysis sa \
+   -target_lib $lvt_lib -target_lib_analysis sa \
+   -lex_attr_mapping attribute_map_file -verbose -plot
+\end{lstlisting}
+
+      \item 参考库与目标库的命名约定完全不同。\\
+        在此情况下，必须创建包含待比较单元对的自定义映射文件，例如：
+\begin{lstlisting}
+INVD2BWP     INVD1BWPHVT
+INVD2BWP     BUFFD4BWPHVT
+ND2D2BWP     ND2D4BWPHVT
+DFQD4BWP     SDFQD4BWPHVT
+\end{lstlisting}
+        然后，运行 \cmd{compare\_libraries} 时必须用 \opt{-custom\_pairs} 指定该映射文件，例如：
+\begin{lstlisting}
+fc_shell> set_app_options -name libra.complib.match_full_cell_name \
+ -value false
+fc_shell> compare_libraries -ref_lib $rvt_lib -ref_lib_analysis sa \
+   -target_lib $lvt_lib -target_lib_analysis sa \
+   -custom_pairs custom_map_file -verbose -plot
+\end{lstlisting}
+    \end{itemize}
+\end{enumerate}
+
+% ============================================================
+\section{读取设计}
+\subsection*{Reading the Design}
+
+读取设计之前，必须创建或打开与该设计关联的设计库，见「设置库」（Setting Up Libraries）。
+
+工具可读取 SystemVerilog、Verilog 或 VHDL 格式的 RTL 设计，以及 Verilog 格式的门级网表（gate-level netlists）。
+
+用下列方法读取设计：
+\begin{itemize}
+  \item 以 SystemVerilog、Verilog 或 VHDL 格式读取 RTL 文件
+  \item 使用 \opt{-autoread} 选项读取设计
+  \item 使用 VCS 命令行选项读取设计
+  \item 读取 Verilog 门级网表文件
+  \item 读取混合的门级网表与 RTL 文件
+\end{itemize}
+
+默认情况下，工具读取 RTL 或门级网表文件时，会在当前设计库中创建一个 block，并增加其打开计数。工具通过识别在指定文件中未被其他模块例化的模块来确定 block 的顶层模块，并以该顶层模块名作为 block 名。
+
+用下列命令处理 block：
+\begin{itemize}
+  \item \cmd{create\_block}：创建 block
+  \item \cmd{open\_block}：打开已有 block
+  \item \cmd{current\_block}：设置或报告当前 block
+  \item \cmd{save\_block}：保存 block
+  \item \cmd{close\_blocks}：关闭 block
+\end{itemize}
+
+\begin{seeAlsoBox}
+参见：Blocks；Working With Design Libraries。
+\end{seeAlsoBox}
+
+\subsection{以 SystemVerilog、Verilog 或 VHDL 格式读取 RTL 文件}
+\subsubsection*{Reading RTL Files in SystemVerilog, Verilog, or VHDL Format}
+
+使用 \cmd{analyze} 与 \cmd{elaborate} 命令，随后使用 \cmd{set\_top\_module}。
+
+\cmd{analyze} 会根据 \opt{-hdl\_library} 选项提供的库名，在磁盘上自动创建 HDL 模板库（HDL template libraries）。HDL 模板库的位置由 \appopt{hdlin.hdl\_library.default\_dirname} 应用选项控制。未指定 \opt{-hdl\_library} 时，默认库名为 \texttt{WORK}。要用 \appopt{hdlin.hdl\_library.default\_name} 指定不同的默认库名。
+
+\begin{noteBox}
+控制 RTL 读取行为的全部应用选项均带有 \texttt{hdlin} 前缀。
+\end{noteBox}
+
+\cmd{elaborate} 构建指定模块，但不链接设计的其余部分。设计链接只能在整个设计都已在内存中之后执行，因此 \cmd{elaborate} 不执行链接。这允许在对整个设计执行一次链接之前运行多次 \cmd{elaborate}。顶层模块必须是已 elaborate 的模块之一。
+
+用 \cmd{set\_top\_module} 完成设计链接并设置顶层模块。顶层模块作为参数传给 \cmd{set\_top\_module}。顶层模块必须是先前用 \cmd{elaborate} 已 elaborate 的模块。\cmd{set\_top\_module} 将指定模块设为顶层设计，链接整个设计，并创建一个供后续综合流程使用的单一 block。
+
+下列脚本用模板库读取 VHDL 文件并创建名为 \texttt{top} 的 block。无需指定磁盘上模板库的位置；\cmd{analyze} 会根据 \opt{-hdl\_library} 自动创建：
+\begin{lstlisting}
+analyze -format vhdl -hdl_library BOT_HDL_LIB bot.vhd
+analyze -format vhdl -hdl_library MID_HDL_LIB mid.vhd
+analyze -format vhdl top.vhd
+elaborate top
+set_top_module top
+\end{lstlisting}
+
+若顶层设计被分析到默认库以外的 HDL 模板库，应用 \opt{-hdl\_library} 为顶层设计提供 HDL 模板库名。例如：
+\begin{lstlisting}
+analyze -format vhdl -hdl_library BOT_HDL_LIB bot.vhd
+analyze -format vhdl -hdl_library MID_HDL_LIB mid.vhd
+analyze -format vhdl -hdl_library TOP_HDL_LIB top.vhd
+elaborate -hdl_library TOP_HDL_LIB top
+set_top_module top
+\end{lstlisting}
+
+也可选用 \cmd{define\_hdl\_library} 指定磁盘上 HDL 模板库的位置。例如：
+\begin{lstlisting}
+define_hdl_library BOT_HDL_LIB -path ./TEMPLATES/BOT_HDL_LIB
+define_hdl_library MID_HDL_LIB -path ./TEMPLATES/MID_HDL_LIB
+define_hdl_library WORK -path ./TEMPLATES/WORK
+analyze -format vhdl -hdl_library BOT_HDL_LIB bot.vhd
+analyze -format vhdl -hdl_library MID_HDL_LIB mid.vhd
+analyze -format vhdl top.vhd
+elaborate top
+set_top_module top
+\end{lstlisting}
+
+\subsection{使用 \texttt{-autoread} 选项读取设计}
+\subsubsection*{Reading Designs Using the -autoread Option}
+
+要让工具自动读取 RTL 文件列表，对 \cmd{analyze} 指定 \opt{-autoread}，如下例所示。指定该选项时，用于分析 RTL 文件的 RTL 语言由文件扩展名自动确定。要用下列应用选项控制文件扩展名：\appopt{hdlin.autoread.verilog\_extensions}、\appopt{hdlin.autoread.sverilog\_extensions}、\appopt{hdlin.autoread.vhdl\_extensions} 以及 \appopt{hdlin.autoread.exclude\_extensions}。
+\begin{lstlisting}
+set DESIGN_NAME top
+analyze -autoread -top ${DESIGN_NAME} ${RTL_FILE_LIST}
+elaborate ${DESIGN_NAME}
+elaborate -hdl_library TOP_HDL_LIB top
+set_top_module ${DESIGN_NAME}
+\end{lstlisting}
+
+\subsection{使用 VCS 命令行选项读取设计}
+\subsubsection*{Reading Designs Using the VCS Command-line Options}
+
+带 VCS 命令行选项的 \cmd{analyze} 提供与 VCS 仿真脚本的兼容性，并便于读取大型设计。使用 VCS 命令行选项时，工具通过在指定库中搜索被引用设计并加载这些设计，自动解析已例化设计的引用（references）。
+
+要读取包含大量 HDL 源文件与库的设计，对 \cmd{analyze} 指定 \opt{-vcs}。必须将 VCS 命令行选项括在双引号中。
+
+例如：
+\begin{lstlisting}
+analyze -vcs "-verilog -y mylibdir1 +libext+.v -v myfile1 \
+   +incdir+myincludedir1 -f mycmdfile2" top.v
+elaborate ${DESIGN_NAME}
+set_top_module ${DESIGN_NAME}
+\end{lstlisting}
+
+要在同一次 \cmd{analyze} 中读取指定扩展名的 SystemVerilog 文件与 Verilog 文件，使用 \opt{-vcs "+systemverilogext+ext"}。此时文件不得包含任何 Verilog 2001 风格。
+
+例如，下列命令分析扩展名为 \texttt{.sv} 的 SystemVerilog 文件以及 Verilog 文件：
+\begin{lstlisting}
+analyze -format verilog -vcs "-f F +systemverilogext+.sv"
+elaborate ${DESIGN_NAME}
+set_top_module ${DESIGN_NAME}
+\end{lstlisting}
+
+\subsection{读取 Verilog 门级网表文件}
+\subsubsection*{Reading Verilog Gate-Level Netlist Files}
+
+用 \cmd{read\_verilog} 通过专用 Verilog 网表读取器读取 Verilog 网表文件。该命令不能用于读取 Verilog RTL 文件。读取 RTL 文件应仅使用 \cmd{analyze} 与 \cmd{elaborate}。读取网表后使用 \cmd{set\_top\_module} 指定顶层模块并链接设计以创建 block。
+\begin{lstlisting}
+read_verilog top.netlist.v
+set_top_module top
+\end{lstlisting}
+
+当文件含有多个独立模块时，用 \opt{-top} 标识顶层模块。例如：
+\begin{lstlisting}
+read_verilog -top top2 netlists.v
+set_top_module top2
+\end{lstlisting}
+
+要指定不同于 \texttt{top\_module\_name.design} 的新 block 名，使用 \opt{-design}。例如：
+\begin{lstlisting}
+read_verilog -top my_top -design desA ../my_data/my_des.v
+set_top_module my_top
+\end{lstlisting}
+
+\subsection{读取混合的门级网表与 RTL 文件}
+\subsubsection*{Reading Mixed Gate-Level Netlists and RTL Files}
+
+可以读取 Verilog 网表与 RTL 文件的组合。用 \cmd{read\_verilog} 读取 Verilog 网表；用 \cmd{analyze} 与 \cmd{elaborate} 读取 RTL 文件。全部网表文件与 RTL 文件读入工具后，用 \cmd{set\_top\_module} 链接设计以创建用于综合的 block。
+
+下例说明如何读取网表与 RTL 的混合。如本例所示，带参数 elaborate 顶层模块时，顶层模块名也会包含参数化模块名。可用下列应用选项控制参数化模块的命名风格：\appopt{hdlin.naming.template\_naming\_style}、\appopt{hdlin.naming.template\_parameter\_style} 以及 \appopt{hdlin.naming.template\_separator\_style}。
+\begin{lstlisting}
+# Read netlist files
+read_verilog NETLIST/bot.v
+# Analyze design files
+analyze -format sverilog -hdl_library MID RTL/mid.sv
+analyze -format sverilog                  RTL/top.svd
+# Elaborate top design module
+elaborate -parameters "N=8,M=3" top
+# Set the top level module to resolve references
+set_top_module top_N8_M3
+\end{lstlisting}
+
+\subsection{在 RTL 代码中嵌入 Tcl 命令}
+\subsubsection*{Embedding Tcl Commands in RTL Code}
+
+要在 RTL 代码中嵌入 Tcl 命令，使用 \texttt{fc\_tcl\_script\_begin} 与 \texttt{fc\_tcl\_script\_end} 指令。下列 Tcl 命令可嵌入 RTL 设计：
+\begin{itemize}
+  \item \cmd{set\_attribute}
+  \item \cmd{set\_ungroup}
+  \item \cmd{set\_size\_only}
+  \item \cmd{set\_dont\_touch}
+  \item \cmd{set\_dont\_retime}
+  \item \cmd{set\_implementation}
+  \item \cmd{set\_optimize\_registers}
+  \item \cmd{get\_modules}
+  \item \cmd{get\_cells}
+  \item \cmd{get\_pins}
+  \item \cmd{get\_nets}
+  \item \cmd{get\_ports}
+\end{itemize}
+
+下列 RTL 示例包含嵌入的 Tcl 命令，对名称前缀为 \texttt{iPort1.dout\_reg} 的全部寄存器施加 \texttt{size\_only} 设置：
+\begin{lstlisting}
+module bot ( myIntf1.datIn iPort1 );
+  always @(posedge iPort1.clk or negedge iPort1.rst)
+  begin
+    if (iPort1.rst == 1'b0)
+    begin
+      iPort1.dout <= '0;
+    end else begin
+      iPort1.dout <= iPort1.iData1 + iPort1.iData2;
+    end
+  end
+// synopsys fc_tcl_script_begin
+// set_size_only [get_cells iPort1.dout_reg*]
+// synopsys fc_tcl_script_end
+endmodule
+\end{lstlisting}
+
+% ============================================================
+\section{缓解设计不匹配}
+\subsection*{Mitigating Design Mismatches}
+
+在早期设计开发中，频繁的设计更新可能导致数据不完整或不一致，例如 block 级设计与顶层设计对其引用之间的 pin 不匹配。要让工具即使存在某些类型的设计不匹配（design mismatch）仍能成功链接 block，可为该 block 设置不匹配配置（mismatch configuration）。
+
+默认情况下，工具无法链接带有不一致或不匹配数据的任何 block。设置不匹配配置后，工具会忽略或修复若干不同类型的不匹配数据，并继续链接过程。以不匹配数据链接的 block 仅可用于可行性分析（feasibility analysis）。
+
+\begin{seeAlsoBox}
+关于如何缓解设计不匹配，见 \textit{Fusion Compiler Data Model User Guide}。
+\end{seeAlsoBox}
+
+% ============================================================
