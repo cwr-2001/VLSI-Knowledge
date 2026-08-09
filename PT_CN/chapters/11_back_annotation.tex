@@ -28,14 +28,14 @@
   \item 不使用 SDF 格式反标延时、时序检查与转换时间
 \end{itemize}
 
-PrimeTime 支持 SDF v1.0 至 2.1 及 v3.0 子集。一般支持除以下外的所有 SDF 结构：\texttt{PATHPULSE}、\texttt{GLOBALPATHPULSE}；\texttt{NETDELAY}、\texttt{CORRELATION}；\texttt{PATHCONSTRAINT}、\texttt{SUM}、\texttt{DIFF}、\texttt{SKEWCONSTRAINT}。另支持 v3.0 子集：	exttt{RETAIN}、	exttt{RECREM}、	exttt{REMOVAL}、	exttt{CONDELSE}。
+PrimeTime 支持 SDF v1.0 至 v2.1，以及 v3.0 的一个子集。一般而言，除以下结构外，其余 SDF 结构均受支持：\texttt{PATHPULSE}、\texttt{GLOBALPATHPULSE}；\texttt{NETDELAY}、\texttt{CORRELATION}；\texttt{PATHCONSTRAINT}、\texttt{SUM}、\texttt{DIFF}、\texttt{SKEWCONSTRAINT}。此外还支持以下 SDF v3.0 结构：\texttt{RETAIN}、\texttt{RECREM}、\texttt{REMOVAL}、\texttt{CONDELSE}。
 
 若无 SDF 文件，可在分析脚本中用电容电阻寄生反标命令指定延时。
 
 \subsection{读入 SDF 文件}
 \subsubsection*{Reading SDF Files}
 
-\cmd{read\_sdf} 从 SDF 1.0/1.1/2.0/2.1/3.0 文件读入实例相关 pin-to-pin 叶单元与 net 时序信息并反标到当前设计。设计中实例名须与时序文件匹配（如 VHDL 命名约定须一致）。读入后 PrimeTime 报告：SDF 读入错误数；反标延时与时序检查数；不支持的 SDF 结构及出现次数；SDF 中的 P/T/V；可用 \cmd{report\_annotated\_delay} 与 \cmd{report\_annotated\_check} 查看反标状态。
+\cmd{read\_sdf} 从 SDF 1.0/1.1/2.0/2.1/3.0 文件中读入与实例相关的 pin-to-pin 叶单元及 net 时序信息，并将其反标到当前设计。设计中的实例名必须与时序文件中的实例名匹配（例如，两者必须采用一致的 VHDL 命名约定）。读入后，PrimeTime 报告：读取 SDF 时发现的错误数；已反标的延时与时序检查数；不受支持的 SDF 结构及各自出现次数；SDF 中的工艺、温度和电压值；并可用 \cmd{report\_annotated\_delay} 与 \cmd{report\_annotated\_check} 查看设计的反标状态。
 
 \begin{lstlisting}
 pt_shell> read_sdf -load_delay cell adder.sdf
@@ -107,7 +107,9 @@ SDF 文件通常很大（$\geq$100 MB），建议验证所有 net 已反标延�
 \subsubsection{SDF 流中的更快时序更新}
 \paragraph*{Faster Timing Updates in SDF Flows}
 
-路径每点 PrimeTime 由输入 slew 与电容计算 slew 并向前传播。SDF 反标流中可将 \cmd{timing\_enable\_sdf\_annotation\_updates} 设为 	exttt{false}，使 \cmd{update\_timing} 不重新计算反标延时弧的 slew，显著加快更新（尤其大设计）。此模式不适用于需精确 slew 传播的分析（如 SI、CCS 详细寄生）。
+对路径中的每个点，PrimeTime 通常根据输入 slew 和电容计算 slew，并从该点继续向前传播。变量 \cmd{timing\_use\_zero\_slew\_for\_annotated\_arcs} 允许对已用 SDF 延时反标的弧采用零 slew，从而缩短几乎所有弧都已反标的设计的分析运行时间。
+
+该变量默认为 \texttt{auto}。对于全部或几乎全部时序弧（例如 95\% 以上）均已用 SDF 反标延时的设计，\texttt{auto} 设置会以牺牲 slew 计算精度换取更快运行：对于由 \cmd{read\_sdf} 或 \cmd{set\_annotated\_delay} 完全反标的每条弧，PrimeTime 跳过延时与 slew 计算，并将反标弧负载 pin 上的 slew 设为零。对于未反标的弧，PrimeTime 使用可获得的最佳输入 slew 来估算延时和输出 slew；对于一段连续的未反标弧，则在整段中传播最坏 slew。使用此功能时，建议将 \cmd{timing\_prelayout\_scaling} 设为 \texttt{false}，以禁用布局前 slew 缩放。
 
 \section{反标延时、时序检查与转换时间}
 \subsection*{Annotating Delays, Timing Checks, and Transition Times}
@@ -121,7 +123,11 @@ SDF 文件通常很大（$\geq$100 MB），建议验证所有 net 已反标延�
 \section{写出 SDF 文件}
 \subsection*{Writing an SDF File}
 
-\cmd{write\_sdf} 将当前设计延时与时序检查写入 SDF。常用选项：\opt{-significant\_digits}、\opt{-load\_delay cell/net}、\opt{-include}、\opt{-exclude}、\opt{-compress gzip}、\opt{-map}（映射文件）、\opt{-mask\_violations setup/hold/both}。
+\cmd{write\_sdf} 将当前设计的延时与时序检查写为 SDF 1.0、2.1 或 3.0 格式；默认输出格式为 2.1。例如：
+\begin{lstlisting}
+pt_shell> write_sdf -version 2.1 -input_port_nets mydesign.sdf
+\end{lstlisting}
+常用选项包括：\opt{-significant\_digits}、\opt{-load\_delay cell/net}、\opt{-include}、\opt{-exclude}、\opt{-compress gzip}、\opt{-map}（映射文件）、\opt{-mask\_violations setup/hold/both}。
 
 并行驱动网络写出 SDF 时，每个驱动器到每个负载的弧均写出；大规模并行缓冲网络 SDF 可能极大。\figplaceholder{Figure 115: Parallel buffers driving parallel buffers}{并行缓冲驱动并行缓冲}{fig:ba-par-buf}\figplaceholder{Figure 116: Cell delays in a parallel driver network}{并行驱动网络中的单元延时}{fig:ba-par-cell}
 
@@ -130,7 +136,7 @@ SDF 文件通常很大（$\geq$100 MB），建议验证所有 net 已反标延�
 \subsection{SDF 映射文件}
 \subsubsection*{SDF Mapping Files}
 
-默认 \cmd{write\_sdf} 格式固定；可用映射文件自定义输出格式，引用库中 	exttt{timing\_label} 等。映射语法使用 	exttt{\$SDF\_CELL}、	exttt{\$SDF\_CELL\_END}、	exttt{\$1}...	exttt{\$N} 占位符及函数如 \texttt{min\_rise\_delay(label)}、\texttt{pin(name)}、\texttt{bus(name[index])}。
+默认 \cmd{write\_sdf} 格式固定；可用映射文件自定义输出格式，并引用库中的 \texttt{timing\_label} 等属性。映射语法使用 \texttt{\$SDF\_CELL}、\texttt{\$SDF\_CELL\_END}、\texttt{\$1}...\texttt{\$N} 占位符，以及 \texttt{min\_rise\_delay(label)}、\texttt{pin(name)}、\texttt{bus(name[index])} 等函数。
 
 \begin{noteBox}
 映射文件不支持通配符；不能指定实例级映射；未提供映射的单元使用 \cmd{write\_sdf} 默认格式。
@@ -201,7 +207,7 @@ report_annotated_parasitics -check
 \subsection{读入多物理 Pin 的寄生}
 \subsubsection*{Reading Parasitics With Multiple Physical Pins}
 
-一个逻辑 pin 可对应多个物理 pin（如宽金属）；SPEF 中 	exttt{*D} 定义驱动/负载 pin 映射。\cmd{read\_parasitics} 自动处理多物理 pin 连接。
+一个逻辑 pin 可对应多个物理 pin（如宽金属连接）；SPEF 中的 \texttt{*D} 定义驱动/负载 pin 映射。\cmd{read\_parasitics} 自动处理多个物理 pin 的连接。
 
 \subsection{从多 corner 寄生数据读入单 corner}
 \subsubsection*{Reading a Single Corner From Multicorner Parasitic Data}

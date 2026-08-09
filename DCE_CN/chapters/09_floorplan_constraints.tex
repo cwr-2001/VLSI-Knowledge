@@ -462,7 +462,7 @@ de_shell> set mw_site_name_mapping \
 为改善相关性，可将已映射网表读入 IC Compiler、创建基本 floorplan、导出后再读回 DC Explorer。
 
 可在 IC Compiler 中用 \cmd{write\_floorplan} 导出 floorplan，写成可读入 DC Explorer 以重建指定设计 floorplan 的 Tcl 脚本。
-下例写出所有已布局标准单元到 \texttt{placed\_std.fp} 风格文件：
+下例将所有已布局 standard cell 写入名为 \texttt{placed\_std.fp} 的文件：
 \begin{lstlisting}
 icc_shell> write_floorplan \
    -placement {io terminal hard_macro soft_macro} -create_terminal \
@@ -689,10 +689,16 @@ de_shell> create_placement_blockage -name Blockage1 \
 
 \figplaceholder{Figure 41: Defining a Hard Placement Blockage}{定义 hard placement blockage}{fig:dce-hard-blk}
 
-\cmd{get\_placement\_blockages} 返回当前设计中的 blockage 集合；可用 \opt{-within} 指定矩形或多边形区域，或用 \opt{-filter} 过滤：
+\cmd{get\_placement\_blockages} 返回当前设计中满足指定条件的 placement blockage 集合；若没有匹配对象，则返回空字符串。该命令的结果可作为其他命令的参数，也可赋给变量。
+
+要返回指定区域内的全部 blockage，可使用 \opt{-within region}；region 边界可以是矩形或多边形。下例中，第一个坐标对 \texttt{\{2 2\}} 是矩形左下角，第二个坐标对 \texttt{\{25 25\}} 是右上角：
 \begin{lstlisting}
 de_shell> get_placement_blockages * -within {{2 2} {25 25}}
 {"PB#5389"}
+\end{lstlisting}
+
+要用表达式过滤集合，可使用 \opt{-filter expression}。下例返回面积大于 900 的全部 placement blockage：
+\begin{lstlisting}
 de_shell> get_placement_blockages * -filter "area > 900"
 {"PB#4683"}
 \end{lstlisting}
@@ -758,7 +764,7 @@ de_shell> create_bounds -coordinate {0 0 10 10} \
    -type hard -exclusive -name temp5 INST5
 \end{lstlisting}
 
-\cmd{get\_bounds} 返回 bound 集合；默认最多显示 100 个对象（可用 \varname{collection\_result\_display\_limit} 更改）：
+\cmd{get\_bounds} 返回当前设计中的 bound 集合。该命令可在命令提示符下直接使用，也可嵌套为 \cmd{report\_bounds} 等其他命令的参数，或将结果赋给变量。在命令提示符下执行时，其行为如同调用 \cmd{report\_bounds} 来报告集合中的对象；默认最多显示 100 个对象，可用 \varname{collection\_result\_display\_limit} 更改此上限。下例返回名称以 \texttt{my\_bound} 开头的全部 bound：
 \begin{lstlisting}
 de_shell> get_bounds my_bound*
 \end{lstlisting}
@@ -816,7 +822,7 @@ de_shell> create_user_shape -type wire \
 \end{lstlisting}
 
 用 \cmd{write\_floorplan -user\_shape} 保存 user shape；或用 \cmd{write\_floorplan -preroute} 同时保存 user shape 与 net shape。
-\cmd{create\_user\_shape} 命令保存在 floorplan 文件的 Preroute 段。用 \cmd{remove\_user\_shape *} 移除全部 user shape。
+\cmd{create\_user\_shape} 命令保存在 floorplan 文件的 Preroute 段。用 \cmd{remove\_user\_shape *} 移除设计中的全部 user shape。
 
 可在 DC Explorer Graphical 的 layout 窗口中查看；在 View Settings 面板控制可见性。详见 Design Vision Help/User Guide 中 ``Examining Preroutes''。
 
@@ -835,6 +841,10 @@ de_shell> set_pin_physical_constraints -pin_name {CCEN} -width 1.2 \
 de_shell> create_pin_guide -bbox {{-20 50} {20 800}} \
    [get_ports xyz*] -name abc
 \end{lstlisting}
+
+\cmd{set\_pin\_physical\_constraints} 可为指定 pin 设置 width、depth 等物理约束。在上例中，\texttt{CCEN} 的几何宽度为 1.2~micron、深度为 1.0~micron；该 pin 邻接 side~1（最左侧的竖直边），offset 为 10~micron，相对 placement order 为 2，因此被放在最左侧边上。
+
+\cmd{create\_pin\_guide} 创建 pin guide，将 pin assignment 限制在指定 bounding box 内；上例为名称以 \texttt{xyz} 开头的全部 port 创建名为 \texttt{abc} 的 pin guide。
 
 \cmd{compile\_exploration} 会遵守这些约束。
 默认布局引脚时将端口吸附到 track；将 \varname{dct\_port\_dont\_snap\_onto\_tracks} 设为 \texttt{true} 可禁止吸附。
@@ -866,8 +876,8 @@ de_shell> create_via -type via_array -net vdd -master via4 \
 \subsubsection{创建布线 Track}
 \subsubsection*{Creating Routing Tracks}
 
-用 \cmd{create\_track} 为布线层与 polygon 层创建 track。Track 覆盖整个 die area；若 die area 为多边形，track 以矩形覆盖并可能伸出多边形外。
-必须为 track 指定 polygon 层或布线层；在 polygon 层上创建 track 并不支持在该层布线。
+用 \cmd{create\_track} 为 routing layer 与 polygon layer 创建一组 track，供 router 执行 detail routing。Track 覆盖整个 die area；若 die area 为多边形，track 以矩形覆盖并会延伸到 polygon die area 之外。
+必须为 track 指定 polygon layer 或 routing layer；在 polygon layer 上创建 track 并不表示支持在该层布线。
 
 \begin{lstlisting}
 de_shell> create_track -layer MET3 -dir Y -coord 0.000 -space 0.290 \
@@ -876,7 +886,15 @@ de_shell> create_track -layer MET3 -dir X -coord 0.000 -space 0.290 \
    -count 5034 -bounding_box {{0.000 0.000} {1460.000 1400.000}}
 \end{lstlisting}
 
-\cmd{get\_tracks} 按条件返回 track 集合；\cmd{report\_track}（无选项）报告金属层、方向、起点、数量、pitch 与属性来源。
+\cmd{get\_tracks} 返回当前设计中满足选择条件的 track 集合。例如，\opt{-within rectangle} 返回指定矩形内的全部 track；矩形格式为 \texttt{\{\{llx lly\} \{urx ury\}\}}，坐标单位由 technology file 指定：
+\begin{lstlisting}
+de_shell> get_tracks * -within {{2 2} {25 25}}
+{"USER_TRACK_5389"}
+de_shell> get_tracks "*TRACK_*"
+{"DEF_TRACK_4683 USER_TRACK_5389"}
+\end{lstlisting}
+
+\cmd{report\_track}（不带选项）报告 metal layer、metal direction、起点、track 数量、metal pitch 与属性来源。
 
 表~\ref{tab:dce-track-cmds} 汇总 track 相关命令。\cmd{create\_track} 与 \cmd{remove\_track} 由 \cmd{write\_floorplan} 写出；表中其他命令不会。
 
@@ -899,7 +917,7 @@ de_shell> create_track -layer MET3 -dir X -coord 0.000 -space 0.290 \
 \subsubsection{创建 Keepout Margin}
 \subsubsection*{Creating Keepout Margins}
 
-用 \cmd{set\_keepout\_margin} 为指定单元或库单元创建 keepout margin；也可指定 \opt{-tracks\_per\_macro\_pin} 自动推导：
+用 \cmd{set\_keepout\_margin} 为指定 cell 或 library cell 创建 keepout margin；也可指定 \opt{-tracks\_per\_macro\_pin} 自动推导。推导值根据 track width、macro pin 数量和指定的 track-to-pin ratio 计算；该比率通常设为接近 0.5，值越大，keepout margin 越大：
 \begin{lstlisting}
 de_shell> set_keepout_margin -tracks_per_macro_pin .6 \
    -min_padding_per_macro .1 -max_padding_per_macro 0.2
@@ -1105,7 +1123,7 @@ issued, please check ./icc2_files/write_icc2_files.log files. (DCT-228)
 \section{包含仅物理单元}
 \subsection*{Including Physical-Only Cells}
 
-可在 floorplan 中包含无逻辑功能的物理单元，称为仅物理单元（physical-only cell），例如 filler、tap、flip-chip pad、endcap、decap。
+可在 floorplan 中包含无逻辑功能的 physical cell，称为 physical-only cell，例如 filler cell、tap cell、flip-chip pad cell、endcap cell 和 decap cell。
 虽无逻辑功能，它们会创建工具在优化与拥塞分析中考虑的 placement blockage。
 
 下列各节描述对仅物理单元的支持：
@@ -1195,14 +1213,14 @@ DEF 中的仅物理单元定义必须包含单元位置。综合期间 DC Explor
 \subsection{报告仅物理单元}
 \subsubsection*{Reporting Physical-Only Cells}
 
-默认工具在所有仅物理单元上设置 \texttt{is\_physical\_only}。检查某单元是否为仅物理单元：
+默认情况下，工具在所有 physical-only cell 上设置 \texttt{is\_physical\_only} 属性。检查某 cell 是否为 physical-only cell：
 \begin{lstlisting}
 de_shell> get_attribute [get_cells -all $cell_name] is_physical_only
 \end{lstlisting}
 
 报告方式：
 \begin{itemize}
-  \item \cmd{report\_cell -only\_physical} — 报告当前设计的仅物理单元
+  \item \cmd{report\_cell -only\_physical} — 报告当前设计的 physical-only cell，例如 \texttt{report\_cell -only\_physical}
   \item \cmd{report\_physical\_constraints} — 报告含仅物理单元信息的 floorplan
   \item \cmd{all\_physical\_only\_cells} — 返回设计中全部仅物理单元的集合
 \end{itemize}

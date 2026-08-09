@@ -32,9 +32,9 @@
 
 要在设计输入处进行约束检查，工具需要输入信号到达时间的信息。要指定通向输入端口的外部路径时序，使用 \cmd{set\_input\_delay} 命令。工具利用该信息检查输入端口及其传递扇出（transitive fanout）中的时序违例。使用该命令可指定从时钟边沿到指定输入端口信号到达的最小与最大延迟量。
 
-对端口应用 \cmd{set\_drive} 或 \cmd{set\_driving\_cell} 命令会使端口具有 cell delay，即外部驱动单元 load-dependent 延迟。为避免该延迟被重复计入，应估算驱动单元的 load-dependent 延迟，再从该端口输入延迟中减去该量。
+对端口应用 \cmd{set\_drive} 或 \cmd{set\_driving\_cell} 命令，会使该端口具有 cell delay，其值为外部驱动单元延迟中与负载相关的部分。为避免重复计入该延迟，应估算驱动单元延迟中与负载相关的部分，再从该端口的输入延迟中减去这一数值。
 
-输入延迟应等于从源触发器时钟引脚到驱动单元输出引脚的路径长度，减去驱动单元 delay 的 load-dependent 部分。下图展示从 L1 时钟端口到 IN1 端口的外部路径。
+输入延迟应等于从源触发器时钟引脚到驱动单元输出引脚的路径延迟，减去驱动单元延迟中与负载相关的部分。下图展示从 L1 时钟端口到 IN1 端口的外部路径。
 
 \figplaceholder{Figure 24: Two-phase clocking example for setting port delays}{设置端口延迟的双相时钟示例}{fig:two-phase-port-delays}
 
@@ -343,7 +343,7 @@ S1 与 S2\_1 可直接比较；S1 与 S2 不可。存在详细 RC 时，slew 在
 
 \cmd{set\_max\_transition} 为指定 pin、port、design 或 clock 设置 transition time 上限。指定于 clock 时，该 clock domain 内 pin 受约束。在 clock domain 内，可进一步限制仅 clock path 或 data path，以及仅上升或下降 transition。
 
-默认约束检查时，采用 design、pin、port、clock（若 pin/port 在该 clock domain）或库上最严格的约束。多条 clock 发射同一路径时亦然。
+默认情况下，对 pin 或 port 执行约束检查时，采用 design、pin、port、clock（若该 pin 或 port 位于相应 clock domain 中）或 library 上指定的最严格约束。多个 clock 发射同一路径时也是如此。
 
 要改变默认行为，将 \texttt{timing\_enable\_max\_slew\_precedence} 设为 \texttt{true}。此时约束设置位置决定优先级（与约束值大小无关）：
 \begin{enumerate}
@@ -352,7 +352,7 @@ S1 与 S2\_1 可直接比较；S1 与 S2 不可。存在详细 RC 时，slew 在
   \item Clock 或 design 级
 \end{enumerate}
 
-\cmd{set\_max\_transition} 在指定对象上放置 \texttt{max\_transition} 属性（设计规则约束）。PrimeTime 中 slew 与最大 transition 约束属性以各 pin 或库的本地 threshold 与 derate 报告。对全局 derating 最大 transition 值，设置 \texttt{timing\_max\_transition\_derate} 变量。
+\cmd{set\_max\_transition} 在指定对象上设置 \texttt{max\_transition} 属性（设计规则约束）。PrimeTime 以各 pin 或 library 的本地 threshold 与 derate 报告 slew 和最大 transition 约束属性。例如，在 design threshold 和 derate 语境下设置的最大 transition，会缩放到 design pin 的 threshold 和 derate；默认启用这种基于 slew threshold 的缩放。要对 \texttt{max\_transition} 值应用全局 derating factor，请设置 \texttt{timing\_max\_transition\_derate} 变量。
 
 \textbf{示例 1}：对 OUT* 端口设置最大 transition 限制 2.0：
 \begin{lstlisting}
@@ -369,12 +369,16 @@ pt_shell> set_max_transition 5.0 [current_design]
 pt_shell> set_max_transition 4.0 [get_clocks CLK1] -data_path -rise
 \end{lstlisting}
 
+\textbf{示例 4}：若 library \texttt{lib1} 的 slew threshold 为 10/90，design 上设置的最大 transition 为 0.3\,ns，而 main library 的上升/下降 slew threshold 为 30/70，则该限制换算到 \texttt{lib1} pin 的 threshold 后为 0.6\,ns。此时 \cmd{report\_constraint -max\_transition -all\_violators -significant\_digits 4} 会相应报告 required transition、actual transition 和 slack。
+
+\textbf{示例 5}：若 library \texttt{lib1} 的 slew derating factor 为 0.5、上升/下降 slew threshold 为 30/70，design 上设置的最大 transition 为 0.3\,ns，而 main library 的 slew derate 为 1.0，则换算后的 required transition 同样为 0.6\,ns。
+
 \subsection{评估最大转换时间约束}
 \subsubsection*{Evaluating the Maximum Transition Constraint}
 
 查看最大 transition 约束评估，使用 \cmd{report\_constraint -max\_transition}。PrimeTime 以 cell instance pin 的 threshold 与 derate 报告所有约束与 slew，违例按绝对值排序。
 
-也可用 \cmd{report\_object\_list} 选项仅报告指定 port 或 pin 的最大 capacitance 与最大 transition 约束计算。
+也可使用 \cmd{report\_constraint} 的 \opt{-object\_list} 选项，仅报告指定 port 或 pin 的最大 capacitance 与最大 transition 约束计算。
 
 查看端口最大 transition 限制：\cmd{report\_port -design\_rule}。查看当前设计默认最大 transition：\cmd{report\_design}。撤销最大 transition 限制：\cmd{remove\_max\_transition}。
 
@@ -384,6 +388,8 @@ pt_shell> set_max_transition 4.0 [get_clocks CLK1] -data_path -rise
 对指定端口或整个设计指定最小 capacitance 限制，运行 \cmd{set\_min\_capacitance}。端口 capacitance 限制应用于连到该端口的网络；design 级限制为设计中所有网络的默认 capacitance 限制。
 
 \cmd{set\_min\_capacitance} 在指定对象上应用 \texttt{min\_capacitance} 属性。Capacitance 约束检查仅适用于 output pin。约束检查时采用最严格约束。
+
+查看最小 capacitance 约束评估，使用 \cmd{report\_constraint -min\_capacitance}；查看 port capacitance 限制，使用 \cmd{report\_port -design\_rule}；查看当前 design 的默认 capacitance 设置，使用 \cmd{report\_design}；移除用户指定的最小 capacitance 限制，使用 \cmd{remove\_min\_capacitance}。
 
 \begin{lstlisting}
 pt_shell> set_min_capacitance 0.2 [get_ports "OUT*"]
@@ -395,11 +401,18 @@ pt_shell> set_min_capacitance 0.1 [current_design]
 
 指定最大 capacitance 限制，运行 \cmd{set\_max\_capacitance}。可在 pin 或 clock 上额外指定最大 capacitance 限制。指定于 clock 时，该 clock domain 内 pin 受约束，可进一步限制仅 clock path 或 data path，以及仅上升或下降 capacitance。
 
-\cmd{set\_max\_capacitance} 应用 \texttt{max\_capacitance} 属性。Capacitance 约束检查仅适用于 output pin。对 \texttt{max\_capacitance} 值应用全局 derating，设置 \texttt{timing\_max\_capacitance\_derate} 变量。
+\cmd{set\_max\_capacitance} 应用 \texttt{max\_capacitance} 属性。Capacitance 约束检查仅适用于 output pin，检查时采用最严格约束。对 \texttt{max\_capacitance} 值应用全局 derating，设置 \texttt{timing\_max\_capacitance\_derate} 变量。
+
+查看最大 capacitance 约束评估，使用 \cmd{report\_constraint -max\_capacitance}；查看 port capacitance 限制，使用 \cmd{report\_port -design\_rule}；查看当前 design 的默认 capacitance 设置，使用 \cmd{report\_design}；移除用户指定的最大 capacitance 限制，使用 \cmd{remove\_max\_capacitance}。
+
+\subsection{约束上升与下降最大电容}
+\subsubsection*{Constraining Rise and Fall Maximum Capacitance}
+
+要约束 design 中 clock 的 clock path 和 data path 上 driver pin 输出端的上升与下降最大 capacitance，请使用 \cmd{set\_max\_capacitance}。工具会将 clock 上的最大 capacitance 约束应用于 clock network 中的所有 pin（clock path），以及由该 clock 发射的数据路径中的 pin（该 clock 的 data path）。可进一步用 \opt{-clock\_path}、\opt{-data\_path}、\opt{-rise} 和 \opt{-fall} 限制约束范围。
 
 \figplaceholder{Figure 31: Restrict constraints}{限制约束范围}{fig:restrict-constraints}
 
-若对象为 clock 列表，可用 \opt{-clock\_path}、\opt{-data\_path}、\opt{-rise} 或 \opt{-fall} 进一步限制约束范围。若 pin(port) 受 design、library、clock（及 port）上不同最大 capacitance 约束，最严格约束优先。slack 为最严格约束与 pin(port) 总 capacitance 之差。该特性适用于 generated clock。
+若对象为 clock 列表，可用 \opt{-clock\_path}、\opt{-data\_path}、\opt{-rise} 或 \opt{-fall} 进一步限制约束范围。若 pin（或 port）受 design、library、clock（以及 port）上不同最大 capacitance 约束，最严格约束优先。slack 为最严格约束与 pin（或 port）总 capacitance 之差。该特性适用于 generated clock。使用 \cmd{report\_constraint} 报告约束违例。
 
 \subsection{基于频率的最大电容检查}
 \subsubsection*{Frequency-Based Maximum Capacitance Checks}
@@ -426,6 +439,8 @@ pt_shell> set_min_capacitance 0.1 [current_design]
 \subsubsection*{Maximum Fanout Load}
 
 \cmd{set\_max\_fanout} 为指定 output port 或 design 设置最大 fanout load，在指定对象上设置 \texttt{max\_fanout} 属性。端口级限制应用于连到该端口的网络；design 级为设计中所有网络的默认最大值。冲突时采用更严格值。库 cell pin 可有 \texttt{max\_fanout} 值，PrimeTime 采用用户设置与库指定中更严格的限制。
+
+查看最大 fanout 约束评估，使用 \cmd{report\_constraint -max\_fanout}；查看 port 的最大 fanout 限制，使用 \cmd{report\_port -design\_rule}；查看当前 design 的默认最大 fanout 设置，使用 \cmd{report\_design}；撤销用户在 port 或 design 上设置的最大 fanout 限制，使用 \cmd{remove\_max\_fanout}。
 
 \begin{lstlisting}
 pt_shell> set_max_fanout 2.0 [get_ports "IN*"]
@@ -482,10 +497,12 @@ PrimeTime 在时序更新时传播 ideal network，并在设计变更（如 ECO�
 pt_shell> set_ideal_network P1
 \end{lstlisting}
 
-使用 \opt{-no\_propagate} 限制传播范围，仅对与 ideal network 源电气相连的 net 与 pin 标记 ideal：
+使用 \opt{-no\_propagate} 限制传播范围，仅将与 ideal network 源电气相连的 net 与 pin 标记为 ideal：
 \begin{lstlisting}
 pt_shell> set_ideal_network -no_propagate net1
 \end{lstlisting}
+
+在此示例中，只有 \texttt{net1}、它的 driver pin 和 load pin 被标记为 ideal，不再继续传播。若不指定 \opt{-no\_propagate}，PrimeTime 会在给定的 pin、port 或 net 列表上设置 ideal 属性，并按前述规则继续传播。
 
 移除 ideal network：\cmd{remove\_ideal\_network}。报告 ideal port、pin、net 或 cell：\cmd{report\_ideal\_network}。
 

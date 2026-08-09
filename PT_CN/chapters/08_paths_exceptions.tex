@@ -328,21 +328,21 @@ pt_shell> set_multicycle_path -setup 2 -from [get_cells FF4] -to [get_cells FF5]
 
 \figplaceholder{Figure 84: Multicycle path hold relationship}{多周期路径 hold 关系}{fig:multicycle-hold}
 
-新 hold 关系可能不是设计的正确关系。若 FF4 无需在第一个时钟边沿后保持数据，须指定另一时序例外。虽可用 \cmd{set\_min\_delay} 指定显式 hold 时间，更好用另一 \cmd{set\_multicycle\_path} 将 hold 关系的捕获边沿后移一个时钟周期：
+新 hold 关系可能不是设计所需的关系。若 FF4 无需在第一个时钟边沿之后继续保持数据，须指定另一时序例外。虽可用 \cmd{set\_min\_delay} 指定显式 hold 时间，但更好的做法是再使用一条 \cmd{set\_multicycle\_path}，将 hold 关系的捕获边沿向较早时间回移一个时钟周期：
 
 \begin{lstlisting}
 pt_shell> set_multicycle_path -setup 2 -from [get_cells FF4] -to [get_cells FF5]
 pt_shell> set_multicycle_path -hold 1 -from [get_cells FF4] -to [get_cells FF5]
 \end{lstlisting}
 
-Figure 85 展示用两个 \cmd{set\_multicycle\_path} 命令正确设置的 setup 与 hold 关系。第二个命令将 hold 关系捕获边沿后移一个时钟周期。
+Figure 85 展示用两条 \cmd{set\_multicycle\_path} 命令正确设置的 setup 与 hold 关系。第二条命令将 hold 关系的捕获边沿向较早时间回移一个时钟周期，即从虚线箭头所示位置移到实线箭头所示位置。
 
 \figplaceholder{Figure 85: Multicycle path hold set correctly}{正确设置的多周期 hold}{fig:multicycle-hold-correct}
 
 PrimeTime 对 \cmd{set\_multicycle\_path} 的 \opt{-setup} 与 \opt{-hold} 选项解释不同：
 \begin{itemize}
   \item \opt{-setup} 整数值指定多周期路径的时钟周期数，无时序例外时默认为 1
-  \item \opt{-hold} 整数值指定相对于默认位置（相对于有效 setup 关系）将捕获边沿后移的时钟周期数，默认为 0
+  \item \opt{-hold} 整数值指定相对于默认位置（相对于有效 setup 关系）将捕获边沿向较早时间回移的时钟周期数，默认为 0
 \end{itemize}
 
 \figplaceholder{Figure 86: Multicycle path taking five clock cycles}{五时钟周期的多周期路径}{fig:multicycle-five-cycles}
@@ -352,7 +352,7 @@ pt_shell> set_multicycle_path -setup 5 -from [get_cells FF1] -to [get_cells FF2]
 pt_shell> set_multicycle_path -hold 4 -from [get_cells FF1] -to [get_cells FF2]
 \end{lstlisting}
 
-\opt{-setup 5} 使 setup 关系跨越五个时钟周期（time=0 到 time=50），隐式将 hold 关系改为 time=40 的前一捕获边沿。要将 hold 捕获边沿移回 time=0，须用 \opt{-hold 4} 将捕获边沿后移四个时钟周期。
+\opt{-setup 5} 使 setup 关系跨越五个时钟周期（time=0 到 time=50），并隐式将 hold 关系改为位于 time=40 的前一捕获边沿。要将 hold 捕获边沿移回 time=0，须用 \opt{-hold 4} 将捕获边沿向较早时间回移四个时钟周期。
 
 总结：hold 周期数 = (setup 选项值) $-$ 1 $-$ (hold 选项值)。默认 hold 周期 = 1 $-$ 1 $-$ 0 = 0。Figure 85：hold 周期 = 2 $-$ 1 $-$ 1 = 0。Figure 86：hold 周期 = 5 $-$ 1 $-$ 4 = 0。
 
@@ -368,7 +368,7 @@ pt_shell> set_path_margin -setup 1.2 -to I_BL/reg30a/D
 
 使到达指定寄存器 pin 的所有 setup 检查更严格 1.2 时间单位。报告 setup slack 比无 path margin 时少 1.2 时间单位（更负）。\cmd{report\_timing} 报告中 margin 显示为 ``data required time'' 计算中的 ``path margin'' 调整。
 
-对所有时序路径，正 margin 使检查更严格；负 margin 使检查更宽松。Path margin 设置是时序例外，类似于 \cmd{set\_max\_delay} 或 \cmd{set\_multicycle\_path} 设置的例外，应用于同一路径上任何 minimum-delay、maximum-delay 与 multicycle path 例外之外的时序检查。
+对所有时序路径，正 margin 使检查更严格；负 margin 使检查更宽松。Path margin 设置是一种时序例外，类似于 \cmd{set\_max\_delay} 或 \cmd{set\_multicycle\_path} 设置的例外；指定的 margin 会叠加到同一路径上适用的 minimum-delay、maximum-delay 和 multicycle path 例外之上。
 
 \subsection{高效指定例外}
 \subsubsection*{Specifying Exceptions Efficiently}
@@ -456,9 +456,17 @@ pt_shell> report_timing -exceptions overridden
 pt_shell> report_timing -exceptions all
 \end{lstlisting}
 
-冲突例外示例中，maximum-delay 例外优先级更高。\cmd{report\_timing -exceptions dominant} 显示 dominant 例外；\opt{-exceptions overridden} 显示被覆盖例外；\opt{-exceptions all} 显示两者。
+例如，下列冲突例外中，maximum-delay 例外的优先级高于 multicycle path 例外：
+\begin{lstlisting}
+pt_shell> set_multicycle_path -through buf1/Z -setup 2
+pt_shell> set_max_delay -through buf1/Z 1
+\end{lstlisting}
 
-\cmd{get\_timing\_paths} 可创建时序路径集合并传递给 \cmd{report\_timing}。时序路径属性（\texttt{dominant\_exception}、\texttt{startpoint\_unconstrained\_reason}、\texttt{endpoint\_unconstrained\_reason}）显示路径未约束原因，如 \texttt{false\_path}、\texttt{min\_delay}/\texttt{max\_delay}、\texttt{multicycle\_path}、\texttt{no\_capture\_clock}、\texttt{no\_launch\_clock}、\texttt{dangling\_end\_point}、\texttt{fanin\_of\_disabled}、\texttt{fanout\_of\_disabled} 等。
+\cmd{report\_timing -exceptions dominant} 显示 dominant 例外；\cmd{report\_timing -exceptions overridden} 显示被覆盖且未影响时序计算的例外；\cmd{report\_timing -exceptions all} 显示两者。
+
+\cmd{get\_timing\_paths} 可创建时序路径集合并传递给 \cmd{report\_timing}。时序路径属性（\texttt{dominant\_exception}、\texttt{startpoint\_unconstrained\_reason}、\texttt{endpoint\_unconstrained\_reason}）显示路径未约束原因，如 \texttt{false\_path}、\texttt{min\_delay}/\texttt{max\_delay}、\texttt{multicycle\_path}、\texttt{no\_capture\_clock}、\texttt{no\_launch\_clock}、\texttt{dangling\_end\_point}、\texttt{dangling\_start\_point}、\texttt{fanin\_of\_disabled}、\texttt{fanout\_of\_disabled} 等。
+
+\cmd{report\_timing -exceptions} 始终显示三类信息：dominant exception、startpoint unconstrained reason 和 endpoint unconstrained reason；某一类没有信息时，对应部分为空。上述属性仅在相应信息存在时才出现在 \texttt{timing\_path} 对象上，因此可用 \cmd{filter\_collection} 的 \texttt{defined(...)} 或 \texttt{undefined(...)} 表达式筛选受例外影响的路径。
 
 \subsection{报告例外源文件与行号信息}
 \subsubsection*{Reporting Exceptions Source File and Line Number Information}

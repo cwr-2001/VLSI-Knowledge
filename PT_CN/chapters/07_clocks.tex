@@ -145,7 +145,7 @@ pt_shell> set_propagated_clock [get_clocks CLK]
 
 Prelayout 设计中 propagated latency 计算通常不准确（parasitic 未知）。可对各时钟估算 latency 并用 \cmd{set\_clock\_latency} 直接设置——ideal clocking，PrimeTime 中表示 clock latency 的默认方法。
 
-\cmd{set\_clock\_latency} 为一个或多个 clock、port 或 pin 设置 latency。对 source latency 指定 external uncertainty，使用 \opt{-early} 与 \opt{-late} 选项。
+\cmd{set\_clock\_latency} 为一个或多个 clock、port 或 pin 设置 latency。要表示 source latency 的外部不确定性，即 source latency 的取值范围，请使用 \opt{-early} 与 \opt{-late} 选项。
 
 \figplaceholder{Figure 38: External source latency}{外部源延迟}{fig:external-source-latency}
 
@@ -179,7 +179,11 @@ pt_shell> set_clock_latency -early -source 2.5 -dynamic -0.5 [get_clocks CLK]
 pt_shell> set_clock_latency -source -late 5.5 -dynamic 0.5 [get_clocks CLK]
 \end{lstlisting}
 
-\cmd{report\_timing} 分别报告 clock latency 的静态与动态分量。\cmd{report\_crpr} 报告静态与动态条件下计算的 CRP 值及实际用于悲观移除的选择。
+前两条命令指定静态 early/late source latency 分别为 3.0 和 5.0；后两条命令在其上叠加 $-0.5$ 和 $+0.5$ 的动态分量，因此总 early/late source latency 分别为 2.5 和 5.5。
+
+若 CLK 使用 propagated latency，则静态与动态 latency 之和用于 delay 计算。不过，对于 launch 与 capture 使用不同时钟边沿的路径，CRPR 在 clock path 公共点之前只使用静态 latency，不使用动态 latency，并从时序结果中移除由此得到的静态悲观量。
+
+\cmd{report\_timing} 分别报告 clock latency 的静态与动态分量。\cmd{report\_crpr} 报告静态和动态条件下计算的 CRP 时间值，以及实际选用于悲观移除的值。
 
 \subsection{设置时钟不确定性}
 \subsubsection*{Setting Clock Uncertainty}
@@ -280,14 +284,32 @@ set_app_var timing_include_uncertainty_for_pulse_checks \
 \subsubsection{脉冲宽度测量阈值}
 默认在电源电压 50\% 处测量脉冲宽度。可对 clock network pin 将测量阈值设为 0.0 到 1.0 之间任意电源电压比例。更保守的 minimum pulse width 检查：低脉冲阈值 $< 0.5$，高脉冲阈值 $> 0.5$。
 
+\begin{lstlisting}
+set delay_calc_waveform_analysis full_design
+set timing_enable_min_pulse_width_waveform_adjustment true
+set timing_min_pulse_width_low_pulse_threshold 0.12
+set timing_min_pulse_width_high_pulse_threshold 0.88
+report_min_pulse_width -path_type short ...
+\end{lstlisting}
+
+\cmd{report\_min\_pulse\_width -path\_type} 报告会将非默认阈值引起的路径调整显示为 ``open edge threshold voltage adjustment'' 和 ``close edge threshold voltage adjustment''。
+
 \figplaceholder{Figure 42: Minimum Pulse Width Checking Thresholds}{最小脉冲宽度检查阈值}{fig:min-pulse-width-thresholds}
 
 \subsubsection{电压摆幅检查}
 可对 clock network pin 执行 voltage swing 检查，确定高脉冲是否足够接近电源轨、低脉冲是否足够接近地轨。
 
+\begin{lstlisting}
+set delay_calc_waveform_analysis full_design
+set timing_enable_voltage_swing true
+set timing_voltage_swing_low_pulse_threshold 0.10
+set timing_voltage_swing_high_pulse_threshold 0.90
+report_min_pulse_width -voltage_swing ...
+\end{lstlisting}
+
 \figplaceholder{Figure 43: Voltage Swing Checking Thresholds}{电压摆幅检查阈值}{fig:voltage-swing-thresholds}
 
-Voltage swing 检查作为 minimum pulse width 检查的特殊情况执行，minimum width 设为 0.0，在指定电源电压比例处测量宽度。
+Voltage swing 检查作为 minimum pulse width 检查的特殊情况执行，minimum width 设为 0.0，并在指定的电源电压比例处测量宽度。达到或越过阈值的任意宽度脉冲均通过检查；未越过阈值的脉冲报告为违例。对于通过检查的脉冲，正 slack 为波形越过阈值电压处测得的脉冲宽度。
 
 \subsection{最小周期检查}
 \subsubsection*{Minimum Period Checking}

@@ -84,11 +84,11 @@ Information: Checked out license 'PrimeTime-ADV' (PT-019)
 
 若限制超过当前机器提供的 CPU 核数，将降至可用核数。（此调整仅考虑核的存在；不考虑机器负载。）
 
-超线程（overthreading）允许同时线程数在短时间内暂时超过最大核数。默认启用。若计算环境不允许超线程，通过以下变量禁用：
+超额线程（overthreading）允许同时线程数在短时间内暂时超过最大核数。默认启用。若计算环境不允许超额线程，通过以下变量禁用：
 \begin{lstlisting}
 pt_shell> set_app_var multi_core_allow_overthreading false
 \end{lstlisting}
-禁用超线程可能降低多核性能。
+禁用超额线程可能降低多核性能。
 
 \subsection{并行执行命令}
 \subsubsection*{Executing Commands in Parallel}
@@ -359,6 +359,8 @@ pt_shell> set_host_options -name my_opts -max_cores 3 \
 \begin{noteBox}
 若设置 \cmd{multi\_scenario\_working\_directory} 与 \cmd{multi\_scenario\_merged\_error\_log} 变量，须在启动算力资源之前设置。
 \end{noteBox}
+        必须先完成上述第 1--5 步，才能在下一步运行
+        \cmd{current\_session} 命令。
   \item 使用 \cmd{current\_session} 命令为会话选择场景。该命令指定先前用 \cmd{create\_scenario} 创建的场景列表。
   \item （可选）使用 \cmd{current\_scenario} 命令更改当前会话中处于命令焦点的场景。默认情况下，当前会话的所有场景均在命令焦点中。
   \item 查看分析报告并修复验证问题：
@@ -491,7 +493,12 @@ set_host_options \
 \end{tabular}
 \end{table}
 
-详情见各变量 man page。要移除 host 选项并终止关联进程，使用 \cmd{remove\_host\_options} 命令。
+详情见各变量 man page。要移除 host 选项并终止关联进程，使用
+\cmd{remove\_host\_options} 命令。例如，移除并停止 \texttt{host1} 与
+\texttt{host3}：
+\begin{lstlisting}
+pt_shell> remove_host_options {host1 host3}
+\end{lstlisting}
 
 \subparagraph{配置分布式环境}
 使用 \cmd{set\_distributed\_parameters} 命令配置分布式环境（远程启动脚本、工作进程启动脚本及集合属性最大层级）。在运行 \cmd{start\_hosts} 命令之前设置配置。
@@ -609,16 +616,25 @@ remote_execute "
 发出 \cmd{remote\_execute} 命令后，管理进程为命令焦点中所有场景的执行生成任务。示例：
 \begin{lstlisting}
 remote_execute {set x 10}
-\section{Send tasks for execution in all scenarios in command focus}
+# Send tasks for execution in all scenarios in command focus
 set x 20
 remote_execute {report_timing -nworst $x}
-\section{Leads to report_timing -nworst 10 getting executed at the workers}
+# Leads to report_timing -nworst 10 getting executed at the workers
 
 remote_execute "report_timing -nworst $x"
-\section{Leads to report_timing -nworst 20 getting executed at the workers}
+# Leads to report_timing -nworst 20 getting executed at the workers
 \end{lstlisting}
 
-使用 \opt{-pre\_commands} 选项时，\cmd{remote\_execute} 在远程执行命令之前执行指定命令。使用 \opt{-post\_commands} 选项时，在远程执行命令之后执行所列命令。
+使用 \opt{-pre\_commands} 选项时，\cmd{remote\_execute} 在远程执行命令之前执行指定命令；使用 \opt{-post\_commands} 选项时，在远程执行命令之后执行所列命令：
+\begin{lstlisting}
+remote_execute -pre_commands {cmd1; cmd2; cmd3} "report_timing"
+# On the worker host, execute cmd1, cmd2, and cmd3 before
+# executing report_timing on the manager
+
+remote_execute -post_commands {cmd1; cmd2; cmd3} "report_timing"
+# On the worker host, execute cmd1, cmd2, and cmd3 after
+# executing report_timing on the manager
+\end{lstlisting}
 
 可使用 \opt{-verbose} 选项的 \cmd{remote\_execute} 命令将所有工作进程数据返回到管理进程终端屏幕，而非管道到 DMSA 文件系统层次工作目录中的 \texttt{out.log} 文件。
 
@@ -638,7 +654,7 @@ remote_execute "report_timing -nworst $x"
 set multi_scenario_working_directory "./ms_session_1"
 set multi_scenario_merged_error_log "merged_errors.log"
 
-\section{Start of specifying the set-up}
+# Start of specifying the set-up
 set search_path "./scripts"
 
 set_host_options -32bit -num_processes 1 platinum1
@@ -754,6 +770,8 @@ pt_shell> array set x {s1 10 s2 0}
 pt_shell> array set y {s1 0 s2 15}
 pt_shell> set_distributed_variables {x y}
 \end{lstlisting}
+这会把管理进程中数组 \texttt{x} 与 \texttt{y} 指定的值发送到相应场景的
+工作进程；若工作进程尚无这些变量，则创建变量并赋予指定值。
 
 创建并设置单个变量时无需创建数组：
 \begin{lstlisting}
@@ -766,11 +784,16 @@ pt_shell> set_distributed_variables my_var
 \begin{lstlisting}
 current_session {scen1 scen2}
 remote_execute {
-  set pin_slack1 [get_attribute -class pin UI/Z slack];
+  set pin_slack1 [get_attribute -class pin U1/Z slack];
   set pin_slack2 [get_attribute -class pin U2/Z slack]
 }
 get_distributed_variables {pin_slack1 pin_slack2}
 \end{lstlisting}
+
+该命令返回以场景名为索引的 \texttt{pin\_slack1} 与
+\texttt{pin\_slack2} 两个数组；例如，
+\texttt{pin\_slack1(scen1)} 是场景 \texttt{scen1} 中
+\texttt{U1/Z} 的 slack 标量值。
 
 检索集合时需指定要从集合检索的属性：
 \begin{lstlisting}
@@ -788,13 +811,20 @@ pt_shell> echo $worst_slack
 \end{lstlisting}
 
 \opt{-merge\_type} 支持的合并类型：\texttt{min}、\texttt{max}、\texttt{average}、\texttt{sum}、\texttt{list}、\texttt{unique\_list}、\texttt{none}。可使用 \opt{-null\_merge\_method} 覆盖选项指定合并空（empty）条目时的行为。
+空数据值不同于未定义值；数组条目未定义时，
+\opt{-null\_merge\_method} 不适用，合并过程会对其余已有数据值正常执行。
 
 \paragraph{跨场景同步对象属性}
-例如，将单元 \texttt{U72} 的 \texttt{dont\_touch} 属性同步为 \texttt{true}：
+例如，在当前命令焦点的所有场景间同步单元 \texttt{U72} 的
+\texttt{dont\_touch} 属性：
 \begin{lstlisting}
 pt_shell> synchronize_attribute -class cell {U72} dont_touch
 \end{lstlisting}
-此命令在 DMSA 管理进程中工作，可同步用户定义属性或 \texttt{dont\_touch} 应用属性。\opt{-merge\_type} 可设为 \texttt{min} 或 \texttt{max}，默认 \texttt{max}。
+此命令在 DMSA 管理进程中工作，可同步用户定义属性或
+\texttt{dont\_touch} 应用属性，但不能用于其他应用属性。
+\opt{-merge\_type} 可设为 \texttt{min} 或 \texttt{max}，默认
+\texttt{max}：数值属性取各场景最大值，字符串属性取字母数字排序中的最后一个值，
+布尔属性取 \texttt{true}。
 
 
 \subsection{合并报告}
@@ -826,7 +856,7 @@ pt_shell> remote_execute -pre_commands {source my_constraints.tcl} \
 \subsubsection{report\_analysis\_coverage}
 \paragraph*{report\_analysis\_coverage}
 
-\cmd{report\_analysis\_coverage} 命令报告当前会话中所有活动场景的时序检查覆盖率。时序检查状态报告为：\textbf{Violated}（到达时间不满足时序要求）、\textbf{Met}（满足时序要求）、\textbf{Untested}（时序检查被跳过）。仅当时序检查在所有场景中均未测试时才归入 Untested 类别。若至少一个场景中测试了时序检查，则报告为 Violated 或 Met，即使在某些场景中未测试。这允许在功能模式与测试模式等行为显著不同时进行有意义的报告。
+\cmd{report\_analysis\_coverage} 命令报告当前会话中所有活动场景的时序检查覆盖率。时序检查由受约束引脚、相关引脚和约束类型共同定义。时序检查状态报告为：\textbf{Violated}（到达时间不满足时序要求）、\textbf{Met}（满足时序要求）、\textbf{Untested}（时序检查被跳过）。仅当时序检查在所有场景中均未测试时才归入 Untested 类别。若至少一个场景中测试了时序检查，则报告为 Violated 或 Met，即使在某些场景中未测试。这允许在功能模式与测试模式等行为显著不同时进行有意义的报告。
 
 \subsubsection{report\_clock\_timing}
 \paragraph*{report\_clock\_timing}
@@ -940,6 +970,11 @@ pt_shell> set_license_limit PrimeTime -quantity 5
 当工作进程发生导致异常终止的故障时，工具根据 \cmd{multi\_scenario\_fault\_handling} 变量（可设为 \texttt{ignore} 或 \texttt{exit}）采取行动。
 
 设为 \texttt{ignore}（默认）且工作进程发生严重故障时，异常终止的场景及依赖这些场景的场景从当前会话的进一步分析中排除，显示警告消息说明哪些场景异常终止，会话继续分析命令焦点中剩余场景。
+\begin{itemize}
+  \item 若当前会话命令焦点中的全部场景均异常终止，之后在管理进程发出的分布式命令会失败；必须在当前会话中更改命令焦点后再分析所选场景。
+  \item 若当前会话中的全部场景均异常终止，当前会话会被移除；之后的分布式命令会因不存在当前会话而报错。
+  \item 严重故障会使资源离线；若没有任何资源保持在线，会话必须终止。
+\end{itemize}
 
 设为 \texttt{exit} 且发生严重故障时，活动命令完成任务后管理进程终止整个分析。
 
@@ -959,34 +994,116 @@ pt_shell> set_license_limit PrimeTime -quantity 5
 \subsection{消息与日志文件}
 \subsubsection*{Messages and Log Files}
 
-多场景分析可能产生大量数据。为避免在管理进程过载数据，所有数据写入一组日志文件。管理进程仅显示有限的交互消息。使用 \opt{-verbose} 选项时，\cmd{remote\_execute} 将所有数据发送到管理终端。
+多场景分析可能产生大量数据。为避免在管理进程用数据过载用户，所有数据写入一组日志文件。管理进程仅显示有限的交互消息。使用 \opt{-verbose} 选项时，\cmd{remote\_execute} 将所有数据发送到管理终端。
 
-\subsubsection{交互消息与进度消息}
-工作进程执行任务时向管理进程发送消息指示进度。工作进程在各分析阶段发送置信度消息更新分析进度。
+关于 DMSA 中可用的消息与日志文件类型，请参阅：
+\begin{itemize}
+  \item 交互消息
+  \item 进度消息
+  \item 任务执行状态消息的用户控制
+  \item 错误消息
+  \item 警告消息
+  \item 日志文件
+  \item 命令输出重定向
+\end{itemize}
+
+\subsubsection{交互消息}
+\paragraph*{Interactive Messages}
+
+工作进程执行任务时，向管理进程发送消息以指示其进度。
+
+\subsubsection{进度消息}
+\paragraph*{Progress Messages}
+
+工作进程在各分析阶段推进时，会发送置信度消息（confidence messages），向您更新分析进度。例如：
+\begin{lstlisting}
+pt_shell> current_session {scen1 scen2}
+pt_shell> remote_execute {cmd1}
+
+Start of Manager/Worker Task Processing
+----------------------------------------
+Started   : Netlist image generation for session 'session'
+Succeeded : Netlist image generation for session 'session'
+Started   : Baseline image generation for scenario 'scen1'
+Succeeded : Baseline image generation for scenario 'scen1'
+\end{lstlisting}
 
 \subsubsection{任务执行状态消息的用户控制}
-可将 \cmd{multi\_scenario\_message\_verbosity\_level} 变量设为 \texttt{default} 或 \texttt{low}。\texttt{default} 显示所有任务执行状态消息；\texttt{low} 仅显示 error、fatal 与 failure 消息，对需要更多输出控制的 Tcl 脚本有用。
+\paragraph*{User Control of Task Execution Status Messages}
 
-\subsubsection{错误与警告消息}
-工作进程上给定场景发生错误时，在管理进程完整报告错误及场景名。警告仅在场景中首次出现该警告时在管理进程报告。
+可控制 DMSA 任务执行状态消息的详细程度。将 \cmd{multi\_scenario\_message\_verbosity\_level} 变量设为 \texttt{default} 或 \texttt{low}。设为 \texttt{default} 时显示所有任务执行状态消息，例如：
+\begin{lstlisting}
+Start of Manager/Worker Task Processing
+-----------------------------------------------
+Started    : Command execution in scenario 'wc'
+Started    : Command execution in scenario 'bc'
+Succeeded : Command execution in scenario 'bc'
+Succeeded : Command execution in scenario 'wc'
+-----------------------------------------------
+End of Manager/Worker Task Processing
+\end{lstlisting}
+
+设为 \texttt{low} 时，仅显示 error、fatal 与 failure 消息；这对需要更多输出控制的 Tcl 脚本可能有用。若 Tcl 脚本更改了该变量，宜在脚本或过程完成后将其改回原值，以免造成混淆。
+
+\subsubsection{错误消息}
+\paragraph*{Error Messages}
+
+工作进程上给定场景发生错误时，在管理进程完整报告该错误及该场景名。例如：
+\begin{lstlisting}
+pt_shell> current_session {scen1 scen2}
+pt_shell> remote_execute {cmd1}
+
+Start of Manager/Worker Task Processing
+-------------------------------------
+Started   : Netlist image generation for session 'session'
+Error    : Problem in read_verilog. No designs were read
+(DBR-011) (default_session)
+\end{lstlisting}
+
+\subsubsection{警告消息}
+\paragraph*{Warning Messages}
+
+工作进程上给定场景出现警告时，仅当该警告在该场景中首次出现时，才在管理进程报告。例如：
+\begin{lstlisting}
+pt_shell> current_session {scen1 scen2}
+pt_shell> remote_execute {cmd1}
+
+Start of Manager/Worker Task Processing
+----------------------------------------
+Started   : Netlist image generation for session 'session'
+Succeeded : Netlist image generation for session 'session'
+Started   : Baseline image generation for scenario 'scen1'
+Warning   : RC-009 has occurred on scenario 'scen1'
+\end{lstlisting}
 
 \subsubsection{日志文件}
-多场景分析的所有数据（含日志文件）的根工作目录由 \cmd{multi\_scenario\_working\_directory} 变量决定。若未显式设置，设为启动 PrimeTime 管理进程的当前目录。须对管理进程及所有工作进程可写且可访问。
+\paragraph*{Log Files}
+
+可在 log、output log、command log 或 merged error log 文件中查看工作进程生成的全部信息。多场景分析全部数据（含日志文件）的根工作目录由 \cmd{multi\_scenario\_working\_directory} 变量决定。若未显式设置，则设为启动 PrimeTime 管理进程时的当前目录。您必须对该工作目录具有写权限，且该目录须对管理进程及所有工作进程可访问。
 
 \begin{itemize}
-  \item \textbf{输出日志（Output Log）}：每个场景有自己的输出日志，位于 \texttt{multi\_scenario\_working\_directory/s1/out.log}。不能设置或更改输出日志名。
-  \item \textbf{命令日志（Command Log）}：每个远程进程有自己的命令日志，位于工作目录下 \texttt{command\_log} 目录，例如 \texttt{srv1\_6\_pt\_shell\_command.log}。管理进程命令日志位于 \texttt{\$sh\_launch\_dir/pt\_shell\_command.log}。\cmd{sh\_source\_logging} 设为 \texttt{true} 时，source 脚本中的各条命令写入命令日志。
-  \item \textbf{合并错误日志（Merged Error Log）}：设置 \cmd{multi\_scenario\_merged\_error\_log} 变量，例如 \texttt{error.log}。从特定任务开始到结束的所有错误消息合并；同一错误在多个场景出现时仅打印一次并列出场景。\textbf{须在发出 \cmd{start\_hosts} 命令之前设置 \cmd{multi\_scenario\_working\_directory} 与 \cmd{multi\_scenario\_merged\_error\_log} 变量。}
+  \item \textbf{输出日志（Output Log）}：每个场景有自己的输出日志，位于场景工作目录中。例如，名为 \texttt{s1} 的场景，日志为 \texttt{multi\_scenario\_working\_directory/s1/out.log}。不能设置或更改输出日志名。某一场景的输出日志包含所有 error、warning 与 information 消息，即您在传统单次分析 PrimeTime 运行的终端窗口中通常看到的全部信息。
+  \item \textbf{命令日志（Command Log）}：每个远程进程有自己的命令日志，位于工作目录下的 \texttt{command\_log} 目录。例如，在名为 \texttt{srv1} 的主机上启动且为第 6 个启动的进程，命令日志为 \texttt{multi\_scenario\_working\_directory/command\_log/srv1\_6\_pt\_shell\_command.log}。不能设置或更改远程进程的命令日志名。某一进程的命令日志包含在该进程上执行的全部命令。管理进程命令日志位于 \texttt{\$sh\_launch\_dir/pt\_shell\_command.log}。当 \cmd{sh\_source\_logging} 设为 \texttt{true} 时，source 脚本中的各条命令会写入命令日志。
+  \item \textbf{合并错误日志（Merged Error Log）}：多场景分析中可能产生大量 error、warning 与 information 消息。为便于调试，可在管理进程设置合并错误日志变量。例如，下列命令在 \texttt{multi\_scenario\_working\_directory/error.log} 中创建合并错误文件：
+\begin{lstlisting}
+pt_shell> set_app_var multi_scenario_merged_error_log "error.log"
+\end{lstlisting}
+        设置该变量后，从特定任务开始到结束的所有错误消息合并在一起；若同一错误消息出现在多个场景中，则仅向合并错误文件打印一次，并列出发生该消息的场景。
+\begin{noteBox}
+须在发出 \cmd{start\_hosts} 命令之前设置 \cmd{multi\_scenario\_working\_directory} 与 \cmd{multi\_scenario\_merged\_error\_log} 变量。
+\end{noteBox}
 \end{itemize}
 
 \subsubsection{命令输出重定向}
-多场景分析支持命令输出重定向。须为每个进程重定向到不同目标文件，否则两个不同进程同时控制同一文件会出错。
+\paragraph*{Command Output Redirection}
+
+多场景分析支持命令输出重定向。须为每个进程重定向到不同目标文件，否则两个不同进程同时试图控制同一文件时会出错。
 
 \begin{noteBox}
 使用输出重定向时务必使用相对路径。不要使用绝对路径；否则所有工作进程尝试写入同一文件，可能导致读/写冲突并使工作进程失败。
 \end{noteBox}
 
-\cmd{multi\_scenario\_working\_directory} 变量值与场景名一起确定输出目标文件名。交互重定向示例：\cmd{remote\_execute \{report\_timing\} > \$x.out} 将输出定向到当前工作目录的 \texttt{myfile.out}，\texttt{\$x} 仅在管理进程求值。脚本重定向示例：\texttt{report\_timing > rt.log} 在 \texttt{/mypath/s3/rt.log} 与 \texttt{s4/rt.log} 中分别生成输出。
+\cmd{multi\_scenario\_working\_directory} 变量值与场景名一起确定输出目标文件名。交互重定向示例：先执行 \cmd{set x myfile}，再执行 \cmd{remote\_execute \{report\_timing\} > \$x.out}，输出会定向到当前工作目录的 \texttt{myfile.out}，其中 \texttt{\$x} 仅在管理进程求值。脚本重定向示例：\texttt{report\_timing > rt.log} 在 \texttt{/mypath/s3/rt.log} 与 \texttt{/mypath/s4/rt.log} 中分别生成输出。
 
 \subsection{DMSA 变量与命令}
 \subsubsection*{DMSA Variables and Commands}
@@ -1098,23 +1215,28 @@ HyperGrid 分布式分析中，分布式分析工作目录包含工具生成的�
 
 HyperGrid 分布式分析需要包装脚本（wrapper script），该脚本启用 HyperGrid、配置并启动工作进程，然后在分布式模式下运行实际分析脚本。示例：
 \begin{lstlisting}
-\section{enable Hypergrid analysis}
+# enable Hypergrid analysis
 set_app_var distributed_enable_analysis true
 set_app_var distributed_working_directory ./MY_WORK_DIR
 
-\section{start worker processes}
+# start worker processes
 set_host_options \
   -num_process 4 \
   -max_cores 4 \
   -submit {...compute farm submission command...}
 start_hosts
 
-\section{run the timing analysis script, distributed across the workers}
+# run the timing analysis script, distributed across the workers
 start_dsta \
   -script run_top_flat.tcl
 \end{lstlisting}
 
-关键命令：\cmd{distributed\_enable\_analysis} 启用 HyperGrid；\cmd{distributed\_working\_directory} 设置工作目录（默认 \texttt{dsta\_working\_dir}）；\cmd{set\_host\_options} 与 \cmd{start\_hosts} 配置并启动远程工作进程；\cmd{start\_dsta} 开始分布式分析（在 master 划分设计、在 worker 加载划分数据、在 master 运行指定分析脚本并与 worker 通信）。包装脚本中 \cmd{start\_dsta} 之后的命令在指定分析脚本完成后作为分布式报告命令执行。
+关键设置如下：\cmd{distributed\_enable\_analysis} 变量启用 HyperGrid；
+\cmd{distributed\_working\_directory} 变量设置工作目录（默认
+\texttt{dsta\_working\_dir}）；\cmd{set\_host\_options} 与
+\cmd{start\_hosts} 命令配置并启动远程工作进程；\cmd{start\_dsta}
+命令开始分布式分析（在管理进程划分设计、在工作进程加载划分数据、在管理进程运行指定分析脚本并与工作进程通信）。包装脚本中 \cmd{start\_dsta}
+之后的命令在指定分析脚本完成后作为分布式报告命令执行。
 
 \subsection{运行分布式分析}
 \subsubsection*{Running the Distributed Analysis}
@@ -1145,6 +1267,12 @@ start_dsta \
 \subsubsection*{Saving a Distributed Session}
 
 可使用 \cmd{save\_session} 命令将 HyperGrid 分布式分析会话保存到磁盘。结果目录包含管理进程与所有工作进程的数据。由于分布式设计数据开销，分布式分析会话目录大于等效全 Flat 会话目录。恢复保存的分布式会话时，工具以相同划分重新创建原始分布式分析，使用与原始分布式分析相同的 \cmd{set\_host\_options} 规范启动工作进程。
+
+恢复已保存的分布式会话时，可先按需设置分布式分析工作目录，再按通常方式恢复：
+\begin{lstlisting}
+pt_shell> set_app_var distributed_working_directory ./MY_WORK_DIR
+pt_shell> restore_session my_distributed_session
+\end{lstlisting}
 
 \subsection{支持 HyperGrid 分布式分析的命令}
 \subsubsection*{Commands With HyperGrid Distributed Analysis Support}
@@ -1188,7 +1316,59 @@ PrimeTime 执行静态时序分析所使用的内存与 CPU 资源取决于设�
 
 在 DMSA 流程中使用 \cmd{report\_host\_usage} 命令报告所有已设置的 host 选项。此命令还报告本地进程的峰值内存、CPU 使用与经过时间；在 DMSA 中还报告所有分布式进程的峰值内存、CPU 使用与经过时间。报告显示指定的 host 选项、分布式进程状态、各进程使用的 CPU 核数及分布式主机使用的许可证。
 
-对于配置为在同一主机上使用多个 CPU 核的进程（如单核或多线程多核分析），\cmd{report\_host\_usage} 提供当前 PrimeTime 会话的资源使用。
+对于配置为在同一主机上使用多个 CPU 核的进程（如单核或多线程多核分析），\cmd{report\_host\_usage} 提供当前 PrimeTime 会话的资源使用。单核或多线程多核分析流程的报告输出示例如下：
+\begin{lstlisting}
+pt_shell> report_host_usage
+****************************************
+Report : host_usage
+...
+****************************************
+Usage limits (cores)
+
+Options Name                 #     Effective
+----------------------------------------------
+(local process)              -     1
+----------------------------------------------
+Total                              1
+
+Memory usage
+Options Name     #        Peak Memory (MB)
+-------------------------------------------
+(local process) -         35.88
+
+Performance
+Options Name     #          CPU Time (s)     Elapsed Time (s)
+--------------------------------------------------------------
+(local process) -           4                33
+\end{lstlisting}
+
+在 DMSA 流程中，资源可分布在多台主机上，因此为每个分布式进程提供资源使用数据。DMSA 流程的 \cmd{report\_host\_usage} 输出示例如下：
+\begin{lstlisting}
+pt_shell> report_host_usage
+****************************************
+Report : host_usage
+...
+****************************************
+
+Options Name       Host Name         32Bit     Num Processes
+--------------------------------------------------------------
+my_opts1          >>farm<<           N         2
+
+Options Name    #    Host Name      Job ID     Process ID   Status
+--------------------------------------------------------------------
+my_opts1        1    ptopt018       136604     1394         ONLINE
+                2    ptopt018       136605     1393         ONLINE
+
+Usage limits (cores)
+
+Options Name                #    Effective
+--------------------------------------------
+(local process)              -     1
+my_opts1                    1     4
+                            2     4
+--------------------------------------------
+Total                             9
+\end{lstlisting}
 
 退出 PrimeTime 时，工具报告会话的峰值内存、CPU 使用与经过时间：
 \begin{lstlisting}
@@ -1253,6 +1433,8 @@ START {
 
 \paragraph{辅助命令}
 辅助命令（helper command）通常用于为其他命令提供信息，包括：\cmd{get\_pins}、\cmd{get\_nets}、\cmd{get\_ports}、\cmd{get\_cells}、\cmd{all\_fanin}、\cmd{all\_fanout}。通常辅助命令本身不引人注意，除非意外贡献运行时间。因此仅 30 秒或以上的辅助命令视为显著，使用特殊``显著辅助命令''事件标记报告。
+运行不足 30 秒的辅助命令会组成辅助命令捆绑；仅当捆绑总运行时间达到
+30 秒或以上时，才视为显著并显式报告。
 
 \paragraph{运行时间}
 流程摘要显示命令（显著与未捕获）与闭合上下文层级的运行时间信息。所有运行时间值为经过的挂钟时间（wall clock time）测量。
@@ -1278,6 +1460,11 @@ Runtime overhead of flow summary utility is: 3.1 s
 \subsubsection*{Defining Custom Flow Segments}
 
 自定义流程段（custom flow segments）允许将脚本部分分组为额外的命名上下文层级结构，便于分离长脚本部分或洞察未捕获运行时间发生位置。使用 \cmd{define\_custom\_flow\_segment} 命令在脚本中定义命名起点与终点。流程段应在同一脚本文件上下文中开始与结束；嵌套流程段须按顺序关闭（低层级先于高层级）。
+\begin{lstlisting}
+define_custom_flow_segment -start -name drc_max_tran
+  # commands in this custom segment
+define_custom_flow_segment -end -name drc_max_tran
+\end{lstlisting}
 
 \subsection{写入多个流程摘要报告}
 \subsubsection*{Writing to Multiple Flow Summary Reports}

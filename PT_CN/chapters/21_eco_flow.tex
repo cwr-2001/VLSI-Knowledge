@@ -58,10 +58,11 @@ report_constraint -max_capacitance ...
 report_constraint -max_transition ...
 report_constraint -max_fanout ...
 report_noise ...
+report_si_bottleneck ...
 report_cell_em_violation ...
 \end{lstlisting}
 
-修复机制包括缓冲器插入、单元尺寸调整、负载屏蔽（load shielding）等。
+该命令通过调整单元尺寸、插入缓冲器或反相器对来尝试修复违例，并尽量减小面积影响；默认不考虑时序影响。可通过选项指定违例类型和目标 slack、修复范围、修复方法、可用库单元、数据路径或时钟网络、setup/hold 裕量以及物理放置模式。
 
 \subsubsection{串扰 Delta 延迟修复}
 \paragraph*{Crosstalk Delta Delay Fixing}
@@ -81,7 +82,7 @@ report_cell_em_violation ...
 \subsection{功耗回收修复}
 \subsubsection*{Power Recovery Fixing}
 
-使用 \cmd{fix\_eco\_power} 在不引入新时序或 DRC 违例的前提下回收漏电功耗，通过单元尺寸调整、阈值电压交换等方式。
+使用 \cmd{fix\_eco\_power} 在不引入或恶化时序及 DRC 违例的前提下尽量回收功耗和面积。默认方法是在 setup slack 为正的路径中缩小单元；也可按库单元数值属性或字符串优先级替换单元、依据 PrimePower 的 switching/leakage/total power 数据替换单元，或从 hold slack 为正的路径中删除缓冲器。
 
 功耗回收后，用 \cmd{write\_changes} 写出设计更改。
 
@@ -97,10 +98,10 @@ report_cell_em_violation ...
 \hline
 \tblhead{步骤} & \tblhead{命令} & \tblhead{修复机制} & \tblhead{优先级规则} \\
 \hline
-Step 1: 功耗回收 & \texttt{fix\_eco\_power} & 单元尺寸、缓冲器 & 不引入新时序/DRC \\
+Step 1: 功耗回收 & \texttt{fix\_eco\_power} & 单元尺寸调整、缓冲器删除 & 不引入新时序/DRC 违例 \\
 Step 2: DRC 修复 & \texttt{fix\_eco\_drc} & 缓冲器插入、单元尺寸 & 会改变 setup/hold slack \\
-Step 3: 时序修复 & \texttt{fix\_eco\_timing} & 缓冲器插入、单元尺寸 & setup 修复遵守 DRC \\
-Step 4: 最终漏电 & \texttt{fix\_eco\_power} & 阈值电压 & 不引入新时序/DRC \\
+Step 3: 时序修复 & \texttt{fix\_eco\_timing} & 缓冲器插入、单元尺寸 & setup 修复遵守 DRC、必要时可改变 hold slack；hold 修复遵守 setup slack 与 DRC \\
+Step 4: 最终漏电回收 & \texttt{fix\_eco\_power} & 阈值电压交换 & 不引入新时序/DRC 违例，且不改变版图 \\
 \hline
 \end{tabularx}
 \end{table}
@@ -252,33 +253,36 @@ PrimeTime 物理感知 ECO 可识别单高度与双高度 site row，在合法 s
 \section{报告不可修复违例与不可用单元}
 \subsection*{Reporting Unfixable Violations and Unusable Cells}
 
-ECO 完成后使用 \cmd{report\_eco\_summary} 查看修复统计。\cmd{report\_eco\_unfixed} 列出无法修复的违例及原因代码：
+执行时序或 DRC ECO 时，可要求 \cmd{fix\_eco\_timing} 或 \cmd{fix\_eco\_drc} 报告无法修复违例的原因。先将 \texttt{eco\_report\_unfixed\_reason\_max\_endpoints} 设为要报告的端点数，再使用 \opt{-verbose} 在命令输出中显示原因，或用 \opt{-unfixable\_reasons\_prefix}（可配合 \opt{-unfixable\_reasons\_format text|csv}）写入日志。仅对 \cmd{fix\_eco\_timing}，还可用 \opt{-estimate\_unfixable\_reasons} 在不修改设计的情况下预估原因。
 \begin{itemize}
-  \item T — 时序裕量过紧无法修复
-  \item U — UPF 限制修复
-  \item W — 修复可能恶化 DRC
-  \item X — 单元对 ECO 不可用
-  \item Z — 单元已被调整尺寸
+  \item A — 面积限制之外存在可用库单元；B — 延时改善不足；C — 违例位于时钟网络
+  \item I — 给定库单元无法通过插入缓冲器修复；S — 备选库单元无法通过调整尺寸修复
+  \item T — 时序裕量过紧；U — UPF 限制修复；V — net/cell 无效或带有 \texttt{dont\_touch}
+  \item W — 修复可能恶化 DRC 违例
 \end{itemize}
+
+对功耗回收，先设置 \texttt{eco\_power\_report\_max\_unusable\_cells}，再对 \cmd{fix\_eco\_power} 使用 \opt{-verbose} 和/或 \opt{-unusable\_reasons\_prefix}。其原因代码包括 B（功耗收益过小）、L（物理约束限制尺寸调整）、S（没有功耗更优的备选库单元）、T（可能恶化时序）、U（UPF 限制）、V（cell 无效或带有 \texttt{dont\_touch}）、W（可能恶化 DRC）、X（cell 不可用于 ECO）以及 Z（cell 已调整尺寸）。
 
 \section{HyperTrace ECO 修复}
 \subsection*{HyperTrace ECO Fixing}
 
-HyperTrace 加速 ECO 路径分析，在大型设计上缩短 \cmd{fix\_eco\_timing} 与 \cmd{fix\_eco\_power} 运行时间。
+HyperTrace 可在 \cmd{fix\_eco\_timing} 或 \cmd{fix\_eco\_power} 使用 \opt{-pba\_mode} 时加速 ECO 修复；该功能需要 PrimeECO 许可证。设置 \texttt{eco\_enable\_graph\_based\_refinement true} 可启用 HyperTrace ECO 修复，此设置独立于用于 HyperTrace 报告的 \texttt{timing\_enable\_graph\_based\_refinement}。
 
-配置 HyperTrace ECO 相关应用变量以启用路径追踪优化。
+\cmd{fix\_eco\_timing} 支持 \opt{-pba\_mode exhaustive} 与 \opt{-pba\_mode ml\_exhaustive}，并使用 \texttt{timing\_refinement\_max\_slack\_threshold}、\texttt{timing\_refinement\_min\_slack\_threshold} 和 \texttt{timing\_refinement\_maximum\_critical\_pin\_percentage}。slack threshold 必须覆盖 \cmd{fix\_eco\_timing} 隐式或显式的 \opt{-slack\_lesser\_than} 值。
+
+\cmd{fix\_eco\_power} 支持 \opt{-pba\_mode path}、\texttt{exhaustive} 与 \texttt{ml\_exhaustive}；其算法直接使用 HyperTrace 数据，不需要上述 refinement 变量。HyperTrace 模式不支持 \texttt{-start\_end\_type reg\_to\_reg} 和 \opt{-pba\_path\_selection\_options}。
 
 \section{写入变更列表}
 \subsection*{Writing Change Lists}
 
 使用 \cmd{write\_changes} 将 ECO 更改写出为脚本，供 ICC II 或其他 P\&R 工具读入。
 
-常用格式：\opt{-format icctcl}、\opt{-format verilog}、第三方格式等。
+可用 \opt{-format} 选择 \texttt{ptsh}（默认，PrimeTime Tcl）、\texttt{text}、\texttt{dctcl}、\texttt{icctcl}、\texttt{eco}（供 \cmd{read\_eco\_changes} 读取的二进制格式）或 \texttt{aprtcl}（第三方布局布线工具使用的伪 Tcl）格式。
 
 \subsubsection{在 PrimeTime 中回放 ECO 变更列表}
 \paragraph*{Replaying an ECO Change List in PrimeTime}
 
-可用 \cmd{source} 读入变更列表验证或增量更新时序。
+建议在原 PrimeTime 会话中执行 \texttt{write\_changes -format eco -output change\_list\_file}；在新建或恢复的会话中设置 ECO 选项并运行 \cmd{check\_eco}，再用 \cmd{read\_eco\_changes} 回放变更。验证结果后，可继续执行 ECO，最后写出供实现工具使用的 \texttt{icctcl} 变更列表。
 
 \subsubsection{在顶层运行中回放块级 ECO 更改}
 \paragraph*{Replaying Block-Level ECO Changes in a Top-Level Run}
@@ -288,7 +292,7 @@ HyperScale 流程中，块级 ECO 可在顶层会话中回放并验证接口时�
 \subsubsection{为第三方 P\&R 工具写入 ECO 变更列表}
 \paragraph*{Writing ECO Change Lists for Third-Party Place-and-Route Tools}
 
-支持 pseudo-Tcl 语法描述 insert_buffer、size_cell、create_cell、connect_net 等操作。
+使用 \texttt{write\_changes -format aprtcl} 可生成与具体工具无关的 pseudo-Tcl，描述 \texttt{insert\_buffer}、\texttt{size\_cell}、\texttt{create\_cell}、\texttt{connect\_net} 和 \texttt{remove\_buffer} 等操作。
 
 变更列表文件头含版本字符串（当前为 1.0），解析脚本应检查版本。
 
@@ -508,7 +512,7 @@ END CORE2T
 \subsection{功耗回收操作统计}
 \subsubsection*{Power Recovery Operation Statistics}
 
-report_eco_summary 显示可参与功耗回收的单元数、已训练/已调整/未训练单元数及面积变化。
+\cmd{fix\_eco\_power} 的最终 ECO 摘要会给出已执行的尺寸调整或缓冲器删除操作数，以及面积变化等统计；使用 \opt{-verbose} 时还会列出不可用单元及其原因汇总。
 
 \subsection{estimate_eco 命令}
 \subsubsection*{The estimate_eco Command}
@@ -520,9 +524,11 @@ report_eco_summary 显示可参与功耗回收的单元数、已训练/已调整
 
 \begin{itemize}
   \item \opt{-format icctcl} — IC Compiler II Tcl 脚本
-  \item \opt{-format verilog} — Verilog 网表增量
   \item \opt{-format ptsh} — PrimeTime Tcl 脚本
-  \item 第三方 P\&R 伪 Tcl 格式
+  \item \opt{-format text} — 说明性文本变更列表
+  \item \opt{-format dctcl} — Design Compiler Tcl 脚本
+  \item \opt{-format eco} — 供 \cmd{read\_eco\_changes} 使用的二进制变更列表
+  \item \opt{-format aprtcl} — 第三方 P\&R 工具使用的伪 Tcl
 \end{itemize}
 
 \subsection{ECO 变更列表版本与解析}

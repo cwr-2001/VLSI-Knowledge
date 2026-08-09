@@ -17,8 +17,8 @@ PrimeTime 支持使用 IEEE 1801 统一功耗格式（UPF）标准指定设计�
 
 PrimeTime Suite 工具支持多电压分析（不同单元使用不同供电电压）：
 \begin{itemize}
-  \item PrimeTime 计算电压正确的延时与 slew
-  \item PrimeTime SI 计算电压正确的串扰延时与噪声效应
+  \item PrimeTime 根据实际电压计算相应的延时与 slew
+  \item PrimeTime SI 根据实际电压计算相应的串扰延时与噪声效应
   \item PrimePower 根据各单元各供电引脚的实际供电电压计算功耗
 \end{itemize}
 
@@ -41,7 +41,7 @@ PrimeTime Suite 工具支持多电压分析（不同单元使用不同供电电�
 多电压分析的库要求：
 \begin{itemize}
   \item 库须包含每个单元的电源与地（PG）引脚信息。Liberty 语法使用 \texttt{voltage\_map} 与 \texttt{pg\_pin}；\texttt{voltage\_map} 定义电源与默认电压，\texttt{pg\_pin} 指定各引脚关联的电源及相关参数。详见 \textit{Library Compiler User Guide}。
-  \item 若 PG-pin 库中单元缺少电源或地引脚，PrimeTime 在 link 时移除这些单元，不报告其时序或功耗信息。
+  \item 若 PG-pin 库中的单元缺少电源引脚或地引脚，PrimeTime 会在 link 时从设计中移除这些单元，也不会报告其时序或功耗信息。
   \item Liberty 库数据须准确描述特定电压下的时序行为。PrimeTime 通过在分别表征于不同供电电压的库之间插值支持电压缩放；用 \cmd{define\_scaling\_lib\_group} 调用电压与温度缩放。注意 PrimeTime 行为与 Design Compiler 不同——DC 在精确角电压下 link 设计。详见交叉库电压与温度缩放。
 \end{itemize}
 
@@ -152,11 +152,11 @@ PrimeTime 接受但对分析无用或信息来自其他来源的 UPF 命令（�
 
 PrimeTime 拒绝为未知语法的命令（如 \cmd{save\_upf}、\cmd{merge\_power\_domains} 等）。
 
-典型 PrimeTime 多电压时序分析命令序列（UPF 相关加粗）：
+典型 PrimeTime 多电压时序分析命令序列如下（其中 UPF 相关功耗命令在原书中以粗体标出）：
 \begin{lstlisting}
 read_lib l1.lib
 read_verilog d1.v
-\section{load_upf / create_power_domain / create_supply_set ...}
+# load_upf / create_power_domain / create_supply_set ...
 source d1.tcl
 define_scaling_lib_group library_list
 set_voltage -object_list supply_net_name
@@ -189,7 +189,7 @@ PrimeTime 构建虚拟供电网络模型传播电压，不执行物理实现。�
 \subsection{设置电压与温度}
 \subsubsection*{Setting Voltage and Temperature}
 
-\cmd{set\_voltage} 在供电网或单元 PG 引脚上设置电压。\opt{-min} 指定最小延时分析的电压（OCV 角）。\opt{-cell} 与 \opt{-pg\_pin\_name} 在单元级标注 IR drop，须同时使用，需要 PrimeTime SI 许可证。
+\cmd{set\_voltage} 在供电网或单元 PG 引脚上设置电压。可指定单一电压，或同时指定最小延时与最大延时分析所用电压（\opt{-min} 与默认的 max 电压）。注意 \opt{-min} 指定的是最小延时分析使用的电压，该值通常是较大的电压。\opt{-cell} 与 \opt{-pg\_pin\_name} 用于在单元级标注 IR drop，须同时使用，并需要 PrimeTime SI 许可证。
 
 \cmd{set\_temperature} 在单元列表上设置温度，与电压缩放库组配合使用。
 
@@ -279,7 +279,7 @@ PrimeTime SI 能在不同单元供电电压下准确确定延时、slew 与噪�
 \subsection{同时多电压分析（SMVA）}
 \subsubsection*{Simultaneous Multivoltage Analysis (SMVA)}
 
-多电压设计中时序路径可跨电源域。当各域可在多种供电电压下工作时，传统分析无法准确分析电压组合对每条路径的影响：每域单一电压则组合无界；每域 min/max（OCV）电压则过于悲观，因同域内单元不能同时工作于不同电压。
+多电压设计中的时序路径可能跨越电源域。当各域可在多种供电电压下工作时，传统分析无法准确反映各种电压组合对每条路径的影响：每个域只使用一个电压无法涵盖所有组合；对每个域使用 min/max（OCV）电压又会过于悲观，因为同一域内的不同单元不可能同时工作在不同电压下。
 
 基于图的同时多电压分析（SMVA）消除该悲观度：域内路径在该域所有电压级分析，跨域路径分析所穿越域的所有电压组合，单次运行完成。详见第~\ref{chap:smva}~章。
 
@@ -316,7 +316,7 @@ RedHawk-SC 功耗与可靠性分析工具可与 PrimeTime 协同分析 IR drop �
 \subsubsection{写出 Ansys RedHawk-SC STA 文件}
 \paragraph*{Writing Ansys RedHawk-SC STA Files}
 
-RedHawk-SC 需要 PrimeTime 的 STA 数据以执行 IR drop、时钟抖动与动态压降分析。
+RedHawk-SC 需要 PrimeTime 的 STA 数据来执行 IR drop、时钟抖动和动态电压降分析。
 
 \begin{enumerate}
   \item 运行 \cmd{write\_rh\_file -output string [-filetype jitter|irdrop]}。需要时执行时序更新，以压缩 .gz 格式写出 STA 数据。动态压降分析使用 \opt{-filetype irdrop}。需要 PrimePower 或 PrimeTime-ADV-PLUS 许可证。
