@@ -68,10 +68,11 @@ build.bat
 或手动：
 
 ```bat
-xelatex -interaction=nonstopmode main.tex
-xelatex -interaction=nonstopmode main.tex
+xelatex -interaction=nonstopmode -jobname=ICV_CN main.tex
+xelatex -interaction=nonstopmode -jobname=ICV_CN main.tex
 ```
 
+产物为 `ICV_CN.pdf`（与文件夹名一致）。
 ### 字体
 
 默认使用 Windows 的 `SimSun` / `Microsoft YaHei` / `FangSong`。若编译报缺字体，编辑 `preamble.tex` 中的 `\setCJKmainfont` 等为你机器上已有的中文字体。

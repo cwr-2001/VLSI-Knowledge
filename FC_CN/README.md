@@ -10,7 +10,7 @@
 
 ```
 FC_CN/
-├── main.tex / main.pdf   # 主文件与编译产物（XeLaTeX）
+├── main.tex / FC_CN.pdf  # 主文件与编译产物（XeLaTeX）
 ├── preamble.tex
 ├── chapters/
 │   ├── 00_preface.tex … 13_eco_flow.tex
@@ -49,7 +49,7 @@ cd "d:\IC Design\VLSI\FC_CN"
 build.bat
 ```
 
-字体默认 `SimSun` / `Microsoft YaHei` / `FangSong`；缺字体时改 `preamble.tex`。
+产物为 `FC_CN.pdf`（与文件夹名一致）。字体默认 `SimSun` / `Microsoft YaHei` / `FangSong`；缺字体时改 `preamble.tex`。
 
 ## 续译 / 校对约定
 

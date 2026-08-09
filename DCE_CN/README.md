@@ -10,7 +10,7 @@
 
 ```
 DCE_CN/
-├── main.tex / main.pdf
+├── main.tex / DCE_CN.pdf
 ├── preamble.tex
 ├── chapters/
 │   ├── 00_preface.tex … 14_milkyway.tex
@@ -55,7 +55,7 @@ cd "d:\IC Design\VLSI\DCE_CN"
 build.bat
 ```
 
-字体默认 `SimSun` / `Microsoft YaHei` / `FangSong`；缺字体时改 `preamble.tex`。
+产物为 `DCE_CN.pdf`（与文件夹名一致）。字体默认 `SimSun` / `Microsoft YaHei` / `FangSong`；缺字体时改 `preamble.tex`。
 
 ## 续译 / 校对约定
 

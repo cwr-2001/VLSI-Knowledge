@@ -54,7 +54,7 @@ RH_CN/
 
 原书 PDF 共 **1027** 页；正文页码 ≈ PDF 页码 − 38。原书目录未单独列出 Appendix B。
 
-译本已按原文做**精译扩写**（步骤/选项/关键字/示例尽量译全）；`main.pdf` 约 **624** 页（插图以占位框表示）。附录 C 含 600+ GSR 关键字逐条说明；附录 D/E 为命令与实用程序详解。
+译本已按原文做**精译扩写**（步骤/选项/关键字/示例尽量译全）；`RH_CN.pdf` 约 **624** 页（插图以占位框表示）。附录 C 含 600+ GSR 关键字逐条说明；附录 D/E 为命令与实用程序详解。
 
 ## 编译方法
 
@@ -68,9 +68,11 @@ build.bat
 或手动：
 
 ```bat
-xelatex -interaction=nonstopmode main.tex
-xelatex -interaction=nonstopmode main.tex
+xelatex -interaction=nonstopmode -jobname=RH_CN main.tex
+xelatex -interaction=nonstopmode -jobname=RH_CN main.tex
 ```
+
+产物为 `RH_CN.pdf`（与文件夹名一致）。
 
 ### 字体
 
