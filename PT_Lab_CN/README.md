@@ -53,7 +53,7 @@ build.bat
 
 ## 翻译约定
 
-1. 中文叙述 + 英文术语夹注；Tcl 用 `lstlisting`；注意/提示/问题/解答用对应 tcolorbox。
+1. 中文叙述 + 英文术语夹注；Tcl 用 `lstlisting`；注意/提示用对应 tcolorbox；每题答案以「答：」紧跟在同一问题框内。
 2. 技术标识符不译：`pt_shell`、`report_timing`、`restore_session`、`PTE-070` 等。
 3. 设计名 **ORCA**、目录名 `lab1_flow` 等保持原文。
 4. OCR 噪声处对照原版扫描页校对。
