@@ -1,0 +1,2643 @@
+
+
+===== PDF page 402 =====
+Feedback
+13
+Performing Pin Assignment
+The IC Compiler II tool provides extensive control over pin placement and feedthrough 
+creation during floorplanning. Pin placement is based on global routing and can be guided 
+by user-defined constraints. You can make minimal changes to an existing pin placement 
+by changing constraints and running pin assignment in incremental mode.
+Pin placement considers all multiply instantiated block (MIB) instances during global 
+routing and pin assignment. Comprehensive pin placement validation and reporting 
+commands are available to qualify pin placement results. The GUI supports pin editing, 
+moving, shaping to adjust placement, as well as pin-based net connectivity analysis and 
+topological constraint visualization. During the ECO process, you can re-create existing 
+pin locations and feedthroughs.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+402
+
+
+===== PDF page 403 =====
+Chapter 13: Performing Pin Assignment
+ 
+Feedback
+The flow to generate pin constraints, place pins, incrementally modify pin placement, and 
+validate placement results is shown in Figure 139.
+Figure 139
+Pin Assignment Flow
+Create block-level pin constraints
+set_block_pin_constraints
+Create individual pin constraints
+create_pin_constraint
+Create bundles and bundle constraints
+create_bundle
+create_pin_constraint
+Create and read pin constraint file
+read_pin_constraints
+Perform preplacement pin check
+check_pre_pin_placement
+Place pins
+place_pins
+Verify pin placement
+check_pin_placement
+report_pin_placement
+report_feedthroughs
+Write pin constraints
+write_pin_constraints
+For more details, see the following topics:
+•
+Creating Pin Blockages
+•
+Precedence Rules and Conflict Resolution for Pin Constraints
+•
+Creating Block Pin Constraints
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+403
+
+
+===== PDF page 404 =====
+Chapter 13: Performing Pin Assignment
+Creating Pin Blockages
+Feedback
+•
+Creating Individual Pin Constraints
+•
+Creating Bundles and Bundle Constraints
+•
+Setting Pin Constraints
+•
+Setting Pin Placement Priority on Nets and Bundles
+•
+Performing Global Routing for Pin Placement
+•
+Creating a Channel Congestion Map
+•
+Checking the Design Before Pin Placement
+•
+Placing Pins
+•
+Checking Pin Placement
+•
+Reporting and Writing Pin Constraints
+•
+Writing Out Feedthrough Information as Tcl Commands
+•
+Creating Topological Pin Constraints in the GUI
+•
+Reporting Estimated Wire Length
+Creating Pin Blockages
+You can create a region in which pins cannot be placed by using the 
+create_pin_blockage command before running the place_pins command. The region 
+boundary can be a rectangle, a polygon, or a collection of objects with physical geometry. 
+The boundary can span multiple layers.
+If you specify a list of physical pins, nets, or ports, the list must be homogeneous; it 
+cannot contain a mixture of object types. However, specified pins, nets, and ports can 
+be associated with multiple pin blockages. All specified pins, pins of specified nets, and 
+specified ports are placed outside of the blockage. If you do not specify physical objects, 
+all pins and ports are placed outside of the blockage during pin assignment.
+You can create a feedthrough-only blockage, excluding feedthrough pins in the specified 
+region, by specifying the -feedthrough_only option with the create_pin_blockage 
+command. If there are conflicts during pin placement, the feedthrough-only pin blockages 
+takes higher priority than any other pin constraints.
+The following example creates a pin blockage named PB_1 with a rectangular boundary 
+that applies to all layers:
+icc2_shell> create_pin_blockage -boundary {{100 100} {200 200}} -name 
+ PB_1
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+404
+
+
+===== PDF page 405 =====
+Chapter 13: Performing Pin Assignment
+Precedence Rules and Conflict Resolution for Pin Constraints
+Feedback
+The following example creates a pin blockage with a rectilinear boundary that applies to 
+the M1 and M2 layers only:
+icc2_shell> create_pin_blockage -boundary {{0 0} {2000 0} \
+   {2000 2000} {1000 2000} {1000 1000} {0 1000}} -layers {M1 M2}
+The following example creates a pin blockage with a rectangular boundary that is 
+associated with physical pins:
+icc2_shell> set pins [get_pins -physical_context cell1/pin*]
+icc2_shell> create_pin_blockage -boundary {{100 100} {200 200}} $pins
+Precedence Rules and Conflict Resolution for Pin Constraints
+The following precedence rules are used when multiple constraints are specified for the 
+same pin:
+•
+Individual pin constraints take precedence over bundle pin constraints.
+•
+Bundle pin constraints take precedence over nondefault rules.
+•
+Nondefault rules take precedence over block pin constraints.
+•
+More pessimistic or restrictive constraints take precedence over less restrictive 
+constraints.
+For example, a constraint that specifies an exact location takes precedence over a pin 
+guide.
+•
+When there are multiple constraints specified for the same pin constraints, the tool 
+applies the last specified constraint.
+•
+Constraints included in the topological map and feedthrough control sections of the pin 
+constraint file override global feedthrough control settings.
+The following conflict resolution rules are used when multiple constraints are specified for 
+the same pin:
+•
+If there are feedthrough constraint conflicts between topological map constraints and 
+previous feedthrough constraints, feedthrough constraints from the constraint file have 
+priority.
+•
+If there are conflicts between feedthrough and topological map constraints, topological 
+map constraints have priority.
+•
+If the pin spacing control section contains conflicting constraints for the same edge, 
+the same layer, and the same block, the last constraint takes priority and the command 
+issues an error or warning message.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+405
+
+
+===== PDF page 406 =====
+Chapter 13: Performing Pin Assignment
+Creating Block Pin Constraints
+Feedback
+•
+When individual net (or pin) side, offset, layer, or order constraints conflict with bundle 
+constraints, the place_pins command ignores bundle pin constraints for those nets (or 
+pins) and places other bundle pins together.
+•
+When individual net (or pin) width, length or spacing constraints conflict with bundle 
+width, length, or spacing constraints, the place_pins command honors both individual 
+and bundle constraints.
+•
+If there are pins in a bus with a different spacing or width from other pins in the bus, 
+all bus pins are placed on the same layer in the order defined in the bundle pin 
+constraints.
+Pin width is determined by the pin constraints applied to the block and by the following 
+precedence rules:
+1. If the pin is placed on a wire track with nonzero track width, the pin width is the same 
+as track width and any other width-related pin constraints are ignored. In this case, the 
+minimum width rule defined in the technology file is ignored.
+2. If the pin has no width-related pin constraints, but its net has a nondefault routing rule 
+that requires a specific width on the pin layer, the pin width is the width specified by the 
+nondefault rule.
+3. If the pin does not have width-related pin constraints or a nondefault routing rule, the 
+pin width is the same as the minimum width rule defined in the technology file.
+Creating Block Pin Constraints
+Block-level pin constraints restrict the metal layers, spacing, block sides, and the creation 
+of feedthroughs for the blocks in your design. The tool supports feedthroughs for both 
+normal and multiply instantiated blocks (MIB). To create block-level pin constraints,
+1. Use the set_block_pin_constraints command and specify the constraint options.
+icc2_shell> set_block_pin_constraints -pin_spacing 1 \
+   -allowed_layers {M2 M3 M4 M5 M6 M7 M8 M9}
+2. (Optional) Verify the constraint settings with the report_block_pin_constraints 
+command.
+icc2_shell> report_block_pin_constraints
+****************************************
+Report : report_block_pin_constraints
+Design : alu
+****************************************
+  Pin constraints report on blocks
+  ========================================
+    block u_l/u0_3 :
+      feedthroughs allowed: false
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+406
+
+
+===== PDF page 407 =====
+Chapter 13: Performing Pin Assignment
+Creating Block Pin Constraints
+Feedback
+      corner_keepout_num_tracks: 5
+      pin_spacing: 1
+      allowed_layers: M2 M3 M4 M5 M6 M7 M8 M9
+      hard_constraints: off
+3. If needed, remove the block pin constraints with the remove_block_pin_constraints 
+command and reapply the constraints with the set_block_pin_constraints 
+command.
+Alternatively, use the Task Assistant to define the block pin constraints.
+1. Select Task > Task Assistant in the GUI.
+2. Select Pin Assignment > Block-based Constraints.
+3. Click the Block-based Constraint Table.
+4. Enter the constraints in the table and click Apply.
+Use options with the set_block_pin_constraints command to perform the following 
+actions:
+•
+Restrict pin placement to a specific set of layers
+icc2_shell> set_block_pin_constraints -allowed_layers {M2 M3}
+•
+Create additional offset from the corner of a block to the closest pin by specifying a 
+number of tracks or a distance in microns
+icc2_shell> set_block_pin_constraints -corner_keepout_num_tracks 5
+icc2_shell> set_block_pin_constraints -corner_keepout_distance 10
+•
+Set the spacing between adjacent pins by specifying a number of tracks or a distance 
+in microns
+icc2_shell> set_block_pin_constraints -pin_spacing 5
+icc2_shell> set_block_pin_constraints -pin_spacing_distance 10
+•
+Specify the allowed block sides where pins can be placed or the sides where pins 
+cannot be placed
+icc2_shell> set_block_pin_constraints -sides {1 2}
+icc2_shell> set_block_pin_constraints -exclude_sides {3 4}
+•
+Enable feedthroughs for a block; disable feedthroughs by setting the option to false
+icc2_shell> set_block_pin_constraints -allow_feedthroughs true
+•
+Set constraints on a specific list or collection of blocks
+icc2_shell> set_block_pin_constraints -cells {CNTL REG}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+407
+
+
+===== PDF page 408 =====
+Chapter 13: Performing Pin Assignment
+Creating Individual Pin Constraints
+Feedback
+•
+Specify which constraints must be met, even if the tool creates a DRC violation
+icc2_shell> set_block_pin_constraints \
+   -hard_constraints {spacing location layer length}
+•
+Specify the length and width of the block pins
+icc2_shell> set_block_pin_constraints \
+   -length {{METAL3 0.2} {METAL4 0.3}}
+icc2_shell> set_block_pin_constraints \
+   -width {{METAL3 0.2} {METAL4 0.3}}
+Creating Individual Pin Constraints
+After setting block pin constraints, define individual pin constraints to control pin placement 
+details on a pin-by-pin basis. Individual pin constraints take precedence over block pin 
+constraints. To create individual pin constraints,
+1. (Optional) Remove existing individual pin constraints with the 
+remove_pin_constraints command.
+icc2_shell> remove_pin_constraints [get_pin_constraints \
+    -filter {pin_constraint_type=="individual"}]
+2. Use the create_pin_constraint command and specify the constraint options.
+icc2_shell> create_pin_constraint -type individual \
+   -pins {u0_1/rstn} \
+   -sides 4 -width {{M3 3} {M5 5}} -length {{M3 3} {M5 5}}
+3. Verify the constraint settings with the report_pin_constraints command:
+icc2_shell> report_pin_constraints [get_pin_constraints \
+   -filter {pin_constraint_type=="individual"}]
+Alternatively, use the Task Assistant to define the individual pin constraint.
+1. Select Task > Task Assistant in the GUI.
+2. Select Pin Assignment > Pin-based Constraints.
+3. Click the Pin-based Constraint Table.
+4. Enter the constraints in the table and click Apply.
+Note that if you specify multiple conflicting pin constraints for the same pin, the last 
+constraint takes precedence.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+408
+
+
+===== PDF page 409 =====
+Chapter 13: Performing Pin Assignment
+Creating Individual Pin Constraints
+Feedback
+Setting Individual Pin Constraint Options
+Use options with the create_pin_constraint command to enable the following actions.
+Note:
+You must specify the -type individual option and at least one of the following 
+options: -pins, -ports, or -nets.
+•
+Restrict the pin placement to the specified set of pins, nets, ports, cells, and layers
+icc2_shell> create_pin_constraint -type individual \
+   -pins pins -nets nets \
+   -ports ports -cells cells -layers layers
+•
+Set the number of wire tracks between adjacent pins
+icc2_shell> create_pin_constraint -type individual \
+   -pin_spacing_tracks 5
+•
+Set the distance in microns between adjacent pins
+icc2_shell> create_pin_constraint -type individual \
+   -pin_spacing_distance 2
+•
+Specify the sides of the block that can be used to place the pin
+icc2_shell> create_pin_constraint -type individual \
+   -sides {1 2 3}
+•
+Specify the sides of the block that cannot be used to place the pin
+icc2_shell> create_pin_constraint -type individual \
+   -exclude_sides {4}
+•
+Specify the width or length of the pin as layer-width or layer-length pairs
+icc2_shell> create_pin_constraint -type individual \
+   -width {{M3 1} {M5 2}} -length {{M3 2} {M5 4}}
+•
+Create a specified distance between the starting point for the block edge and the first 
+pin on that edge
+icc2_shell> create_pin_constraint -type individual \
+   -sides 1 -offset 10
+Alternatively, specify a range of locations in which the pins can be placed by specifying 
+a minimum and maximum offset as follows:
+icc2_shell> create_pin_constraint -type individual \
+    -sides 1 -offset {5 15}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+409
+
+
+===== PDF page 410 =====
+Chapter 13: Performing Pin Assignment
+Creating Bundles and Bundle Constraints
+Feedback
+If your design is evolving and you do not want to specify any absolute values for the 
+offset, you can specify a relative location. You can do this by specifying a percentage 
+of the total length. To specify a percentage, append the '%' character to the end of the 
+value. For example, -offset {10% 40%}.
+icc2_shell> create_pin_constraint -type individual \
+   -layers [get_layers {M2 M3}] -nets [get_nets clk] \
+   -offset {10% 40%} -side 3
+In the preceding example, the tool sets the allowed pin layers for net clk to M2 and M3 
+having start offset as 10% of side 3 and end offset as 40% of side 3.
+•
+Set the x- and y-location in the top-level design to place the pin
+icc2_shell> create_pin_constraint -type individual \
+   -pins {u0_1/rstn} -location {1430 1914}
+Creating Bundles and Bundle Constraints
+Net bundles are used to manage bus signals and other related signal nets. You can use 
+bundles to group signals together, create a bundle object, and trace their flylines in the 
+layout. Any net can be placed into a bundle. Signals within the bundle can be rearranged 
+and sorted to create custom pin ordering. Bundles can be created by based on standard 
+bus naming patterns. Bundles can contain other bundles.
+During pin placement, the place_pins command routes bundle nets together through the 
+block edge and honors bundle constraints such as pin spacing, pin width, and so on.
+To create an explicit bundle by specifying individual net names,
+1. Use the create_bundle command and specify the bundle name and the signals in the 
+bundle.
+icc2_shell> create_bundle -name Bundle1 \
+    [get_nets {sd[0] sd[1] sd[2] sd[3]}]
+{Bundle1}
+You can also create bundles of supernets with the create_bundle command.
+icc2_shell> create_bundle -name supernet_bundle1 \
+   [get_supernets {supernet_0 supernet_1}]
+2. (Optional) Verify the net contents of the bundle with the report_bundles command.
+icc2_shell> report_bundles [get_bundles Bundle1]
+Begin bundle report ..
+  Bundle NAME: `Bundle1'
+  Number of objects in bundle 4
+  Bundle Type 'net'
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+410
+
+
+===== PDF page 411 =====
+Chapter 13: Performing Pin Assignment
+Creating Bundles and Bundle Constraints
+Feedback
+  Objects in bundle
+    Position = 0, net sd[0]
+...
+To automatically create bus bundles based on nets with similar prefixes,
+1. Use the create_bundles_from_patterns command and specify the prefix of the 
+net group, or omit the -net_name_prefix option to automatically create multiple net 
+bundles for all net groups.
+icc2_shell> create_bundles_from_patterns -net_name_prefix ahbmi
+Information: There are 1 new bundles defined. (LED-102)
+{B_ahbmi}
+2. (Optional) Verify the contents of the bundle with the report_bundles command.
+icc2_shell> report_bundles [get_bundles {B_ahbmi}]
+Begin bundle report ..
+  Bundle NAME: `B_ahbmi'
+  Number of objects in bundle 24
+...
+The create_bundles_from_patterns command supports several options to control how 
+the bundles are created. Use the -net_name_prefix prefix option to specify a set of 
+net names for a bundle. To specify the ordering of the net bundles, use the -net_order 
+ascending | descending option. To constrain the minimum and maximum number of 
+nets in a bundle, use the -minimum_nets min and -maximum_nets max options.
+If you omit the -net_name_prefix option, the create_bundles_from_patterns 
+command creates a bundle by identifying signals that contain a bus index pattern. The 
+supported bus index patterns are [i], (i), <i>, _i, :i and {i}, where "i" is the bus index. 
+To limit the set of recognized bus patterns, specify the -no_braces, -no_brackets, 
+-no_angle_brackets, -no_underlines, -no_colons, or -no_parentheses options.
+To modify an existing bundle by adding or removing nets, use the add_to_bundle and 
+remove_from_bundle commands.
+You can also use the Design Assistant dialog box in the GUI to create or modify bundles of 
+nets as follows:
+1. Select View > Assistants > Design Assistant in the GUI.
+2. Enter the net selection command in the command box.
+3. Select the nets to add to the bundle from the list.
+4. Choose Bundles > Create Bundle from the menu.
+5. Enter the bundle name.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+411
+
+
+===== PDF page 412 =====
+Chapter 13: Performing Pin Assignment
+Creating Bundles and Bundle Constraints
+Feedback
+6. Sort the list by selecting the sort options and clicking the Sort button, or by dragging 
+and dropping the signals to reorder the list.
+7. Click OK to create the bundle.
+Figure 140 shows the Design Assistant and Create Bundle dialog boxes.
+Figure 140
+Design Assistant and Create Bundle Dialog Boxes
+To return a collection of bundles, use the get_bundles command. To remove a bundle 
+from the design, use the remove_bundles command.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+412
+
+
+===== PDF page 413 =====
+Chapter 13: Performing Pin Assignment
+Creating Bundles and Bundle Constraints
+Feedback
+Bundle pin constraints restrict the placement of net bundles on a physical design block. 
+You can use the constraints to keep bundle bits together, specify pin ordering, specify the 
+allowed layers for bundles, and so on. To create a bundle constraint,
+1. Use the create_pin_constraint command and specify the constraint options.
+icc2_shell> create_pin_constraint -type bundle \
+     keep_pins_together true
+1
+2. (Optional) Verify the constraint settings with the report_pin_constraints command.
+icc2_shell> report_pin_constraints [get_pin_constraints \
+   -filter {pin_constraint_type=="bundle"}]
+****************************************
+Report : report_pin_constraints
+Design : ORCA
+****************************************
+ 
+Pin Constraints        Description
+----------------------------------------
+Pin_Constraint_0
+                       Type: Bundle
+                       Obj Type: Net
+                       Feedthrough allowed: true
+1
+The create_pin_constraint command supports several options to constrain bundles:
+•
+To create the constraint on specific bundles, use the -bundles option.
+•
+To apply the constraints to specific cells, use the -cells option.
+•
+To apply the constraints only at the top level, use the -self option.
+•
+To specify whether bundle pins are kept together, use the -keep_pins_together 
+option.
+•
+To specify a region on the block where the bundle pins should be placed, use the 
+-sides and -range options.
+•
+To control the ordering of the pin placement for signals in the bundle, use the 
+-bundle_order option.
+•
+To allow or disallow feedthroughs for a bundle, use the -allow_feedthroughs option.
+•
+To control which layers can be used for the bundle pins, use the -layers option.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+413
+
+
+===== PDF page 414 =====
+Chapter 13: Performing Pin Assignment
+Creating Bundles and Bundle Constraints
+Feedback
+•
+To specify the number of wire tracks between adjacent pins, use the 
+-pin_spacing_tracks option.
+•
+To specify the minimum distance between adjacent pins in microns, use the 
+-pin_spacing_distance option.
+Bundle Constraint Example
+The following example uses bundle constraints to control the global routing of a bus. A 
+256-bit bus is split into two individual 128-bit buses. Bits 0 through 127 are routed from 
+block A to block D through block B, and bits 128 through 255 are routed from block A 
+to block D through block C. Each bundle is constrained independently and is routed 
+separately. The commands to create this routing are as follows and the simplified layout 
+result is shown in Figure 141.
+icc2_shell> create_bundle -name bundle1 [get_nets \
+   {Bus_0 Bus_1 ... Bus_127}]
+icc2_shell> create_pin_constraint ... -bundles bundle1 \
+   -layers {M3 M5} -cells B
+icc2_shell> create_bundle -name bundle2 [get_nets \
+   {Bus_128 Bus_129 ... Bus_255}]
+icc2_shell> create_pin_constraint ... -bundles bundle2 \
+   -layers {M3 M5} -cells C
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+414
+
+
+===== PDF page 415 =====
+Chapter 13: Performing Pin Assignment
+Setting Pin Constraints
+Feedback
+Figure 141
+Splitting a Large Bus into Two Bundles
+A
+C
+D
+B
+Bus[127:0]
+Bus[255:128]
+Setting Pin Constraints
+Pin constraints describe the preferred connection path, feedthrough control, pin spacing, 
+layer and other pin-related information for the blocks in the design. Pin constraints are 
+defined with the create_pin_constraint and set_block_pin_constraints commands, 
+or by reading a pin constraints file with the read_pin_constraints command.
+To read the pin constraints file, use the read_pin_constraints command and specify the 
+constraints file name as follows:
+icc2_shell> read_pin_constraints -file_name constraints.txt
+After reading the constraints, use the report_pin_constraints command to view the 
+constraints.
+The pin constraints file is divided into sections, and each section of the file begins with a 
+section header and ends with a footer. Within each section, constraints are surrounded 
+by curly brackets and each record description ends with a semicolon (;). Empty lines are 
+ignored, and comments begin with a pound sign (#).
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+415
+
+
+===== PDF page 416 =====
+Chapter 13: Performing Pin Assignment
+Setting Pin Constraints
+Feedback
+Topological Map
+The topological map section specifies how a net or group of nets should be routed through 
+blocks during pin placement. Pin constraints specified in the topological map section take 
+precedence over block-level pin constraints.
+The topological map section of the constraints file is specified as follows:
+•
+Each record begins with the Nets or Bundles keyword, contains the names of one or 
+more nets or bundles, and is followed by pairs of objects on the net or bundle.
+•
+Each cell, pin, or port specification should be grouped together by a pair of curly 
+braces.
+•
+Each keyword and its value should be enclosed by a pair of curly braces.
+•
+For clarity, the description of the whole net or bundle constraint should be enclosed 
+by curly braces; however, this is not strictly required and is not shown in the following 
+example.
+•
+Use an asterisk (*) as a wildcard character to specify nets with similar names. An 
+asterisk is not supported as a wildcard character for bundle names.
+•
+The net or bundle constraint is terminated with a semicolon (;).
+start topological map;
+{Nets net_names}
+ {{Port port_name_1} {Cell cell_name_1}}
+ {{Cell cell_name_1} {Cell cell_name_2}}
+ {{Cell cell_name_2} {Pins pin_name_1}};
+{Bundles bundle_names}
+ {{Cell cell_name_1} {Cell cell_name_2}};
+end topological map;
+For block objects specified by the Cell keyword, you can include side, offset, and layer 
+constraints for the block pins by using the side, offset and layer keywords. The side 
+constraint specifies the side number for the block where the pins are inserted. The side 
+number is a positive integer that starts from 1. Given any block with a rectangular or 
+rectilinear shape, the lowest leftmost edge is side number 1. The sides are numbered 
+consecutively as you proceeded clockwise around the shape.
+The offset specifies the distance in microns from the starting point of a given edge to the 
+routing cross-point on that edge in clockwise direction. The starting point for edge number 
+1 is the lower vertex, the starting point for edge number 2 is the left vertex, and so on. You 
+must specify the side number when you specify an offset. The layer constraint specifies 
+the metal layers to use for the pins.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+416
+
+
+===== PDF page 417 =====
+Chapter 13: Performing Pin Assignment
+Setting Pin Constraints
+Feedback
+The general syntax for a block object constraint is as follows:
+{{Cell cell_name_1} {sides side_number}
+ {offset offset_1} {layers {layer_1 layer_2 ...}}}
+For examples of topological pin constraints, see Topological Constraint Examples.
+Topological Constraint Examples
+The following topics show brief usage examples for topological constraints.
+Specifying Routing Topology Using Side Constraints
+The following example connects hierarchical nets and pins in the UA, UA/UB0, and 
+UA/UB1 blocks as shown in the following figure.
+# Example 1
+start topological map;
+{nets UA/netA}
+{{{port UA/inA}}
+ {{cell UA/UB0} {sides 1}}}
+{{{cell UA/UB0} {sides 3}}
+ {{cell UA/UB1} {sides 1}}}
+{{{cell UA/UB1}{sides 3}}
+ {{port UA/out}}};
+end topological map;
+Figure 142
+Topological Constraints Example 1
+UB1
+UB0
+UA
+TOP
+netA
+inA
+out
+Forcing a Connection Through a Block
+The following example connects Net_A to blocks Cell_A, Cell_C, and Cell_E; the tool 
+forces the routing between blocks Cell_A and Cell_C to pass through block Cell_B.
+# Example 2
+start topological map;
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+417
+
+
+===== PDF page 418 =====
+Chapter 13: Performing Pin Assignment
+Setting Pin Constraints
+Feedback
+{Nets Net_A}
+ {{Cell Cell_A} {Cell Cell_B}}
+ {{Cell Cell_B} {Cell Cell_C}}
+ {{Cell Cell_A} {Cell Cell_E}};
+end topological map;
+Figure 143
+Topological Constraints Example 2
+Cell_A
+TOP
+Cell_B
+Cell_C
+Cell_E
+Net_A
+The following example connects top-level port A to pin Cell_C/a. If Net_A does not 
+connect to Cell_B, the tool forces the connection to pass through Cell_B.
+# Example 3
+start topological map;
+{Nets Net_A}
+  {{Port A} {Cell Cell_B}}
+  {{Cell Cell_B} {Pins Cell_C/a}};
+end topological map;
+Figure 144
+Topological Constraints Example 3
+Cell_B
+TOP
+Cell_C
+Net_A
+a
+A
+Using Net Grouping in Topological Constraints
+The following example uses curly brackets and a wildcard for net grouping. The constraint 
+creates a similar routing pattern from Cell_A to Cell_B to Cell_C for nets Net_A, Net_B, 
+and all nets with net names that begin with DataIn.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+418
+
+
+===== PDF page 419 =====
+Chapter 13: Performing Pin Assignment
+Setting Pin Constraints
+Feedback
+# Example 4
+start topological map;
+{Nets Net_A Net_B DataIn*}
+  {{Cell Cell_A} {Cell Cell_B}}
+  {{Cell Cell_B} {Cell Cell_C}};
+end topological map;
+Figure 145
+Topological Constraints Example 4
+Cell_A
+TOP
+Cell_B
+Net_A
+Net_B
+Data_In*
+Cell_C
+The following example routes the Bundle1 and Bundle2 net bundles through the Cell_A 
+and Cell_B blocks.
+# Example 5
+start topological map;
+{Bundles Bundle1 Bundle2}
+  {{Cell Cell_A} {Cell Cell_B}};
+end topological map;
+Specifying Side, Offset, and Layer Topological Constraints
+The following example sets side, offset, and layer topological constraints for pins that 
+connect to Net_A. The routing connects Cell_C through side 1 at offset 20 on layer M2 to 
+Cell_B through side 3 at offset 40 on layer M4. The routing also connects Cell_B through 
+side 1 at offset 10 on layer M4 to Cell_A through side 3 at offset 30 on layer M2.
+# Example 6
+start topological map;
+{Nets Net_A}
+   {{{Cell Cell_C} {sides 1}
+     {offset 20} {layers M2}}
+    {{Cell Cell_B} {sides 3}
+     {offset 40} {layers M4}}}
+ 
+   {{{Cell Cell_B} {sides 1}
+     {offset 10} {layers M4}}
+    {{Cell Cell_A} {sides 3}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+419
+
+
+===== PDF page 420 =====
+Chapter 13: Performing Pin Assignment
+Setting Pin Constraints
+Feedback
+     {offset 30} {layers M2}}};
+end topological map;
+Figure 146
+Topological Constraints Example 6
+TOP
+20
+Cell_C
+1
+2
+3
+4
+Cell_B
+1
+2
+3
+4
+40
+10
+30
+Cell_A
+1
+2
+4
+Net_A
+Specifying a Connection Without Feedthroughs
+The following example contains three blocks: A, B, and C. The specification requires 
+that net Net1 connect blocks A and C without creating a feedthrough in block B. 
+To implement this design, create the following constraints.txt pin constraints file 
+and specify the read_pin_constraints -file_name constraints.txt and 
+set_block_pin_constraints -allow_feedthroughs true commands before running 
+the place_pins command.
+start topological map;
+{Nets Net1}
+ {{Cell A} {Cell C}};
+end topological map;
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+420
+
+
+===== PDF page 421 =====
+Chapter 13: Performing Pin Assignment
+Setting Pin Constraints
+Feedback
+The layout result is shown in Figure 147.
+Figure 147
+Direct Connection Between Blocks
+A
+B
+A
+C
+Note that you can create the same topology for a group of nets by specifying net names 
+separated by white space within the curly brackets. You can also use the asterisk 
+character (*) as a wildcard.
+Allowing Mixed Feedthroughs on Abutted and Narrow Channel 
+Blocks
+The place_pins command honors the topological pin feedthroughs constraints 
+set with the -allow_feedthroughs option of the set_block_pin_constraints, 
+set_bundle_pin_constraints, and set_individual_pin_constraints commands, in 
+addition to the topological pin constraints file and the GUI. For designs with abutted blocks 
+and tight feedthrough constraints, the global router might create long routing detours to 
+avoid creating feedthroughs.
+To improve routing, you can relax the feedthrough constraints and allow the 
+place_pins command to create mixed feedthroughs on blocks where feedthroughs 
+are disallowed. Mixed feedthroughs are feedthroughs that have an existing 
+connection to a pin on the block. To relax the feedthrough constraints, set the 
+plan.pins.allow_mixed_feedthroughs application option to true.
+The following figure shows three layout results. The figure on the left is the default 
+behavior when feedthroughs are disallowed on abutted blocks. The middle and right 
+figures show possible layout results when the plan.pins.allow_mixed_feedthroughs 
+application option is true.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+421
+
+
+===== PDF page 422 =====
+Chapter 13: Performing Pin Assignment
+Setting Pin Constraints
+Feedback
+Figure 148
+Mixed Feedthroughs in Disallowed Blocks
+Feedthroughs allowed
+Feedthroughs not allowed
+A
+B
+C
+D
+A
+B
+C
+D
+A
+B
+C
+D
+Default solution
+Alternate solution 1
+Alternate solution 2
+allow_mixed_feedthroughs false
+allow_mixed_feedthroughs true
+allow_mixed_feedthroughs true
+Specifying a Partial Path
+The following example contains six blocks: A, B, C, X, Y, and Z. The specification requires 
+that port Net1In connect to block A, and block A connect to block B. No feedthroughs are 
+allowed on blocks X and Y. To implement this feedthrough routing, create the following 
+constraints.txt pin constraints file.
+start topological map;
+{Nets Net1}
+{{Port Net1In} {Cell A}}
+  {{Cell A} {Cell B}};
+end topological map;
+start feedthrough control;
+{Nets Net1}
+  {NoFeedthrough X Y};
+end feedthrough control;
+The layout result is shown in Figure 149.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+422
+
+
+===== PDF page 423 =====
+Chapter 13: Performing Pin Assignment
+Setting Pin Constraints
+Feedback
+Figure 149
+Partial Path Specification
+AA
+Net1In
+B
+C
+X
+Y
+Z
+Note that Net1 has pins in blocks B, X, and Z, and the global router routes the net by 
+creating a feedthrough in block B. Any feedthroughs created by the tool are labeled with 
+the “_FEEDTHRU_n” suffix. The NoFeedthrough statement in the constraints file prevents 
+the tool from creating a feedthrough in blocks X or Y, and the global router creates a 
+feedthrough in block C instead.
+Specifying Topological Constraints for Multiply Instantiated 
+Blocks
+The following example contains multiply instantiated blocks MIB_A, MIB_B, and MIB_C. 
+The one-to-n topological constraint specifies that each MIB instance has the same size 
+and offset constraint. After global routing and pin assignment, feedthroughs are created 
+as shown in Figure 150. No extra feedthroughs are created for net A. Note that the same 
+routing topology is specified for blocks MIB_A, MIB_B, and MIB_C; this is a requirement 
+for multiply instantiated blocks.
+start topological map;
+{net A}
+{{{cell Block_A} {side 2}}
+ {{cell MIB_A} {side 4} {offset 10}}
+ {{cell Block_A} {side 2}}
+ {{cell MIB_B} {side 4} {offset 10}}
+ {{cell Block_A} {side 2}}
+ {{cell MIB_C} {side 4} {offset 10}}};
+end topological map;
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+423
+
+
+===== PDF page 424 =====
+Chapter 13: Performing Pin Assignment
+Setting Pin Constraints
+Feedback
+Figure 150
+Topological Constraints for Multiply Instantiated Blocks
+MIB_A
+TOP
+MIB_B
+MIB_C
+Block_A
+A
+Feedthrough Control
+The feedthrough control section specifies the blocks that allow or disallow feedthroughs. 
+Pin constraints specified in the feedthrough control section take precedence over block-
+level pin constraints. Each record contains one or more net or bundle names within a pair 
+of curly brackets, followed by a Feedthrough or NoFeedthrough keyword, followed by 
+block cell names within curly brackets.
+Any feedthrough nets created by the tool contain the “_FEEDTHRU_n” suffix. To modify 
+this suffix, set the plan.pins.new_port_name_tag application option. Block feedthrough 
+pins created by the tool have the is_feedthrough_port attribute set to true. Inside the 
+block, all feedthrough nets, ports, and corresponding routing objects created by the tool 
+have the is_shadow attribute set to true.
+Note that you can route signals over blocks without creating feedthroughs. 
+Disable feedthroughs for the block and net by specifying the NoFeedthrough 
+keyword in the feedthrough control section, and create a routing corridor with the 
+create_routing_corridor command. When you create pins with the place_pins 
+command, the signal is routed over the block and feedthroughs are not created for the 
+specified signal.
+The general syntax is as follows. Note that this is only a syntax example; you typically do 
+not specify both the Feedthrough and NoFeedthrough keywords for the same net.
+start feedthrough control;
+{Nets net_name}
+# Specify either Feedthrough or NoFeedthrough
+# but not both for a given net
+  {Feedthrough cell_name_1 cell_name_2 cell_name_3}
+  {NoFeedthrough cell_name_4 cell_name_5 cell_name_6};
+{Bundles bundle_name}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+424
+
+
+===== PDF page 425 =====
+Chapter 13: Performing Pin Assignment
+Setting Pin Constraints
+Feedback
+  {Feedthrough cell_name_7 cell_name_8 cell_name_9}
+  {NoFeedthrough cell_name_10 cell_name_11 cell_name_12};
+end feedthrough control;
+The following rules apply to feedthrough control:
+•
+For a given net, constraint statements that appear later in the file override earlier 
+statements.
+•
+The Feedthrough and NoFeedthrough keywords specify whether feedthroughs are 
+allowed or disallowed for either specified block cells or for the entire design.
+If block cells are specified, all other blocks cells receive the opposite feedthrough 
+constraint value. Therefore, there is no need for more than one Feedthrough or 
+NoFeedthrough constraint line for a given net.
+•
+Topological map constraints can take priority over feedthrough control statements. 
+For example, A->B and B->C forces a feedthrough on B, regardless of whether 
+feedthroughs are allowed on B.
+A single Feedthrough or NoFeedthrough statement completely specifies the allowed 
+feedthrough modules for the net. Feedthrough statements are not cumulative. If multiple 
+feedthrough statements exist for the same net, the last feedthrough statement overrides 
+the earlier statements and a warning message is issued.
+Feedthrough and NoFeedthrough statements override the default feedthrough permission 
+set by the set_block_pin_constraints -allow_feedthroughs true | false 
+command for the specified nets.
+The statement { Feedthrough A B } does not force the creation of feedthroughs on A 
+and B. Instead, the statement allows feedthroughs on blocks A and B, while restricting 
+feedthroughs on all other blocks. To force a specific feedthrough path, you must use 
+topological constraints.
+If there are feedthrough constraint conflicts between topological map constraints and 
+previous feedthrough constraints, the feedthrough constraints from the constraint file 
+take priority. If there are conflicts between feedthrough constraints and topological map 
+constraints, topological map constraints take priority.
+The following example enables feedthroughs for net Xecutng_Instrn[0] on blocks I_ALU, 
+I_REG_FILE, and I_STACK_TOP.
+start feedthrough control;
+{Nets Xecutng_Instrn[0]}
+  {Feedthrough {I_ALU I_REG_FILE I_STACK_TOP}};
+end feedthrough control;
+The following example prevents feedthroughs for net Xecutng_Instrn[0] on blocks I_ALU, 
+I_REG_FILE, and I_STACK_TOP.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+425
+
+
+===== PDF page 426 =====
+Chapter 13: Performing Pin Assignment
+Setting Pin Constraints
+Feedback
+start feedthrough control;
+{Nets Xecutng_Instrn[0]}
+  {NoFeedthrough I_ALU I_REG_FILE I_STACK_TOP};
+end feedthrough control;
+Physical Pin Constraints
+The physical pin constraints section specifies location and layer constraints for individual 
+nets and pins. The general syntax is as follows:
+start physical pin constraints;
+{Net net_name} {cell cell_name}
+  {layers {layer1 layer2}} {sides {side1 side2}}
+  {offset offset1} {order {order_spec}}
+  {start start_offset} {end end_offset}
+  {width layer1 width1 layer2 width2}
+  {length layer1 length1 layer2 length2};
+{Pins pin_name} {reference reference_cell}
+  {off_edge} {location {x y}};
+end physical pin constraints;
+Supported keywords are: net, pins, reference, sides, layers, offset, order, start, 
+end, off_edge, location, width, and length. The side constraint specifies on which 
+side number the pin should be inserted for the specified block cell. The side number is a 
+positive integer that starts from 1. Given any rectangular or rectilinear shape, the lower 
+leftmost edge is side number 1. The sides are numbered consecutively as you proceeded 
+clockwise around the shape. The shape refers to the reference boundary shape for the 
+block.
+The offset constraint specifies the distance in microns from the starting point of a specific 
+edge to the routing cross-point on that edge in the clockwise direction. The starting point 
+for side 1 is the lowest vertex, the starting point for side 2 is the left vertex, and so on. 
+Since the offset is specific for each edge, you must specify the side information with the 
+offset.
+Each record in the physical pin constraints section is contained within curly brackets. 
+The first element in the record can be a top-level net or a port for a reference block. If the 
+record is a port object, the next record should be the reference block name associated 
+with the port.
+In the following example, ports C and D on reference block REFA are constrained. This 
+provides flexibility to use the constraint both inside the block design and at the top level.
+start physical pin constraints;
+{Net E} {cell A} {layers M2} {sides 2};
+{Net E} {cell B} {layers M4} {sides 4};
+{Pins C} {reference REFA} {layers M2} {sides 2};
+{Pins D} {reference REFA} {layers M2} {sides 2}
+  {width 0.8} {length 0.8};
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+426
+
+
+===== PDF page 427 =====
+Chapter 13: Performing Pin Assignment
+Setting Pin Constraints
+Feedback
+{Pins F} {reference REFA} {off_edge} {location {10 10}};
+end physical pin constraints;
+If the top-level block cells are instances of multiply instantiated blocks (MIBs), and there is 
+more than one record for each port on the MIB's reference block, the last constraint record 
+takes priority over previous constraint records.
+Physical Pin Constraint Example
+In this example, pins A, B, C, and D must be placed within the 10 to 40 micron offset on 
+side 3 of the RISC_CORE reference block. The constraint specifies the pin order for pins 
+A and B, however, pins C and D are not included in the order constraint. As a result, pins 
+C and D can be anywhere within the 10 to 40 micron offset on side 3. Figure 151 shows 
+three possible placements for pins A, B, C, and D based on these constraints.
+start physical pin constraints;
+{reference RISC_CORE}
+{sides 3}
+{start 10}
+{end 40}
+{{order {A B}}
+{pins {C D}}};
+end physical pin constraints;
+Figure 151
+Physical Pin Constraint Example
+RISC_CORE
+10
+1
+2
+4
+40
+3
+C
+A
+B
+D
+A
+B
+C
+D
+C
+D
+A
+B
+Pin Spacing Control
+The pin spacing control section specifies pin spacing constraints on individual edges for 
+block cells. Each record specifies the pin spacing constraints for one or more edges on 
+one or more layers for a particular block cell. The constraint contains the reference, 
+side, and layer keywords. The general syntax is as follows:
+start pin spacing control;
+{reference ref_cell_name} {sides {side_a side_b}}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+427
+
+
+===== PDF page 428 =====
+Chapter 13: Performing Pin Assignment
+Setting Pin Constraints
+Feedback
+{layer_a spacing_a} {layer_b spacing_b};
+end pin spacing control;
+The reference keyword specifies the block reference that this constraint applies to. For a 
+block cell, this constraint refers to the reference cell name, not the cell instance name, if it 
+constrains the top level.
+The sides keyword specifies one or more sides of the block. If there is more than one 
+side, specify the side number within curly brackets separated by white space. Use an 
+asterisk (*) as a wildcard character to specify that all sides are allowed.
+The layer and spacing constraints are specified as pairs. You can specify multiple 
+layer-spacing pairs. The layer value is the metal layer name and the spacing value is the 
+minimum number of wire tracks between adjacent pins for the specified layer. Only the 
+specified layers are used for pin placement; unspecified layers are not used by the pin 
+placer. In addition, only layers that are allowed in the corresponding reference blocks are 
+allowed for pin placement.
+Keywords are case-insensitive. The reference name and the layer name are case-
+sensitive. If a line contains a syntax error, the line is ignored. The command issues 
+warnings or errors for any lines that are ignored.
+If the pin spacing control section contains conflicting constraints for the same edge, same 
+layer and the same block, the last constraint takes priority and the command issues an 
+error or warning message.
+In the following example, the CPU block cell is constrained to a minimum pin spacing 
+of 2 wire tracks on layer M2, a minimum pin spacing of 3 wire tracks on layer M4, and a 
+minimum pin spacing of 3 wire tracks on layer M6 for sides 2 and 4 of the block. If the pins 
+are placed on sides 2 or 4, the pins must be placed on layer M2, M4, or M6. Note than 
+when reference, sides, and layer-spacing pairs are given, unspecified layers are strictly 
+not used by the tool for pin placement on the specified block sides. If the pins are placed 
+on sides other than 2 or 4, the pins must honor the block pin constraints applied to the 
+CPU block. Note that individual or bundle pin constraints can override these constraints.
+start pin spacing control;
+{reference CPU} {sides {2 4}} {M2 2} {M4 3} {M6 3};
+end pin spacing control;
+Block Pin Constraints
+The block pin constraints section specifies pin constraints that apply to all the pins of the 
+specified block cell. You can specify block-related pin constraints for feedthroughs, layers, 
+spacing, corner keepouts, hard pin constraints, sides, and exclude sides. The same 
+constraint can be set with the set_block_pin_constraints Tcl command. Supported 
+keywords are: reference, sides, exclude_sides, layers, feedthrough, spacing, 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+428
+
+
+===== PDF page 429 =====
+Chapter 13: Performing Pin Assignment
+Setting Pin Placement Priority on Nets and Bundles
+Feedback
+spacing_distance, corner_keepout_distance, corner_keepout_num_tracks, and 
+hard_constraints.
+The general syntax is as follows:
+start block pin constraints;
+{reference reference_name}
+  {layers {layer_name_1 layer_name_2 ...}}
+  {feedthrough true | false}
+  {corner_keepout_num_tracks number_of_tracks}
+  {spacing number_of_tracks}
+  {hard_constraints {spacing location layer}}
+  {exclude_sides {side_1 side_2}};
+end block pin constraints;
+The following example sets pin constraints on references DATA_PATH and ALU:
+start block pin constraints;
+{reference DATA_PATH}
+  {layers {METAL3 METAL4 METAL5}}
+  {feedthrough true}
+  {corner_keepout_num_tracks 1}
+  {spacing 5}
+  {exclude_sides {2 3}};
+ 
+{reference ALU}
+  {layers {METAL3 METAL4 METAL5}}
+  {feedthrough true}
+  {hard_constraints {spacing location layer}}
+  {sides {2 3}};
+end block pin constraints;
+Setting Pin Placement Priority on Nets and Bundles
+To specify a higher placement priority for certain pins that connect to nets in a bundle, set 
+the pin_placement_priority_id attribute on the bundle as follows:
+icc2_shell> set_attribute [get_bundles b1] pin_placement_priority_id 5
+{b1}
+Pins of bundles are placed as follows when the pin_placement_priority_id attribute is 
+set:
+•
+If bundle pin placement is enabled, bundle nets have higher placement priority than 
+nonbundle nets.
+•
+If two bundles have a pin_placement_priority_id setting, pins on the bundle with 
+the smaller value have a higher placement priority.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+429
+
+
+===== PDF page 430 =====
+Chapter 13: Performing Pin Assignment
+Performing Global Routing for Pin Placement
+Feedback
+Performing Global Routing for Pin Placement
+If your design contains multiply instantiated blocks or existing feedthroughs, you can aid 
+pin placement by performing global routing on the top level and on child blocks before 
+placing block pins. In the top-level design view, the blocks can be either design or abstract 
+views. You can place pins and create feedthroughs for designs with top-level terminal or 
+cell objects that are placed inside the block boundary.
+To perform global routing on all the blocks in your design,
+1. (Optional) Set host options for distributed processing.
+icc2_shell> set_host_options -name distributed ...
+2. Use the route_global command with the -virtual_flat all_routing option.
+icc2_shell> route_global -floorplan true -host_options distributed \
+   -virtual_flat all_routing
+Use the -virtual_flat route_type option to the route_global command to specify 
+the hierarchy level to global route.
+•
+Specify the -virtual_flat all_routing option to route all nets in both the top-level 
+and child-level blocks.
+•
+Specify -virtual_flat top_and_interface_routing_only option to route only nets 
+in top-level design and nets that connect to child-level blocks, including interface and 
+feedthrough nets that cross block boundaries.
+After virtual flat global routing, you can place pins based on the global routing results 
+with the place_pins -use_existing_routing command. Note that the place_pins 
+-use_existing_routing command supports designs with or without multiply instantiated 
+blocks.
+To limit global routing and reduce runtime when iterating on different pin placements for 
+a small collection of pins, use the -nets_to_exclude_from_routing option with the 
+place_pins command. The command does not perform global routing for the specified 
+nets.
+To check for unused feedthroughs, use the check_feedthroughs 
+-unused_feedthroughs command. You can use the -congestion_map_only option to 
+create congestion maps without writing the global routes, after running the route_global 
+command.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+430
+
+
+===== PDF page 431 =====
+Chapter 13: Performing Pin Assignment
+Creating a Channel Congestion Map
+Feedback
+Creating a Channel Congestion Map
+Before performing pin placement, you can identify potentially congested areas 
+between macros or block boundaries by creating a channel congestion map. The 
+channel congestion map is based on the global route. To generate the channel 
+congestion map, use the create_channel_congestion_map command as follows. 
+The -channel_width_threshold option specifies the maximum channel width when 
+generating the congestion map; channels larger than the specified width are not 
+considered. The command first performs a global route on the design by using the 
+route_global command.
+icc2_shell> create_channel_congestion_map -channel_width_threshold 10
+To view the congestion map, select View > Map > Channel Congestion in the GUI. The 
+IC Compiler II tool also provides the What-if Channel Congestion panel for interactive 
+analysis of congested channels. Figure 152 shows a channel congestion map and the 
+What-if Channel Congestion panel.
+Figure 152
+Channel Congestion Map and What-if Channel Congestion
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+431
+
+
+===== PDF page 432 =====
+Chapter 13: Performing Pin Assignment
+Checking the Design Before Pin Placement
+Feedback
+Checking the Design Before Pin Placement
+Before performing pin placement, you should check your design for the following design 
+issues or pin constraint specification errors:
+•
+Placement issues for cells and multiply instantiated blocks
+Use the report_placement, check_mib_alignment, and 
+check_mib_for_pin_placement commands for these checks.
+•
+Pin constraint errors
+Use the report_individual_pin_constraints, report_bundle_pin_constraints, 
+report_block_pin_constraints, and report_topological_constraints 
+commands for these checks.
+•
+Other design issues that might affect pin placement
+Use the check_design -checks {dp_pre_block_shaping 
+dp_pre_macro_placement dp_pre_pin_placement} command for this check.
+The check_pre_pin_placement or check_design -checks {dp_pre_pin_placement} 
+command checks for the following conditions before pin placement. Some of these 
+checks can be performed on top-level ports by specifying the -self option with the 
+check_pre_pin_placement command.
+•
+The routing direction of a given layer is not consistent with the block edge constraints
+In this example, the routing direction for layer M3 is horizontal, but the pin access is set 
+to the top and bottom sides of the block.
+icc2_shell> set_attribute \
+   -quiet [get_layers M3] routing_direction horizontal
+icc2_shell> set_block_pin_constraints -cells B2 \
+   -allowed_layers [get_layers M3] -sides {2 4}
+icc2_shell> check_pre_pin_placement
+...
+------ Start Of Constraint Conflict Check ------
+Warning: Conflicting block pin constraints
+detected. Routing direction of allowed layers M3
+incompatible with allowed sides 2, 4 of block
+block2. (DPPA-441)
+------ End Of Constraint Conflict Check -------
+•
+Inconsistent edge directions in topological constraint pairs
+In this example, the preferred routing direction for the METAL1 layer is horizontal; 
+however, the left and right sides of blocks are excluded from pin placement.
+icc2_shell> set_block_pin_constraints -exclude_sides {1 3} \
+   -allowed_layers {METAL1}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+432
+
+
+===== PDF page 433 =====
+Chapter 13: Performing Pin Assignment
+Checking the Design Before Pin Placement
+Feedback
+icc2_shell> check_pre_pin_placement
+...
+------ Start Of Bad Constraint Check ------
+Warning: Conflicting block pin constraints detected. Routing direction
+of allowed layers METAL1 incompatible with excluded sides 1, 3 of
+block block2. (DPPA-441)
+•
+Invalid topological constraint that specifies a connection that cannot be created
+•
+Fixed, off-edge pins that are part of a constraint
+icc2_shell> check_pre_pin_placement
+...
+------ Start Of Off Edge Pin Check ------
+Warning: The fixed pin U_BLK1/in on net in1 is off-edge, outside
+boundary of U_BLK1. The fixed pin will be ignored in global route and
+pin placement. (DPPA-458)
+------ End Of Off Edge Pin Check ------
+•
+Infeasible connection between cells that are separated by a block that has 
+feedthroughs disabled. Feedthroughs must be enabled on blocks that separate two 
+cells to allow a net connection through the block.
+•
+Possible overlaps with existing internal block objects (route blockage, pin blockage, 
+fixed pin, preroute, and so on) during pin creation
+icc2_shell> check_pre_pin_placement
+...
+------ Start Of Pin Blockage Check ------
+Warning: Fixed pin iu/clk_cts_3_10 might cause newly-placed abutted
+pin in cell dcram_shell to overlap with blockage SNPS_PB_0 that is
+close to the abutted edge 7 of cell iu. (DPPA-442)
+------ End Of Pin Blockage Check ------
+•
+Poorly specified topological constraints that create a loop
+icc2_shell> sh cat constraint.txt
+start topological map;
+{net n2}
+{{cell BLK3 {sides 3}} {cell BLK4 {sides 1}}}
+{{cell BLK4 {sides 3}} {cell BLK2 {sides 3}}}
+{{cell BLK2 {sides 2}} {cell BLK3 {sides 2}}};
+end topological map;
+ 
+icc2_shell> check_pre_pin_placement
+------ Start Of Bad Constraint Check ------
+Error: Loop back topological constraints start from and end at cell
+BLK3 detected without indicating pin names. (DPPA-453)
+------ End Of Bad Constraint Check ------
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+433
+
+
+===== PDF page 434 =====
+Chapter 13: Performing Pin Assignment
+Placing Pins
+Feedback
+•
+Inconsistent routing or pin blockages across multiply instantiated blocks
+icc2_shell> check_pre_pin_placement
+...
+------ Start Of Pin Blockage Check ------
+Warning: Detected inconsistent blockage across MIBs. Blockage RB_0 for
+cell mib1 does not have a counterpart for cell mib2. (DPPA-464)
+...
+•
+Fixed block pins or top terminals in pin blockages or routing blockages
+•
+Fixed pins or top terminals outside associated pin guide or routing corridor
+•
+Fixed pins shorted to each other
+•
+Fixed pins that have inconsistent alignment
+•
+A range, offset, or location overlap between net, bundle, or pin constraints
+•
+Overlap between locations of existing fixed pins and the offset, location, or range 
+values of net, bundle, or pin constraints
+Placing Pins
+After defining pin placement constraints, use the place_pins command to perform global 
+routing and place pins on the blocks in the current block.
+You can limit pin placement to specific layers, cells, nets, pins, and ports, and perform 
+incremental pin placement. The following command places pins on all blocks within the 
+current block.
+icc2_shell> place_pins
+To place pins in a block,
+1. (Optional) Set application options as needed.
+icc2_shell> set_app_options -name plan.pins.incremental \
+   -value true
+plan.pins.incremental true
+2. (Optional) Specify the number of processor cores to use for multithreading.
+icc2_shell> set_host_options -max_cores 4
+3. (Optional) Remove existing tool-created feedthroughs.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+434
+
+
+===== PDF page 435 =====
+Chapter 13: Performing Pin Assignment
+Placing Pins
+Feedback
+icc2_shell> remove_feedthroughs
+4. Use the place_pins command to place pins on all blocks within the current block.
+icc2_shell> place_pins
+Alternatively, use the Task Assistant to place pins.
+1. Select Task > Task Assistant in the GUI.
+2. Select Pin Assignment > Place Pin/Global Route/Congestion and select the Placement 
+tab.
+3. Choose the Incremental or “Place only top-level ports” options if required.
+If you choose the Incremental option, you must first remove all existing feedthroughs 
+with the remove_feedthroughs command before proceeding.
+4. Click Apply to place the pins.
+To perform incremental pin placement after modifying the block or changing constraints,
+1. Remove any existing feedthroughs with the remove_feedthroughs command.
+When the feedthroughs are removed, the tool has more freedom to move pins along 
+the block edge to create a layout with better quality of results (QoR). The tool can also 
+change the layer used for the pin.
+2. (Optional) Set the plan.pins.incremental application option to true to specify that 
+pins should stay in their existing locations.
+The tool moves the pin within the distance and layer ranges defined by the 
+plan.pins.pin_range and plan.pins.layer_range application options, if the wire 
+length, congestion, and pin alignment do not degrade.
+3. Run the place_pins command.
+Use options with the place_pins command to control how the pins are placed.
+•
+Place pins only on specific cells, nets, pins, or ports by using the -cells, -nets, 
+-pins, -ports option.
+icc2_shell> place_pins -cells {I_ALU}
+icc2_shell> place_pins -nets [get_nets Oprnd_B*]
+icc2_shell> place_pins -pins [get_pins I_DATA_PATH/Oprnd_A*]
+icc2_shell> place_pins -ports [get_ports]
+For designs that contain multiply instantiated blocks (MIBs), use the -cells option to 
+specify the instance to use when placing pins. Pin placement honors all user-specified 
+blockages on all MIB instances and ignores congestion around MIB instances not 
+specified with the -cells option.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+435
+
+
+===== PDF page 436 =====
+Chapter 13: Performing Pin Assignment
+Placing Pins
+Feedback
+•
+Place pins only on the current block by using the -self option.
+icc2_shell> place_pins -self
+•
+Avoid placing pins that connect to specific nets by using the -exclude_nets option.
+icc2_shell> place_pins -exclude_nets [get_nets Oprnd_B*]
+•
+Avoid global routing for some nets by using the -nets_to_exclude_from_routing 
+option. This option might be useful to reduce runtime when iterating on different pin 
+placements for a small collection of pins.
+icc2_shell> place_pins \
+   -nets_to_exclude_from_routing [get_nets RegPort_B*]
+The tool determines pin locations for excluded nets based on net connectivity and 
+user-specified constraints. This option honors all pin constraints but does not honor 
+feedthrough constraints or create feedthroughs; feedthrough creation requires route 
+information from the global router. You should use the global router for pin placement 
+whenever possible.
+•
+Legalize pin placement by using the -legalize option.
+icc2_shell> place_pins -legalize
+The -legalize option honors the plan.pins.pin_range and 
+plan.pins.layer_range application options and enables the following behavior for 
+the place_pins command:
+◦
+Removes pin overlaps with other pins, vias, preroutes, PG straps, and so on
+◦
+Snaps pins to the nearest track
+For multiply instantiated block (MIB) instances, pin placement considers all MIB instances 
+during global routing and pin assignment. Pin placement for MIBs considers blockages, 
+routing congestion, and wire length. You can perform pin placement on selected MIB 
+instances by specifying their instance names on the place_pins command line. Pin 
+placement honors all user-specified blockages for all MIB instances, and ignores the 
+congestion around unselected MIB instances.
+Application Options for Pin Placement
+The place_pins command supports the following application options to control pin 
+placement.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+436
+
+
+===== PDF page 437 =====
+Chapter 13: Performing Pin Assignment
+Placing Pins
+Feedback
+Table 21
+Pin Placement Application Options
+To do this
+Use this application option
+Specify whether feedthroughs are created at the top 
+level of the block for channel-only nets.
+plan.pins.allow_feedthroughs_for
+_internal_channel_nets
+Specify whether the global router is permitted to route 
+through narrow channels between blocks, between 
+hard macros, and between blocks and hard macros. 
+This option also controls whether the pin placer is 
+allowed to place pins in narrow channel areas.
+plan.pins.allow_pins_in_narrow_m
+acro_channels
+Specify whether the tool treats the block as a black box. plan.pins.black_box_design_style
+Specify whether the tool should honor color-based span 
+spacing rules loaded from the technology file. When 
+this application option is true, the place_pins and 
+check_pin_placement commands use these span 
+spacing rules during pin creation and pin checking.
+plan.pins.enable_color_span_ru
+les
+Specify whether the tool should honor span spacing 
+rules loaded from the technology file. When this 
+application option is true, the place_pins and 
+check_pin_placement commands use these span 
+spacing rules during pin creation and pin checking.
+plan.pins.enable_span_rules
+Specify whether feedthroughs are allowed on clock 
+pins.
+plan.pins.exclude_clocks_from_fe
+edthroughs
+Specify whether feedthrough ports are created on nets 
+that connect to multiple driver pins or nets without driver 
+pins, or nets that connect to inout pins.
+plan.pins.exclude_inout_nets_fro
+m_feedthroughs
+When this application option is true, the place_pins 
+command ignores the minimum end-to-end spacing 
+rule.
+plan.pins.ignore_pin_spacing_con
+straint_to_pg
+When this application option is true, pins should 
+stay at or near their existing locations. The tool 
+moves the pin within the distance defined by the 
+plan.pins.pin_range application option and the 
+layers specified by the plan.pins.layer_range 
+application option, if the wire length, congestion, and 
+pin alignment do not degrade.
+plan.pins.incremental
+Specify the maximum allowable layer displacement 
+from the original pin layer.
+plan.pins.layer_range
+Specify whether the tool should group together pins on 
+the block boundary that have the same block-to-block 
+connections.
+plan.pins.maximize_black_box_pin
+_grouping
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+437
+
+
+===== PDF page 438 =====
+Chapter 13: Performing Pin Assignment
+Placing Pins
+Feedback
+Table 21
+Pin Placement Application Options (Continued)
+To do this
+Use this application option
+Minimizes the number of feedthroughs at the possible 
+cost of additional routing detours.
+plan.pins.minimize_feedthroughs
+Specify the naming suffix for newly created feedthrough 
+ports and feedthrough nets; this setting overrides the 
+default of _FEEDTHRU_#.
+plan.pins.new_port_name_tag
+Specify whether the port name tag defined by the 
+plan.pins.new_port_name_tag application option is 
+inserted at the beginning or end of the net or port name.
+plan.pins.new_port_name_tag_st
+yle
+Specify whether the driver and receiver block names 
+are inserted into the feedthrough net name.
+plan.pins.new_split_nets_use_blo
+ck_names
+Specify whether intermediate combinational cells 
+are ignored and the locations of the driver and load 
+registers takes higher priority when placing pins. 
+Note that this application option also affects the 
+route_global -virtual_flat command and 
+route_group -global_planning command.
+This application option setting does not affect 
+the pin detour or path detour checks that the 
+check_pin_placement command performs. For these 
+checks, use the -pin_detour and -path_detour 
+options of the check_pin_placement command.
+plan.pins.path_based_pin_placem
+ent
+Specify the maximum allowable pin location 
+displacement from the original pin location when the 
+plan.pins.incremental application option is set to 
+true.
+plan.pins.pin_range
+Specify the maximum channel size for routing, 
+where a channel is the space between a block 
+or module on which pins can be placed and any 
+adjacent module, hard macro, or I/O pad. For 
+narrow-channel blocks, specify this option to limit 
+routing in the channel and allow feedthroughs 
+by specifying set_block_pin_constraints 
+-allow_feedthroughs true. Specify a larger value for 
+plan.pins.reserved_channel_threshold to increase 
+the number of feedthroughs created; specify a smaller 
+value to decrease the number of feedthroughs created.
+plan.pins.reserved_channel_thres
+hold
+Specify how new feedthrough nets for buses are named 
+if they are not marked as bus ports or nets in the 
+database.
+plan.pins.retain_bus_name
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+438
+
+
+===== PDF page 439 =====
+Chapter 13: Performing Pin Assignment
+Placing Pins
+Feedback
+Table 21
+Pin Placement Application Options (Continued)
+To do this
+Use this application option
+Specify whether pins are placed such that all connected 
+pins are aligned. When this option is true, pin 
+placement ignores routing tracks and places pins to 
+strictly align with other placed and connected pins on 
+the same layer.
+plan.pins.strict_alignment
+Specify whether new pins are created on 
+neighboring abutted blocks and are connected 
+to the original single pins. To add a suffix 
+or prefix to the new pin names, use the 
+plan.pins.synthesize_abutted_pins_name_tag and 
+plan.pins.synthesize_abutted_pins_name_tag_st
+yle application options.
+plan.pins.synthesize_abutted_p
+ins
+Specifies whether to perform fast global route based pin 
+placement.
+When you set this application option to true, the tool 
+uses an internal algorithm to quickly route the nets for 
+pin assignment and tries to achieve optimized routing 
+solutions.
+This application option honors all the pin constraints 
+and most of the routing rules, which includes nondefault 
+routing rules (NDR), routing corridors, routing guides, 
+routing blockages, and pin guides.
+plan.pins.fast_route
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+439
+
+
+===== PDF page 440 =====
+Chapter 13: Performing Pin Assignment
+Placing Pins
+Feedback
+Table 21
+Pin Placement Application Options (Continued)
+To do this
+Use this application option
+Specify whether the tool should consider a narrow 
+channel design as an abutted design for pin placement 
+when the channel widths are less than or equal to 
+the threshold value specified for this application 
+option. This application option is honored during pin 
+placement by the place_pins and push_down_objects 
+commands.
+When a threshold value is specified in X- and Y- 
+directions by using this application option, the tool 
+analyzes the design for any single pins in narrow 
+channel design blocks and places corresponding pins 
+in the blocks that are without any pins. For example, 
+as shown in the following diagram, the tool considers 
+Blocks 1 and 2 to be abutted and creates a new pin in 
+Block 1 to match the pin in Block 2.
+If this application option is not set, which is the default, 
+the tool does not consider narrow channel designs as 
+abutted designs. Therefore, the tool does not place 
+any corresponding pins for any single pins that may be 
+present in narrow channel designs.
+This application behaves as expected only when 
+plan.pins.synthesize_abutted_pins is set to true.
+Block 1
+Block 2
+Block 3
+Block 1
+Block 2
+Pin placement when the application option is not set
+Pin placement when the application option is set
+X gap
+Block 3
+Y gap
+plan.pins.abutment_threshold
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+440
+
+
+===== PDF page 441 =====
+Chapter 13: Performing Pin Assignment
+Placing Pins
+Feedback
+Removing Pins and Terminals
+Normally you do not need to explicitly remove pins and terminals after running the 
+place_pins command; the command removes all nonfixed terminals each time it runs. 
+To force removal of the terminals, use the remove_terminals command and specify the 
+block pins as arguments to the command. The following example removes the terminals 
+from the I_ORCA_TOP/I_CONTEXT_MEM block.
+icc2_shell> set pins [get_pins -of_objects {I_ORCA_TOP/I_CONTEXT_MEM}]
+icc2_shell> remove_terminals [get_terminals -of_objects $pins]
+Avoid using the remove_pins command unless absolutely necessary, because this 
+command alters the netlist by disconnecting nets from the pin.
+Performing Incremental Bundle Pin Placement
+The tool supports an incremental bundle pin placement flow to improve the placement 
+quality of pins for bundle nets. In this flow, you begin by placing pins for the most difficult 
+bundles pins, such as bundles with wide width, complex connectivity, long feedthrough 
+paths, and so on. Next, fix the location for the placed pins and repeat with a different set 
+of bundles until all bundle pins are placed. Using this methodology, you can focus on a 
+small set of bundle nets to improve bundle pin alignment and bundle feedthrough sharing. 
+Bundle pins placed earlier in the flow have more flexibility in selecting edges, layers, and 
+offsets for better placement.
+The following example performs two iterations of pin placement: the first iteration for 
+difficult-to-place bundle B1, and the second for bundle B2.
+# Allow feedthroughs on all blocks
+set_block_pin_constraints -allow_feedthroughs true
+ 
+# Create two bundles
+create_bundle -name {B1} {Data[0] Data[1] Data[2] Data[3]}
+create_bundle -name {B2} {Data[4] Data[5] Data[6] Data[7]}
+ 
+# Create bundle pin constraints
+set_bundle_pin_constraints -keep_pins_together true
+ 
+# Place pins for the first bundle
+place_pins -nets [get_nets -of_objects [get_bundles {B1}]]
+ 
+# Fix the pin locations for bundle B1
+set_fixed_objects [get_pins -filter "is_hierarchical==true" \
+   -of_objects [get_nets -segments [get_nets \
+   -of_objects [get_bundles {B1}]]]]
+ 
+# Place pins for the second bundle
+place_pins -nets [get_nets -of_objects [get_bundles {B2}]]
+ 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+441
+
+
+===== PDF page 442 =====
+Chapter 13: Performing Pin Assignment
+Checking Pin Placement
+Feedback
+# Fix the pin locations for bundle B2
+set_fixed_objects [get_pins -filter "is_hierarchical==true" \
+   -of_objects [get_nets -segments [get_nets \
+   -of_objects [get_bundles {B2}]]]]
+Controlling Feedthrough Sharing in Multiply Instantiated Blocks
+When feedthrough creation is enabled on a block, the place_pins command 
+creates feedthroughs as needed to perform routing through blocks. To 
+reduce the number of feedthroughs created for multiply instantiated blocks, 
+set the feedthrough_sharing_matching_id attribute on feedthrough 
+nets or bundles. The tool attempts to share feedthroughs only on nets with 
+the same feedthrough_sharing_matching_id value. By default, the 
+feedthrough_sharing_matching_id attribute is assigned to 0 for all nets. Avoid setting 
+this attribute on both bundles and nets.
+The following example sets the feedthrough_sharing_matching_id attribute on nets 
+b[0] and b[1]. As a result, feedthroughs are not shared between nets b[0] and b[1].
+icc2_shell> set_attribute [get_nets b[0]] \
+   feedthrough_sharing_matching_id 10
+icc2_shell> set_attribute [get_nets b[1]] \
+   feedthrough_sharing_matching_id 20
+Checking Pin Placement
+After placing pins, you should verify the placement and investigate any issues with pin 
+alignment, pin spacing, feedthroughs, and other pin placement problems. To verify pin 
+placement,
+1. Use the check_pin_placement command and specify the verification options.
+icc2_shell> check_pin_placement -pin_spacing true -layers true
+  -------------------- Start Of Pin Layer Check --------------------
+No violation has been found
+  -------------------- End Of Pin Layer Check --------------------
+  -------------------- Start Of Missing Pin Check --------------------
+Port ahbi_HGRANT__0_ on cell u_l/u0_3 has no pin
+Port ahbi_HGRANT__1_ on cell u_l/u0_3 has no pin
+  -------------------- End Of Missing Pin Check --------------------
+  -------------------- Start Of Pin Spacing Check --------------------
+No violation has been found
+  -------------------- End Of Pin Spacing Check --------------------
+  -------------------- Start Of Pin Short Check --------------------
+No violation has been found
+  -------------------- End Of Pin Short Check --------------------
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+442
+
+
+===== PDF page 443 =====
+Chapter 13: Performing Pin Assignment
+Checking Pin Placement
+Feedback
+2. Use the check_feedthroughs command to check for unused feedthroughs, reused 
+feedthroughs, and feedthrough constraint violations.
+icc2_shell> check_feedthroughs -unused_feedthroughs \
+   -reused_feedthroughs -net_constraints -topo_constraints
+ 
+Un-used feedthrough ports:
+*********************************************************
+Block Name | Instance Name | Pin Name
+===========----------------------------------------------
+block1     | U2/u0_0       | U2/u0_0/ahbso__FEEDTHRU_1[0]
+*********************************************************
+ 
+Un-used feedthrough summary:
+************************************************************
+Block Name | Instance Name |   # of unused  |   # of total
+           |               |   feedthroughs |   feedthroughs
+===========-------------------------------------------------
+block1     | U2/u0_0       |   1            |   2
+************************************************************
+ 
+Re-used feedthrough ports:
+************************************
+Block Name | Instance Name |Pin Name
+************************************
+ 
+Re-used feedthrough summary:
+********************************************************
+Block Name | Instance Name | # of reused  | # of total
+           |               | feedthroughs | feedthroughs
+********************************************************
+ 
+Checking Feedthrough Constraint Violations
+Error: The net ahbso[0] violates feed-through constraints
+  on cell u0_1 with feed-through ports : u0_1/...
+Error: The net ahbso[0] violates feed-through constraints
+  on cell U2/u0_0 with feed-through ports : U2/...
+violating feedthrough ports:
+***********************************************
+ Instance Name | Pin Name
+===============---------------------------------
+ u0_1          | u0_1/ahbso__FEEDTHRU_1[0]
+===============---------------------------------
+ U2/u0_0       | U2/u0_0/ahbso__FEEDTHRU_1[0]
+***********************************************
+ 
+--- Start Of Check Feedthrough Net Constraints Summary ---
+Number of Feedthrough ports checked:18
+Number of Violating Feedthrough ports:2
+Inst Name | Number of Ports | Number of Violating Ports
+==========--------------------------------------
+u0_1      |      6345       |      1
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+443
+
+
+===== PDF page 444 =====
+Chapter 13: Performing Pin Assignment
+Checking Pin Placement
+Feedback
+==========--------------------------------------
+U2/u0_0   |      6345       |      1
+==========--------------------------------------
+U1/u0_2   |      6344       |      0
+==========--------------------------------------
+U1/u0_3   |      6348       |      0
+--- End Of Check Feedthrough Net Constraints Summary ---
+ 
+ 
+End of feed-through constraint violations
+ 
+Checking Topological Constraint Violations
+Error: The net ahbso[0]  violates topological constraints
+  by not having a direct connection between cells u0_1 and ...
+Error: The net ahbso[0]  violates topological constraints
+  by not having a direct connection between cells U1/u0_3 ...
+ 
+ 
+Checked a total of 1 nets with topological constraints,
+found 1 nets with violations
+ 
+End of topological constraint violations
+3. If your design contains multiply instantiated block instances, verify pin placement with 
+the check_mib_for_pin_placement command.
+icc2_shell> check_mib_for_pin_placement -swapped_connections \
+   -top_level_terminal_locations
+4. Use the report_pin_placement command to save the block name, layer, side, and 
+offset for the current pin placement for each block.
+icc2_shell> report_pin_placement > pin_placement.rpt
+5. Use the report_feedthroughs command to generate a list of feedthrough nets and 
+their associated block pins.
+icc2_shell> report_feedthroughs -reporting_style net_based
+Alternatively, use the Task Assistant to verify the pin placement and create the pin and 
+feedthrough reports.
+1. Select Task > Task Assistant in the GUI.
+2. Select Pin Assignment > QoR Analysis and click the Check tab.
+3. Select the checking options as needed to limit the pin verification.
+4. Click Apply to check pin placement.
+5. Select Pin Assignment > QoR Analysis and click the Report tab.
+6. Select reporting options as needed to limit the report to specific nets or blocks.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+444
+
+
+===== PDF page 445 =====
+Chapter 13: Performing Pin Assignment
+Checking Pin Placement
+Feedback
+7. Click Apply to generate the pin placement report.
+Note that the check_feedthroughs and report_feedthroughs commands are not 
+available in the Task Assistant.
+Figure 153
+Check Pin QoR Task Assistant Dialog Boxes
+For net bundles created with the create_bundle or create_bundles_from_patterns 
+command, or by using the GUI, the check_pin_placement command checks that 
+the bundle meets the pin constraints. Bundle pin constraints are created with the 
+set_bundle_pin_constraints command, and the check_pin_placement command 
+checks spacing, layer, and offset constraints for the bundle. Note that individual pin 
+constraints take precedence over bundle pin constraints, and bundle pin constraints take 
+precedence over block pin constraints.
+Use the report_pin_placement command to generate a list of pins on blocks in the 
+design. The report contains the block name, layer, block side, and offset for each pin. 
+To limit the report to a specified set of pins, nets, ports, or cells, use the -pins pins, 
+-nets nets, -ports ports, or -cells cells option. Use the -self option to report pin 
+placement for only the top-level ports. Use the -format {layer side offset cell} 
+option to limit the report content to one or more of layer, side, offset or block name.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+445
+
+
+===== PDF page 446 =====
+Chapter 13: Performing Pin Assignment
+Checking Pin Placement
+Feedback
+Use the report_feedthroughs command to generate a report that contains 
+feedthrough nets and their associated block pin names for each feedthrough. To 
+limit the report to a specified set of feedthrough nets, use the -nets option. Use the 
+-include_buffered option to report feedthroughs which contain buffer cells. Use the 
+-include_original_feedthroughs option to report feedthroughs inserted by the 
+place_pins command and feedthroughs that previously existed in the original netlist. 
+Use the -reporting_style net_based option to generate a single report containing 
+feedthrough net names and associated block pins for each feedthrough in the design. 
+Use the -reporting_style block_based option to generate multiple feedthrough 
+reports, one for each design block. The report generated with the -reporting_style 
+block_based option contains a list of feedthrough net names. Use the -self option to 
+limit feedthrough reporting to only the current block; by default, the command checks all 
+planning levels.
+Checking Pin Alignment
+Use options with the check_pin_placement command to control pin alignment checking 
+as follows (the -alignment true option also enables a check for block edges to ensure 
+that they are aligned to the litho grid).
+•
+Limit alignment checking to only two-pin nets only of the specified connection types: 
+BLOCK_TO_BLOCK, BLOCK_TO_MACRO, BLOCK_TO_IO, or ALL. The default is 
+ALL.
+icc2_shell> check_pin_placement -alignment true \
+   -connection_type BLOCK_TO_BLOCK
+•
+Check pin alignment within a specified tolerance, or identify aligned pins that have a 
+physical block or hard macro between the pins; the default alignment tolerance is zero.
+icc2_shell> check_pin_placement -alignment true \
+   -alignment_tolerance_distance 5
+•
+Report nets that are aligned, but the pins are placed on different layers
+icc2_shell> check_pin_placement -alignment true \
+   -layer_mismatch_only true
+•
+Print out additional information about the nets connected to the violating pins and 
+report detailed net information about pins with alignment violations; include the 
+-alignment_report_file filename option to write the output to a file
+icc2_shell> check_pin_placement -alignment true \
+   -report_net_details true
+...
+********** total unaligned nets **********
+...
+********** unaligned alignable unblocked nets **********
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+446
+
+
+===== PDF page 447 =====
+Chapter 13: Performing Pin Assignment
+Checking Pin Placement
+Feedback
+Two-Pin net q1_35 with pins u1/q35 and u2/d35
+  of type BLOCK->BLOCK is unaligned.
+  The net is alignable and unblocked.
+...
+********** unaligned unalignable nets **********
+Two-Pin net q0_0 with pins u0/q0 and u1/d0
+  of type BLOCK->BLOCK is unaligned.
+  The net is unalignable (Due to Side Orientation) and blocked.
+...
+•
+Skip checking for nets that have unplaced connections when checking pin alignment; 
+by default, the -alignment true option includes unplaced pins when checking 
+alignment
+icc2_shell> check_pin_placement -alignment true \
+   -exclude_unplaced_objects true
+•
+Limit the checking to the specified connection type: ALL, BLOCK_TO_BLOCK, 
+BLOCK_TO_MACRO, or BLOCK_TO_IO when checking alignment; by default, ALL is 
+used
+icc2_shell> check_pin_placement -alignment true \
+   -connection_type BLOCK_TO_BLOCK
+•
+Limit the alignment check to two-pin nets that are aligned but have a physical block or 
+hard macro placed between the two pins
+icc2_shell> check_pin_placement -alignment true \
+   -blocked_only true
+•
+Write a table of misalignment offsets and the number of pins in each offset range
+icc2_shell> check_pin_placement -alignment true \
+    -alignment_histogram true
+...
+Total of 17 alignment violations
+------Start Of Alignment Histogram-----------
+Total Two-Pin Nets: 65
+Total Misaligned Nets: 17
+Average Misalignment Distance: 24.3668um
+Standard Deviation: 48.3um
+Maximum: 151.048um
+---------------------------------------------
+Low Violation (um) High Violation (um) Number
+---------------------------------------------
+0                  50                  14
+50                 100                 1
+100                150                 1
+150                200                 1
+--------End Of Alignment Histogram-----------
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+447
+
+
+===== PDF page 448 =====
+Chapter 13: Performing Pin Assignment
+Checking Pin Placement
+Feedback
+Saving Output From check_pin_placement
+Use options with the check_pin_placement command to specify how the information from 
+the pin check is saved:
+•
+Specify the name of the error view for pin placement checking
+icc2_shell> check_pin_placement -error_view pincheck.err
+•
+Specify the name of a report file in which to write the console output from the 
+check_pin_placement command; be default, the tool writes output only to the console
+icc2_shell> check_pin_placement -filename pinchecks.txt
+Enabling Various Pin Placement Checks
+Use options with the check_pin_placement command to limit pin checking to the 
+specified checks or change the default pin check behavior. By default, the command skips 
+these checks unless otherwise specified.
+•
+Check for mismatches in pin directions for nets with only two pins.
+icc2_shell> check_pin_placement -pin_direction true
+•
+Check the pins only of the specified cell type: BLOCK, HARD_MACRO, 
+EXTRACTED_TIMING_MODEL, or ALL. The default is BLOCK.
+icc2_shell> check_pin_placement -cell_type HARD_MACRO
+•
+Check the pins only of the specified type: PG_PINS, SIGNAL_PINS, or ALL. The 
+default is SIGNAL_PINS.
+icc2_shell> check_pin_placement -pin_type ALL
+•
+Check for corner keepout violations on the edges of physical blocks
+icc2_shell> check_pin_placement -corner_keep_out true
+•
+Check if pins are placed only on allowed layers
+icc2_shell> check_pin_placement -layers true
+•
+Skip checking for block pins without a pin shape; by default, this check is performed
+icc2_shell> check_pin_placement -missing false
+•
+Restrict the check to the specified nets; by default, the tool checks all block pins
+icc2_shell> check_pin_placement -nets {clk}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+448
+
+
+===== PDF page 449 =====
+Chapter 13: Performing Pin Assignment
+Checking Pin Placement
+Feedback
+•
+Check for off-edge pins
+icc2_shell> check_pin_placement -off_edge true
+•
+Check if any pins violate individual pin offset constraints
+icc2_shell> check_pin_placement -offset true
+•
+Check for pin-order constraint violations
+icc2_shell> check_pin_placement -order true
+•
+Check if the center of the pin is inside an associated pin blockage and if the pin shape 
+is on the layer associated with the blockage
+icc2_shell> check_pin_placement -pin_blockage true
+•
+Create an ordered list of pins that might have nonoptimal placement and create a 
+longer routing path than necessary
+The -pin_detour check reports nets that have a bounding-box greater than the 
+bounding box of the standard-cell pins and the top-level terminals or ports that it 
+connects.
+When the -detour_consider_pin_constraints option is set to true, the tool takes 
+the individual and block pin constraints into account while checking for any pin detours.
+icc2_shell> check_pin_placement -pin_detour true \
+   -detour_tolerance 1.5 -detour_consider_pin_constraints true
+•
+Create an ordered list of pins that might have nonoptimal placement and create a 
+longer routing path than necessary
+The -path_detour check reports nets that have a bounding-box greater than the 
+bounding box of the driver and load registers and the top-level terminals or ports that it 
+connects.
+When the -detour_consider_pin_constraints option is set to true, the tool takes 
+the individual and block pin constraints into account while checking for any path 
+detours.
+icc2_shell> check_pin_placement -path_detour true \
+   -detour_tolerance 1.5 -detour_consider_pin_constraints true
+•
+Check if the center of the pin is within its associated pin guide and whether the pin is 
+placed on a layer allowed by the pin guide
+icc2_shell> check_pin_placement -pin_guide true
+•
+Check whether pins have adequate spacing between them
+icc2_shell> check_pin_placement -pin_spacing true
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+449
+
+
+===== PDF page 450 =====
+Chapter 13: Performing Pin Assignment
+Checking Pin Placement
+Feedback
+To modify the spacing check and treat PG pins as a stop or shield, set the 
+plan.pins.treat_pg_as_shield application option to true.
+icc2_shell> set_app_options -name plan.pins.treat_pg_as_shield \
+   -value true
+•
+Check for pins with coloring conflicts
+icc2_shell> check_pin_placement -pin_mask_constraint true
+•
+Check for pins that fail to honor their length constraints, width constraints, or double 
+patterning pin length requirements
+icc2_shell> check_pin_placement -pin_size true
+•
+Check for pins shorted with PG or signal preroutes; the -shorts check does not check 
+for these shorts
+icc2_shell> check_pin_placement -pre_route true
+•
+Check for pins that are outside the routing corridor; this option also check for pins that 
+are on a different layer than specified by the routing corridor
+icc2_shell> check_pin_placement -routing_corridor true
+•
+Check only top-level terminals and ignore block pins; by default, the command checks 
+all block pins
+icc2_shell> check_pin_placement -self
+•
+Disable checking for shorted or overlapping pins; by default, the shorts check is 
+enabled
+icc2_shell> check_pin_placement -shorts false
+•
+Check for pin side placement violations
+icc2_shell> check_pin_placement -sides true
+•
+Check for single, unroutable pins under different conditions; valid values are 
+connected, unconnected, and all
+icc2_shell> check_pin_placement -single_pin all
+•
+Check for pin stacking violations
+icc2_shell> check_pin_placement -stacking true
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+450
+
+
+===== PDF page 451 =====
+Chapter 13: Performing Pin Assignment
+Checking Pin Placement
+Feedback
+•
+Report all the pins that were inserted by the tool to avoid single pins in an abutted 
+design
+icc2_shell> check_pin_placement -synthesized_pins true
+•
+Check that pins are centered on a wire track
+icc2_shell> check_pin_placement -wire_track true
+•
+Check that pins satisfy track width constraints
+icc2_shell> check_pin_placement -wide_track true
+•
+Check that pins satisfy location constraints
+icc2_shell> check_pin_placement -location true
+•
+Disable checking for violations of technology-related minimum layer spacing and fat 
+metal spacing between signal pins, signal and PG pins, and signal and preroute pins
+icc2_shell> check_pin_placement -technology_spacing_rules false
+Checking Pin Placement on Multiply Instantiated Blocks
+Use the check_mib_for_pin_placement command to check multiply instantiated blocks 
+(MIBs) for pin placement issues.
+•
+Check for pins across MIB instances where the MIB block pin does not connect to the 
+same number or pins or same type of pins.
+icc2_shell> check_mib_for_pin_placement -asymmetric_connections
+---------- Start Of Logical Asymmetry Check ----------
+Error: Port pin_b on MIB Reference Module CPU
+  has asymmetric connections. (DPPA-205)
+•
+Check MIB instances for two-pin nets that do not connect to the same pin across 
+all instances of the reference MIB block. Swapped connections are a subset of 
+asymmetric connections.
+icc2_shell> check_mib_for_pin_placement -swapped_connections
+---------- Start Of Swapped Connection Check ----------
+Error: Port pin_a on MIB Reference Module CPU
+  is a potentially swapped port. (DPPA-203)
+•
+Check for top-level terminals that connect to the same MIB pin, but at different 
+locations on the MIB instances.
+icc2_shell> check_mib_for_pin_placement -top_level_terminal_locations
+---------- Start Of Top Level Terminal Check ----------
+Error: Port A[0] on MIB Reference Module dlm_test2 connects to
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+451
+
+
+===== PDF page 452 =====
+Chapter 13: Performing Pin Assignment
+Checking Pin Placement
+Feedback
+  top level terminals which are not all
+  at the same location. (DPPA-204)
+•
+Check only pins on specific cells, or pins only connected to specific nets.
+icc2_shell> check_mib_for_pin_placement -asymmetric_connections \
+   -cells {U_MIB2_2/U_DLM_TEST2}
+icc2_shell> check_mib_for_pin_placement -asymmetric_connections \
+   -nets {U_MIB1_2/A}
+Checking Feedthroughs
+Use options with the check_feedthroughs command to specify how feedthroughs are 
+checked and what information is reported:
+•
+Specify a collection of blocks for feedthrough analysis
+icc2_shell> check_feedthroughs -cells {u0_1}
+•
+Write out a list of feedthroughs that are reused across MIB instances
+icc2_shell> check_feedthroughs -reused_feedthroughs
+•
+Check for feedthrough violations on each feedthrough net on each block and for net 
+bundles
+icc2_shell> check_feedthroughs -net_constraints
+•
+Check for redundant feedthroughs
+icc2_shell> check_feedthroughs -redundant
+•
+Check feedthrough nets that connect top-level ports in the current block
+icc2_shell> check_feedthroughs -self
+•
+Check topological constraints for each feedthrough net
+icc2_shell> check_feedthroughs -topo_constraints
+•
+Check for unused feedthroughs
+icc2_shell> check_feedthroughs -unused_feedthroughs
+•
+Include repeater and buffer cells in feedthrough tracing when timing libraries are loaded
+icc2_shell> check_feedthroughs -include_buffered
+•
+Check mixed feedthroughs
+icc2_shell> check_feedthroughs -mixed
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+452
+
+
+===== PDF page 453 =====
+Chapter 13: Performing Pin Assignment
+Reporting and Writing Pin Constraints
+Feedback
+The tool supports two type of mixed feedthroughs:
+◦
+Feedthroughs with connections to combinational cells (other than buffers or 
+inverters)
+◦
+Feedthrough nets that own both the original feedthrough port and the newly created 
+feedthrough port
+•
+Check pure feedthroughs
+icc2_shell> check_feedthroughs -pure
+Pure feedthroughs are feedthroughs that have no physical pins or connections other 
+than buffers or inverters within the block that the net passes through.
+•
+Check intra-block feedthrough alignment for two-pin nets
+icc2_shell> check_feedthroughs -alignment
+   -alignment_tolerance_distance 1
+Block A
+OUT
+check_feedthroughs -alignment
+Without the -alignment_tolerance_distance 
+option, the two pins are considered aligned if their pin 
+bounding boxes are aligned, as shown in the image to 
+the left.
+IN
+Block A
+OUT
+check_feedthroughs -alignment \
+-alignment_tolerance_distance x
+The two pins are considered unaligned when the 
+distance between them is greater than the value 
+specified by the 
+-alignment_tolerance_distance option. In this 
+example, if the distance between the pins is greater 
+than “x,” the tool considers it as an alignment violation.
+IN
+x
+Reporting and Writing Pin Constraints
+Use the report_pin_constraints command to display the individual pin constraints, 
+block pin constraints, bundle pin constraints, and topological constraints for a specific nets, 
+ports, or pins. The command also displays the constraint information for related nets, pins, 
+and blocks.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+453
+
+
+===== PDF page 454 =====
+Chapter 13: Performing Pin Assignment
+Reporting and Writing Pin Constraints
+Feedback
+Use the write_pin_constraints command to write out the current set of pin constraints 
+for a specific pins, ports, nets, or bundles. Use options to the command to specify the type 
+of information written for topological and physical pin constraints.
+Reporting Pin Constraints
+Use the report_pin_constraints command to display the individual pin constraints, 
+block pin constraints, bundle pin constraints, and topological constraints for a specific net, 
+port, or pin. The command also displays the constraint information for related pins and 
+blocks.
+The following example reports pin constraints for net rst_l:
+icc2_shell> report_pin_constraints -nets rst_l
+****************************************
+Report : report_pin_constraints
+Design : top
+****************************************
+ 
+Pin constraints report on nets
+========================================
+ 
+Pin constraints report on connected nets
+========================================
+ 
+  --Topological Pin Constraints On Net rst_l--
+    {Nets rst_l}
+      {{{port rst_l}} {{cell U_H1_0} {sides 1}
+        {offset {231 266}} {layers {M3}}}}
+      {{{cell U_H1_0} {sides 1} {offset {231 266}} {layers {M3}}}
+       {{cell U_H1_0/U_H2_0} {sides 1} {offset {30 65}} {layers {M3}}}}
+      ...
+      {{{cell U_H2_3} {sides 4} {offset {38 88}} {layers {M4}}}
+       {{cell U_H2_2} {sides 2} {offset {36 87}} {layers {M4}}}}
+Writing Pin Constraints
+Use the write_pin_constraints command to write out a constraints file that can be 
+used as input for incremental pin placement and feedthrough generation. To write the pin 
+constraints for the current design, use the write_pin_constraints command with the 
+appropriate options.
+icc2_shell> write_pin_constraints -from_existing_pins \
+   -topological_map {side offset layer} \
+   -file_name pin_constraints.map
+Use the write_pin_constraints command to write out topological and physical pin 
+constraints for the current block. To limit the output to a specified set of pins, nets, ports, 
+cells, or bundles, use the -pins pins, -nets nets, -ports ports, -cells cells, or 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+454
+
+
+===== PDF page 455 =====
+Chapter 13: Performing Pin Assignment
+Reporting and Writing Pin Constraints
+Feedback
+-bundles bundles option. Use the -exclude_nets option to exclude specified nets from 
+the list of pins constraints written by this command. Use the -self option to write out 
+pin constraints for the top-level ports. Specify the output file name with the -file_name 
+option.
+Use the -topological_map {side layer offset offset_range offset_range 
+layer_range layer_range} option to write out only the specified fields to the topological 
+map section of the constraint file. If you specify the offset_range argument, the command 
+adds the offset_range value to, and subtracts the offset_range value from, the current 
+offset position. This provides additional flexibility for the pin placer during incremental pin 
+placement. For example, if the current offset is 20 and you specify -topological_map 
+{offset offset_range 5}, the command writes the offset portion of the constraint as 
+{offset {15 25}}. If you specify the layer_range argument, the command adds layers 
+above and below the current layer to the output constraint. For example, if the current 
+layer is M4 and you specify -topological_map {layer layer_range 2}, the command 
+adds two layers above and two layers below the current pin layer and writes the layers 
+portion of the constraint as {layers {M2 M3 M4 M5 M6}}.
+In the following example, the command writes out the topological map section of the 
+constraints file, including net name, pin name, cell name, side, layer range, and offset 
+range for each constraint. The constraints are based on the existing pin placement. The 
+pin_constraints.map generated by this command is also shown.
+icc2_shell> write_pin_constraints -from_existing_pins \
+   -file_name pin_constraints.map \
+   -topological_map {side offset offset_range 5 layer layer_range 1}
+1
+icc2_shell> sh head pin_constraints.map
+START TOPOLOGICAL MAP;
+{n832}
+  {{{pin u_m/U1192/Y}} {{cell u0_0}
+    {layers {M5 M6 M7}} {sides 4}
+    {offset {756.280 766.280}}}};
+{n1319}
+  {{{pin U45/Y}} {{cell u0_0}
+    {layers {M5 M6 M7}} {sides 4}
+    {offset {1013.464 1023.464}}}};
+...
+Use the -physical_pin_constraint {side layer offset offset_range 
+offset_range layer_range layer_range} option to write out only the specified fields to 
+the physical pin constraints section of the constraint file. The offset_range and layer_range 
+arguments have the same meaning as in the topological map section.
+In the following example, the command writes out the physical pin constraints section 
+of the constraints file, including pin name, reference name, side, layer, and offset range 
+for each constraint. The constraints are based on the existing pin placement. The 
+physical_constraints.map generated by this command is also shown.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+455
+
+
+===== PDF page 456 =====
+Chapter 13: Performing Pin Assignment
+Writing Out Feedthrough Information as Tcl Commands
+Feedback
+icc2_shell> write_pin_constraints \
+  -file_name physical_constraints.map -from_existing_pins \
+  -physical_pin_constraint {side offset offset_range 5 layer}
+1
+icc2_shell> sh cat physical_constraints.map
+START PHYSICAL PIN CONSTRAINTS;
+  {pins clk} {reference block1}
+    {layers M5} {sides 3} {offset {694.720 704.720}};
+  {pins rstn} {reference block1}
+    {layers M6} {sides 4} {offset {756.280 766.280}};
+  {pins ahbi[0]} {reference block1}
+    {layers M2} {sides 4} {offset {171.536 181.536}};
+  {pins ahbi[1]} {reference block1}
+    {layers M4} {sides 4} {offset {171.384 181.384}};
+  ...
+Writing Out Feedthrough Information as Tcl Commands
+The place_pins commands places pins and creates feedthroughs in blocks, and the 
+push_down_objects commands creates feedthroughs and moves objects into blocks 
+from a higher level of hierarchy. When these commands add a new object to a block, the 
+command sets the is_shadow attribute on these objects to true. To write out a script 
+that contains create_net, create_pin, and connect_net commands to re-create the 
+feedthrough topology, use the write_shadow_eco command as shown in the following 
+example. The example also shows the first few lines of the script written by the command; 
+you can source this script in another session of the IC Compiler II tool to re-create the 
+feedthroughs. Use the -command_style dc option to write out a script that is compatible 
+with the Design Compiler tool.
+icc2_shell> write_shadow_eco -command_style icc2 \
+   -output feedthroughs.tcl
+1
+ 
+icc2_shell> sh cat feedthroughs.tcl
+# original net: si[31]
+create_net U1/si__FEEDTHRU_0[31]
+disconnect_net -net U1/si[31] [get_pins U1/u0_3/si[118]]
+connect_net -net U1/si__FEEDTHRU_0[31] [get_pins U1/u0_3/si[118]]
+create_pin -direction out U1/u0_2/si__FEEDTHRU_1[31]
+connect_net -net U1/si__FEEDTHRU_0[31] \
+   [get_pins U1/u0_2/si__FEEDTHRU_1[31]]
+connect_net -net U1/u0_2/si[118] \
+   [get_pins U1/u0_2/si__FEEDTHRU_1[31]]
+...
+When multiple place_pins or push_down_objects commands are used in the same 
+tool session, the write_shadow_eco command writes out commands to re-create 
+feedthroughs for the entire session. You can also write out shadow ECO commands 
+from specific place_pins or push_down_objects commands in the session. First, 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+456
+
+
+===== PDF page 457 =====
+Chapter 13: Performing Pin Assignment
+Creating Topological Pin Constraints in the GUI
+Feedback
+set the plan.pins.enable_feedthrough_timestamps application option to true at 
+the beginning of the session. After running the place_pins or push_down_objects 
+commands, specify the -latest_rounds {rounds} option with the write_shadow_eco 
+command. The rounds argument specifies the place_pins or push_down_objects 
+command most recent occurrence count, where “1” is the most recent place_pins or 
+push_down_objects command, “2” is the second most recent command, and so on.
+For example, to write out Tcl commands to re-create the feedthroughs from the two 
+most place_pins commands and ignore earlier place_pins commands, specify the 
+-latest_rounds {1 2} option as follows. Note that the feedthroughs created by the first 
+place_pins command are not included in the feedthroughs.tcl file.
+icc2_shell> set_app_options \
+   -name plan.pins.enable_feedthrough_timestamps -value true
+icc2_shell> place_pins -nets A # latest round 3
+icc2_shell> place_pins -nets B # latest round 2
+icc2_shell> place_pins -nets C # latest round 1
+icc2_shell> write_shadow_eco -output feedthroughs.tcl \
+   -latest_rounds {1 2}
+Creating Topological Pin Constraints in the GUI
+You create topological pin constraints by using Tcl commands and constraint files, or 
+by drawing them in the GUI. Use the GUI to view and examine the current topological 
+constraints set with the create_topological_constraint command or with the 
+Topological Pin Constraints tool in the GUI.
+To create a topological pin constraint with a Tcl command, specify the 
+create_topological_constraint command with the net name, starting and ending 
+block, starting and ending sides, and so on as shown in the following example:
+icc2_shell> create_topological_constraint \
+   -start_object I_DATA_PATH \
+   -start_sides 3 -end_object I_ALU \
+   -end_sides 4 [get_nets Op_Result[0]]
+To create the same constraint in the GUI by drawing it on the layout,
+1. Start the Topological Pin Constraints tool by choosing Create > Topological Pin 
+Constraint from the menu.
+2. Enter the net name in the net name box in the Topological Pin Constraints tool. In this 
+example, the net name is Op_Result[0].
+You can also select the net before starting the tool to automatically populate the net 
+name box.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+457
+
+
+===== PDF page 458 =====
+Chapter 13: Performing Pin Assignment
+Creating Topological Pin Constraints in the GUI
+Feedback
+3. (Optional) Specify the allowed layers for the net by selecting them in the Topological 
+Pin Constraints toolbar.
+4. Draw a rectangle to define the topological constraint for the start block as shown in 
+step (2) in the following figure.
+5. Draw a rectangle to define the topological constraint for the end block as shown in step 
+(3).
+This completes the constraint as shown in step (4) in the following figure.
+Figure 154
+Creating a Topological Constraint
+After defining the constraint, use the place_pins command to place the pins. The 
+following figure shows the layout after running the place_pins command with the 
+topological pin constraint.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+458
+
+
+===== PDF page 459 =====
+Chapter 13: Performing Pin Assignment
+Creating Topological Pin Constraints in the GUI
+Feedback
+Figure 155
+Pin Placement Result After Defining a Topological Constraint
+After defining a topological constraint, you can perform the following operations:
+•
+Retrieve the currently defined topological constraints with the 
+get_topological_constraints command.
+•
+Write a report that describes the currently defined constraints with the 
+report_topological_constraints command.
+icc2_shell> report_topological_constraints -all
+TPF Constraint Description
+------------------------------------------------------
+TPF_CONSTRAINT_0    Owner Type            blk_net
+                    Owner Name            Op_Result[0]
+                    Start Type            blk_inst
+                    Start Name            I_DATA_PATH
+                    End Type              blk_inst
+                    End Name              I_ALU
+...
+•
+Edit the allowed sides, offset, range, and layer specification for the constraint by 
+clicking on the cell in the constraint table and modifying the contents of the cell.
+•
+Remove a constraint by clicking the right mouse key over the constraint in the table 
+and choosing Delete from the context menu.
+•
+Remove a constraint by specifying the remove_topological_constraints command 
+with the constraint name.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+459
+
+
+===== PDF page 460 =====
+Chapter 13: Performing Pin Assignment
+Reporting Estimated Wire Length
+Feedback
+Reporting Estimated Wire Length
+After placing the pins with the place_pins command, report the wire length for 
+individual nets or for the entire design with the get_estimated_wirelength command. 
+The command produces a wire length estimate by creating a virtual route for the 
+net across all design hierarchies. Use the set_editability command to limit the 
+design hierarchies considered by the get_estimated_wirelength command. The 
+get_estimated_wirelength command should be used after placing block pins with the 
+place_pins command.
+The following example reports the estimated wire length for the entire design and for only 
+the din[0] and dout[1] nets.
+icc2_shell> get_estimated_wirelength
+Total wirelength of net is: 4117.640
+1
+ 
+icc2_shell> get_estimated_wirelength -nets [get_nets {din[0] dout[0]}]
+The length of net din[0] is: 138.478
+The length of net dout[0] is: 137.485
+1
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+460

@@ -1,0 +1,206 @@
+% 第 6 章 Performing Parasitic Extraction
+\bichapter{寄生参数提取}{Performing Parasitic Extraction}
+\label{chap:extract}
+
+准确的时序分析依赖于准确的网线 RC（寄生）信息。IC Compiler II 在布线前与布线后都能做 RC 提取，也可以反标详细的寄生参数。本章说明提取与寄生参数反标相关的任务：
+\begin{itemize}
+  \item 指定寄生工艺信息
+  \item 指定提取用的寄生缩放因子
+  \item 为详细布线网启用耦合电容提取
+  \item 执行提取并生成寄生参数
+  \item 执行设计内 signoff 提取
+  \item 反标寄生参数
+\end{itemize}
+
+\section{指定寄生工艺信息}
+\subsection*{Specifying the Parasitic Technology Information}
+
+IC Compiler II 使用 TLUPlus 文件作为寄生工艺信息。TLUPlus 是存放各层 RC 系数的二进制表。
+
+TLUPlus 模型把线宽、间距、密度与温度对电阻系数的影响包括进来，从而得到准确的 RC 提取结果。关于在互连工艺格式（Interconnect Technology Format，ITF）文件中建模这些效应，见 StarRC 文档。
+
+做虚拟布线估计时，这一阶段尚未分配金属层，因此工具对分层 RC 系数做平均，以计算 RC 系数。
+
+要把寄生信息关联到某个 corner，必须：
+\begin{enumerate}
+  \item 用 \cmd{read\_parasitic\_tech} 读入 TLUPlus 文件，并把它加到下列之一：
+  \begin{itemize}
+    \item 参考库。一般应把 TLUPlus 放在参考库中，使使用该工艺的全部 block 都能访问。
+    \item 设计库。若参考库中没有 TLUPlus，则加到设计库。
+  \end{itemize}
+        可以读入一个或多个下列类型的 TLUPlus 文件：
+  \begin{itemize}
+    \item 仿真（emulation）TLUPlus，用于插入金属填充之前。
+    \item 非仿真 TLUPlus，用于插入金属填充之后。
+  \end{itemize}
+        还必须用 \opt{-tlup} 指定 TLUPlus 文件。若给出相对路径或不给路径，工具用变量 \cmd{search\_path} 所定义的搜索路径定位文件。
+
+        若 TLUPlus 中的层名与工艺文件中的层名不一致，必须在 TLUPlus 层映射文件中定义映射，语法见「TLUPlus 层映射文件」。用 \opt{-layermap} 指定层映射文件名。
+
+        读入之后，TLUPlus 由其寄生工艺模型名标识。默认模型名是所指定 TLUPlus 文件的基本名，也可用 \opt{-name} 指定其他名称。
+
+        例如，用名为 \cmd{my.layermap} 的层映射文件读入 \cmd{my.tlup}，并以寄生工艺模型名 \cmd{para1} 存入当前库：
+\begin{lstlisting}
+icc2_shell> read_parasitic_tech -tlup my.tlup \
+    -layermap my.layermap -name para1
+\end{lstlisting}
+  \item 用 \cmd{set\_parasitic\_parameters} 把 TLUPlus 文件关联到 corner。
+  \begin{itemize}
+    \item 用 \opt{-corners} 关联到指定 corner。默认关联到当前 corner。
+    \item 用 \opt{-early\_spec} 指定 early 延迟计算所用的 TLUPlus。
+    \item 用 \opt{-early\_temperature} 指定 early 延迟计算所用的温度。
+    \item 用 \opt{-late\_spec} 指定 late 延迟计算所用的 TLUPlus。
+    \item 用 \opt{-late\_temperature} 指定 late 延迟计算所用的温度。
+    \item 用 \opt{-library} 指定含有该寄生规格的库名。默认在当前库中查找 TLUPlus。
+  \end{itemize}
+        每个 corner 只能指定一个 early 和一个 late 寄生工艺模型。但可以在设计流程中随时更改，例如插入金属填充后改用非仿真 TLUPlus。
+
+        \opt{-early\_spec} 与 \opt{-late\_spec} 使用 \cmd{read\_parasitic\_tech} 所赋的寄生工艺模型名。例如，让当前 corner 的 early 延迟计算使用模型名 \cmd{para1}：
+\begin{lstlisting}
+icc2_shell> set_parasitic_parameters -early_spec para1
+\end{lstlisting}
+\end{enumerate}
+
+\subsection{TLUPlus 层映射文件}
+\subsubsection*{TLUPlus Layer Mapping File}
+
+TLUPlus 层映射文件使用下列语法：
+\begin{lstlisting}
+conducting_layers
+tf_metal_layer_name1
+ITF_metal_layer_name1
+...
+tf_metal_layer_namen
+ITF_metal_layer_namen
+via_layers
+tf_via_layer_name1
+ITF_via_layer_name1
+...
+tf_via_layer_namen
+ITF_via_layer_namen
+\end{lstlisting}
+
+层映射文件中的注释行以星号（\cmd{*}）或井号（\cmd{\#}）开头。
+
+\section{指定提取用的寄生缩放因子}
+\subsection*{Specifying the Parasitic Scaling Factors for Extraction}
+
+寄生缩放因子用来按特定条件调整电阻与电容，例如最小或最大延迟计算，以及虚拟布线或详细布线的网线。默认缩放因子为 1.0，工具不调整电阻与电容。
+
+用 \cmd{set\_extraction\_options} 指定寄生缩放因子。默认作用于当前 corner。用 \opt{-corners} 作用于指定 corner。这些因子在用 \cmd{save\_block} 把 block 存入设计库时一并保存。
+
+表~\ref{tab:ext-scale} 给出设置各种寄生缩放因子所用的选项。
+
+\begin{table}[htbp]
+\centering
+\caption{设置寄生缩放因子的选项}
+\label{tab:ext-scale}
+\begin{tabularx}{\textwidth}{@{}X l@{}}
+\toprule
+寄生量 & 选项 \\
+\midrule
+详细布线电阻 & \cmd{-late\_res\_scale}、\cmd{-early\_res\_scale} \\
+详细布线电容 & \cmd{-late\_cap\_scale}、\cmd{-early\_cap\_scale} \\
+详细布线耦合电容 & \cmd{-late\_ccap\_scale}、\cmd{-early\_ccap\_scale} \\
+虚拟布线水平电阻 & \cmd{-late\_vr\_horizontal\_res\_scale}、\cmd{-early\_vr\_horizontal\_res\_scale} \\
+虚拟布线垂直电阻 & \cmd{-late\_vr\_vertical\_res\_scale}、\cmd{-early\_vr\_vertical\_res\_scale} \\
+虚拟布线通孔电阻 & \cmd{-late\_vr\_via\_res\_scale}、\cmd{-early\_vr\_via\_res\_scale} \\
+虚拟布线水平电容 & \cmd{-late\_vr\_horizontal\_cap\_scale}、\cmd{-early\_vr\_horizontal\_cap\_scale} \\
+虚拟布线垂直电容 & \cmd{-late\_vr\_vertical\_cap\_scale}、\cmd{-early\_vr\_vertical\_cap\_scale} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+例如，把当前 corner 最大延迟计算所用的电容增大 10\%，把最小延迟计算所用的电容减小 5\%：
+\begin{lstlisting}
+icc2_shell> set_extraction_options \
+    -late_cap_scale 1.1 -early_cap_scale 0.95
+\end{lstlisting}
+
+用 \cmd{report\_extraction\_options} 报告寄生缩放因子。默认报告全部 corner；用 \opt{-corners} 报告指定 corner。
+
+要把某个寄生缩放因子复位，用 \cmd{set\_extraction\_options} 把它设回 1.0。
+
+\section{为详细布线网启用耦合电容提取}
+\subsection*{Enabling Coupling Capacitance Extraction for Detailed Routed Nets}
+
+默认情况下，对已详细布线的 block 做提取时，工具不单独提取网与网之间的耦合电容。耦合效应包含在总电容中。
+
+要为详细布线网提取耦合电容，把应用选项 \appopt{extract.enable\_coupling\_cap} 设为 \cmd{true}：
+\begin{lstlisting}
+icc2_shell> set_app_options -name extract.enable_coupling_cap \
+    -value true
+\end{lstlisting}
+
+\section{执行提取并生成寄生参数}
+\subsection*{Performing Extraction and Generating Parasitics}
+
+工具在更新时序信息时自动做提取。可以显式运行 \cmd{update\_timing} 来更新时序并执行提取。要用 SPEF 格式写出提取到的寄生参数，使用 \cmd{write\_parasitics}。
+
+使用 \cmd{write\_parasitics} 时必须用 \opt{-output} 指定输出文件名。工具为每个 corner 生成一个 SPEF 文件。这些文件名由所给输出文件名，以及工艺名、温度和 \cmd{set\_extraction\_options} 指定的缩放因子导出。工具还会生成名为 \cmd{XX.spef\_scenario} 的文件，列出每个输出 SPEF 所关联的 scenario。
+
+默认情况下，\cmd{write\_parasitics}：
+\begin{itemize}
+  \item 把网名映射为数字，写网线寄生信息时使用这些数字，以减小文件。要用原网名，使用 \opt{-no\_name\_mapping}。
+  \item 为顶层设计生成一个 SPEF。要为每个下层 block 分别生成 SPEF，使用 \opt{-hier}。
+\end{itemize}
+
+运行 \cmd{write\_parasitics} 时，若寄生信息已过时，工具会执行提取。但若使用 \opt{-hier}，工具不检查下层 block 是否已经提取。因此在带 \opt{-hier} 使用 \cmd{write\_parasitics} 之前，应先运行 \cmd{update\_timing}。
+
+\section{执行设计内 signoff 提取}
+\subsection*{Performing In-Design Signoff Extraction}
+
+IC Compiler II 支持在已布线设计上使用 StarRC 提取能力做设计内（In-Design）signoff 提取。该功能改善与 StarRC 的相关性，并可与 PrimeTime 延迟计算配合，改善布线后 QoR。由于运行较慢，StarRC 设计内提取应只在设计收敛的最后阶段使用。
+
+在运行 \cmd{route\_opt} 之前，按下列步骤使用 StarRC 设计内提取：
+\begin{enumerate}
+  \item 用 \cmd{set\_starrc\_in\_design -config} 指定运行 StarRC 提取的配置文件。配置文件必须包含：
+  \begin{itemize}
+    \item \cmd{SIGNOFF\_IMAGE}：StarRC 可执行文件的位置。
+    \item \cmd{CORNER\_GRD\_FILE}：列出每个 corner 及对应 StarRC nxtgrd 文件的文件。
+    \item 下列设置之一：
+    \begin{itemize}
+      \item \cmd{MAPPING\_FILE}：StarRC 层映射文件（推荐）。
+      \item \cmd{COMMAND\_FILE}：StarRC 命令文件。若 StarRC 命令文件中的设置与 IC Compiler II 冲突，工具使用 IC Compiler II 的设置。例如，\cmd{set\_extraction\_options} 指定的耦合电容阈值为 1.0~fF，而 StarRC 命令文件把 \cmd{COUPLING\_ABS\_THRESHOLD} 设为 0.5~fF，则设计内提取使用 1.0~fF。
+    \end{itemize}
+  \end{itemize}
+        配置文件示例：
+\begin{lstlisting}
+SIGNOFF_IMAGE: /home/star_rcxt_2016.06/bin/StarXtract
+CORNER_GRD_FILE: corner_grd.mapping
+MAPPING_FILE: star.mapping
+\end{lstlisting}
+  \item （可选）用 \cmd{report\_starrc\_in\_design} 报告 StarRC 设计内提取的设置。
+  \item 用下列应用选项启用 StarRC 设计内提取：
+\begin{lstlisting}
+icc2_shell> set_app_options -list {extract.starrc_mode true}
+\end{lstlisting}
+\end{enumerate}
+
+\begin{noteBox}
+若设计尚未布线，即使该应用选项为 \cmd{true}，也不会执行 StarRC 设计内提取。
+\end{noteBox}
+
+要使用 StarRC 提取得到的寄生信息，在运行 \cmd{report\_timing}、\cmd{report\_qor} 或 \cmd{write\_parasitics} 之前，先运行 \cmd{update\_timing -full}。
+
+\section{反标寄生参数}
+\subsection*{Back-Annotating Parasitics}
+
+可以读入外部工具以 SPEF 格式生成的网线寄生数据，并在时序分析的延迟计算中使用。用 \cmd{read\_parasitics}，并以 \opt{-corner\_spef} 一次或多次为每个 corner 指定一个 SPEF 文件。若多个 corner 共用同一个 SPEF，可以在一次 \opt{-corner\_spef} 中列出多个 corner。
+
+默认把 SPEF 中的寄生参数加到顶层 block。要为下层 block 读入 SPEF，使用 \opt{-block}。使用该选项时，\opt{-corner\_spef} 中的 corner 必须在顶层定义。
+
+下例：
+\begin{itemize}
+  \item 在顶层，corner \cmd{C1}、\cmd{C2} 使用 \cmd{TOP\_C1C2.spef}，corner \cmd{C3}、\cmd{C4} 使用 \cmd{TOP\_C3C4.spef}。
+  \item 在 block 级，corner \cmd{C1}、\cmd{C2} 使用 \cmd{BLK\_C1C2.spef}，corner \cmd{C3}、\cmd{C4} 使用 \cmd{BLK\_C3C4.spef}。
+\end{itemize}
+\begin{lstlisting}
+icc2_shell> read_parasitics -corner_spef {{C1 C2} TOP_C1C2.spef} \
+    -corner_spef {{C3 C4} TOP_C3C4.spef}
+icc2_shell> read_parasitics -block BLK \
+    -corner_spef {{C1 C2} BLK_C1C2.spef} \
+    -corner_spef {{C3 C4} BLK_C3C4.spef}
+\end{lstlisting}
+
+\cmd{read\_parasitics} 执行后，工具打印未被反标的网线数量，并对 SPEF 未反标的网线执行提取。

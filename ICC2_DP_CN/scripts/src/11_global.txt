@@ -1,0 +1,1305 @@
+
+
+===== PDF page 346 =====
+Feedback
+11
+Performing Global Planning
+To improve global routing between design blocks during the design planning phase, the IC 
+Compiler II tool supports operations to group similar nets, create global routing corridors, 
+and push global route objects into blocks. Global planning enables you to better manage 
+routing resources between blocks. You typically use global bus planning after running 
+block shaping and macro placement.
+For more details, see the following topics:
+•
+Topology Interconnect Planning
+•
+Creating Routing Corridors
+•
+Creating Global Routes Within Routing Corridors
+•
+Adding Repeater Cells
+•
+Pushing Down Repeater Cells
+Topology Interconnect Planning
+Topology interconnect planning is a methodology for defining and creating a routing 
+topology for large collections of bus signals. The routing topology is defined by creating a 
+topology plan for the bus signals; the plan contains topology nodes and topology edges 
+that describe the routing intent. Designers use topology planning to simplify the task of 
+defining, implementing, and refining the routing topology for the bus signals.
+In the traditional flow, top-level interconnect signals are implemented by using EDA 
+point tools to create block pins, insert feedthroughs, insert buffers and repeaters, route 
+bus signals, and so on. Each of these tools has its own constraints methodology and 
+commands to guide the tool; this forces the SoC designer to understand the particular 
+options and constraint settings needed by each tool when implementing the top-level 
+interconnect signals.
+In the topology interconnect planning flow, unified topology constraints provide a common 
+constraint language and methodology for creating the routing topology for bus signals in 
+the layout. The unified topology constraints comprise a topolology plan, which manages 
+all the constraint requirements; this enables SoC designers to plan, check, optimize, and 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+346
+
+
+===== PDF page 347 =====
+Chapter 11: Performing Global Planning
+Topology Interconnect Planning
+Feedback
+verify the top-level interconnections more efficiently. Topology plans are visible in the GUI, 
+where you can use the Design Assistant to create and modify the constraints in the layout.
+Figure 112 shows the topology interconnect planning flow.
+Figure 112
+Topology Interconnect Planning Flow
+Create supernet bundles
+create_bundle
+create_bundles_from_patterns
+Create topology plan
+create_default_topology_plan
+Check plan feasibility
+check_topology_plans -mode pre_check
+Optimize topology plan
+optimize_topology_plans
+Verify topology plan
+check_topology_plans -mode post_check
+The following topics describe the steps in this flow:
+•
+Creating Supernet Bundles
+•
+Creating Net Estimation Rules for Topology Plans
+•
+Creating Topology Plans
+•
+Setting the Current Topology Plan
+•
+Reviewing Topology Plans
+•
+Refining Topology Plans
+•
+Optimizing Topology Plans
+•
+Performing What-If Analysis on the Topology Plan
+•
+Propagating Topology Plans
+•
+Writing Topology Plans in Tcl Format
+•
+Creating Topology Groups
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+347
+
+
+===== PDF page 348 =====
+Chapter 11: Performing Global Planning
+Topology Interconnect Planning
+Feedback
+•
+Setting the Current Topology Group
+•
+Removing Topology Groups
+•
+Branching and Ripping Support for Bundles
+•
+Bidirectional Support for Bundles
+Creating Supernet Bundles
+Topology interconnect planning is initiated by creating bundles of supernets.
+•
+Supernets define bus signals that might contain feedthroughs, repeaters, and registers, 
+and are named based on the original driver net name. To create a supernet, use 
+the set_supernet_exceptions and create_supernet commands. You can create 
+supernets using any of the following combination of anchor points:
+◦
+One anchor point – This anchor point can be a port or a pin. This method creates a 
+set of all the nets in the physical hierarchy of the anchor point.
+◦
+One start and one stop anchor points – This method creates a set of all the nets 
+between the specified anchor points. However, neither of these two anchor points 
+can be reused to create another supernet.
+◦
+One start and multiple stop anchor points – This method creates a supernet that is 
+a collection of the nets between the specified start anchor point and multiple stop 
+anchor points.
+The following example creates a supernet s2 between i1, o1, and o2.
+icc2_shell> create_supernet -start i1 -stop { o1 o2 } -name S2
+You can specify the cells and pins in the design that are to be marked as transparent 
+for supernets by using the set_supernet_exceptions command. This exception 
+includes the following entities:
+◦
+Library cells
+◦
+Pins
+◦
+Hierarchical cells and its pins
+◦
+Logical modules and its ports
+◦
+Disabled cells
+◦
+Excluded cells
+•
+Bundles are used to group supernets together into a bundle object. Signals within 
+a bundle can be rearranged and sorted to create custom pin ordering. To create a 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+348
+
+
+===== PDF page 349 =====
+Chapter 11: Performing Global Planning
+Topology Interconnect Planning
+Feedback
+bundle, use the create_bundle command and specify the bundle name and the 
+supernets in the bundle as shown in the following example.
+icc2_shell> create_bundle \
+   -name Bundle_z163261 [get_supernets z163261]
+For more information about creating bundles, see Creating Bundles and Bundle 
+Constraints.
+Creating Net Estimation Rules for Topology Plans
+Before creating a topology plan, you must create a net estimation rule for the plan. 
+A net estimation rule defines the routing layers, nondefault routing rule, repeater cell 
+name, repeater cell spacing, clock, and other routing- and timing-related constraints. 
+Use the set_net_estimation_rule command to define a net estimation rule. Use the 
+report_net_estimation_rules command to list the detailed parameter settings for each 
+defined rule.
+The following example creates a net estimation rule named M3:
+icc2_shell> set_net_estimation_rule M3 -parameter "layer" \
+   -horizontal_value "M3" -vertical_value "M4"
+icc2_shell> set_net_estimation_rule M3 -parameter "buffer_spacing" \
+   -value "500.000"
+icc2_shell> set_net_estimation_rule M3 -parameter \
+   "register_spacing" -value "1200.000"
+icc2_shell> set_net_estimation_rule M3 -parameter "buffer" \
+   -value "NBUFFX4_RVT"
+icc2_shell> report_net_estimation_rules M3
+...
+ parameter      value(s)               value from
+--------------------------------------------------
+buffer          NBUFFX4_RVT            user
+buffer_spacing  H: 500.000 V: 500.000  user
+...
+Creating Topology Plans
+A topology plan specifies the routing intent for a supernet bundle. Each plan contains 
+topology nodes and topology edges that define the routing paths and feedthroughs for the 
+route. To create topology plans, use the create_default_topology_plans command or 
+use the Design Assistant in the GUI.
+The tool creates a base topology plan for each specified bundle (or for all bundles), where 
+each base topology plan contains a start node, end node, and a topology edge that 
+connects the nodes. If the endpoint for the bundle is inside a block, the end node is placed 
+at the center of the block. If a bundle contains feedthroughs, the tool creates nodes inside 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+349
+
+
+===== PDF page 350 =====
+Chapter 11: Performing Global Planning
+Topology Interconnect Planning
+Feedback
+the feedthrough block. The tool uses the following naming convention for the generated 
+topology plans: TOPOLOGY_PLAN_<bundle_name>
+Figure 113 shows two base topology plans: the topology plan at the top of the figure 
+contains a feedthrough; the topology plan in the middle of the figure does not.
+Figure 113
+Topology Plans With and Without Feedthroughs
+If required, you can create bidirectional topology plans in which the nets traverse in 
+opposite directions. The repeaters in such topology plans are associated with non-
+sequential topology repeaters.
+Figure 114
+Bidirectional Topology Plan
+Creating Topology Plans From the Command Line
+To create base topology plans for one or more supernet bundles from the command line, 
+use the create_default_topology_plans command.
+The following command creates a base topology plan for each supernet bundle in the 
+block and assigns the M5 net estimation rule to the plan:
+icc2_shell> create_default_topology_plans -net_estimation_rule M5
+{TOPOLOGY_PLAN_B_z161756 TOPOLOGY_PLAN_B_z161763 ...
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+350
+
+
+===== PDF page 351 =====
+Chapter 11: Performing Global Planning
+Topology Interconnect Planning
+Feedback
+To create a topology plan for specific supernet bundles, specify the bundles with the 
+get_bundles command. The following command creates a topology plan for the supernet 
+bundle named B_z161756 and assigns the M3 net estimation rule to the plan:
+icc2_shell> create_default_topology_plans \
+   -net_estimation_rule M3 [get_bundles B_z161756]
+{TOPOLOGY_PLAN_B_z161756}
+To specify layer specific repeater distance, you can create a net estimation rule (NER) 
+for each metal layer and assign these multiple NERs to a topology plan. This approach 
+ensures that the tool applies the relevant NER to the relevant metal layer. If two or more 
+NERs apply to the same layer, the tool assigns the most recent NER. For example, if 
+NER1 is associated with M3, NER2 with M5, and NER3 with M5, then the tool applies 
+NER3 for the M5 layer.
+To associate multiple NERs to a topology plan or a topology edge, use the following 
+commands. In the following example, topology plan A is associated with the net estimation 
+rules, NER1, NER2, and NER3.
+icc2_shell> create_topology_plan -name A \
+   -net_estimation_rule {NER1 NER2 NER3}
+(or)
+icc2_shell> set_attribute [get_topology_plans A] \
+   -name net_estimation_rule - value {NER1 NER2 NER3}
+Here is an example to associate a topology edge with multiple NERs:
+icc2_shell> create_topology_edge -plan [get_topology_plan A] \
+   -name edge0 -net_estimation_rule {NER1 NER2 NER3}
+(or)
+icc2_shell> set_attribute [get_topology_edges A/edge1] \
+   -name net_estimation_rule - value {NER1 NER2}
+If an edge segment has multiple NERs associated with it, then the tool applies the 
+following logic:
+•
+If the segment has no layer shape, then the tool applies the first rule from the NERs list
+•
+If the segment has a layer share, then the tool applies the most recent NER that 
+matches the layer; if no NER matches this criterion, then the first rule from the NERs 
+list is applied
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+351
+
+
+===== PDF page 352 =====
+Chapter 11: Performing Global Planning
+Topology Interconnect Planning
+Feedback
+Creating Topology Plans in the GUI
+To create base topology plans in the GUI,
+1. Open the Design Assistant by choosing View > Assistants > Design Assistant.
+2. To create topology plans for
+◦
+All bundles, choose Create > Create Default Topology Plan
+◦
+Specific bundles,
+a. Click the Nets tab and use the get_bundles command to populate the list.
+b. Select the bundles from the list, right-click the selection, and select Create 
+Default Topology Plans.
+3. Enter information in the create_default_topology_plans dialog box, if required, and 
+click OK.
+The created topology plans are displayed in the block window. You can review the 
+topology plans as described in Reviewing Topology Plans.
+You can associate multiple net estimation rules to a topology plan or a topology node from 
+the Properties Editor > Basic > net_estimation_rule panel. You might want to consider 
+this approach when there is a need to specify layer specific repeater distance. You can 
+create a net estimation rule for each layer and then assign these multiple rules to the 
+topology plan.
+Setting the Current Topology Plan
+When you create a topology plan, it becomes the current topology plan. To return 
+the current topology plan, use the current_topology_plan command without any 
+arguments.
+icc2_shell> current_topology_plan
+You can also use the current_topology_plan command to set the current topology plan.
+icc2_shell> current_topology_plan my_topology_plan
+In the GUI, you can set the current topology plan by choosing Set Current Topology Plan 
+from the context menu.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+352
+
+
+===== PDF page 353 =====
+Chapter 11: Performing Global Planning
+Topology Interconnect Planning
+Feedback
+Reviewing Topology Plans
+After creating topology plans, you can examine the plans in the block window and make 
+changes to the plan. Use one of the following methods to view or report topology plans:
+•
+Use the Design Assistant in the GUI to view the topology plan in the block window.
+Choose View > New Topologies from the menu to display the Topologies tab, which is 
+shown in Figure 115. By default, the tool shows all topology plans. Enter a command 
+such as get_topology_plans TOPOLOGY_PLAN_Bndl_150 in the box to filter the list 
+and reduce the number of topology plans that are displayed.
+Figure 115
+Design Assistant Topologies Tab
+With a topology plan selected, click the Constraints Editor tab at the right of the 
+Topologies panel to view the list of nodes and edges in the topology plan, as shown in 
+Figure 116. To perform different operations on the nodes and edges, right-click a node 
+or an edge and select an item from the menu.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+353
+
+
+===== PDF page 354 =====
+Chapter 11: Performing Global Planning
+Topology Interconnect Planning
+Feedback
+Figure 116
+Constraints Editor
+•
+Use the report_topology_plans command to write out information for one or more 
+topology plans. The command reports the net estimation rule, topology nodes, topology 
+edges, and other information about the topology plan.
+icc2_shell> report_topology_plans TOPOLOGY_PLAN_Bndl_150
+...
+Topology Plan      Description
+------------------------------
+TOPOLOGY_PLAN_Bndl_150
+  comment:
+  stats: 5 nodes, 4 edges, 0 repeaters
+  net_estimation_rule: M3
+  objects: 1 bundles
+  nodes:
+    TOPOLOGY_PLAN_Bndl_150/TOPOLOGY_NODE4
+      is_reference: false
+      num_edges: 1
+      num_driving_edges: 1
+      objects: 1 ports
+  ...
+ 
+  edges:
+    TOPOLOGY_PLAN_Bndl_150/TOPOLOGY_EDGE3
+      start_node: TOPOLOGY_PLAN_Bndl_150/TOPOLOGY_NODE3
+      end_node: TOPOLOGY_PLAN_Bndl_150/TOPOLOGY_NODE4
+      net_estimation_rule:
+      objects:
+      repeaters:
+  ...
+•
+Use the check_topology_plans -mode pre_optimization command to perform a 
+sanity check on the base topology plan.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+354
+
+
+===== PDF page 355 =====
+Chapter 11: Performing Global Planning
+Topology Interconnect Planning
+Feedback
+Table 14 shows the sanity checks that the check_topology_plans command 
+performs. When you run this command, if any of the following warnings or errors 
+are reported, it means that there is a problem with the topology plans. Review these 
+topology plans and revise them, as needed, before you optimize these plans.
+Table 14
+Topology Plan Sanity Checks
+Error/Warning/Information
+Message
+DPPA-543
+Error: Topology node %s contains or, abuts and connects 
+to fixed pins or ports that are placed on layer %s, but 
+this layer is not included in the Net Estimation Rule 
+(NER) associated with this node.
+DPPA-541
+Error: Detected overlapping topology nodes on the same 
+layer. The pins or ports on topology node %s are placed 
+interleavingly with topology node %s.
+DPPA-499
+Error: Topology edge %s of block %s overlaps cell %s. 
+However, the reported edge is not allowed to create 
+feedthroughs or flyover on the reported cell.
+DPPA-498
+Error: Topology edge %s of block %s is too close to the 
+boundary of cell %s.
+DPPA-497
+Error: Topology edge %s of block %s is too close to 
+topology edge %s of block %s. The collision happens in 
+block %s.
+DPPA-496
+Error: The topology node %s has pins or ports placed 
+on layer %s, but this layer is not included in the 
+Net Estimation Rule (NER) that is associated with this 
+node.
+DPPA-495
+Warning: The bundle associated with topology plan %s is 
+too wide. Extra repeaters may be needed to compensate 
+the timing difference among the bundle bits.
+DPPA-494
+Information: The pin order specified in topology node 
+%s is inconsistent with the net order specified in the 
+bundle associated with the topology plan.
+Refining Topology Plans
+Before optimizing the topology plans, you can refine the plans to create additional nodes 
+and edges so that routing is done as per your intent. To refine a topology plan, use the 
+refine_topology_plans command.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+355
+
+
+===== PDF page 356 =====
+Chapter 11: Performing Global Planning
+Topology Interconnect Planning
+Feedback
+This command creates new nodes and edges for topology edges that have the 
+shape_layers attribute defined with Manhattan-style edge segments. If a topology edge 
+does not meet these criteria, no new nodes or edges are created for that topology edge.
+One of the use cases where you can use this command is shown in Figure 117. As 
+illustrated, when you create a topology plan for a bundle that has a long route, you need 
+not manually create the feedthrough topology nodes for each and every block in the 
+bundle. Instead, run the refine_topology_plans command that automatically creates 
+the necessary feedthrough nodes on these blocks.
+The following command refines all the topology plans within the current design:
+icc2_shell> refine_topology_plans
+The following command refines a specific topology plan, A2B:
+icc2_shell> refine_topology_plans [get_topology_plans A2B]
+Figure 117
+Refine Topology Plan
+Optimizing Topology Plans
+After creating a topology plan, you must optimize the plan to derive the routing topology. 
+The routing topology includes feedthroughs, buffers, retiming flip-flops, and bus routing 
+topologies that honor the topology constraints. To derive the routing topology, use the 
+optimize_topology_plans command or use the Design Assistant in the GUI.
+The tool performs global routing to create a manhattan route and adds repeaters and 
+sequential elements to the route. Repeater type and spacing is specified by the net 
+estimation rule assigned to the topology plan - while defining the spacing, note that a 
+single spacing rule may be insufficient in constraining all repeaters. If the endpoint for 
+the topology plan is a block or if the block contains feedthroughs, the tool command also 
+creates pins on the block.
+The following figure shows a topology plan before and after optimization. In the figure, the 
+yellow squares represent the block pins, the red triangles represent suggested repeater 
+locations, and the red rectangles represent suggested sequential element locations.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+356
+
+
+===== PDF page 357 =====
+Chapter 11: Performing Global Planning
+Topology Interconnect Planning
+Feedback
+Figure 118
+Optimize Topology Plan
+After optimizing the topology plan, you can perform a sanity check by using the 
+check_topology_plans -mode post_optimization command.
+•
+Repeater Optimization Flow
+•
+Handling of the Existing Repeaters in the Design
+•
+Ignoring a Part of the Hierarchy in the Design During Optimization
+•
+Adding and Removing Topology Repeaters
+•
+Reporting Topology Plan Repeaters
+Repeater Optimization Flow
+The repeater optimization takes place in two passes:
+1. The tool places all the repeater (sequential and electrical) along the route and fixes all 
+the spacing violation.
+2. The tool performs the legalization operation and inserts additional repeaters where 
+necessary.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+357
+
+
+===== PDF page 358 =====
+Chapter 11: Performing Global Planning
+Topology Interconnect Planning
+Feedback
+Figure 119
+Repeater Optimization
+Figure 119 shows repeater optimization in two passes for a straight route by the 
+optimize_topology_plans command:
+1. Defines a route by specifying the start and end nodes.
+2. Places all sequential repeaters equally spaced on the route.
+3. Checks that all repeaters are legally placed and adds a repeater to resolve the spacing 
+issues.
+4. Add buffers or flip-flops at equal distances to meet the timing constraints.
+5. Checks that all buffers are legally placed and adds buffer where necessary.
+Handling of the Existing Repeaters in the Design
+The optimize_topology_plans command honors physical and logical information of 
+preexisting repeaters (registers, buffers, and inverters), by default.
+To disable this feature in the tool, set the 
+plan.interconnection.enforce_repeaters_hiers to false as follows:
+icc2_shell> set_app_options \
+   -list {plan.interconnection.enforce_repeaters_hiers false}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+358
+
+
+===== PDF page 359 =====
+Chapter 11: Performing Global Planning
+Topology Interconnect Planning
+Feedback
+Table 15
+Examples Where the Command Honors the Physical Location of Existing 
+Repeaters
+Sub block A/a
+Block A
+Sub block C/c
+Block C
+Supernet
+Repeater
+Tool honors the preexisting repeaters that are at the top (as shown below)  
+Sub block A/a
+Block A
+Sub block C/c
+Block C
+Supernet
+Tool honors the preexisting repeaters that are inside the block (as shown below)  
+Sub block A/a
+Block A
+Sub block B/b
+Block B
+Supernet
+Tool honors the preexisting repeaters that are at the top and within the block 
+(as shown below)  
+Block A
+Block C
+Supernet
+Tool honors the preexisting repeaters in a branch bus (as shown below)  
+Table 16
+Example Where the Command Honors the Logical Location of Existing 
+Repeaters
+Path 1
+Path 2
+Repeater
+Path 1
+Path 2
+Repeater
+Repeater
+Optimization
+While optimizing, the tool adds repeaters, as appropriate (as shown below)  
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+359
+
+
+===== PDF page 360 =====
+Chapter 11: Performing Global Planning
+Topology Interconnect Planning
+Feedback
+During repeater optimization, the tool associates any preexisting repeater cells 
+(from a netlist) with any preexisting topology repeaters. However, when a topology 
+plan has more repeaters than that are present in a netlist, the tool might leave 
+out associating these excess repeaters with any repeater cells. You can run the 
+insert_topology_repeater_connections command to add new repeater cells in the 
+netlist and associate the topology repeaters that are without cell association with the new 
+repeater cells. The tool ensures that the new cells and their connections with the repeaters 
+are created in the correct blocks to maintain physical hierarchy. The tool automatically 
+adds super net exceptions for any new registers.
+To add new cells and establish connections with the repeaters:
+insert_topology_repeater_connections plans -register_lib_cell register 
+ -type sequential
+To add new repeater connections with cells that are provided by you:
+insert_topology_repeater_connections plans -buffer_lib_cell buffer 
+ -register_lib_cell register
+If you do not provide a cell name, the tool uses the cell names from the NER of the 
+topology plan:
+insert_topology_repeater_connections plans
+Ignoring a Part of the Hierarchy in the Design During Optimization
+In the initial stages of your design, where the netlist is not yet finalized, during the 
+optimization phase you might want to ignore pin or feedthroughs (that is, the netlist 
+connectivity) below a certain hierarchy. This approach is useful when you want to look at 
+the implementation results for the parts of the netlist that are complete or finalized, and 
+ignoring the rest of the design. You can achieve this result by using the stop_hierarchy 
+user attribute. The flow is as follows:
+1. Specify which part of the hierarchy of a bundle you want the tool to ignore.
+set_attribute bundle_name \
+   stop_hierarchy hierarchy_name
+For example, the following command ensures that the tool ignores the netlist 
+connectivity in block C.
+icc2_shell> set_attribute [get_bundles Bundle_0] stop_hierarchy {C}
+The create_default_topology_plans command honors the stop_hierarchy 
+attribute on the bundle.
+2. Optimize the topology plan.
+Here are some examples of how stop_hierarchy works.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+360
+
+
+===== PDF page 361 =====
+Chapter 11: Performing Global Planning
+Topology Interconnect Planning
+Feedback
+Table 17
+Examples of How stop_hierarchy Works
+set_attribute [get_bundles Bundle_0] stop_hierarchy {C}
+A
+B
+C
+Connectivity under C is ignored  
+Sub block A/a
+Sub block B/b
+Block A
+Block B
+Sub block C/c
+Block C
+c
+Sub block D/d
+Block D
+d
+Sub block E/e
+Block E
+Supernet
+Example where stop_hierarchy is defined for the start node  
+Connectivity after A is ignored  
+Sub block A/a
+Sub block B/b
+Block A
+Block B
+Sub block C/c
+Block C
+c
+Sub block D/d
+Block D
+d
+Sub block E/e
+Block E
+Supernet
+Example where stop_hierarchy is defined for the middle node  
+Connectivity for B, C, and D are 
+ignored  
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+361
+
+
+===== PDF page 362 =====
+Chapter 11: Performing Global Planning
+Topology Interconnect Planning
+Feedback
+Table 17
+Examples of How stop_hierarchy Works (Continued)
+Sub block A/a
+Sub block B/b
+Block A
+Block B
+Sub block C/c
+Block C
+c
+Sub block D/d
+Block D
+d
+Sub block E/e
+Block E
+Supernet
+Example where stop_hierarchy is defined for the end node  
+Connectivity for E is ignored  
+Sub block A/a
+Sub block B/b
+Block A
+Block B
+Sub block d_0
+Block D_0
+Sub block d_1
+Block D_1
+Example where stop_hierarchy setting works for
+multiply instantiated blocks and multiple levels of physical hierarchy
+NODE_0
+NODE_1
+Connectivity for D is ignored  
+Adding and Removing Topology Repeaters
+You can use the implement_topology_repeaters command to insert new buffers and 
+place existing registers into your topology plans.
+In the following example, the tool inserts and places buffers and registers for the topology 
+plans specified in the command.
+icc2_shell> implement_topology_repeaters \
+   -topology_plans [get_topology_plans topo*]
+First, the tool places the registers associated with sequential-type topology repeaters. 
+Next, the tool inserts new buffers and inverter pairs with repeater-type topology repeaters. 
+If the placement fails, the tool does not proceed with the insertion of new buffers and 
+inverter pairs.
+To remove the placed registers and inserted buffers or inverter pairs from topology plans, 
+use the remove_implement_topology_repeaters command.
+icc2_shell> remove_implement_topology_repeaters \
+   -topology_plans [get_topology_plans topo*]
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+362
+
+
+===== PDF page 363 =====
+Chapter 11: Performing Global Planning
+Topology Interconnect Planning
+Feedback
+Reporting Topology Plan Repeaters
+To report the pipeline registers that are part of topology plans after optimization, use the 
+report_topology_plan_registers command.
+Table 18
+Options to the report_topology_plan_registers Command Control Which 
+Registers Are Reported
+To do this
+Use this
+To specify whether to report all the registers (-type all) or 
+only those that are not yet bound to the physician registers 
+(-type unimplemented) for the specified topology plans
+-type unimplemented | all
+To specify the list of topology plans whose registers are to be 
+reported
+If no topology plans are specified, the registers that are in all the 
+topology plans within the current design are reported.
+topology_plan_list
+icc2_shell> report_topology_plan_registers -type all
+In the following example, there are totally eight registers of which four are yet to be bound 
+to physical registers.
+Table 19
+report_topology_plan_registers Report
+Design
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+363
+
+
+===== PDF page 364 =====
+Chapter 11: Performing Global Planning
+Topology Interconnect Planning
+Feedback
+Table 19
+report_topology_plan_registers Report (Continued)
+Report
+fc_shell> report_topology_plan_registers -type all
+ 
+ #<topology_plan>,<block_pins_before_PRP_registers>,<block_pins_after_PRP_regist
+ers>,<number_of_total_PRP_registers>,<number_of_open_PRP_registers>
+================================================================================
+=============================================================
+ 
+ TOPOLOGY_PLAN_bundle_A_to_B_16,{A/A_to_B_bit_0_0...A/A_to_B_bit_0_15},{B/A_to_B
+_bit_0_0...B/A_to_B_bit_0_15},8,4
+--------------------------------------------------------------------------------
+----------------------------------
+1
+To determine the unimplemented repeaters, run the following command,
+icc2_shell> get_attribute [get_topology_repeaters] objects
+In the following example, TOPOLOGY_REPEATER0-3 are yet to be implemented.
+Warning: Attribute 'objects' does not exist on topology_repeater 
+ TOPOLOGY_PLAN_bundle_A_to_B_16/TOPOLOGY_EDGE0/TOPOLOGY_REPEATER0 
+ (ATTR-3)
+Warning: Attribute 'objects' does not exist on topology_repeater 
+ TOPOLOGY_PLAN_bundle_A_to_B_16/TOPOLOGY_EDGE0/TOPOLOGY_REPEATER1 
+ (ATTR-3)
+Warning: Attribute 'objects' does not exist on topology_repeater 
+ TOPOLOGY_PLAN_bundle_A_to_B_16/TOPOLOGY_EDGE0/TOPOLOGY_REPEATER2 
+ (ATTR-3)
+Warning: Attribute 'objects' does not exist on topology_repeater 
+ TOPOLOGY_PLAN_bundle_A_to_B_16/TOPOLOGY_EDGE0/TOPOLOGY_REPEATER3 
+ (ATTR-3)
+{A_to_B_bit_0_0_group0 A_to_B_bit_0_1_group0 A_to_B_bit_0_2_group0 
+ A_to_B_bit_0_3_group0 A_to_B_bit_0_4_group0 A_to_B_bit_0_5_group0 
+ A_to_B_bit_0_6_group0 A_to_B_bit_0_7_group0 A_to_B_bit_0_8_group0 
+ A_to_B_bit_0_9_group0 A_to_B_bit_0_10_group0 A_to_B_bit_0_11_group0 
+ A_to_B_bit_0_12_group0 A_to_B_bit_0_13_group0 A_to_B_bit_0_14_group0 
+ A_to_B_bit_0_15_group0 A_to_B_bit_0_0_group1 A_to_B_bit_0_1_group1 
+ A_to_B_bit_0_2_group1 A_to_B_bit_0_3_group1 A_to_B_bit_0_4_group1 
+ A_to_B_bit_0_5_group1 A_to_B_bit_0_6_group1 A_to_B_bit_0_7_group1 
+ A_to_B_bit_0_8_group1 A_to_B_bit_0_9_group1 A_to_B_bit_0_10_group1 
+ A_to_B_bit_0_11_group1 A_to_B_bit_0_12_group1 A_to_B_bit_0_13_group1 
+ A_to_B_bit_0_14_group1 A_to_B_bit_0_15_group1 A_to_B_bit_0_0_group2 
+ A_to_B_bit_0_1_group2 A_to_B_bit_0_2_group2 A_to_B_bit_0_3_group2 
+ A_to_B_bit_0_4_group2 A_to_B_bit_0_5_group2 A_to_B_bit_0_6_group2 
+ A_to_B_bit_0_7_group2 A_to_B_bit_0_8_group2 A_to_B_bit_0_9_group2 
+ A_to_B_bit_0_10_group2 A_to_B_bit_0_11_group2 A_to_B_bit_0_12_group2 
+ A_to_B_bit_0_13_group2 A_to_B_bit_0_14_group2 A_to_B_bit_0_15_group2 
+ A_to_B_bit_0_0_group3 A_to_B_bit_0_1_group3 A_to_B_bit_0_2_group3 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+364
+
+
+===== PDF page 365 =====
+Chapter 11: Performing Global Planning
+Topology Interconnect Planning
+Feedback
+ A_to_B_bit_0_3_group3 A_to_B_bit_0_4_group3 A_to_B_bit_0_5_group3 
+ A_to_B_bit_0_6_group3 A_to_B_bit_0_7_group3 A_to_B_bit_0_8_group3 
+ A_to_B_bit_0_9_group3 A_to_B_bit_0_10_group3 A_to_B_bit_0_11_group3 
+ A_to_B_bit_0_12_group3 A_to_B_bit_0_13_group3 A_to_B_bit_0_14_group3 
+ A_to_B_bit_0_15_group3}
+Performing What-If Analysis on the Topology Plan
+The optimize_topology_plans command inserts repeaters and sequential elements 
+into the topology plan to meet timing on the path. The net estimation rule (NER) for the 
+topology plan determines the spacing of the repeater elements.
+To experiment with routing the topology plan on different layers, you can specify a different 
+net estimation rule for the plan and reoptimize the plan. After reoptimization, the number of 
+buffers and sequential elements changes based on the spacing requirements of the new 
+net estimation rule.
+icc2_shell> set_attribute \
+   -objects [get_topology_plans [current_topology_plan]] \
+   -name net_estimation_rule -value M3
+everything_shell> optimize_topology_plans [current_topology_plan]
+After running the optimize_topology_plans command, the GUI updates the layout view 
+and displays the topology plan with new buffering.
+Figure 120
+Optimizing Topology Plans for Different Net Estimation Rules
+Setting the Current Topology Plan
+When you create a topology plan, it becomes the current topology plan. To return 
+the current topology plan, use the current_topology_plan command without any 
+arguments.
+icc2_shell> current_topology_plan
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+365
+
+
+===== PDF page 366 =====
+Chapter 11: Performing Global Planning
+Topology Interconnect Planning
+Feedback
+You can also use the current_topology_plan command to set the current topology plan.
+icc2_shell> current_topology_plan my_topology_plan
+In the GUI, you can set the current topology plan by choosing Set Current Topology Plan 
+from the context menu.
+Propagating Topology Plans
+To propagate topology plans across multiple multiply instantiated block (MIB) instances, 
+use the propagate_topology_plans command.
+You can create the topology plan once by using the create_topology_plan command 
+and then use the propagate_topology_plans command to copy it over to multiple MIBs 
+that are present in the current design.
+When a topology plan is propagated, this command ensures that the topology plan in the 
+destination MIB instances is the same as the source MIB instance.
+This command propagates a topology plan only if the following conditions are met:
+•
+The topology plan is associated with a bundle that consists of supernets.
+•
+The supernets of the bundle have the drivers and loads on the same blocks. In 
+addition, all the driver and loads blocks are MIB cells.
+The following command propagates the current topology plan across multiple MIB 
+instances that are in the current design:
+icc2_shell> propagate_topology_plans [current_topology_plan]
+The following command propagates the specified topology plan, A2B, across multiple MIB 
+instances that are in the current design:
+icc2_shell> propagate_topology_plans [get_topology_plans A2B]
+The following command ensures that if the current topology plan is already assigned to 
+the destination MIB instance, then it is not overwritten. If the -no_overwrite option is not 
+specified, then the topology plan in the destination MIB instance is overwritten.
+icc2_shell> propagate_topology_plans [current_topology_plan] 
+ -no_overwrite
+Writing Topology Plans in Tcl Format
+To quickly re-create the topology plans that are in your design, elsewhere - in similar 
+designs, you can write out the these topology plans as a script in Tcl format by using the 
+write_topology_plans command. You can then run the script in designs where you 
+need to implement these topology plans.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+366
+
+
+===== PDF page 367 =====
+Chapter 11: Performing Global Planning
+Topology Interconnect Planning
+Feedback
+To write out the topology information to the console or the log file, use the -log option. To 
+capture this information in a file, use the -filename option.
+To write out topology plan information for only specific topology plans, specify a list of 
+topology plans with the write_topology_plans command.
+The -pins_locations option provides you with the flexibility to write out the topology 
+plans by using side node constraints with start and end offsets. This enables you to re-
+create these topology plans in similar designs where pins are not created or placed yet.
+For more information about the write_topology_plans command, see the command 
+man page.
+The following example writes out the topology information to a file in the current directory.
+icc2_shell> write_topology_plans -pins_locations -filename 
+ toplogyplaninfo
+# icc2 S-2021.06-DEV Apr 11, 2021
+# design: ORCA
+# Mon Apr 12 11:24:03 2021
+set _curr_ [current_block]
+### NER (per block)
+current_block ORCA
+remove_net_estimation_rules -reset default -quiet
+### Topology Groups (per block)
+current_block ORCA
+if {[sizeof_collection [get_topology_groups DEFAULT_TOPOLOGY_GROUP 
+-quiet]] == 0} { create_topology_group -name DEFAULT_TOPOLOGY_GROUP }
+### plan name: pad[0]-pad[3]
+current_block ORCA
+if {[sizeof_collection [get_topology_plans pad[0]-pad[3] -quiet]] != 0} 
+{ remove_topology_plans pad[0]-pad[3] }
+set _objLst_ [get_nets { pad[3] pad[4] pad[5] pad[6] pad[2] pad[1] 
+pad[0] }]
+create_topology_plan -name pad[0]-pad[3] -group DEFAULT_TOPOLOGY_GROUP 
+-objects $_objLst_
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+367
+
+
+===== PDF page 368 =====
+Chapter 11: Performing Global Planning
+Topology Interconnect Planning
+Feedback
+create_topology_node -plan pad[0]-pad[3] -name TOPOLOGY_NODE0 -objects 
+[get_cells { pad_iopad_0 }] -constraint_type side -side E -start 10.000 
+-end 100.000
+current_block $_curr_
+Creating Topology Groups
+Topology groups enable you to divide your topology plans into multiple smaller groups. 
+You can then work on the smaller chunks independently, which essentially helps in dividing 
+a large design into manageable chunks. It also enables you to group similar topology 
+plans that allows you to take actions such as modify, remove, and so on on a set of 
+topology plans.
+You can associate a topology plan to a topology group by using the command line option 
+or the GUI. The tool automatically assigns the topology plans that are not associated with 
+any specific topology group to a default topology group, DEFAULT_TOPOLOGY_GROUP. 
+When you migrate, all the topology plans in a design are assigned to this default topology 
+group.
+Creating Topology Groups From the Command Line
+To create topology groups for one or more topology plans from the command line for the 
+current block, use the create_topology_group command.
+The following example creates a topology group that includes topology plans for clock 
+signals.
+icc2_shell> create_topology_group -name TOPOLOGY_GROUP_CLK -plans 
+ sys_clk-pclk \
+    -comment {For clocks}
+icc2_shell> create_topology_group -name TOPOLOGY_GROUP_CLK1 -plans 
+ [get_topology_plans *clk*] \
+    -comment {For clocks}
+icc2_shell> set_attribute [get_topology_plans *clk*] group 
+ [get_topology_groups TOPOLOGY_GROUP_CLK1]
+icc2_shell> create_topology_plan -name q -group TOPOLOGY_GROUP_CLK1 \
+    create_topology_plan -name sys_clkpclk -group TOPOLOGY_GROUP_CLK1
+icc2_shell> create_default_topology_plans -group TOPOLOGY_GROUP_CLK \
+    [get_bundles {bundle_A2B_64 bundle_A2B_32}]
+To edit the topology groups, use the set_attribute command.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+368
+
+
+===== PDF page 369 =====
+Chapter 11: Performing Global Planning
+Topology Interconnect Planning
+Feedback
+icc2_shell> set_attribute [get_topology_plans -of_objects 
+ [get_topology_groups A2]] \
+    -name group -value [get_topology_groups A1]
+Creating Topology Groups in the GUI
+To create topology groups in the GUI,
+1. Open the Design Assistant by choosing View > Assistants > Design Assistant.
+2. To create topology groups for specific topology plans,
+◦
+Create the topology plans if they do not exist previously
+▪
+Click on the Nets tab and use the get_nets command to populate the list.
+▪
+Select the nets from the list, right-click the selection, and select Create 
+Topology Plan.
+▪
+Enter information in the create_topology_plan dialog box, if required, and click 
+OK.
+◦
+Create topology group for specific topology plans
+▪
+Click on the TopologyPlans tab and use the get_topology_plans command to 
+populate the list.
+▪
+Select the topology plans from the list, right-click on the selection, and select 
+Create Topology Group.
+One topology plan can belong to only one topology group. Topology plans 
+cannot be shared across multiple topology groups.
+▪
+Enter information in the create_topology_group dialog box, if required, and 
+click OK.
+If you provide a name to the topology group and if it previously exists within the 
+current block, an error is thrown. However, you can have topology groups with 
+the same name within different blocks of the design.
+The created topology groups are displayed in the block window.
+Setting the Current Topology Group
+When you create a topology group, it becomes the current topology group. To return 
+the current topology group, use the current_topology_group command without any 
+arguments.
+icc2_shell> current_topology_group
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+369
+
+
+===== PDF page 370 =====
+Chapter 11: Performing Global Planning
+Topology Interconnect Planning
+Feedback
+You can also use the current_topology_group command to set the current topology 
+group.
+icc2_shell> current_topology_group TOPOLOGY_GROUP_CLK
+In the GUI, you can set the current topology group by choosing Set Current Topology 
+Group from the context menu in Design Assistant.
+Removing Topology Groups
+When a topology group is no longer needed, you can remove it by using the GUI or the 
+command line option. When you remove a topology group that contains topology plans, 
+these topology plans get automatically moved to the default topology group. You cannot 
+remove the default topology group if it has any topology plans; however, you can use the 
+-remove_plans option with the remove_topology_groups command to remove both the 
+topology plans and the default topology group.
+The following command removes all topology groups from the current block.
+icc2_shell> remove_topology_groups -all
+The following example removes topology groups from blocks A and B:
+icc2_shell> remove_topology_groups {A/AGroupname  B/BGroupname}
+(or)
+icc2_shell> current_block A
+icc2_shell> remove_topology_groups A/AGroupname
+icc2_shell> current_block B
+icc2_shell> remove_topology_groups B/BGroupname
+In the GUI, you can remove topology groups by choosing Remove Topology Group from 
+the context menu in Design Assistant.
+Branching and Ripping Support for Bundles
+Branching allows all the nets in a bundle to have the same driver block, say BK1, and the 
+same load blocks, say BK2 and BK3. For example, see Figure 121.
+Ripping allows the nets in a bundle to have the same driver block and most of the nets to 
+have the same load blocks with a few exceptions. For example, Figure 122 shows a 6-bit 
+bundle with all nets starting from BK1, with five of the nets sharing the same load blocks 
+(BK2 and BK3), with the last bit having only BK2 as its load block.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+370
+
+
+===== PDF page 371 =====
+Chapter 11: Performing Global Planning
+Topology Interconnect Planning
+Feedback
+Figure 121
+Branching Bundle Example
+Figure 122
+Ripping Bundle Example 1
+Figure 123
+Ripping Bundle Example 2
+When you plan for a ripping bundle,
+•
+Create the topology plan manually, preferably using the GUI tools to create a 
+Manhattan plan.
+•
+Ensure that the driver block has a topology node associated with it.
+•
+Ensure that the load blocks, regardless whether they are connected to all the nets or a 
+subset of the nets, have their own topology nodes.
+•
+To have feedthrough path via specific blocks, ensure that those blocks have their 
+corresponding topology nodes.
+•
+Define topology edges and connect topology nodes such that all topology nodes are 
+connected to each other directly or indirectly.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+371
+
+
+===== PDF page 372 =====
+Chapter 11: Performing Global Planning
+Topology Interconnect Planning
+Feedback
+When you optimize a ripping bundle by using the optimize_topology_plans command,
+•
+Topology plans are updated to include new topology nodes and topology edges.
+•
+Bundle pins are grouped correctly on each block and placed together honoring the 
+spacing rules.
+•
+Bundle pins on each block are associated with the correct topology node and ordered 
+according to bit order within the bundle.
+•
+Each topology edge have the shape-layers attribute defined.
+•
+If NER defines the repeater distances, topology repeaters are created on the topology 
+edges if the corresponding shape-layers attribute is defined.
+Bidirectional Support for Bundles
+To reduce crosstalk, you can interleave nets with opposite signal directions by using a 
+bidirectional bundle. Figure 124 shows a bidirectional bundle where the red lines and 
+green lines are the signal nets connecting block A and block B. The arrows in the middle 
+of the lines represent the signal direction. Red lines are nets from block A to block B and 
+green lines are nets from block B to block A.
+Figure 124
+Bidirectional Bundle Example
+A
+B
+When you plan for a bidirectional bundle,
+•
+If you want to use a bidirectional bundle within topology interconnect planning 
+flow, ensure that all the nets in this bundle are supernets (for example, when 
+you run the optimize_topology_plans, create_default_topology_plans, 
+refine_topology_plans commands on a bundle)
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+372
+
+
+===== PDF page 373 =====
+Chapter 11: Performing Global Planning
+Creating Routing Corridors
+Feedback
+•
+Ensure that all the nets within the bundle connect to the same two ending blocks (the 
+leaf driving block and the leaf load block)
+•
+If there are additional blocks between the leaf driver and leaf load block, ensure that 
+the nets follow the same order from the leaf driver block to the leaf load block, or from 
+the leaf load block to the leaf driver block
+To create a bidirectional bundle,
+1. Create a supernet by using the set_supernet_exceptions and create_supernet 
+commands.
+2. Create a bundle with supernets (from step 1) of opposite signal directions by using the 
+create_bundle command.
+Creating Routing Corridors
+Routing corridors provide added control over the routing topology of individual nets or 
+a bundle of nets. During global routing, the tool routes the associated nets through the 
+routing corridors. Routing corridors are not exclusive; you can route other nets through the 
+corridor, even if they are not assigned to the corridor. You can define a unique minimum 
+and maximum layer for each corridor, or use the default minimum and maximum layers for 
+the design. Note that during optimization, the tool does not legalize cells within a routing 
+corridor.
+The tool supports two types of routing corridors: complete and partial. A complete corridor 
+is a corridor which encloses all the pins of the nets assigned to that corridor. A partial 
+corridor is a corridor that has pins (of nets assigned to the corridor) that are physically 
+placed outside of the corridor area. Figure 125 shows a complete corridor and a partial 
+corridor.
+Figure 125
+Complete and Partial Routing Corridors
+Complete
+Corridor
+Partial
+Corridor
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+373
+
+
+===== PDF page 374 =====
+Chapter 11: Performing Global Planning
+Creating Routing Corridors
+Feedback
+To create and verify a routing corridor,
+1. Use the create_routing_corridor to specify the routing corridor.
+icc2_shell> create_routing_corridor -name corridor_a \
+   -boundary {{1925 2170} {1980 3260}} \
+   -min_layer_name METAL1 -max_layer_name METAL4 \
+   -object [get_nets n1]
+2. (Optional) Verify the routing corridor with the report_routing_corridors command.
+icc2_shell> report_routing_corridors \
+   [get_routing_corridors corridor_a]
+****************************************
+Report : report_routing_corridors
+Design : ORCA
+****************************************
+CORRIDOR NAME: corridor_a
+Shape Name                   min/max       Shape
+------------------------------------------------------------------
+CORRIDOR_SHAPE_0             METAL1/METAL4 {1925 2170} {1980 3260}
+------------------------------------------------------------------
+Shapes Connected:            yes
+Shapes Cover Pins and Ports: no
+Objects:                     n1
+------------------------------------------------------------------
+Alternatively, you can use the Create Routing Corridor tool in the GUI to create the 
+corridor.
+1. Select the nets to associate with the new routing corridor.
+2. Select Create > Routing Corridor in the GUI.
+3. Change any additional settings as needed, such as the minimum or maximum layer, 
+the allowed drawing angles, snap settings, and so on.
+4. Draw the routing corridor by clicking the mouse at the vertices of the corridor.
+The IC Compiler II tool supports several commands to create, modify, 
+and remove routing corridors. To add nets to a routing corridor, use the 
+add_to_routing_corridor command. To extend the shape of the routing corridor, 
+use the create_routing_corridor_shape command. To return a collection of routing 
+corridors, use the get_routing_corridors command. To return a list of shapes that are 
+contained in the routing corridor, use the get_routing_corridor_shapes command. 
+To remove nets from a routing corridor, use the remove_from_routing_corridor 
+command. To modify a routing corridor by removing a portion of the shape, use the 
+remove_routing_corridor_shapes command.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+374
+
+
+===== PDF page 375 =====
+Chapter 11: Performing Global Planning
+Creating Global Routes Within Routing Corridors
+Feedback
+Creating Global Routes Within Routing Corridors
+After creating routing corridors, you can use the routing corridors to guide global routing. 
+To limit global routing to only specified nets in the design, use the route_group command 
+with the -nets and -global_planning true options.
+To create a routing corridor and to globally route a specific net through the corridor:
+1. Use the create_routing_corridor command to create the corridor.
+icc2_shell> create_routing_corridor -name corridor_a \
+   -boundary {{1942 3219} {2026 2105}} \
+   -object [get_nets n1]
+2. If the routing corridor is a partial corridor, set the 
+route.global.connect_pins_outside_routing_corridor application option to 
+true to allow the global router to connect to pins outside the corridor. This step is not 
+required for complete corridors which cover all pins on the route.
+icc2_shell> set_app_options \
+   -name route.global.connect_pins_outside_routing_corridor \
+   -value true
+route.global.connect_pins_outside_routing_corridor true
+3. Globally route the net that is associated with the corridor by using the route_group 
+command with the -global_planning option set to true.
+icc2_shell> route_group -global_planning true -nets [get_nets \
+   -of_object [get_routing_corridors corridor_a]]
+Adding Repeater Cells
+In the global planning flow, you can perform repeater insertion with the 
+add_buffer_on_route command. Use this command after routing globally planned nets 
+with the route_group command. Repeater insertion is done before pushing objects into 
+blocks and creating pins on blocks.
+icc2_shell> add_buffer_on_route \
+   -allow_insertion_over_cell [get_cells {i_block1 i_block2}] \
+   -repeater_distance 150 -lib_cell stdcell/buffer1 {net1 net2}
+The add_buffer_on_route command automatically detects whether the buffer cell is an 
+inverter or not, according to the specified library cell. The command respects placement 
+blockages, soft macros, and hard macros by default, and allows you to add repeaters 
+in specified soft macros or hard macros. You can use the add_buffer_on_route 
+command on incomplete routes, and the command can be used during global route, track 
+assignment and detail routing.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+375
+
+
+===== PDF page 376 =====
+Chapter 11: Performing Global Planning
+Pushing Down Repeater Cells
+Feedback
+Options to the add_buffer_on_route command control how the buffers are 
+inserted. Use the -location, -user_specified_buffers, -repeater_distance, or 
+-repeater_distance_length_ratio options to control the positioning of buffers and 
+the number of buffers to insert. Use the -scaled_by_layer and -scaled_by_width 
+options to scale the distance between the buffers based on metal layer or based on the 
+default width of the metal layer. Use the -allow_insertion_over_cell option to insert 
+buffers on top of blocks. You can use the push_down_objects command later in the flow 
+to push the buffers into blocks. The add_buffer_on_route command supports many 
+more options; see the man page for more information.
+Note that the command inserts buffers but does not legalize them. You must legalize 
+the buffers with the legalize_placement command at the top and block design 
+levels. In addition, you must use perform engineering change order (ECO) routing with 
+the route_eco command to completely repair a net that has been modified by the 
+add_buffer_on_route command.
+Pushing Down Repeater Cells
+After inserting repeater cells in the global planning flow, you can push the repeater 
+cells into the blocks they cover with the push_down_objects command. The command 
+supports concurrent cell and routing push down.
+To push down a net and create feedthroughs,
+1. Set pin constraints to enable feedthroughs on the net.
+icc2_shell> create_pin_constraint -type individual \
+   -nets [get_nets n1] -allow_feedthroughs true
+2. (Optional) If your design contains multiply instantiated blocks, check that they are 
+correctly aligned with cell rows and wire tracks before pushing down objects.
+icc2_shell> check_mib_alignment -cell_row -wire_tracks
+------ Start Of Cell Row Misalignment Check -------
+Misaligned cell_rows: 0, misaligned cell_sites: 0
+------ End Of Cell Row Misalignment Check -------
+------ Start Of Wire Track Misalignment Check -------
+Warning: Misalignment at track TRACK_14 on layer METAL6 between
+  MIB instances I_ORCA_TOP/I_BLENDER_1 and
+  I_ORCA_TOP/I_BLENDER_6. Track offset of I_ORCA_TOP/I_BLENDER_1
+  is 0.205, and track offset of I_ORCA_TOP/I_BLENDER_6 is 0.41.
+  (MIB-203)
+...
+Misaligned wire_tracks: 6
+------ End Of Wire Track Misalignment Check -------
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+376
+
+
+===== PDF page 377 =====
+Chapter 11: Performing Global Planning
+Pushing Down Repeater Cells
+Feedback
+3. Use the push_down_objects command to push down the net.
+icc2_shell> push_down_objects [get_nets \
+   -of_objects [get_routing_corridors corridor_a]]
+To push down the repeater cells and the nets connected to those cells, use the 
+push_down_objects command and specify the repeater cell instances.
+icc2_shell> push_down_objects [get_cells eco_*]
+4. Push down the repeater cells and the nets connected to those cells.
+To do this, use the push_down_objects command and specify the repeater cell 
+instances.
+icc2_shell> push_down_objects [get_cells eco_*]
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+377

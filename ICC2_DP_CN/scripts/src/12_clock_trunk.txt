@@ -1,0 +1,893 @@
+
+
+===== PDF page 378 =====
+Feedback
+12
+Performing Clock Trunk Planning
+To manage clock trunks during design planning, the tool supports clock trunk planning. 
+A clock trunk is a coarse-grain physical distribution of the clock, which starts at the clock 
+source and ends at the clock trunk endpoint. This capability allows you to
+•
+Manage clock trunks earlier in the design cycle
+•
+Provide physical guidance for clock tree implementation during clock tree synthesis
+•
+Perform clock pin placement by using information about the clock tree
+•
+Mitigate timing issues on the clock trunk
+The result is a more robust clock topology for your design. This capability also enables 
+you to reuse or repeat the clock topology even when there are minor modifications to the 
+netlists.
+Figure 126 shows where the clock trunk planning fits in the overall design planning flow.
+Figure 126
+Clock Trunk Planning in the Overall Design Planning Flow
+QoR refinement considering inter-block 
+timing:
+  - On-chip variation impact on virtual
+    in-place optimization slack values
+  - What-if analysis
+Physical planning without datapath 
+timing:
+  - Anchor and topology synthesis
+  - Clock pin placement
+Split Constraints
+Initialize Design
+Create Abstracts
+Shape Blocks
+Place Macros and Standard Cells
+Create Power Network
+Perform Global Planning
+Place Pins
+Estimate Timing
+Budget Timing
+Perform Block-Level Implementation
+Perform Top-Level Closure
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+378
+
+
+===== PDF page 379 =====
+Chapter 12: Performing Clock Trunk Planning
+ 
+Feedback
+Figure 127 shows the clock trunk planning terminologies that you need to be familiar with.
+Figure 127
+Clock Trunk Planning Terminology
+Feedthrough pin
+Block clock pin
+Clock trunk endpoint
+Clock port
+Top-level clock 
+trunk arc
+Block-level clock 
+trunk arc
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+379
+
+
+===== PDF page 380 =====
+Chapter 12: Performing Clock Trunk Planning
+ 
+Feedback
+Figure 128 shows the clock trunk planning flow.
+Figure 128
+Clock Trunk Planning Flow
+Set clock trunk constraints  
+Load mapping file
+set_constraint_mapping_file
+Perform block-level clock trunk planning
+synthesize_clock_trunk_endpoints
+Perform top-level clock trunk planning
+synthesize_clock_trunk
+Perform QoR analysis
+Top-level clock trunk planning:
+  - Synthesize clock trunk
+     topology
+  - Place block-level clock pins
+Block-level clock trunk planning:
+  - Identify clock trunk endpoints
+    and insert anchor cells
+  - Estimate clock latency
+Set clock trunk planning pin constraints
+set_ctp_constraints
+(optional)
+The following topics describe the steps in this flow:
+•
+Setting Clock Trunk Planning Constraints
+•
+Performing Clock Trunk Planning for Multiply Instantiated Blocks
+•
+Performing Block-Level Clock Trunk Planning
+•
+Checking the Feasibility of Performing Clock Trunk Planning
+•
+Performing Clock Trunk Planning for Hierarchical Designs With Abstracts
+•
+Setting Clock Trunk Planning Pin Constraints
+•
+Performing Top-Level Clock Trunk Planning
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+380
+
+
+===== PDF page 381 =====
+Chapter 12: Performing Clock Trunk Planning
+Setting Clock Trunk Planning Constraints
+Feedback
+•
+Performing Top-Level Clock Trunk Planning Push-Down Flow
+•
+Performing QoR Analysis
+•
+Managing Timing Constraints for Clock Feedthrough Paths
+•
+Performing Incremental Clock Trunk Planning
+•
+Performing Clock Trunk Analysis in the GUI
+Setting Clock Trunk Planning Constraints
+Before you begin clock trunk planning, you must set constraints on the clock trunks, both 
+at the block level and top level. Ensure that you set all the constraints including the clock 
+tree synthesis constraints.
+Constraints ensure that clock trunk planning produces realistic results that correlate with 
+the actual clock tree implementation.
+To set constraints,
+1. Create the constraint files for block-level and top-level clock trunk planning. Constraints 
+include the following settings:
+◦
+Maximum capacitance set with the set_max_capacitance command
+◦
+Maximum transition time set with the set_max_transition command
+◦
+Routing layers set with the set_ignored_layers command
+◦
+Clock tree references set with the set_lib_cell_purpose command
+◦
+Nondefault routing rules
+◦
+Driving cell set with the set_driving_cell command
+Specify the clock tree synthesis constraints for both the block level and top level using 
+the constraint mapping file. An example of the clock trunk mapping file, ctp_mapfile:
+misc CTS_CONSTRAINT constraints/block_ctp.tcl
+leon3s CTS_CONSTRAINT constraints/block_ctp.tcl
+leon3s_1 CTS_CONSTRAINT constraints/block_ctp.tcl
+leon3s_2 CTS_CONSTRAINT constraints/block_ctp.tcl
+leon3s_3 CTS_CONSTRAINT constraints/block_ctp.tcl
+leon3_mp CTS_CONSTRAINT constraints/top_ctp.tcl
+For more information about constraints for clock tree synthesis, see the Clock Tree 
+Synthesis topic in the IC Compiler II Implementation User Guide.
+2. Load the constraint mapping file into the tool with the set_constraint_mapping_file 
+command.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+381
+
+
+===== PDF page 382 =====
+Chapter 12: Performing Clock Trunk Planning
+Performing Clock Trunk Planning for Multiply Instantiated Blocks
+Feedback
+icc2_shell> set_constraint_mapping_file ./ctp_mapfile
+1
+icc2_shell> sh cat ./ctp_mapfile
+misc CTS_CONSTRAINT constraints/block_ctp.tcl
+leon3s CTS_CONSTRAINT constraints/block_ctp.tcl
+leon3s_1 CTS_CONSTRAINT constraints/block_ctp.tcl
+leon3s_2 CTS_CONSTRAINT constraints/block_ctp.tcl
+leon3s_3 CTS_CONSTRAINT constraints/block_ctp.tcl
+leon3_mp CTS_CONSTRAINT constraints/top_ctp.tcl
+Performing Clock Trunk Planning for Multiply Instantiated Blocks
+In the clock trunk planning flow, multiply instantiated blocks (MIBs) are considered as 
+read-only blocks. Therefore, if there are any MIBs in your design, you must place the clock 
+pins of the MIBs manually before you start the clock trunk planning flow.
+Performing Block-Level Clock Trunk Planning
+Block-level clock trunk planning performs clock latency estimation and inserts 
+anchor cells. After creating the constraints for clock trunk planning, use the 
+synthesize_clock_trunk_endpoints command to compute seed locations for the clock 
+ports, create clock trunk endpoints, and add phase delay annotations to the endpoints. 
+The command uses clock tree synthesis to measure the achievable latency for the clock 
+and inserts anchor cells as needed based on the block size, number of clock sinks, driving 
+cell specification, and clock tree synthesis constraints.
+When you start the block-level clock trunk planning flow, if the block-level clock ports are 
+already placed or if they are fixed, the block-level clock trunk planning flow skips finding 
+the seed location of the block clock ports.
+Block-level clock trunk planning supports multithreading.
+To perform block-level clock trunk planning,
+1. Check that the following conditions are met before you perform block-level clock trunk 
+planning:
+◦
+Blocks are shaped.
+◦
+Top-level flip-flops are placed.
+2. Run the synthesize_clock_trunk_endpoints command.
+icc2_shell> synthesize_clock_trunk_endpoints \
+   -blocks list_of_blocks \
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+382
+
+
+===== PDF page 383 =====
+Chapter 12: Performing Clock Trunk Planning
+Performing Block-Level Clock Trunk Planning
+Feedback
+   -clocks list_of_clocks \
+   -host_options host_option_name
+The following example generates clock trunk endpoints for the misc, leon3s, leon3s_1, 
+leon3s_2, and leon3s_3 blocks:
+synthesize_clock_trunk_endpoints \
+   -blocks {misc leon3s leon3s_1 leon3s_2 leon3s_3} \
+   -clocks {CLK} \
+   -host_options block_script
+ 
+Running Block misc ...
+...
+1
+Alternatively, create the clock trunk endpoints manually by using the 
+set_clock_trunk_endpoints command. This command is useful for creating clock 
+trunk endpoints for black boxes.
+icc2_shell> set_clock_trunk_endpoints u0_1/clk -delay 0.2
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+383
+
+
+===== PDF page 384 =====
+Chapter 12: Performing Clock Trunk Planning
+Performing Block-Level Clock Trunk Planning
+Feedback
+Figure 129 shows the results after performing block-level clock trunk planning.
+Figure 129
+Results After Performing Block-Level Clock Trunk Planning
+Block clock pin
+Clock trunk endpoint
+Clock port
+Clock trunk arc
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+384
+
+
+===== PDF page 385 =====
+Chapter 12: Performing Clock Trunk Planning
+Performing Block-Level Clock Trunk Planning
+Feedback
+The following figures show examples of clock trunk endpoints in various situations.
+Figure 130
+Clock to Single Flip-Flop With Buffers
+Figure 131
+Clock to Multiple Flip-Flops With Buffers on Common Path
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+385
+
+
+===== PDF page 386 =====
+Chapter 12: Performing Clock Trunk Planning
+Performing Block-Level Clock Trunk Planning
+Feedback
+Figure 132
+Clock to Multiple Flip-Flops With Buffers Only on Branch Path
+Figure 133
+Clock to Flip-Flop With Buffers and Buffered Feedthrough
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+386
+
+
+===== PDF page 387 =====
+Chapter 12: Performing Clock Trunk Planning
+Performing Block-Level Clock Trunk Planning
+Feedback
+Figure 134
+Clock to Flip-Flop With Buffers and Buffered Feedthrough With Balance Point
+Figure 135
+Buffered Feedthrough With Fixed Buffer
+Figure 136
+Buffered Feedthrough With Balance Point on One Buffer
+To report clock trunk endpoints, use the report_clock_trunk_endpoints 
+command. The command reports the location of the clock trunk endpoints set by the 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+387
+
+
+===== PDF page 388 =====
+Chapter 12: Performing Clock Trunk Planning
+Checking the Feasibility of Performing Clock Trunk Planning
+Feedback
+synthesize_clock_trunk_endpoints and set_clock_trunk_endpoints commands as 
+follows:
+icc2_shell> report_clock_trunk_endpoints
+****************************************
+Report : report_clock_trunk_endpoints
+Design : leon3mp
+Version:
+Date :
+****************************************
+Endpoint Phase Delay Dom Pt Clock Corner Block
+------------------------------------------------------------
+u0_1/cts_inv_34563455/A
+0.52 pci_clk RCworst u0_1
+u0_1/cts_inv_34423441/A
+0.30 pci_clk RCworst u0_1
+U2/u0_0/cts_inv_34533452/A
+0.51 pci_clk RCworst U2/u0_0
+...
+Alternatively, use the report_clock_trunk_endpoints -script command to write out 
+the clock trunk endpoints as a series of set_clock_trunk_endpoints commands as 
+follows:
+icc2_shell> report_clock_trunk_endpoints -script
+# set_clock_trunk_endpoints constraints for mode func
+set_clock_trunk_endpoints cts_inv_34423441/A -clock pci_clk
+-corners RCworst -delay 0.296
+set_clock_trunk_endpoints cts_inv_34423441/A -clock pci_clk
+-corners estimated_corner -delay 0.296
+...
+To remove clock trunk endpoints, use the remove_clock_trunk_endpoints command.
+icc2_shell> remove_clock_trunk_endpoints u0_1/clk
+Checking the Feasibility of Performing Clock Trunk Planning
+To check the feasibility of performing clock trunk planning, use the 
+check_design_for_clock_trunk_planning command. Run this command after you 
+specify the clock trunk planning setting, but before you perform clock trunk planning by 
+running the synthesize_clock_trunks command.
+Based on the type of flow that you specified for the clock trunk planning, generic or push 
+down, and the clock you specify with the -clock option, this command identifies the 
+issues you would encounter during clock trunk planning. The -summary option provides 
+the summary of the clock trunk planning checks that the command performs, which are 
+shown in the following table.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+388
+
+
+===== PDF page 389 =====
+Chapter 12: Performing Clock Trunk Planning
+Checking the Feasibility of Performing Clock Trunk Planning
+Feedback
+Table 20 shows the sanity checks that the command performs:
+Table 20
+Clock Trunk Planning Sanity Checks
+Check Name
+Message
+SUB_BLOCK_INST_WITH_I
+NCORRECT_TYPE_OR_V
+IEW
+Error: Block instance %s (Reference: %s) is bound to 
+Frame view. Cannot be used for top-level optimization. 
+(TL-112)
+Error: Block instance %s (Reference: %s) has design 
+type macro. Cannot be used for top-level optimization. 
+(TL-134)
+DESIGN_VIEW_CHECK
+Error: Design view for the Abstract '%s' does not exist. 
+(TL-101)
+DESIGN_MISMATCH_CHE
+CKS
+Error: Missing port in block %s.%s corresponding to 
+block instance pin %s. (TL-109)
+Error: Missing pin on block instance %s (Reference: %s) 
+corresponding to port %s. (TL-110)
+CORE_AREA_CHECK
+Error: Missing core area in block %s.%s. Cannot run 
+top-level timing analysis and optimization. (TL-111)
+LOC_SUB_BLOCK_CHECK Error: Missing location of block instance %s (Reference: 
+%s) in design %s.%s. (TL-130)
+Error: Block instance '%s' (Reference: %s) boundary is 
+outside its parent block '%s' boundary. (TL-131)
+LOC_SUB_BLOCK_PIN_CH
+ECK
+Error: Missing physical location for port %s of block 
+reference %s.%s. (TL-126)
+Note: Only for clock ports.
+LOC_LEAF_INST_CHECK
+Error: Missing location of leaf cells %s inside block 
+reference %s.%s. (TL-128)
+Error: Leaf cell %s inside block reference %s.%s is 
+outside block boundary. (TL-129)
+Note: For all Cells.
+VOLTAGE_AREA_CHECKS Error: Internal Consistency Failure. Internal voltage 
+area %s does not have a voltage area. (TL-114)
+Error: Internal Consistency Failure. Voltage area %s 
+does not have associated power domain. (TL-115)
+Error: Internal Consistency Failure. Internal voltage 
+area %s does not have associated power domain. (TL-116)
+Error: Internal Consistency Failure. Internal voltage 
+area %s does not have associated voltage area region. 
+(TL-117)
+Error: Internal Consistency Failure. Voltage area %s 
+does not have any internal voltage area. (TL-118)
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+389
+
+
+===== PDF page 390 =====
+Chapter 12: Performing Clock Trunk Planning
+Performing Clock Trunk Planning for Hierarchical Designs With Abstracts
+Feedback
+Table 20
+Clock Trunk Planning Sanity Checks (Continued)
+Check Name
+Message
+POWER_DOMAIN_CHE
+CKS
+Error: Power domain %s does not have associated voltage 
+area. (TL-113)
+UNMAPPED_LOGIC_CH
+ECK
+Error: The leaf cell %s in the block reference %s is 
+unmapped. (TL-305)
+Note: For cells on clock path.
+CLOCK_LOOP_CHECK
+Error: Output pin '%s' is driving input pin '%s' of the 
+same physical hierarchy instance '%s'. (TL-140)
+Note: Only for clock path.
+Performing Clock Trunk Planning for Hierarchical Designs With 
+Abstracts
+The top-level clock trunk planning flow supports abstracts, which are light-weight 
+representations of the blocks. The steps are as follows:
+1. Create abstracts for the blocks before block-level clock trunk planning by using the 
+following commands:
+icc2_shell> set_editability -value true -blocks *
+icc2_shell> create_abstract -blocks list_of_blocks
+2. Prepare the hierarchical design for clock trunk planning by using the following 
+command:
+icc2_shell> synthesize_clock_trunk_setup_hier_context  -init \
+-host_options host_option_name
+3. Synthesize the clock trunks by using the following command:
+icc2_shell> synthesize_clock_trunks -clock \
+$CTP_CLOCKS -from from_step -to to_step
+4. Update the hierarchical design after clock trunk planning by using the following 
+command:
+icc2_shell> synthesize_clock_trunk_setup_hier_context -commit \
+-host_options host_option_name
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+390
+
+
+===== PDF page 391 =====
+Chapter 12: Performing Clock Trunk Planning
+Setting Clock Trunk Planning Pin Constraints
+Feedback
+Setting Clock Trunk Planning Pin Constraints
+Setting clock tree planning pin constraints enables you to partially block and unblock 
+the sides of design blocks. After performing block-level clock trunk planning, use the 
+set_ctp_constraints command to set these clock trunk planning pin constraints. This 
+step is optional.
+The place_pins command honors the constraints set using the set_ctp_constraints 
+command and ensures that no pins are placed on the edges that are blocked or any 
+feedthroughs are cut on these edges.
+The set_ctp_constraints command is additive, which means that the constraint values 
+set by the previous set_ctp_constraints commands are retained unless they are 
+explicitly overridden by subsequent calls.
+The constraints set using this command takes priority over the constraints set using the 
+set_block_pin_constraints or set_individual_pin_constraints command.
+To enable or disable the constraints that were set using the set_ctp_constraints 
+command on specific blocks, use the set_editability command. The clock trunk 
+planning engine ignores the blocks that were disabled and does not enforce the 
+constraints on these blocks.
+To place pins on specific sides of the blocks, use the -sides option. To disallow placing 
+of pins on specific sides, use the -exclude_sides option. Both of these options accept a 
+positive integer that represent the sides of a block. For a block, the left-most lowest edge 
+takes the value of 1 and as you move in a clockwise direction, increment this number 
+by one. For example, -sides {1 2 4} allows pins to be placed on edges 1, 2, and 4. 
+However, -exclude_sides {2 3 5} disables pins being placed on edges 2, 3, and 5. 
+These two options are mutually exclusive. 0 is not a valid value.
+To place pins on a specific portion of an edge or edges, use the -offset option along with 
+the -sides option. To exclude a specific portion, use the -offset option along with the 
+-exclude_sides option.
+To specify the metal layers on which you want to allow pin placement, use the 
+-allowed_layers option.
+To allow or disallow feedthrough creation on blocks, use the -allow_feedthroughs 
+option. By default, this option is set to true.
+Example 1: Use the following command to allow pin placement on side 1 within the offset 0 
+to 5.
+icc2_shell> set_ctp_constraints ABC_cell_name   -sides 1   -offset {0 5}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+391
+
+
+===== PDF page 392 =====
+Chapter 12: Performing Clock Trunk Planning
+Setting Clock Trunk Planning Pin Constraints
+Feedback
+a
+b
+c
+d
+Side 1
+Length = 10 units
+Side 3
+Length = 10 units
+Side 2
+Length = 14 units
+Side 4
+Length = 10 units
+0
+5
+10
+Example 2: Use the following command to disallow pin placement on side 1 within the 
+offset 4 to 8.
+icc2_shell> set_ctp_constraints ABC_cell_name   -exclude_sides 1  
+ -offset {4 8}
+a
+b
+c
+d
+Side 1
+Length = 10 units
+Side 3
+Length = 10 units
+Side 2
+Length = 14 units
+Side 4
+Length = 10 units
+0
+4
+10
+8
+Example 3: Use the following commands to allow pin placement on sides 1 and 2 within 
+the offset 0 to 5.
+icc2_shell> set_editability
+icc2_shell> set_ctp_constraints ABC_cell_name   -sides {1 2}   -offset {0 
+ 5 0 5}
+(or)
+icc2_shell> set_ctp_constraints ABC_cell_name   -sides {1 2}  
+ -offset {{0 5} {0 5}}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+392
+
+
+===== PDF page 393 =====
+Chapter 12: Performing Clock Trunk Planning
+Setting Clock Trunk Planning Pin Constraints
+Feedback
+a
+b
+c
+d
+Side 1
+Length = 10 units
+Side 3
+Length = 10 units
+Side 2
+Length = 14 units
+Side 4
+Length = 10 units
+0
+5
+10
+0
+5
+14
+Removing Clock Tree Planning Pin Constraints
+To remove the clock tree planning pin constraints on specific blocks, use the 
+remove_ctp_constraints command.
+This command removes the constraint set by the set_ctp_constraints command. All 
+other pin constraints set using block/individual pin constraint remain as is.
+The remove_ctp_constraints command has no effect on the blocks that are disabled 
+using the set_editability command.
+The following command removes the clock tree planning pin constraints from all the blocks 
+in your current design.
+icc2_shell> remove_ctp_constraints
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+393
+
+
+===== PDF page 394 =====
+Chapter 12: Performing Clock Trunk Planning
+Performing Top-Level Clock Trunk Planning
+Feedback
+Reporting Clock Tree Planning Pin Constraints
+To report the clock tree planning pin constraints defined on specific blocks, use the 
+report_ctp_constraints command. The following command reports the clock tree 
+planning pin constraints on all the blocks in your current design.
+icc2_shell> report_ctp_constraints
+Performing Top-Level Clock Trunk Planning
+During top-level clock trunk planning, the tool synthesizes a physical topology for the clock 
+trunk at the top level by using clock tree synthesis. This step compensates for the phase 
+delays in the block-level clock trunk endpoints and tries to maximize the common clock 
+path between blocks that communicate with each other. This flow supports,
+•
+Multiple levels of physical hierarchy
+•
+Multivoltage
+•
+Abutted design
+•
+Nonabutted design (channel design)
+To perform top-level clock trunk planning,
+1. Check that the following conditions are met:
+◦
+Blocks are shaped.
+◦
+Block clock ports are placed.
+◦
+Top-level flip-flops are placed.
+◦
+The clock trunk endpoints are created by running the 
+synthesize_clock_trunk_endpoints or set_clock_trunk_endpoints 
+command.
+Verify the clock trunk endpoint by using the report_clock_trunk_endpoints 
+command.
+2. Control the hierarchical optimization of the lower-level blocks by specify the following 
+application option settings:
+◦
+icc2_shell> set_app_options -name plan.clock_trunk.flow_control \
+   -value optimize_subblocks
+◦
+icc2_shell> set_app_options -name plan.clock_trunk.enable_new_flow \
+   -value true
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+394
+
+
+===== PDF page 395 =====
+Chapter 12: Performing Clock Trunk Planning
+Performing Top-Level Clock Trunk Planning
+Feedback
+3. For multiple levels of physical hierarchy designs, enable generation of top-level pin 
+constraints, by using the following command:
+icc2_shell> set_app_options -name 
+ plan.clock_trunk.enable_mph_constraints \
+   -value true
+4. Enable feedthrough cells on clock nets by using the following application option 
+settings:
+icc2_shell> set_app_options \
+-name plan.pins.exclude_clocks_from_feedthroughs -value false
+If this application option is set to true, the tool does not create feedthroughs on clock 
+nets.
+5. Remove the following pin constraints already defined on the clock nets:
+◦
+Topological pin feedthrough constraints, which are defined with the 
+create_topological_constraint command, by using the following command:
+icc2_shell> remove_topological_constraints -all
+◦
+Individual pin constraints, which are defined with the 
+set_individual_pin_constraints command, by using the following command:
+icc2_shell> remove_individual_pin_constraints
+During clock trunk planning, the tool honors the following constraints when determining 
+the location of block pins and feedthrough pins:
+◦
+Feedthroughs allowed in physical block by using the set_block_pin_constraints 
+-allow_feedthroughs true -blocks command
+◦
+Block editability setting specified with the set_editability -value true 
+-blocks command
+◦
+Sides included and excluded for pin creation by using the 
+set_block_pin_constraints -sides -blocks command
+◦
+Routing blockages
+◦
+Clock metal layer assignments
+6. (Optional) Set the cts.common.user_instance_name_prefix application option to 
+identify the buffers or inverters added by the top-level clock trunk planning.
+icc2_shell> set_app_options \
+   -name cts.common.user_instance_name_prefix -value ICC2_TOP_CTP_
+7. Check the feasibility of performing clock trunk planning as described in Checking the 
+Feasibility of Performing Clock Trunk Planning.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+395
+
+
+===== PDF page 396 =====
+Chapter 12: Performing Clock Trunk Planning
+Performing Top-Level Clock Trunk Planning Push-Down Flow
+Feedback
+8. Synthesize the top-level clock trunk by using the synthesize_clock_trunks 
+command.
+This command consists of the following two stages:
+a. pin_constr_generation, during which the tool generates a topological pin 
+constraint file
+By default, the constraint file is named read_pin_constr_place_pins.tcl. 
+However, you can change this name by using the 
+plan.clock_trunk.topo_constr_pin_place_script_name application option.
+b. read_pin_constr_and_place_pins, during which the tool reads the topological 
+pin constraint file generated in the previous step and places all pins of all the 
+synthesized clock nets
+By default, the tool runs both stages of the synthesize_clock_trunks command. 
+To run only a specific stage, use the -from and -to options. The following example 
+runs only the pin_constr_generation stage:
+icc2_shell> synthesize_clock_trunks \
+   -to  pin_constr_generation
+9. Analyze the QoR as described in Performing QoR Analysis.
+Performing Top-Level Clock Trunk Planning Push-Down Flow
+You can also use the traditional push-down flow for top-level clock trunk planning. This 
+flow supports abstracts, abutted, and nonabutted designs; however, it does not support 
+multiple levels of physical hierarchy or multivoltage designs. This flow treats blocks as 
+read-only and does not take into consideration move bounds and blockages inside first-
+level blocks.
+To use the push-down flow,
+1. Set up the type of flow by using the following command:
+icc2_shell> set_app_options -name plan.clock_trunk.flow_control \
+-value pushdown
+2. Check that the following conditions are met:
+◦
+Blocks are shaped.
+◦
+Block clock ports are placed.
+◦
+Top-level flip-flops are placed.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+396
+
+
+===== PDF page 397 =====
+Chapter 12: Performing Clock Trunk Planning
+Performing QoR Analysis
+Feedback
+◦
+The clock trunk endpoints are created by running the 
+synthesize_clock_trunk_endpoints or set_clock_trunk_endpoints 
+command.
+Verify the clock trunk endpoint by using the report_clock_trunk_endpoints 
+command.
+3. Check the feasibility of performing clock trunk planning as described in Checking the 
+Feasibility of Performing Clock Trunk Planning.
+4. Synthesize the top-level clock trunk with the synthesize_clock_trunks command.
+icc2_shell> synthesize_clock_trunks
+5. Push down the top-level clock trunk into the blocks with the push_down_clock_trunks 
+command.
+icc2_shell> push_down_clock_trunks
+This command also runs the place_pins command on the top-level clock nets while 
+honoring pin constraints. The final clock pin placement is guided by the clock trunk cell 
+placement, and pushed down cells are removed.
+Analyze the QoR as described in Performing QoR Analysis.
+Performing QoR Analysis
+To perform QoR analysis,
+1. Ensure that the timing derate values are applied
+2. Estimate and back-annotate virtually-optimized delay information by using the 
+estimate_timing command
+3. Analyze the timing of the clock trunk by using the report_clock_trunk_qor 
+command, which analyzes inter block relationships using the estimated on-chip 
+variation (OCV) and clock reconvergence pessimism (CRP) values, as shown in the 
+following example report.
+Figure 137
+Clock Trunk QoR Report
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+397
+
+
+===== PDF page 398 =====
+Chapter 12: Performing Clock Trunk Planning
+Managing Timing Constraints for Clock Feedthrough Paths
+Feedback
+To consider clock trunk planning during budgeting and analyze the clock reconvergence 
+pessimism (CRP) effects,
+1. Enable budgeting to use the clock trunk planning results by using the 
+compute_budget_constraints command.
+icc2_shell> compute_budget_constraints -latency_targets estimated \
+   -balance true
+2. Write out the tool-derived budgeting constraints by using the write_script command.
+icc2_shell> write_script -include budget -output budget_constraints
+3. Check for the -crp option in the output file, as shown in the following example output:
+set_latency_budget_constraints -default -crp 0.00205341 -from_clock 
+ clk:nw/clk -to_clock clk:cc/clk
+set_latency_budget_constraints -corner default -crp 0.00205341 
+ -from_clock clk:nw/clk -to_clock clk:cc/clk
+set_latency_budget_constraints -default -crp 0.00252273 -from_clock 
+ clk:sw/clk -to_clock clk:cc/clk
+Managing Timing Constraints for Clock Feedthrough Paths
+Top-level clock trunk planning can create new clock feedthrough input ports for the blocks. 
+To be able to inherit clock tree synthesis constraints, nondefault routing rules, and so 
+on, the clock feedthrough paths need to be treated as clocks. Therefore, clocks must be 
+defined for each newly created clock feedthrough ports. You can achieve this by running 
+the split_constraints command with the following application option settings:
+1. icc2_shell> set_app_options \
+   -name plan.budget.add_missing_feedthrough_clocks -value true
+2. icc2_shell> set_app_options -name \
+plan.budget.include_feedthrough_clocks \
+   -value true
+3. icc2_shell> split_constraints
+The preceding steps add the clock information for each newly created clock input port. For 
+more information about the split_constraints command, see the Splitting Constraints 
+topic.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+398
+
+
+===== PDF page 399 =====
+Chapter 12: Performing Clock Trunk Planning
+Performing Incremental Clock Trunk Planning
+Feedback
+Performing Incremental Clock Trunk Planning
+You can perform incremental clock trunk planning multiple times on your design to achieve 
+the best clock pin placement based on the comparison of outputs from the various 
+incremental clock trunk planning cycles.
+To run incremental clock trunk planning, use the synthesize_clock_trunks 
+-incremental command. You can run incremental clock trunk planning on all clocks 
+in the design or on a subset of clocks, on which clock trunk planning has already been 
+performed. Both the pin_constr_generation and read_pin_constr_and_place_pins 
+steps are supported with incremental clock trunk planning. The command uses the 
+constraints that are already defined and generates a modified pin topology file.
+Example 1
+In the following example, incremental clock trunk planning honors the constraints that are 
+set in step 2.
+1. icc2_shell> synthesize_clock_trunks  -from pin_constr_generation \
+   -to pin_constr_generation -clock [get_clocks {clk1 clk2}]
+2. Modify clock trunk planning block and pin constraints.
+3. icc2_shell> synthesize_clock_trunks  -from pin_constr_generation \
+   -to pin_constr_generation -clock [get_clocks {clk1 clk2}] 
+ -incremental
+Example 2
+In the following example, incremental clock trunk planning keeps the pin constraints 
+for clk2 same as step 1, whereas for clk1, it overwrites the pin constraints based on 
+constraints set at step2.
+1. icc2_shell> synthesize_clock_trunks  -from pin_constr_generation \
+   -to pin_constr_generation -clock [get_clocks {clk1 clk2}]
+2. Modify clock trunk planning block and pin constraints.
+3. icc2_shell> synthesize_clock_trunks  -from pin_constr_generation \
+   -to pin_constr_generation -clock {clk1} -incremental
+Example 3
+In the following example, incremental clock trunk planning writes the pin constraints 
+file and pin placement only for clk1 (that is, for the nets specified by using the -to 
+read_pin_constr_and_place_pins option.
+1. icc2_shell> synthesize_clock_trunks  -from pin_constr_generation \
+   -to pin_constr_generation -clock [get_clocks {clk1 clk2}]
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+399
+
+
+===== PDF page 400 =====
+Chapter 12: Performing Clock Trunk Planning
+Performing Clock Trunk Analysis in the GUI
+Feedback
+2. Modify clock trunk planning block and pin constraints.
+3. icc2_shell> synthesize_clock_trunks \
+   -to read_pin_constr_and_place_pins  -clock {clk1} -incremental
+Example 4
+In the following example, in step 4, the tool places the pins based on constraints from step 
+3 for clk1 and from step 1 for clk2.
+1. icc2_shell> synthesize_clock_trunks  -from pin_constr_generation \
+   -to pin_constr_generation -clock [get_clocks {clk1 clk2}]
+2. Modify clock trunk planning block and pin constraints.
+3. icc2_shell> synthesize_clock_trunks  -from pin_constr_generation \
+   -to pin_constr_generation -clock {clk1} -incremental
+4. icc2_shell> synthesize_clock_trunks \
+   -from read_pin_constr_and_place_pins \
+   -to  read_pin_constr_and_place_pins -clock [get_clocks {clk1 clk2}]
+Performing Clock Trunk Analysis in the GUI
+The GUI supports the Clock Trunk Planning panel to load clock trunk information from 
+the design. Use this tool to view clock trunks, identify clock trunk endpoints, insert clock 
+buffers, remove clock buffers, and perform other tasks.
+To begin clock trunk analysis in the GUI,
+1. Choose View > Flylines > Clock Trunk Planning from the menu.
+2. Click the Reload button.
+3. Select Automatic or Specified in the Reload dialog box and click OK to load data for all 
+clocks or only for the clocks you specify.
+4. In the Clock Trunk Planning panel, select the name of the clock to analyze in the Clock 
+list box.
+5. (Optional) Modify the clock trunk by using the Add, Remove, Check, or Push button in 
+the Tools section of the panel.
+When you select and apply the options in the Clock Trunk panel, the layout window 
+updates to display the selected data. To obtain more information about a clock trunk, 
+hover the pointer over the path to show the clock name, startpoint, endpoint, and other 
+information in an InfoTip.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+400
+
+
+===== PDF page 401 =====
+Chapter 12: Performing Clock Trunk Planning
+Performing Clock Trunk Analysis in the GUI
+Feedback
+Figure 138
+Clock Trunk Planning Panel
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+401

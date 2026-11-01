@@ -1,0 +1,2694 @@
+
+
+===== PDF page 192 =====
+Feedback
+9
+Performing Block Shaping and Macro Placement
+The block shaping flow refines the boundary for the block based on the rough rectangular 
+or rectilinear shape defined during hierarchy exploration. When creating the block shape, 
+the tool considers design constraints such as target utilization for the block, channel width 
+and keepout settings, while minimizing feedthroughs and interface wire lengths. You can 
+create an optional block grid for your design; the tool aligns block shapes to the grid.
+The flow to shape blocks is shown in Figure 66.
+Figure 66
+Block Shaping Flow
+Set macro constraints
+(set_macro_constraints)
+Create macro keepouts
+(create_keepout_margin)
+Create shaping constraints
+Shape blocks
+(shape_blocks)
+Create initial placement
+(create_placement -floorplan)
+For more details, see the following topics:
+•
+Setting Macro Constraints
+•
+Creating Relative Placement Constraints for Macros and Macro Arrays
+•
+Setting Macro Keepouts
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+192
+
+
+===== PDF page 193 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Setting Macro Constraints
+Feedback
+•
+Reserving Space for Macros Between Connected Blocks
+•
+Creating Macro Arrays
+•
+Shaping Blocks
+•
+Performing Block Shaping With Tcl Constraints
+•
+Creating Channel Constraints for Block Shaping
+•
+Creating the Block Grid for Multiply Instantiated Blocks
+•
+Creating the Initial Macro Placement
+•
+Placing Macros Island Style
+•
+Placing Macros Away From Block Edges
+•
+Performing Machine Learning-Based Macro Cells Placement
+•
+Using the Macro Placement Assistant
+•
+Performing Timing-Driven and Congestion-Driven Placement
+Setting Macro Constraints
+Before block shaping, you can specify macro placement constraints and keepout margins 
+for some or all blocks and macros. Placement constraints limit the orientations in which 
+macros can be placed. To set macro placement constraints,
+1. Create a collection of macro cells. The following example assigns a variable to a 
+collection containing all macro cells in the design.
+icc2_shell> set macro_cells [get_cells -physical_context \
+   -filter "is_hard_macro && !is_physical_only" -quiet]
+2. Specify the set_macro_constraints command with the appropriate arguments. The 
+following example limits the placement orientation for all hard macros to R0 or R180.
+icc2_shell> set_macro_constraints \
+   -allowed_orientations {R0 R180} $macro_cells
+3. (Optional) Use the report_macro_constraints command to verify the 
+current constraint settings. Use one or more of the -allowed_orientations, 
+-preferred_location, -alignment_grid, and -align_pins_to_tracks options to 
+report_macro_constraints to limit the report to only those constraints.
+icc2_shell> report_macro_constraints
+****************************************
+Report : report_macro_constraints
+Design : ORCA
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+193
+
+
+===== PDF page 194 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Setting Macro Constraints
+Feedback
+****************************************
+  macro     allowed           legal
+  name      orientations      orientations
+  ------------------------------------------
+  I_ORCA_TOP/I_RISC_CORE/I_REG_FILE/REG_FILE_D_RAM
+            R0,R180           all
+  I_ORCA_TOP/I_RISC_CORE/I_REG_FILE/REG_FILE_C_RAM
+            R0,R180           all
+...
+Use the following options with the set_macro_constraints command to constrain the 
+placement of hard macros and I/O cells in the design:
+Table 6
+Specifying Macro Constraint Options
+To do this
+Use this option
+Specify a list of allowed orientation values that 
+further restrict legal placement orientations specified 
+in the reference library
+-allowed_orientations {list}
+Place macros by aligning the signal pins of the 
+macro to the tracks for the layer the pin shape 
+belongs to
+Based on your requirement, use either the 
+-align_pins_to_tracks or -alignment_grid 
+grid_name option; not both
+-align_pins_to_tracks
+Align macros to a specified placement grid
+Based on your requirement, use either 
+the -alignment_grid grid_name or 
+-align_pins_to_tracks option; not both
+-alignment_grid grid_name
+Only apply the -alignment_grid or 
+-align_pins_to_tracks option specified in the 
+same command to the specified macros placed in 
+the specified orientation set, either R0: {R0, R180, 
+MX, MY}, or R90: {R90,R270, MXR90, MYR90}
+-alignment_orientation_set R0 | R90 | 
+all
+Assign a location on the macro that must be on-grid. 
+If you do not specify the coordinates, they default to 
+{0 0}.
+Use this option with the -alignment_grid 
+grid_name option. Otherwise, the tool ignores the 
+-alignment_point {x y} setting.
+-alignment_point {x y}
+Specify a preferred placement location for a 
+specified macro, where x_range and y_range are 
+values from zero to one
+-preferred_location {x_range y_range}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+194
+
+
+===== PDF page 195 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Creating Relative Placement Constraints for Macros and Macro Arrays
+Feedback
+Table 6
+Specifying Macro Constraint Options (Continued)
+To do this
+Use this option
+Specify the style used to place each macro when 
+the plan.macro.style application option is set to 
+hybrid.
+The valid values are auto, on_edge, and freeform. 
+The default is auto, which means that the tool 
+decides whether to place the macros along the 
+edges or in freeform style. The automatic selection 
+is based on the size of the macros and the number 
+of routing layers that are blocked. The tool limits the 
+on-edge selection to only those macros that should 
+not be in the standard cell area.
+For more information about the plan.macro.style 
+application option, see the man page.
+-style on_edge | freeform | auto
+Creating Relative Placement Constraints for Macros and Macro 
+Arrays
+During design planning, macros and standard cells are placed by using the 
+create_placement -floorplan command. To constrain a macro or macro 
+array to be placed with respect to another object in the design, use the 
+set_macro_relative_location command. The create_placement -floorplan 
+command honors the constraints set by the set_macro_relative_location command 
+and places the target macro or macro array according to the specified offset distance from 
+the anchor object.
+To create the constraint for macro placement,
+1. Set the constraint with the set_macro_relative_location command.
+icc2_shell> set target .../I_RISC_CORE/I_REG_FILE/REG_FILE_D_RAM
+icc2_shell> set anchor .../I_RISC_CORE/I_REG_FILE/REG_FILE_B_RAM
+icc2_shell> set_macro_relative_location \
+   -target_object [get_cells $target] \
+   -target_orientation R0 -target_corner bl \
+   -anchor_object [get_cells $anchor] -anchor_corner tl \
+   -offset {0.0000 35.2550} -offset_type fixed
+2. (Optional) Verify that the constraint was set correctly with the 
+report_macro_relative_location command.
+icc2_shell> report_macro_relative_location
+****************************************
+Report : report_macro_relative_location
+Design : ORCA
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+195
+
+
+===== PDF page 196 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Creating Relative Placement Constraints for Macros and Macro Arrays
+Feedback
+****************************************
+Macro relative location constraints in block ORCA/dp:
+--------------------------------------------------------------
+target  target       target  anchor  anchor  anchor  offset...
+name    orientation  corner  name    type    corner  X     ...
+--------------------------------------------------------------
+.../I_RISC_CORE/I_REG_FILE/REG_FILE_D_RAM
+        R0           bl      .../I_RISC_CORE/I_REG_FILE/REG_FILE_B_RAM
+                                     macro   tl      0.0000 ...
+Figure 67 shows the layout after running the set_macro_relative_location and 
+create_placement -floorplan commands.
+Figure 67
+Macro Relative Location
+The set_macro_relative_location command constrains the placement of an object 
+with respect to the anchor object. If the anchor object is not specified, the constraint is with 
+respect to the parent-level design that contains the target object. The following anchor 
+objects are supported:
+•
+Hard Macro
+•
+Macro Array
+•
+Block
+•
+I/O Pad
+•
+Block Pin
+•
+Core Area
+•
+Move Bound
+•
+Voltage Area
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+196
+
+
+===== PDF page 197 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Setting Macro Keepouts
+Feedback
+You can change the relative location constraints with the following 
+set_macro_relative_location command options:
+•
+Specify which corner of the anchor object to use when creating the offset between 
+the anchor object and target object; valid corner values are bl (bottom left), br (bottom 
+right), tl (top left), and tr (top right).
+icc2_shell> set_macro_relative_location -anchor_corner bl ...
+•
+Specify the instance name of the object to use as the reference location for the target 
+object.
+icc2_shell> set_macro_relative_location -anchor_object {u1/u2} ...
+•
+Specify the x- and y-offset for the target object with respect to the anchor object.
+icc2_shell> set_macro_relative_location -offset {200 200} ...
+•
+Specify the corner of the target macro to apply the constraint; valid corner values are 
+the same as for the -anchor_corner option.
+icc2_shell> set_macro_relative_location -target_corner tr ...
+•
+Specify the instance name of the target macro to constrain.
+icc2_shell> set_macro_relative_location -target_object {u3/u4} ...
+•
+Specify the orientation of the target macro; valid orientations are R0, R90, R180, R270, 
+MX, MXR90, MY, and MYR90. The orientation that you specify must be an allowed 
+orientation for the macro.
+icc2_shell> set_macro_relative_location -target_orientation R0 ...
+•
+Specify a scalable offset ratio, positive or negative, from the anchor object.
+icc2_shell> set_macro_relative_location -offset_type scalable \
+   -offset {0.5 0.5} ...
+The scalable offset is calculated using the following formula:
+target position = anchor position + offset * (scale_edge_length - used_length)
+•
+Specify different offset types for the x- and y-directions.
+icc2_shell> set_macro_relative_location \
+   -offset_type {fixed scalable} ...
+Setting Macro Keepouts
+Keepout margins maintain spacing around blocks and macros and help prevent 
+congestion and DRC errors. The following example creates a collection of all hard macros, 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+197
+
+
+===== PDF page 198 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Setting Macro Keepouts
+Feedback
+then uses the create_keepout_margin command to create four types of keepout 
+margins:
+icc2_shell> set all_hm [get_cells -hierarchical \
+   -filter "is_hard_macro==true"]
+icc2_shell> create_keepout_margin -type hard \
+   -tracks_per_macro_pin 0.05 $all_hm
+icc2_shell> create_keepout_margin -type hard_macro \
+   -tracks_per_macro_pin 0.5 $all_hm
+icc2_shell> create_keepout_margin -type routing_blockage \
+   -layers "M2 M3 M4" -tracks_per_macro_pin 0.05 $all_hm
+icc2_shell> create_keepout_margin -type soft \
+   -tracks_per_macro_pin 1.0 $all_hm
+The create_keepout_margin command supports several options to control the keepout 
+margins. To create a keepout margin around the outside of the block or macro, use 
+the -outer {left bottom right top} option. To create a keepout margin around 
+the inside of the block or macro, use the -inner {left bottom right top} option. 
+To create a keepout margin based on a specified number of wire tracks, use the 
+-tracks_per_macro_pin tracks option. When you use this option, the command 
+multiplies the number of tracks you specify by the number of pins on that side of the macro 
+to calculate the keepout margin size. You can further restrict the size of the keepout by 
+specifying the -min_padding_per_macro size and -max_padding_per_macro size 
+options together with the -tracks_per_macro_pin option. To specify the layers on which 
+to apply a route_blockage keepout, use the -layers {layer_list} option.
+The keepout is not a placement blockage, but behaves like one and moves with the hard 
+macro.
+The tool supports four types of keepout margins: hard, soft, hard_macro, and 
+routing_blockage. The following table summarizes these four types.
+Table 7
+Summary of Keepout Types
+Keepout Type
+Description
+hard (default)
+Prevents standard cells from being placed within the keepout margin.
+soft
+Prevents standard cells from being placed within the keepout margin. However, 
+the placer can move cells into the keepout during optimization.
+hard_macro
+Prevents the placement of hard macros or other hard macro keepout margins 
+within the keepout margin. This type affects only hard macro placement and 
+ensures a minimum channel between hard macros. The entire macro and 
+keepout are kept within the site array. You can use this keepout type to allocate 
+space for routing to the pins of the macro.
+routing_blockage Prevents the power and ground (PG) router from inserting via arrays that 
+block access to macro pins. This type requires a list of layers to include in the 
+blockage.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+198
+
+
+===== PDF page 199 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Reserving Space for Macros Between Connected Blocks
+Feedback
+Reserving Space for Macros Between Connected Blocks
+The number of available routes between blocks can be reduced if macros 
+are placed near the block edges. To control how macros are placed near 
+block edges with the create_placement -floorplan command, set the 
+plan.macro.cross_block_connectivity_planning application option on the block to 
+one of the following values:
+•
+hard: The tool analyzes the connectivity between subblocks and avoids placing 
+macros in a section of the boundary between blocks. The free edge can be used for pin 
+placement later in the flow.
+•
+soft: This setting is similar to the hard constraint setting, but creates a soft constraint 
+which can be violated as needed.
+•
+unset: The application option setting is inherited from the parent block.
+•
+false: This constraint setting disables cross-block connectivity planning.
+The following example creates a hard constraint on block BLK1 to enable cross block 
+connectivity planning.
+icc2_shell> set_app_options -block BLK1 \
+   -name plan.macro.cross_block_connectivity_planning -value hard
+You can perform similar connectivity planning on move bounds and voltage areas by 
+setting the interface_connectivity_planning attribute on the object. The attribute 
+accepts the same values as the plan.macro.cross_block_connectivity_planning 
+application option. The following example sets a hard interface connectivity planning 
+constraint on voltage area VA1.
+icc2_shell> set_attribute -name interface_connectivity_planning \
+   -value hard [get_voltage_areas VA1]
+Creating Macro Arrays
+Macro arrays can be used to manage two or more macros as a single unit. Use macro 
+arrays to enforce orientation, consistent channel width, macro flipping, and fill pattern 
+for all macros in the group. To create a macro array, specify the create_macro_array 
+command with the number of rows and columns in the array.
+icc2_shell> create_macro_array -num_rows 2 -num_cols 6 [get_selection]
+{MACRO_ARRAY_0}
+After creating a macro array, you can use the macro array tool in the GUI to rotate and 
+swap macros. You can also rotate the entire macro array with the macro array tool. To 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+199
+
+
+===== PDF page 200 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Shaping Blocks
+Feedback
+start the macro array tool, select two or more macros in the macro array and choose Edit > 
+Macro Array from the menu. The macro array editor is shown in the following figure.
+Figure 68
+Macro Array Editor
+To remove a macro array, use the remove_edit_groups command to remove the edit 
+group associated with the macro array.
+icc2_shell> remove_edit_groups {MACRO_ARRAY_0}
+See Also
+•
+Creating the Initial Macro Placement
+Shaping Blocks
+After committing the logical hierarchy cells to physical hierarchy blocks, you can create a 
+rough placement of the physical hierarchy blocks. The tool shapes and places the physical 
+blocks, including power domains and voltage areas, based on the specified utilization, 
+channel size and constraints.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+200
+
+
+===== PDF page 201 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Shaping Blocks
+Feedback
+To place and shape the committed physical hierarchy blocks,
+1. Set the block placement options with the set_shaping_options command.
+icc2_shell> set_shaping_options -keep_top_level_together true
+Any options set with the set_shaping_options command remain active during the 
+session. You can use the report_shaping_options command to validate the current 
+shaping settings.
+2. Shape and place the blocks with the shape_blocks command.
+icc2_shell> shape_blocks -channels true
+In this example, the -channels true option directs the command to insert channels 
+between blocks. Note that shape_blocks command options are not persistent. 
+Figure 69 shows the floorplan before and after block shaping.
+Figure 69
+Before (left) and After (right) Block Shaping
+During block shaping, the tool minimizes the number of feedthroughs and minimizes 
+interface wire lengths. The command uses macro packing to place the top-level 
+macros. The tool also aligns the block shape to the block grid, if specified. If you 
+created block placement abstracts as described in Creating Block Placement 
+Abstracts, you can use the abstracts to reduce the runtime required for placement.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+201
+
+
+===== PDF page 202 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Shaping Blocks
+Feedback
+3. Report any violations that occurred during block placement with the 
+report_block_shaping command.
+The report_block_shaping -flyline_crossing command evaluates and compares 
+shaping QoR between different floorplans. When you use the -flyline_crossing 
+option, the tool calculates and reports flyline crosses between all blocks. A smaller 
+value in the report indicates fewer net crossings and less congestion. For example, in 
+the following figure, if there are 100 flylines from A to D and there are two flylines from 
+C to B, this command reports 2x100 flyline crossings. However, if there are no flylines 
+from A to D, but only from C to B, then the command reports no cross flylines. Also, if 
+the flylines from neighboring blocks do not across any other flylines, there are no cross 
+flylines for the tool to report.
+icc2_shell> report_block_shaping -core_area_violations -overlaps \
+   -flyline_crossing
+****************************************
+Report : report_block_shaping
+Design : ORCA
+****************************************
+  Block core area violation report
+  ================================
+  Core area violations in design ORCA: 0
+ 
+  Block overlap report
+  ====================
+  Block overlaps in design ORCA: 0
+ 
+  Block crossing flyline report
+  =============================
+  Maximum flyline crossings is between block pairs
+    (I_ORCA_TOP/I_BLENDER_2 I_ORCA_TOP/I_BLENDER_1) and
+    (I_ORCA_TOP/I_BLENDER_7 I_ORCA_TOP/I_BLENDER_4): 4x19 = 76
+  Flyline crossings in design ORCA: 400
+1
+The report_block_shaping command produces a QoR report for the current block 
+shaping result. Use the command to check for block overlaps, blocks outside the core 
+boundary, and excessive flyline crossings. The command also produces estimates for 
+the number of unaligned pins and net detours.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+202
+
+
+===== PDF page 203 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Shaping Blocks
+Feedback
+You can use most of the options of the report_block_shaping command after block 
+shaping. However, use the -detour_estimate option of this command only after the 
+top cells are placed to achieve a more accurate QoR report. The -detour_estimate 
+option reports the estimated number of net detours caused by blocks.
+4. (Optional) Repeat the flow from step 1 to adjust the shaping options and produce a 
+higher QoR.
+The shape_blocks commands supports different options to modify and refine the shaping 
+result. Use the -channels true | false option to specify whether the command inserts 
+channels between different blocks or between the blocks and the core boundary. Use the 
+-constraint_file file_name option to apply utilization, preferred locations, grouping, 
+and fixed shape constraints for each block. Use the -incremental congestion_driven 
+| target_utilization_driven option to apply incremental shaping with a priority on 
+congestion or target utilization.
+Creating Block Shaping Constraints
+To specify preferred block and voltage area placement locations for the shape_blocks 
+command, create a block shaping constraint file and specify the file with the 
+-constraint_file option. The tool sizes and places the specified regions based on the 
+target utilization, channel size, and other constraints you specify in the file.
+The shaping constraints file supports the following syntax:
+# Global shaping constraints
+utilization { target: 0.2; }
+guard_band { width: 0; height: 0; }
+channel_size { size=5; }
+ 
+# TOP constraints
+# block constraints cannot be nested
+block TOP {
+    # Define channel constraints for TOP
+    # and blocks within TOP
+    # Channel constraints can be defined for
+    # block_inst, voltage_area, group, or current_block
+    channel_size {
+        # Define constraint for TOP/U1
+        block_inst U1;
+        # Default channel is 20 micron
+        # You can also specify "min = 20, max = 20"
+        size = 20;
+        # Left and right channels are between 30 and 50 microns
+        left, right: min = 30, max = 50;
+    }
+    # Create a guard band constraint for voltage area VA1
+    # of 50 microns, and set the voltage area boundary
+    # to {{0 0} {300 600}}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+203
+
+
+===== PDF page 204 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Shaping Blocks
+Feedback
+    voltage_area VA1 {
+        contents: voltage_area VA2, block_inst U3;
+        # Define spacing around voltage area VA2
+        guard_band {
+            width: 50; height: 50;
+        }
+        boundary {
+            type: rigid;
+            shape: {{0 0} {300 600}};
+        }
+    }
+    # Define spacing around any other voltage area
+    # beneath TOP
+    guard_band {
+        width: 40;
+        height: 40;
+    }
+    # Define a group that contains a set of blocks or
+    # voltage areas within TOP
+    define_group GROUP1 {
+        # Organize blocks and voltage areas in a row or column
+        # Legal directions are:
+        # east (from left to right)
+        # west (from right to left)
+        # north (from bottom to top)
+        # south (from top to bottom)
+        arrange_in_array {
+            contents: block_inst U1, block_inst U2, voltage_area VA3;
+            direction: east;
+        }
+        # Specify a relative placement location
+        # for instance U4 in the middle of TOP block,
+        # alignment_point is optional
+        arrange_in_box {
+            block_inst U4;
+            location: x = 0.5, y = 0.5;
+            alignment_point: x = 1, y = 0;
+        }
+ 
+        # aspect_ratio specifies the relative width
+        # and height. Use aspect_ratio together with
+        # arrange_in_box
+        aspect_ratio {
+            block_inst U1;
+            target: width = 1, height = 2;
+        }
+    }
+}
+ 
+# BLOCK2 constraints
+block BLOCK2 {
+    # Reserve a space between the current block
+    # boundary and any regions shaped inside the block
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+204
+
+
+===== PDF page 205 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Shaping Blocks
+Feedback
+    boundary_channel_size {
+        current_block;
+        left: min = 3, max = 5;
+        right, bottom: min = 5, max = 10;
+    }
+    # Specify a 50% target utilization
+    # and a maximum of 70%
+    utilization {
+        target: 0.5;
+        max: 0.7;
+    }
+}
+The following example uses the shaping constraints file to organize blocks in the design. 
+The shaping constraints file specifies two groups that contain five blocks each. The five 
+blocks are stacked horizontally, and the two groups are stacked vertically. A guard band of 
+100 is applied between the blocks.
+icc2_shell> sh cat shaping.con
+# Shaping constraint file
+channel_size { size=100; }
+block top {
+    define_group UPPER {
+        arrange_in_array {
+            contents: block_inst u0, block_inst u1, block_inst u2,
+               block_inst u3, block_inst u4;
+            direction: east;
+        }
+    }
+    define_group LOWER {
+        arrange_in_array {
+            contents: block_inst u5, block_inst u6, block_inst u7,
+               block_inst u8, block_inst u9;
+            direction: east;
+        }
+    }
+    define_group TOP {
+        arrange_in_array {
+            contents: group UPPER, group LOWER;
+            direction: south;
+        }
+    }
+}
+ 
+icc2_shell> shape_blocks -constraint_file shaping.con
+Figure 70 shows the layout after running the shape_blocks command.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+205
+
+
+===== PDF page 206 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Shaping Blocks
+Feedback
+Figure 70
+Layout With Shaping Constraints
+The following example specifies a fixed boundary for a block in the design. The boundary 
+is specified with the shape: and type: rigid constraints. The coordinates are relative 
+and the tool can move the shape to a new location in the parent block. The location of the 
+block within the design is specified by arrange_in_array or arrange_in_box constraints.
+icc2_shell> sh cat fixedblock.con
+# Shaping constraints with fixed block
+channel_size { size=50; }
+block block100a {
+    boundary {
+        type: rigid;
+        shape: {{350 500} {350 1360} {550 1360}
+                {550 900} {850 900} {850 500}};
+    }
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+206
+
+
+===== PDF page 207 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Shaping Blocks
+Feedback
+}
+block top {
+    define_group UPPER {
+        arrange_in_array {
+            contents: block_inst u0, block_inst u1, block_inst u2,
+                      block_inst u3, block_inst u4;
+            direction: east;
+        }
+    }
+    define_group LOWER {
+        arrange_in_array {
+            contents: block_inst u5, block_inst u6, block_inst u7,
+                      block_inst u8, block_inst u9;
+            direction: east;
+        }
+    }
+    define_group TOP {
+        arrange_in_array {
+            contents: group UPPER, group LOWER;
+            direction: south;
+        }
+    }
+}
+Figure 71 shows the layout after running the shape_blocks command. Note the shape of 
+the block100a block, instantiated in the design as instance u0.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+207
+
+
+===== PDF page 208 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Performing Block Shaping With Tcl Constraints
+Feedback
+Figure 71
+Layout With Fixed Boundary
+Performing Block Shaping With Tcl Constraints
+In addition to the block shaping constraint file, the tool supports Tcl-based constraints 
+that work with the shape_blocks command to specify constraint-based block, blockage, 
+channel, move bound, and voltage area shaping. You create these constraints by 
+specifying Tcl commands or by using the GUI to create the constraints in the layout.
+Shaping constraints can be applied to single objects or groups of heterogeneous objects. 
+Groups can also contain other groups to form a hierarchy. Use the create_group 
+command to create a group that contains the objects in the group and the get_groups 
+and report_groups commands to query the groups.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+208
+
+
+===== PDF page 209 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Performing Block Shaping With Tcl Constraints
+Feedback
+The following example creates a specific arrangement of ten blocks as shown in 
+Figure 72. Blocks u1, u2, u3, u4 and u5 are grouped and arranged left-to-right in the top 
+half of the layout. Blocks u6, u7, u8, u9, and u10 are arranged left-to-right and placed at 
+the bottom half of the layout.
+1. Set the plan.shaping.import_tcl_shaping_constraints application option to true 
+to specify that the shape_blocks command should honor the Tcl-based constraints.
+icc2_shell> set_app_options \
+   -name plan.shaping.import_tcl_shaping_constraints -value true
+2. (Optional) Set the plan.shaping.report_import_constraints application option to 
+file, log, or both to write a detailed summary of the block-shaping constraints to the 
+console, log file, or both. The application option is off by default.
+3. Create one group named TOP_ROW to contain the top set of blocks and another 
+group named BOTTOM_ROW to contain the bottom set of blocks.
+icc2_shell> create_group -name TOP_ROW \
+   -shaping [get_cells {u1 u2 u3 u4 u5}]
+{TOP_ROW}
+icc2_shell> create_group -name BOTTOM_ROW \
+   -shaping [get_cells {u6 u7 u8 u9 u10}]
+{BOTTOM_ROW}
+4. Create a parent group named TOP_AND_BOTTOM to contain the TOP_ROW and 
+BOTTOM_ROW groups.
+icc2_shell> create_group -name TOP_AND_BOTTOM \
+   -shaping [get_groups -shaping {TOP_ROW BOTTOM_ROW}]
+{TOP_AND_BOTTOM}
+Note:
+You can modify the order of the objects within a shaping group by using the 
+set_shaping_group_order command. The command allows you to move 
+specific objects or specify a new order for the entire group.
+5. Create one shaping constraint for the TOP_ROW group and another shaping constraint 
+for the BOTTOM_ROW group to specify the type of layout for each group. The “east” 
+array layout orders the objects from left-to-right in the order they were specified by the 
+-shaping option of the create_group command.
+icc2_shell> create_shaping_constraint [get_groups \
+   -shaping TOP_ROW] -type array_layout -array_layout east
+{TOP_ROW/SHAPING_CONSTRAINT_0_array_layout}
+icc2_shell> create_shaping_constraint [get_groups \
+   -shaping BOTTOM_ROW] -type array_layout -array_layout east
+{BOTTOM_ROW/SHAPING_CONSTRAINT_1_array_layout}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+209
+
+
+===== PDF page 210 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Performing Block Shaping With Tcl Constraints
+Feedback
+6. Create a shaping constraint that specifies that the BOTTOM_ROW group is placed 
+below the TOP_ROW group.
+icc2_shell> create_shaping_constraint [get_groups \
+   -shaping TOP_AND_BOTTOM] -type array_layout -array_layout south
+{TOP_AND_BOTTOM/SHAPING_CONSTRAINT_2_array_layout}
+7. Perform block shaping with the shape_blocks command.
+icc2_shell> shape_blocks
+Figure 72
+Block Shaping Example
+BOTTOM_ROW
+TOP_ROW
+TOP_AND_BOTTOM
+To remove shaping constraints, use the remove_shaping_constraints command. The 
+following command removes all shaping constraints from the u1/u2 block:
+icc2_shell> remove_shaping_constraints u1/u2/*
+To report the shaping constraints for the current block or a specific block, use the 
+report_shaping_constraints command. The following example reports all the shaping 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+210
+
+
+===== PDF page 211 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Performing Block Shaping With Tcl Constraints
+Feedback
+constraints for the current block and all its hierarchically nested blocks that are visible to 
+the shape_blocks command:
+icc2_shell> report_shaping_constraints
+The Design Assistant in the GUI displays the Tcl-based shaping constraints applied to the 
+design. Open the Design Assistant by choosing View > Assistants > Design Assistant from 
+the menu. In the Design Assistant, choose View > Shapeable Objects to view the objects 
+and constraints. Use this tool to create shaping constraints, rearrange objects in shaping 
+groups, remove objects from shaping groups, and delete shaping groups. The following 
+figure shows the shapeable objects tab in the Design Assistant for the previous example.
+Figure 73
+Shapeable Objects in Design Assistant
+The following example applies Tcl-based shaping constraints to two blocks and a voltage 
+area. The create_shaping_constraint command is used to create a 50 micron 
+channel around each shaped object. Note that the Tcl list command is used to gather 
+heterogeneous objects for the -shaping option with the create_group command.
+set_app_options \
+   -name plan.shaping.import_tcl_shaping_constraints -value true
+ 
+create_group -name G1 \
+   -shaping [list [get_cells u0_1] \
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+211
+
+
+===== PDF page 212 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Performing Block Shaping With Tcl Constraints
+Feedback
+                  [get_voltage_areas u_m/PD_LEON3_misc] \
+                  [get_cells U2]]
+ 
+create_group -name USG_1 \
+   -shaping [list [get_groups -shaping G1] \
+                  [get_cells U1]]
+ 
+create_shaping_constraint \
+   [get_blocks leon3mp.nlib:leon3mp/shaping.design] \
+   -type boundary_channels \
+   -object_channel [create_shaping_channel -left_min 50 \
+   -left_max 50 -bottom_min 50 -bottom_max 50 -right_min 50 \
+   -right_max 50 -top_min 50 -top_max 50]
+ 
+create_shaping_constraint [get_groups -shaping G1] \
+   -type array_layout -array_layout east
+ 
+create_shaping_constraint [get_groups -shaping USG_1] \
+   -type array_layout -array_layout south
+ 
+shape_blocks
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+212
+
+
+===== PDF page 213 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Creating Channel Constraints for Block Shaping
+Feedback
+This example creates the following layout.
+Figure 74
+Block and Voltage Area Shaping
+Creating Channel Constraints for Block Shaping
+Block shaping channels are used to create space between different objects such as 
+blocks, voltage areas, move bounds, and shaping groups in the layout. To create 
+a shaping channel, use the create_shaping_channel command with options to 
+define the minimum and maximum channel width along the top, bottom, left, and right 
+edges of the object. Use the -neighbor option with the create_shaping_channel 
+command to specify a spacing constraint with respect to a neighboring object in the 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+213
+
+
+===== PDF page 214 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Creating Channel Constraints for Block Shaping
+Feedback
+layout. After creating the shaping channel, assign the channel to an object by using the 
+create_shaping_constraint command.
+You can assign three types of channels by using the -type option with the 
+create_shaping_constraint command:
+•
+boundary_channel: Creates a boundary channel constraint for the top-level design.
+•
+external_channels: Creates a channel constraint along the sides of an objects. Note 
+that you cannot assign an external channel constraint to the current top-level block 
+(returned by the current_block command).
+•
+child_default_channels: Creates default external channels for the nested child 
+regions of the specified block, voltage area, move bound, or shaping group.
+The following example creates a 100 micron boundary channel between the core 
+boundary and top-level objects. A neighbor channel constraint is created for the u0_1 
+block and assigned to the U1 block. The shape_blocks command shapes the blocks and 
+channels based on the constraints.
+# Create the TOP_ROW shaping group to contain blocks
+# u0_1 and U2, and voltage area u_m/PD_LEON3_misc.
+# Create the TOP_AND_BOTTOM group to contain TOP_ROW
+# group and block U1
+set_app_options \
+   -name plan.shaping.import_tcl_shaping_constraints -value true
+create_group -name TOP_ROW \
+   -shaping [list [get_cells u0_1] \
+                  [get_voltage_areas u_m/PD_LEON3_misc] \
+                  [get_cells U2]]
+create_group -name TOP_AND_BOTTOM -shaping \
+   [list [get_groups -shaping TOP_ROW] [get_cells U1]]
+ 
+# Create the boundary shaping channel and
+# neighbor shaping channel
+set boundary_channel_100 \
+   [create_shaping_channel -left_min 100 \
+       -right_min 100 -top_min 100 -bottom_min 100]
+set neighbor_channel \
+   [create_shaping_channel -left_min 200 -left_max 250 \
+       -right_min 200 -right_max 250 \
+       -top_min 200 -top_max 250 \
+       -bottom_min 200 -bottom_max 250 \
+       -neighbor [get_cells u0_1]]
+ 
+# Assign the boundary channel to the current block and
+# the neighbor channel to block U1
+create_shaping_constraint [current_block] -type boundary_channel \
+   -object_channel $boundary_channel_100
+create_shaping_constraint [get_cells U1] -type external_channels \
+   -neighbor_channels $neighbor_channel
+ 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+214
+
+
+===== PDF page 215 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Creating Channel Constraints for Block Shaping
+Feedback
+# Arrange the objects in the TOP_ROW group in
+# left-to-right order
+create_shaping_constraint [get_groups -shaping TOP_ROW] \
+   -type array_layout -array_layout east
+ 
+# Arrange the objects in the TOP_AND_BOTTOM group in
+# top-to-bottom order
+create_shaping_constraint [get_groups -shaping TOP_AND_BOTTOM ] \
+   -type array_layout -array_layout south
+shape_blocks
+The constraints produce the layout result in Figure 75.
+Figure 75
+Block Shaping and Channel Constraints
+$boundary_channel_100
+$neighbor_channel
+To remove shaping channels, use the remove_shaping_channels command. The 
+following command removes all channels associated with a specific shaping constraint 
+object:
+icc2_shell> remove_shaping_channels \
+     DEFAULT_VA/SHAPING_CONSTRAINT_0_external_channels/*
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+215
+
+
+===== PDF page 216 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Creating the Block Grid for Multiply Instantiated Blocks
+Feedback
+To report the shaping channels created by the create_shaping_channel and 
+create_shaping_constraint commands, use the report_shaping_channels 
+command. The following example reports the shaping channels related to the MB2 move 
+bound:
+icc2_shell> report_shaping_channels -of_objects [get_bounds MB2]
+Creating the Block Grid for Multiply Instantiated Blocks
+For designs that contain multiply instantiated blocks (MIBs), you must create a block 
+grid to enable the tool to properly align MIB instances with other design objects. Proper 
+MIB alignment ensures that objects can be successfully pushed down into blocks while 
+the objects maintain alignment with the original block. During block shaping with the 
+shape_blocks command, the tool aligns MIB instances with the block grid.
+The block grid can be derived from power plan strategies or derived from existing site rows 
+in the floorplan. You can also define the grid manually by specifying the origin and grid 
+spacing. After creating the grid, you must associate the block references with a block grid 
+to ensure that the tool aligns all instances with the grid in the same way.
+To create the block grid from existing site rows and power ground strategy settings,
+1. Use the create_pg_mesh_pattern and set_pg_strategy commands to define the 
+power grid (it is not necessary to instantiate the grid with the compile_pg command).
+icc2_shell> create_pg_mesh_pattern pat_mesh \
+   -layers { \
+      {{vertical_layer: ME8} {width: 3} \
+       {spacing: 3} {pitch: 20} {offset: 2}} \
+      {{horizontal_layer: ME7} {width: 3} \
+       {spacing: 3} {pitch: 20} {offset: 2}}}
+icc2_shell> set_pg_strategy s_mesh -core \
+   -pattern {{name: pat_mesh} {nets: VDD90 VSS}}
+2. Create the grid by using the create_grid command with the -site_rows and 
+-pg_strategy options.
+icc2_shell> create_grid grid1 -type block \
+   -site_rows [get_site_rows] -pg_strategy s_mesh1
+Calculating block grid:
+...
+{grid1}
+If your design contains a site array instead of site rows, use the following command to 
+create the grid:
+icc2_shell> create_grid grid1 -type block \
+   -site_arrays [get_site_array] -pg_strategy s_mesh1
+Calculating block grid:
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+216
+
+
+===== PDF page 217 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Creating the Block Grid for Multiply Instantiated Blocks
+Feedback
+...
+{grid1}
+3. (Optional) Verify that the grid was created correctly by using the report_grids 
+command.
+icc2_shell> report_grids
+****************************************
+Report : report block grid
+Design : ORCA
+****************************************
+Auto Block grid grid1:
+   Step in X direction: 20.0000 micron
+   Step in Y direction: 20.0000 micron
+   X offset: 0.0000 micron
+   Y offset: 0.0000 micron
+   Allowed orientations: R0
+   Derived from PG strategies.
+        Strategies Used  Layers:
+         s_mesh1         \
+4. Associate the block grid with the MIB references by using the 
+set_block_grid_references command.
+icc2_shell> set_block_grid_references -designs {ORCA} \
+   -grid grid1
+Alternatively, you can manually create the block grid by specifying the x- and y- offsets 
+and step sizes for the grid. Use the report_grids and set_block_grid_references 
+commands to verify the grid and associate the grid with the MIB references. Create the 
+grid manually as follows:
+icc2_shell> create_grid -type block grid2 -x_step 20.0 \
+   -y_step 20.0 -x_offset 19.0 -y_offset 13.0
+{grid2}
+Note that you do not need to specify the power planning patterns or strategy if you create 
+the grid manually.
+Setting the Snap Point for a Multiply Instantiated Block
+To ensure that multiply instantiated blocks (MIBs) can be flipped and rotated correctly 
+while keeping the MIBs on-grid, you can change the snap point for the block. The 
+tool aligns the snap point of the block to the nearest grid point. By default, the snap 
+point for the design is (0,0). To set the snap point and verify the setting, use the 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+217
+
+
+===== PDF page 218 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Creating the Block Grid for Multiply Instantiated Blocks
+Feedback
+set_block_grid_references command followed by the get_attribute command as 
+follows:
+1. Set the snap point for the multiply instantiated design.
+icc2_shell> set_block_grid_references -grid grid1 -designs BLENDER_2 \
+   -snap_point {100.0 100.0}
+2. (Optional) Verify the settings by examining the attributes on the multiply instantiated 
+block instances.
+icc2_shell> get_attribute [get_cells I_BLENDER_1] snap_point
+100.0000 100.0000
+icc2_shell> get_attribute [get_cells I_BLENDER_1] block_grid
+grid1
+3. (Optional) Snap the multiply instantiated blocks to the grid using one of the following 
+commands.
+icc2_shell> snap_cells_to_block_grid -grid grid1
+icc2_shell> snap_cells_to_block_grid -designs BLENDER_2
+icc2_shell> snap_cells_to_block_grid
+   -cells [get_cells I_BLENDER_1]
+The snap point can be set to any location on the block. In the following figure, the small 
+plus symbols represent points on the grid and the large plus symbols (circled in red) 
+represent the snap point defined for the design.
+Figure 76
+Multiply Instantiated Block Instances With Snap Point
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+218
+
+
+===== PDF page 219 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Creating the Initial Macro Placement
+Feedback
+Creating the Initial Macro Placement
+After shaping the blocks, you can create an initial global macro placement with the 
+create_placement command. The objective of macro placement is to decide which 
+macro to place where. The macro placement is done at the early stages of the design 
+planning flow
+To create the initial macro placement,
+1. (Optional) Set the host options for the creating the floorplan-level placement with the 
+set_host_options command.
+icc2_shell> set_host_options -name distributed ...
+Use the set_host_options command to create the setting for distributed processing.
+2. (Optional) Enable macro-only placement by setting the 
+plan.macro.macro_place_only application option to true.
+icc2_shell> set_app_options -name plan.macro.macro_place_only \
+   -value true
+3. (Optional) Review the settings for the application options for the placer and make any 
+necessary changes.
+You can use the report_app_options plan.place* commands to report the current 
+placer-related settings. Use the set_app_options command to change a setting.
+4. (Optional) Limit placement to specific levels of design hierarchy with the 
+set_editability command. The following example prevents placement at lower 
+levels of the design hierarchy and specifies placement at the top level only.
+icc2_shell> set_editability -from_level 1 -value false
+5. Perform global macro placement by using the create_placement -floorplan 
+command.
+icc2_shell> create_placement -floorplan -host_options distributed
+Optionally,
+◦
+If you set host options in step 1, enable distributed processing by using the 
+-host_options option
+◦
+Specify the level of effort to apply to the placement by using the -effort low | 
+medium | high option
+As you increase the effort level, the tool increases the number of internal loops 
+to create a placement with the best possible quality of results. To provide better 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+219
+
+
+===== PDF page 220 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Creating the Initial Macro Placement
+Feedback
+convergence, the tool decreases the average distance the cells are allowed to 
+move in successive placement passes.
+◦
+Update the placement after changing the boundaries of macro blocks by using the 
+-incremental option
+When you use this option, the command tries to create legal macro placement close 
+to the current one. If the current macro placement is legal, it is retained; otherwise, 
+macros are moved to other legal positions. Examples of illegal positions include 
+macro overlapping, sticking out of core, or not being on grid.
+◦
+Reduce congestion by using the -congestion option
+When you use this option, the tool tries to reduce congestion by moving macros and 
+creating wider channels.
+6. Validate the placement with the report_placement command.
+icc2_shell> report_placement -physical_hierarchy_violations all \
+   -wirelength all -hard_macro_overlap
+****************************************
+Report : report_placement
+Design : ORCA
+****************************************
+Wire length report (all)
+==================
+wire len in design ORCA/dp: 828662.662 microns.
+wire len in design ORCA/dp (see through blk pins): 950442.075 microns.
+ 
+Physical hierarchy violations report
+====================================
+Violations in design ORCA/dp:
+Information: cell .../I_PCI_TOP/I_PCI_WRITE_FIFO/PCI_FIFO_RAM_5
+  overlaps block .../I_BLENDER_1 (DPP-403)
+Information: cell .../I_PCI_TOP/I_PCI_WRITE_FIFO/PCI_FIFO_RAM_5
+  overlaps block .../I_BLENDER_5 (DPP-403)
+2 cells have placement violation.
+ 
+Voltage area violations report
+====================================
+Voltage area placement violations in design ORCA/dp:
+   0 cells placed outside the voltage area which they belong to.
+ 
+Hard macro to hard macro overlap report
+=======================================
+Information: .../I_PCI_TOP/I_PCI_WRITE_FIFO/PCI_FIFO_RAM_4 and
+  .../I_PCI_TOP/I_PCI_WRITE_FIFO/PCI_FIFO_RAM_7 overlap (DPP-405)
+Information: .../I_PCI_TOP/I_PCI_WRITE_FIFO/PCI_FIFO_RAM_3 and
+  .../I_PCI_TOP/I_PCI_WRITE_FIFO/PCI_FIFO_RAM_6 overlap (DPP-405)
+HM to HM overlaps in design ORCA/dp: 2
+---------------------------------------
+Total hard macro to hard macro overlaps: 2
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+220
+
+
+===== PDF page 221 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Creating the Initial Macro Placement
+Feedback
+7. (Optional) If the design contains overlaps, generate a complete list of overlapping 
+instances with the report_placement command.
+icc2_shell> report_placement -verbose high > report.txt
+You can examine the report that is created by the report_placement command and 
+investigate the overlaps.
+8. (Optional) To remove the placement created with the create_placement command, 
+use the reset_placement command.
+icc2_shell> reset_placement
+For more information on congestion-driven and timing-driven placement, see Performing 
+Timing-Driven and Congestion-Driven Placement.
+Identifying Channels Between Objects
+To identify and report channels that exist between specified objects,
+1. Specify the objects between which to identify channels.
+icc2_shell> set macros {I_CONTEXT_RAM_3_1 I_CONTEXT_RAM_3_2 \
+   I_CONTEXT_RAM_3_3 I_CONTEXT_RAM_3_4}
+2. Run the identify_channels command to write out a file that contains the coordinates 
+of the channels between the specified objects.
+icc2_shell> identify_channels -cross_area $macros
+Creating channel file channels.txt
+The tool writes the channels to the channels.txt file. The file lists the type of channel 
+(horizontal, vertical, or crossed_area) and the coordinates of the channel as follows:
+icc2_shell> sh cat channels.txt
+horizontal    (848.17   1632.765) (970.3    1669.995)
+horizontal    (1009.175 1632.765) (1131.305 1669.995)
+vertical      (970.3    1669.995) (1009.175 1774.075)
+vertical      (970.3    1528.685) (1009.175 1632.765)
+crossed_area  (970.3    1632.765) (1009.175 1669.995)
+In the following layout, the channels are outlined and numbered corresponding to the line 
+number of the channel in the channels.txt file.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+221
+
+
+===== PDF page 222 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Creating the Initial Macro Placement
+Feedback
+Figure 77
+Identified Channels
+Use options with the identify_channels command to control how the channels are 
+reported.
+•
+Report channels less than a specified height by using the -horizontal_threshold 
+option.
+•
+Report channels less than a specified width by using the -vertical_threshold 
+option.
+•
+Specify the output file name with the -output_filename option.
+•
+Report cross areas by using the -cross_area option. Cross areas occur between 
+the lower-left edge of one object and the upper right edge of another object, and vice 
+versa.
+•
+Report cross channels less than a specified height by using the -cross_area_height 
+option.
+•
+Report cross channels less than a specified width by using the -cross_area_width 
+option.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+222
+
+
+===== PDF page 223 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Creating the Initial Macro Placement
+Feedback
+Application Options for Macro Placement
+Table 8
+Macro Placement Application Options
+To do this
+Use this application option
+Specify whether pins are aligned in both the x- and 
+y-directions or are aligned only with the direction for the 
+layer they occupy.
+plan.macro.align_pins_on_paralle
+l_edges
+Specify the maximum height of an automatically 
+generated macro array.
+plan.macro.auto_macro_array_max_
+height
+Specify the maximum number of columns in an 
+automatically generated macro array.
+plan.macro.auto_macro_array_max_
+num_cols
+Specify the maximum number of rows in an 
+automatically generated macro array.
+plan.macro.auto_macro_array_max_
+num_rows
+Specify the maximum width in micros of an 
+automatically generated macro array.
+plan.macro.auto_macro_array_max_
+width
+Specify whether macros with pins on only one side 
+are flipped to abut the pins of neighboring macros 
+(pins_in), or flipped to abut the sides without pins 
+(pins_out), or not changed (none).
+plan.macro.auto_macro_array_mini
+mize_channels
+Specify the amount of array packing: none, low, 
+medium, or high.
+plan.macro.auto_macro_array_size
+Specify the height of the channel created 
+when the macro stack height meets 
+or exceeds the value specified by the 
+plan.macro.max_buffer_stack_height application 
+option.
+plan.macro.buffer_channel_height
+Specify the width of the channel created when the 
+macro stack width meets or exceeds the value specified 
+by the plan.macro.max_buffer_stack_width 
+application option.
+plan.macro.buffer_channel_width
+Specify the number of iterations used when estimating 
+congestion using the -congestion option with the 
+create_placement command.
+plan.macro.congestion_iters
+Specify a command or script to use to create temporary 
+PG grids to help reduce congestion during macro 
+placement. Optionally, in the script, you can include 
+code to insert temporary power switch cells in narrow 
+channels along with PG grids.
+plan.macro.create_temporary_pg_g
+rid
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+223
+
+
+===== PDF page 224 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Creating the Initial Macro Placement
+Feedback
+Table 8
+Macro Placement Application Options (Continued)
+To do this
+Use this application option
+Specify the user script to run, to remove the temporary 
+PG grids and the temporary power switch cells that 
+were inserted to help improve congestion estimate.
+plan.macro.remove_temporary_pg_g
+rid
+Specify the constraint type (soft or hard) or behavior 
+(false, true, or unset) to use when avoiding macro 
+placement along a block boundary in a channel 
+between blocks.
+plan.macro.cross_block_connectiv
+ity_planning
+Specify that the create_placement -floorplan 
+command create a temporary PG mesh to enhance the 
+precision of the congestion estimation.
+plan.macro.estimate_pg
+Specify what happens if an error occurs when aligning 
+macros to the grid. Specify continue to print warning 
+messages and continue floorplan placement. Specify 
+macro_place_only to print warning messages and 
+stop after completing macro placement. Specify quit 
+to print error messages and stop immediately when an 
+alignment error occurs.
+plan.macro.grid_error_behavior
+Specify that the create_placement -floorplan 
+command groups macros by logical hierarchy. 
+When true, the macro placer places all macros 
+within a hierarchy into the same group if the ratio 
+of the size of the hierarchy and the size of the 
+block exceeds the threshold specified by the 
+plan.macro.hierarchy_area_threshold application 
+option.
+plan.macro.grouping_by_hierarchy
+Specify whether the create_placement -floorplan 
+command stops or continues after placing macros.
+plan.macro.macro_place_only
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+224
+
+
+===== PDF page 225 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Creating the Initial Macro Placement
+Feedback
+Table 8
+Macro Placement Application Options (Continued)
+To do this
+Use this application option
+Specify the preferred placement of macros. This 
+application option supports on_edge, islands, and 
+freeform, and hybrid styles. The default is on_edge 
+that places the macros along the edges of blocks, 
+voltage areas, and move bounds. If this application is 
+set to islands, some of the macros are placed away 
+from partition edges in islands, that is, floating tightly 
+packed groups of macros. If freeform, the macros are 
+placed individually and loosely among standard cells. If 
+hybrid, the tool places large macros along the edges 
+of the partitions while the smaller ones are placed using 
+freeform placement. However, it is also possible that 
+the tool places all macros on edge or all macros in 
+freeform style (for example, if all the macros are large, 
+block a lot of routing layers, or both, the tool could 
+place them along the edges, whereas for opposite 
+reasons, the tool could place all the macros in freeform 
+style). The difference between the hybrid style and the 
+islands style is that in the hybrid style, the floating 
+macros are placed individually in freeform style versus 
+being grouped and packed in islands. Also, in the 
+hybrid style, any number of macros can be floating, 
+while in the islands style, only small percentage of the 
+design area can be islands.
+plan.macro.style
+Specify the height of the macro stack after which the 
+tool creates a channel for buffer placement.
+plan.macro.max_buffer_stack_hei
+ght
+Specify the width of the macro stack after which the tool 
+creates a channel for buffer placement.
+plan.macro.max_buffer_stack_wi
+dth
+Specify the minimum size of the macro keepout created 
+to ensure routability to the macro pins.
+plan.macro.min_macro_keepout
+Specify the width (for vertical layers) or height (for 
+horizontal layers) within which the tool tries to color 
+match pin shapes and tracks.
+plan.macro.pin_shape_track_match
+_threshold
+Specify a pair of distances, an exact distance and a 
+minimum distance, for placing neighboring macros. 
+Neighboring macros must be placed at the exact 
+vertical distance apart, or placed with a vertical spacing 
+greater than the minimum distance.
+plan.macro.spacing_rule_heights
+Specify a pair of distances, an exact distance and a 
+minimum distance, for placing neighboring macros. 
+Neighboring macros must be placed at the exact 
+horizontal distance apart, or placed with a horizontal 
+spacing greater than the minimum distance.
+plan.macro.spacing_rule_widths
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+225
+
+
+===== PDF page 226 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Creating the Initial Macro Placement
+Feedback
+Table 8
+Macro Placement Application Options (Continued)
+To do this
+Use this application option
+Control whether to automatically create soft placement 
+blockages in channels between hard and soft objects. 
+Hard objects include hard macros, hard keepout 
+margins, block boundaries, VA boundaries, and 
+hard placement blockages. Soft objects include soft 
+placement blockages and soft keepout margins.
+plan.place.auto_create_blockages
+Control whether to automatically create vertical channel 
+blockages.
+plan.place.auto_create_blockage_
+channel_widths
+Control whether to automatically create horizontal 
+channel blockages.
+plan.place.auto_create_blockage_
+channel_heights
+Control whether slightly rectilinear macros are 
+considered to be the shape of their rectangular 
+bounding box when determining blockages.
+plan.place.auto_generate_blockag
+es_smooth_rectilinear
+Control whether to allow standard cells to clump 
+together during top-level placement of a design that 
+contains blocks.
+plan.place.auto_max_density
+Specify the type of cell to consider for congestion 
+reduction: macro, std_cell, or both.
+plan.place.congestion_driven_m
+ode
+Control whether the tool creates a default hard keepout 
+for all macros to force spacing between macros.
+plan.place.default_keepout
+Control whether the tool creates a default hard keepout 
+for all macros to force spacing between macros and 
+standard cells.
+plan.place.auto_create_hard_keep
+out
+Specify the tracing method used when tracing signals 
+for macro placement. Specify normal to trace only 
+buffers and inverters to registers; specify dfa to trace 
+buffers, inverters, and combinational logic to registers.
+plan.place.trace_mode
+Performing Freeform Macro Placement
+With the increase in the number of macros, the traditional approach of placing the macros 
+on the edge does not scale well. To address this issue as well improve the QoR and EoU, 
+the tool allows the placement of macros among standard cells, which is called the freeform 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+226
+
+
+===== PDF page 227 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Creating the Initial Macro Placement
+Feedback
+macro placement style. Freeform macro placement provides the following benefits as 
+compared to on-edge macro placement:
+•
+Considers congestion driven channel sizing
+•
+Adds partial blockages to macro channels
+•
+Considers PG resources when calculating channel congestion
+•
+Provides automatic pin protection blockages
+•
+Provides support for hard inclusive bounds with standard cells
+•
+Honors any functional safety-related Dual Core Lock Step (DCLS) or nCLS (core lock 
+step with n cores) constraints
+To use the freeform style of macro placement, set the following application option:
+icc2_shell> set_app_options -name plan.macro.style -value freeform
+Use the following application options for finer control of the freeform macro placement:
+•
+plan.macro.create_auto_pin_blockages: Specifies whether to create blockages 
+around pins when running freeform macro placement. These blockages are of 
+hard_macro type and they protect the design pins from having macros too close to 
+them.
+•
+plan.macro.remove_auto_pin_blockages: Specifies whether to remove the 
+temporary blockages that were placed around the pins during freeform macro 
+placement, to allow easy access to the pins.
+•
+plan.macro.auto_pin_blockages_width: Specifies the width (if the pins are on the 
+vertical block edges) or height (if pins are on horizontal block edges) of pin blockages 
+created during freeform macro placement.
+To enable timing driven placement using the buffering aware timing model, use the 
+create_placement -buffering_aware_timing_driven command. This approach 
+estimates the effects of buffering long nets and high-fanout nets later in the design 
+planning flow. It provides a better starting point for later timing optimizations.
+icc2_shell> create_placement -floorplan -congestion \
+   -buffering_aware_timing_driven
+To perform incremental freeform macro placement after changes due to one or more of the 
+following reasons, use the create_placement -from command.
+•
+Netlist changes (during optimization due to timing or area changes)
+•
+Constraint changes (for example, hard macro keepouts)
+•
+Congestion reduction
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+227
+
+
+===== PDF page 228 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Creating the Initial Macro Placement
+Feedback
+The -from option enables you to choose the level of macro movement from the most 
+aggressive and time consuming (combined_placement) to the least aggressive 
+(channel_sizing). A value of combined_placement results in the tool running the full 
+freeform flow. The default is macro_legalization. Ensure that you use the -from option 
+with the -floorplan and -incremental options.
+For incremental congestion-driven freeform macro placement, use the following options in 
+the create_placement command:
+•
+-floorplan
+•
+-incremental
+•
+-congestion
+•
+(Optional) -from option from the following table
+Starting point for incremental freeform 
+macro placement
+Use this
+Incremental combined placement
+-from combined_placement
+Legalize macros
+-from macro_legalization
+which is the default starting point for 
+incremental freeform macro placement.
+Macro channel sizing
+and
+Incremental standard cell placement
+-from channel_sizing
+For example,
+icc2_shell> create_placement -floorplan -incremental -congestion 
+ -from combined_placement
+For noncongestion driven freeform macro placement,
+Starting point for incremental freeform 
+macro placement
+Use this
+Incremental combined placement
+-from combined_placement
+Legalize macros
+Incremental standard cell placement
+-from macro_legalization
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+228
+
+
+===== PDF page 229 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Creating the Initial Macro Placement
+Feedback
+Integrated Freeform Macro Placement
+To have a better runtime efficiency during macro placement, you can use the integrated 
+freeform macro cells placement (iFFMP) approach. In this approach, the macro cells 
+are placed among standard cells and the placement of macros is adjusted to changes in 
+congestion and timing that occur during the timing optimization steps.
+Typically, freeform macro placement (FFMP) is performed before running the place_opt 
+flow. The limitations of this standalone FFMP are inefficient runtime, non-adaptive results, 
+and the possibility of duplication when running the place_opt flow.
+To overcome these limitations, the tool supports Integrated Free Form Macro Placement 
+(iFFMP), where freeform macro cells placement is integrated with the place_opt flow. The 
+advantages of such an integrated flow are better runtime efficiency and the ability to adjust 
+macro cells placement during the place_opt flow to improve QoR.
+You can run the iFFMP for a single pass, two pass, and manual two pass place_opt 
+flows. Apart from this, iFFMP also supports PG grid insertion and native chip-finishing 
+without requiring any changes in the place_opt flow.
+To run iFFMP without the support for PG grid, switch, or tap insertion, perform the 
+following steps:
+1. Open a design.
+2. Ensure that all the macro cells to be placed are unfixed. For example,
+icc2_shell> set_attribute [get_flat_cells -filter is_hard_macro] 
+ unplaced
+3. Remove any boundary, switch, and tap cells.
+icc2_shell> remove_cells-force \
+   [get_flat_cells-quiet -all -filter \
+   "(is_power_switch|| is_physical_only) && !is_io"]
+4. Set the following application options to enable the iFFMP flow:
+icc2_shell> set_app_options -name plan.macro.style -value freeform
+icc2_shell> set_app_options -name plan.macro.integrated -value true
+Note:
+When setting the plan.macro.integrated to true,
+◦
+If place_opt.initial_place.two_pass is false, the tool enables the 
+single pass flow.
+◦
+If place_opt.initial_place.two_pass is true, the tool enables the 
+two pass flow.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+229
+
+
+===== PDF page 230 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Creating the Initial Macro Placement
+Feedback
+When running the manual two pass flow, set the plan.macro.integrated 
+application option to two_pass.
+5. Run the place_opt command to start the place_opt flow with iFFMP.
+6. Ensure all macros are fixed after the place_opt flow by using the set_fixed_objects 
+command. For example,
+icc2_shell> set_fixed_objects [get_flat_cells -filter is_hard_macro]
+Performing iFFMP With Temporary PG Grid Insertion
+Inserting a PG grid before macro cells placement increases runtime as macro cells have 
+a significant impact on the PG grid. To improve performance, the tool supports iFFMP with 
+a temporary PG grid creation to model the congestion effect of a power grid during macro 
+and standard cells placement.
+The temporary PG grid flow is quicker as it is inserted without the PG via DRC checking. 
+After the final_place step of the place_opt flow is completed, the PG grid is removed 
+and reinserted to analyze the capacity impact of the PG grid on the tracks available for 
+routing.
+To perform iFFMP with temporary PG grid insertion,
+1. Open a design.
+2. Ensure that all the macro cells to be placed are unfixed. For example,
+icc2_shell> set_attribute [get_flat_cells -filter is_hard_macro] 
+ unplaced
+3. Remove any boundary, switch, and tap cells.
+icc2_shell> remove_cells-force \
+   [get_flat_cells-quiet -all -filter \
+   "(is_power_switch|| is_physical_only) && !is_io"]
+4. Set the following application options to enable iFFMP flow and PG grid insertion:
+icc2_shell> set_app_options -name plan.macro.style -value freeform
+icc2_shell> set_app_options -name plan.macro.integrated -value true
+set_app_options -name plan.macro.create_temporary_pg_grid \
+   -value <pg_script.tcl|Tcl code block>
+set_app_options -name plan.macro.remove_temporary_pg_grid \
+   -value <pg_script.tcl|Tcl code block>
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+230
+
+
+===== PDF page 231 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Creating the Initial Macro Placement
+Feedback
+5. Run the place_opt command to start the place_opt flow with iFFMP.
+6. Ensure that all macro cells are fixed after the place_opt flow by using the 
+set_fixed_objects command. For example,
+icc2_shell> set_fixed_objects [get_flat_cells -filter is_hard_macro]
+7. Remove and reinsert the PG grid with via DRC checking.
+Performing iFFMP With Floorplan Finishing
+You can do floorplan finishing when running freeform or hybrid macro placement 
+to insert boundary cells, tab cells, switch cells, and so on by using the 
+plan.macro.floorplan_finishing application option.
+It is important that these cells are modeled during the iFFMP flow as the 
+placement of these cells has a significant impact on the placeable area of the 
+design. To improve the accuracy of the iFFMP place_opt flow, the tool uses the 
+plan.macro.floorplan_finishing application option while enabling the iFFMP flow. 
+You can use this application option to specify a script file or Tcl code that inserts boundary 
+cells, tap cells, and switch cells.
+To perform iFFMP with floorplan finishing,
+1. Open a design.
+2. Make sure all the macro cells to be placed are unfixed. For example,
+icc2_shell> set_attribute [get_flat_cells -filter is_hard_macro] 
+ unplaced
+3. Remove any boundary, switch, and tap cells.
+icc2_shell> remove_cells-force \
+   [get_flat_cells-quiet -all -filter \
+   "(is_power_switch|| is_physical_only) && !is_io"]
+4. Set the following application options to enable iFFMP flow, PG grid insertion, and 
+floorplan finishing:
+icc2_shell> set_app_options -name plan.macro.style -value freeform
+icc2_shell> set_app_options -name plan.macro.integrated -value true
+set_app_options -name plan.macro.create_temporary_pg_grid -value \
+   <pg_script.tcl|Tcl code block>
+set_app_options -name plan.macro.remove_temporary_pg_grid -value \
+   <pg_script.tcl|Tcl code block>
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+231
+
+
+===== PDF page 232 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Placing Macros Island Style
+Feedback
+set_app_options -name plan.macro.floorplan_finishing \
+   -value <floorplan_finishing.tcl|Tcl code block>
+5. Run the place_opt command to start the place_opt flow with iFFMP.
+6. Ensure that all macro cells are fixed after the place_opt flow by using the 
+set_fixed_objects command. For example,
+icc2_shell> set_fixed_objects [get_flat_cells -filter is_hard_macro]
+7. Remove and reinsert the PG grid with via DRC checking.
+Placing Macros Island Style
+The default macro placement is along the edge of blocks, voltage areas, and move 
+bounds. For some designs, macro placement might be improved by placing groups of 
+macros away from the edges of these objects or placing the macros among standard cells. 
+Island-style placement can improve placement quality in designs with smaller macros that 
+need to be relatively close to objects on different edges of the design.
+By default, the tool uses timing and connectivity information to determine which macros 
+to group together. You can specify the macro grouping by creating a bound to contain the 
+group of macros as shown in steps 2 and 3 in the following example.
+To place macros away from block, voltage area, and move bound edges during macro 
+placement,
+1. Set the plan.macro.style application option to islands.
+icc2_shell> set_app_options -list {plan.macro.style islands}
+2. (Optional) Create a group bound for the collection of island macros with the 
+create_bound command.
+icc2_shell> create_bound -effort high \
+   -name bound1 { I_ORCA_TOP/I_PCI_TOP/I_PCI_WRITE_FIFO/PCI_FIFO_RAM_7
+   I_ORCA_TOP/I_PCI_TOP/I_PCI_WRITE_FIFO/PCI_FIFO_RAM_6
+   I_ORCA_TOP/I_PCI_TOP/I_PCI_WRITE_FIFO/PCI_FIFO_RAM_5 }
+3. (Optional) If you created a bound to specify the macros to group together, set the 
+is_off_edge attribute on the group bound to true.
+icc2_shell> set_attribute -objects [get_bounds bound1] \
+   -name is_off_edge -value true
+4. Perform global macro placement with the create_placement -floorplan command.
+icc2_shell> create_placement -floorplan
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+232
+
+
+===== PDF page 233 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Placing Macros Away From Block Edges
+Feedback
+In the following figure, the default on-edge macro placement is shown on the left. On the 
+right, three group bounds are created and the preceding flow is used to create island-style 
+macro placement for the design.
+Figure 78
+Default and Island Macro Placement
+Placing Macros Away From Block Edges
+To avoid placing macros over a block, use the create_placement_blockage -type 
+hard_macro command to create a hard macro placement blockage over the block. The 
+tool avoids placing macros within the blockage, but might place the macros abutting the 
+blockage. To reserve additional space around the blockage, set the is_pin_protect 
+attribute on the hard macro placement blockage to true. This setting allows the tool to 
+reserve space around the hard macro placement blockage area for pin placement. By 
+default, the is_pin_protect attribute is false and the macro placer only avoids placing 
+macro cells over the hard macro placement blockage area; macro cell placement is 
+allowed at the edge of the placement blockage. For example, the following commands 
+create a placement blockage and set the is_pin_protect attribute to true on the 
+blockage:
+icc2_shell> set pb [create_placement_blockage -type hard_macro \
+   -boundary {{350 350} {500 500}}]
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+233
+
+
+===== PDF page 234 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Performing Machine Learning-Based Macro Cells Placement
+Feedback
+icc2_shell> set_attribute -objects $pb -name is_pin_protect \
+   -value true
+The following figure shows the layout results with no placement blockage, a hard_macro 
+type placement blockage, and a hard_macro type placement blockage with the 
+is_pin_protect attribute set to true.
+Figure 79
+Macros Placed Away From Block Edges
+Default
+hard_macro placement
+blockage
+hard_macro placement
+blockage with
+is_pin_protect==true
+Performing Machine Learning-Based Macro Cells Placement
+In a typical SoC, macro cells dominate many of the blocks and the location of these cells 
+have a big impact on the QoR. Therefore, the placement of these macro cells plays a 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+234
+
+
+===== PDF page 235 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Performing Machine Learning-Based Macro Cells Placement
+Feedback
+major role in the physical design. To place macro cells at the best possible locations is 
+both time and effort -intensive.
+Different macro placements can lead to drastically different congestion, wire length and 
+along with that dynamic power, and can have a very large impact on timing. For example,
+Figure 80
+Different Floorplans as a Result of Different Macro Placements
+•
+General Terminology for ML-Based Macro Cells Placement
+•
+ML-Based Macro Cells Placement Flow
+•
+Invoking ML-Based Macro Placement Flow
+•
+Creating ML Data
+•
+Known Limitations of ML-Based Macro Placement
+•
+Points to Consider While Performing ML-Based Macro Placement
+•
+Achieving Better PPA Using DSO.ai
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+235
+
+
+===== PDF page 236 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Performing Machine Learning-Based Macro Cells Placement
+Feedback
+General Terminology for ML-Based Macro Cells Placement
+ML-based macro 
+placement
+Machine learning-based macro placement
+This approach uses the data from previous macro placements to predict 
+the QoR and applies machine learning to create floorplans that have the 
+best macro placement.
+ML data
+It is the label for a floorplan
+When you use ML-based macro placement, the tool creates a number 
+of floorplans. Each floorplan is referred to as one ML data.
+Trained model
+This model predicts congestion and TNS after post optimization. The 
+tool creates the model from the ML data. The more data is available, the 
+more accurate the model becomes.
+ML-Based Macro Cells Placement Flow
+During ML-based macro placement, the tool uses distributed processing to explore 
+possible macro placement results and create numerous floorplans. The tool then creates 
+a trained model to predict the QoR among the created floorplans and comes up with the 
+best floorplan.
+•
+Performing ML-Based Macro Placement in IC Compiler II
+Performing ML-Based Macro Placement in IC Compiler II
+The ML-based macro placement flow in IC Compiler II is as follows:
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+236
+
+
+===== PDF page 237 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Performing Machine Learning-Based Macro Cells Placement
+Feedback
+1. The tool generates numerous floorplans and extracts ML data from each floorplan.
+a. Extracts information such as macro connectivity, macro grouping, relationship 
+between macros and standard cell areas, and so on
+b. Chooses certain floorplans and performs standard cell placement, legalization, 
+global routing, and optimization
+c. Extracts overall congestion and TNS data from the results of global routing and 
+optimization, respectively
+d. Saves the extracted congestion and TNS data as ML data, which can then be used 
+in different designs for optimal ML-based macro placement
+2. Creates the ML training model from the previous step and any other ML data (such as, 
+from the tool library or data that is provided by you from previous designs).
+The tool uses this model to predict congestion and TNS and also arrive at the floorplan 
+with the best macro placement.
+During ML-based macro placement, you can provide a PG script through an application 
+option to better predict congestion.
+After ML-based macro placement is complete, you can continue with physical only cell 
+insertion and PG grid creation.
+If you used freeform or hybrid macro placement, continue with place_opt -from 
+initial_drc. Otherwise, use place_opt -from initial_place.
+Continue the flow with clock tree synthesis and routing.
+Note:
+Ensure to re-create the PG grid even if you have provided a PG script during 
+ML-based macro placement. This is because the tool removes any PG grids 
+after the ML-based macro placement is complete.
+Invoking ML-Based Macro Placement Flow
+To perform ML-based macro placement, use the place_macro_ml command. Use the 
+following options with this command, as needed.
+Command Options
+Description
+-host_options
+(Required option)
+Specify to enable distributed processing, which improves the runtime
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+237
+
+
+===== PDF page 238 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Performing Machine Learning-Based Macro Cells Placement
+Feedback
+Command Options
+Description
+-mode
+Specify the optimization objective
+• congestion - The tool optimizes the floorplan for overall congestion
+• tns - The tool optimizes the floorplan for total negative slack (TNS)
+• power - The tool optimizes the floorplan for power consumption
+• both (default) - The tool optimizes the floorplan for both overall 
+congestion and TNS
+• all - The tool optimizes the floorplan for congestion, TNS, and power 
+consumption
+• wirelength - The tool optimizes the floorplan for total wire length
+• thermal - The tool optimizes the floorplan for temperature. The tool 
+performs macro placement to reduce the maximum temperature.
+Before running macro placement to optimize for temperature, 
+ensure that you have set the power value for hard macros using 
+the thermal.hier_block_power_profile application option. For 
+example,
+icc2_shell> set_app_options \
+   -name thermal.hier_block_power_profile \
+   -value { SRAM1RW256x32 0.1 SRAM2RW32x39 0.2 
+ SRAM2RW64x32 0.3 }
+-work_directory
+Specify where the machine learning internal data (temporary files and 
+other data) should be stored
+If you do not provide a value, the default work directory is mlmp_dir
+The generated machine learning data is stored in the 
+mlmp_dir/design_local_data/hm_local.csv file
+-effort
+Specify the optimization effort
+• low - has the shortest runtime with less accuracy
+In this mode, the tool does not generate any ML data for the current 
+design. Instead, the tool uses any existing data (the ML data from the 
+library in the tool and optionally user provided data) to arrive at the 
+best floorplan.
+• medium (default) - provides the best balance between runtime and 
+QoR
+• high - provides the best accuracy at the cost of highest runtime
+When you run ML macro placement with high effort, the 
+tool uses the default settings during place_opt. However, if 
+you need to use customized settings during place_opt, you 
+can point to a Tcl file containing this setting by using the 
+plan.macro.ml_place_opt_setting application option.
+With the medium and high effort setting, the tool uses the ML data 
+generated from the current design in addition to any existing ML data to 
+arrive at the best floorplan. This generally leads to better floorplans.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+238
+
+
+===== PDF page 239 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Performing Machine Learning-Based Macro Cells Placement
+Feedback
+Command Options
+Description
+-style
+Place the macro cells on_edge (the default), in hybrid placement, 
+in freeform style, or allow the tool to find the best form of macro 
+placement style by using auto.
+In the hybrid style, some of the macro cells are placed on edge while 
+others are placed in freeform style.
+In the auto style, the tool explores both hybrid and freeform macro 
+placement styles to optimize the design.
+-on_edge_ratio
+Specify the ratio of macros that should be identified as on edge macros 
+over all the available macros.
+This option is only for hybrid macro placement
+If this option is not set, the tool determines this value automatically. To 
+know the value used by the tool, search for the text "On_edge ratio:" in 
+the tool log file.
+To see which macros would be identified as on-edge based on the 
+-on_edge_ratio setting, open the GUI then use the command 
+identify_on_edge_macros -ratio <ratio>.
+-incremental
+Specify this option only when you require minor changes from the 
+existing macro placement.
+-exploration_file
+Specify a customized macro placement-related application options file.
+When you use this option, the tool explores all the combinations set in 
+the file. In the following example, the tool explores all the settings in the 
+ml_app_options.tcl file.
+icc2_shell> set_host_options -name mlmp \
+   -submit_command "qsub -P bnormal -l mem_free=30G" \
+   -max_cores 8
+icc2_shell> place_macro_ml -host_options mlmp \
+   -exploration_file ml_app_options.tcl
+The following example shows a Tcl file with the application option 
+settings:
+plan.macro.max_group_area_percentage {0.3 0.2 0.1}
+plan.macro.grouping_by_hierarchy {true false}
+plan.place.auto_create_blockages {soft partial}
+plan.macro.auto_buffer_channels {true false}
+plan.place.create_auto_pin_blockages {true false}
+•
+Example Script for IC Compiler II
+m
+Example Script for IC Compiler II
+Here is an example script for IC Compiler II, which opens a design that has been 
+floorplanned, runs ML-based macro placement, and then continues with place_opt.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+239
+
+
+===== PDF page 240 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Performing Machine Learning-Based Macro Cells Placement
+Feedback
+# Load the floorplanned design
+open_lib design.nlib
+open_block floor.design
+# Set up distributed processing
+set_host_options -name mlmp -submit_command [list qsub -P ae -pe mt 4 -l 
+ mem_free=100G]
+# Set up macro auto-blockages, spacing, keepouts, etc.
+set_app_options -list {plan.place.auto_create_blockages  partial}
+set_app_options -list {plan.place.auto_create_blockage_channel_widths 
+ {2um 25um}}
+set_app_options -list {plan.place.auto_create_blockage_channel_heights 
+ {1um 25um}}
+ 
+# Run ML macro placement in hybrid mode, with 50% macros on edge,
+# optimized for both congestion and timing
+place_macro_ml -host_options mlmp -mode both -style hybrid -on_edge_ratio 
+ 0.5
+ 
+# fix macro cells, create the PG mesh, continue with the flow
+set_fixed_objects [get_cells -hier -filter is_hard_macro]
+source boundary_tap.tcl
+source pg.tcl
+# If you used freeform or hybrid, skip the initial_place stage
+place_opt -from initial_place  or  place_opt -from initial_drc
+Creating ML Data
+ML data is the foundation to build a trained model - the more ML data is made available, 
+the more accurate the trained model will be. To create ML data, you can follow either 
+Method 1: Creating ML Data From Optimized Designs or Method 2: Creating ML Data 
+From ML Macro Placement When Running the place_macro_ml Command.
+•
+Method 1: Creating ML Data From Optimized Designs
+•
+Method 2: Creating ML Data From ML Macro Placement When Running the 
+place_macro_ml Command
+•
+How to Provide User ML Data
+•
+Selecting the Best Design From Previous ML Macro Placement Runs
+Method 1: Creating ML Data From Optimized Designs
+To enhance the predictability by training the ML model, you can provide additional ML 
+data from optimized designs. Optimized designs can be designs that have run through 
+place_opt, or even designs that have completed clock tree synthesis or even better, 
+route_opt.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+240
+
+
+===== PDF page 241 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Performing Machine Learning-Based Macro Cells Placement
+Feedback
+To capture ML data, use the create_mlmp_data -output command. For example,
+icc2_shell> create_mlmp_data \
+   -output /remote/central_location/MLMP/design1/hm.csv
+In this example, the following files are created in the /remote/central_location/MLMP/
+design1 directory.
+•
+hm.csv: Contains ML data for the current floorplan
+•
+.hm.csv.signature: Contains information that the tool uses to decode the ML data
+The tool requires both files to train the ML model.
+Method 2: Creating ML Data From ML Macro Placement When 
+Running the place_macro_ml Command
+To create ML data, you can run the place_macro_ml -work_directory command. For 
+example,
+icc2_shell> place_macro_ml -host_options mlmp \
+   -style hybrid -work_directory mlmp_dir_medium
+In this example, the following files are created in the mlmp_dir_medium/design_local_data 
+directory.
+•
+hm_local.csv file: Contains multiple ML data. Each ML data corresponds to one 
+explored floorplan
+•
+.hm_local.signature file: Contains information that the tool uses to decode the ML data
+How to Provide User ML Data
+To use the ML data created from previous tapeout designs and apply it for the current ML 
+model training,
+1. Ensure that you put all the necessary files under a folder
+This folder should include the *.csv and .*.csv.signature files.
+2. Specify this directory when invoking the place_macro_ml -work_directory 
+command
+For example, if you have placed all the necessary ML data files in the /remote/
+central_location/ML_data location, then use the command:
+icc2_shell> place_macro_ml -host_options mlmp -style hybrid \
+   -work_directory /remote/central_location/ML_DATA
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+241
+
+
+===== PDF page 242 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Performing Machine Learning-Based Macro Cells Placement
+Feedback
+Example 16
+Contents of ML Data Directory
+/remote/central_location/ML_data> ls -al
+drwxr-xr-x  4 snps synopsys  4096 Aug 24 08:59 ./
+drwxr-xr-x 60 snps synopsys 36864 Aug 26 07:55 ../
+-rw-r--r--  1 snps synopsys  7744 Aug 24 08:59 hm_local.csv
+-rw-r--r--  1 snps synopsys    48 Aug 24 08:59 .hm_local.csv.signature
+drwxr-xr-x  2 snps synopsys  4096 Aug 24 09:07 leon3mp_design_local_data/
+drwxr-xr-x  2 snps synopsys  4096 Aug 23 16:22 orca_design_local_data/
+Selecting the Best Design From Previous ML Macro Placement 
+Runs
+Use the select_mlmp_result command to select the best design from the previous 
+machine learning-based macro placement runs. The tool selects the best design based 
+on congestion and timing values of the corresponding macro placement. Use the -mode 
+option to specify the optimization objective. For example, using this option, you can 
+direct the tool to select the best design that is optimized for one or more of the following: 
+congestion, tns, power, or wire length.
+Specify a file with this option that contains all the corresponding mlmp_dir directories of 
+the previous machine learning-based macro placement runs. In the following example, the 
+tool selects the best result from the directories specified in the mlmp_result_file.
+icc2_shell> select_mlmp_result -result_file_name mlmp_result_file
+An example file is as follows:
+/u/hardmacro/designs/orca/mlmp_dir_medium_hybrid
+/u/hardmacro/designs/orca/mlmp_dir
+/u/hardmacro/designs/orca/mlmp_dir_auto
+/u/hardmacro/designs/orca/mlmp_dir_medium_encoded
+Known Limitations of ML-Based Macro Placement
+ML-based macro cell placement does not support:
+•
+Hierarchical designs
+•
+Soft blocks with abstract or design views
+Points to Consider While Performing ML-Based Macro Placement
+You might want to consider the following points while performing ML-based macro 
+placement:
+•
+Keepout Margins Around Macro Cells
+•
+Creating Placement Blockages for Narrow Channels
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+242
+
+
+===== PDF page 243 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Performing Machine Learning-Based Macro Cells Placement
+Feedback
+•
+Creating Placement Blockages Around Top Pins
+•
+Controlling Spacing Between Macro Cells
+•
+Protecting Concave Corners in Rectilinear Floorplans
+•
+Distributing Macro Cells Around Boundaries
+•
+Comparison Between Keepout Margin and Placement Blockage
+•
+Inserting and Handling Temporary PG Grid During ML-Based Macro Cells Placement
+Keepout Margins Around Macro Cells
+Although the ML-based macro cell placement flow honors all macro placement constraints 
+and options, you might still see DRC violations around macros. This issue could be due to 
+insufficient channel size or keepout margin as shown in the following images.
+•
+When DRC errors occur due to lack of space, you can resolve them by reserving more 
+space between macros. For example, you can:
+◦
+Set the hard_macro type keepout margin
+(or)
+◦
+Cover narrow channels with hard placement blockage
+You can do these actions before running boundary cell insertion.
+•
+When DRC errors occur between macro blockages and standard cells, you can resolve 
+them by setting the hard_macro type keepout margin. This action reserves more space 
+between macros and standard cells.
+In general, use macro keepout margins to improve placement and routing QoRs. In many 
+cases, you might need to create keepout margin for the specified physical designs and 
+cell.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+243
+
+
+===== PDF page 244 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Performing Machine Learning-Based Macro Cells Placement
+Feedback
+Keepout 
+Types
+Objects Affected
+Purpose
+hard
+Affects standard cell placement 
+including any new cells added 
+during optimization
+Prevents the standard cells from being close to 
+the macro cell’s boundary
+soft
+Affects standard cell placement 
+around macro cells during 
+placement
+Places any new cells from timing optimization 
+over soft keepout margin or soft placement 
+blockages
+hard_macro
+Affects placement among hard 
+macros
+Guarantees a minimum channel between 
+macros
+Prevents overlap of the macros including 
+the hard_macro keepout. Allocates space to 
+support routing to the pins of the macro.
+Ensures that no hard macros or other hard 
+macro keepout margins are placed within the 
+keepout margin
+route_block
+age
+Affects preroute nets
+Prevents preroute blockages
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+244
+
+
+===== PDF page 245 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Performing Machine Learning-Based Macro Cells Placement
+Feedback
+Creating Placement Blockages for Narrow Channels
+After macro placement, it is likely that many narrow channels might be created and not all 
+of them can be used as normal standard cell area. This is because
+•
+Many channels might be facing macro pins
+•
+Some areas have to be reserved for routing and so on
+In such cases, cover these narrow channels with soft or partial placement blockages. 
+However, if the channel is very narrow and placing of standard cells on this channel is 
+causing DRC errors, cover this channel with hard placement blockages.
+Note:
+The general recommendation is to cover narrow channels with hard blockages 
+and wide channels with partial or soft blockages.
+Also, use partial blockages for freeform macro placement.
+The plan.place.auto_create_blockages application option controls the type of 
+placement blockages.
+For greater control, you can use the 
+plan.place.auto_create_blockage_channel_widths {min max} and 
+plan.place.auto_create_blockage_channel_heights {min max} application options 
+- these enable you to control the partial blockage size - in the vertical and horizontal 
+direction, respectively. Each of these application options take in two values:
+•
+When the channel size is less than the first number, the tool covers the channel with a 
+hard placement blockage.
+•
+When the channel width is between the first and the second number, the tool covers 
+the channel with a soft or partial blockage.
+The approximate partial blockage channel percentage = (1 - channel_width/(max - 
+min)) * 100%.
+For example, if the channel width is 5 um, and the minimum and maximum values are 
+2um and 30 um, the blockage percentage for this 5 um channel is (1 - 5/28)*100 = 
+82%.
+•
+No blockage is created when the channel width is larger than the second number - 
+as this typically means that the channel is large enough and therefore can be used to 
+place the standard cells.
+Creating Placement Blockages Around Top Pins
+When your design has pins on the top, it is important to create placement blockages 
+around these pins. The pin placement blockages are created by default during freeform 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+245
+
+
+===== PDF page 246 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Performing Machine Learning-Based Macro Cells Placement
+Feedback
+style of macro placement. However, for on-edge macro placement, you must set the 
+plan.macro.ml_create_auto_pin_blockages application option to true.This action 
+ensures that there are no routing issues, later on.
+To create placement blockages around pins, the flow is as follows:
+1. Open the design.
+2. Select the pins around which you require placement blockages.
+3. Set the plan.macro.ml_create_auto_pin_blockages application option to true.
+Controlling Spacing Between Macro Cells
+Some designs may require that the spacing rules are met so that the channels can be 
+used to place standard cells or to insert power switch cells.
+To control the spacing between macro cells, you can use the following application options 
+- while one is for controlling the vertical spacing, the other is for controlling the horizontal 
+spacing.
+•
+plan.macro.spacing_rule_heights {exact_distance at_least_distance}
+•
+plan.macro.spacing_rule_widths {exact_distance at_least_distance}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+246
+
+
+===== PDF page 247 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Performing Machine Learning-Based Macro Cells Placement
+Feedback
+Each of these application options take in two values. In the following examples, the tool 
+sets the horizontal channel spacing to either 2 um or at least 8 um and the vertical channel 
+spacing to either 2 um or at least 9 um.
+icc2_shell> set_app_options -name plan.macro.spacing_rule_heights -value 
+ {2 8}
+icc2_shell> set_app_options -name plan.macro.spacing_rule_widths -value 
+ {2 9}
+Protecting Concave Corners in Rectilinear Floorplans
+Concave corner protection might be needed when macros are stacked on a concave 
+corner dangle into the core area and cause congestion.
+To avoid packed macros on concave corners, set the 
+plan.macro.ml_use_concav_blockage application option to true before performing the 
+machine learning-based macro placement. When this application option is set to true, it 
+prevents macros from being placed on the corner. The default is false.
+Distributing Macro Cells Around Boundaries
+Too many macros around boundaries might cause congestion or timing issue, especially in 
+rectilinear designs.
+The plan.macro.ml_distribute_evenly application option helps to overcome this 
+issue. When set to true (which is the default), the tool distributes the macros evenly 
+around the boundaries and creates blockages around pins.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+247
+
+
+===== PDF page 248 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Performing Machine Learning-Based Macro Cells Placement
+Feedback
+Comparison Between Keepout Margin and Placement Blockage
+Here is a comparison between keepout margins and placement blockages:
+Keepout Margin
+Placement Blockage
+Is attached to macro cells
+Therefore, the location of a keepout margin 
+changes when a macro cell moves from one 
+place to another
+Is associated with a fixed area in the floorplan
+It protects the macros and the area around 
+them
+It ensures that no cells are placed near the 
+macros
+It prevents placing cells in the area that is 
+covered by a placement blockage
+Use keepout margin for macro cells
+Use placement blockages for fixed areas
+Inserting and Handling Temporary PG Grid During ML-Based 
+Macro Cells Placement
+Insert temporary PG grids before ML-based macro placement to arrive at a more accurate 
+congestion driven channel sizing. After the macro placement is done, it is mandatory to 
+remove the inserted PG grids.
+You can use the following application options:
+•
+plan.macro.create_temporary_pg_grid: To specify a PG script for inserting 
+temporary PG grids
+•
+plan.macro.remove_temporary_pg_grid: To specify a PG script for removing the 
+temporary PG grids
+Achieving Better PPA Using DSO.ai
+You can achieve a floorplan that has better power, performance, and area (PPA) by using 
+the Design Space Optimization (DSO.ai™) tool.
+The explore_macro_placement command provides an interface between machine 
+learning-based macro placement (MLMP) and DSO.ai. When you run this command, 
+the tool outputs five floorplans instead of one based on machine learning ranking. This 
+command also creates a settings file called “mlmp_compile_permutons.tcl.” DSO.ai uses 
+this setting file to load the generated floorplans and optimizes them to achieve the best in 
+terms of congestion, timing, and power. For more information about running DSO.ai, see 
+the DSO.ai User Guide.
+In the following example, the tool explores macro placement using on_edge style.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+248
+
+
+===== PDF page 249 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Using the Macro Placement Assistant
+Feedback
+icc2_shell> set_host_options -name mlmp -submit_command \
+   "qsub -P bnormal -l mem_free=30G" -max_cores 8
+icc2_shell> explore_macro_placement -host_options mlmp -style on_edge
+Using the Macro Placement Assistant
+To improve the quality of your placement results when placing macros by hand, you can 
+use the Macro Placement Assistant to group macros and experiment with different macro 
+placements. Use this tool to reduce the number of narrow channels in your layout and 
+improve routing congestion. To start the Macro Placement Assistant, choose View > 
+Assistants > Macro Placement Assistant from the menu, or click the Macro Placement 
+Assistant button on the toolbar. After starting the Macro Placement Assistant, click the 
+Initialize button before proceeding.
+Figure 81
+Macro Placement Assistant Panel
+You can use the following flow to create the initial macro placement and refine the macro 
+placement with the Macro Placement Assistant.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+249
+
+
+===== PDF page 250 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Using the Macro Placement Assistant
+Feedback
+Figure 82
+Macro Placement Flow
+Perform freeform macro placement
+Create or edit macro groups
+Analyze macro groups
+Shape macro groups
+Pack macro groups
+Creating Macro Groups
+Macro groups are a collection of macro cells and macro arrays that should be placed 
+together in the layout. When you create a macro group with the Macro Placement 
+Assistant, the tool applies the create_macro_groups command to create a bound. The 
+Macro Placement Assistant supports the following methods for creating groups of macros; 
+to access these methods, click the Create button to open the Create Macro Groups dialog 
+box.
+Auto
+Creates one or more groups to produce the best grouping based on hierarchy, 
+connectivity, and coarse placement. In the GUI, click Auto and then click OK. Alternatively, 
+use the following Tcl command to create the macro groups:
+create_macro_groups -method auto -macros
+By connectivity
+Creates one or more groups based on the connections between the macros and flip-flops 
+in the layout. In the GUI, click “By connectivity” and then click OK. To specify names for 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+250
+
+
+===== PDF page 251 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Using the Macro Placement Assistant
+Feedback
+the new macro groups, enter the names in the “Group name” box separated by spaces. 
+Alternatively, use the following Tcl command to create the macro groups:
+create_macro_groups -method by_connectivity -names {M1 M2 M3}
+By hierarchy
+Creates one group for each level of hierarchy that contains macros. In the GUI, click 
+“By hierarchy” and then click OK. To specify names for the new macro groups, enter the 
+names in the “Group name” box separated by spaces. Alternatively, use the following Tcl 
+command to create the macro groups:
+create_macro_groups -method by_hierarchy -names {M1 M2 M3}
+By name pattern
+Creates a macro group based on a regular expression. In the GUI, select a macro in the 
+layout, click “By name pattern” and adjust the regular expression pattern as needed. The 
+tool derives a regular expression based on the instance name of the selected macro. 
+To specify names for the new macro groups, enter the names in the “Group name” 
+box separated by spaces. Alternatively, enter a pattern string in the regular expression 
+box; the pattern should contain the full path name and use “?” or “.” characters to allow 
+matching of more than one macro. Click “Show Macros” to populate the macro list based 
+on the pattern. Click OK to create the macro groups. Alternatively, use the following Tcl 
+command:
+create_macro_groups -method by_pattern \
+   -pattern {I_ORCA_TOP/I_RISC_CORE/I_REG_FILE/REG_FILE_?_RAM}
+In the following example, the pattern string I_ORCA_TOP/I_RISC_CORE/I_REG_FILE/
+REG_FILE_?_RAM matches macros REG_FILE_A_RAM, REG_FILE_B_RAM, 
+REG_FILE_C_RAM, and REG_FILE_D_RAM under I_ORCA_TOP/I_RISC_CORE/
+I_REG_FILE.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+251
+
+
+===== PDF page 252 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Using the Macro Placement Assistant
+Feedback
+Figure 83
+Group by name pattern
+By name index
+Creates one or more macro groups based on a regular expression for the macro indexes. 
+In the GUI, select a macro in the layout and click “By name index”. The tool tries to derive 
+an index pattern based on the indexes at the end of the instance name of the selected 
+macro. Alternatively, enter a pattern string in the index pattern box; the pattern should 
+contain the full path name and use “?” or “.” characters to allow matching of more than one 
+macro. Click “Show Macros” to populate the macro list based on the pattern. Alternatively, 
+use the following Tcl command to create the macro groups:
+create_macro_groups -method by_index_pattern \
+   -index_pattern {I_ORCA_TOP/I_CONTEXT_MEM/I_CONTEXT_RAM_?_*}
+In the following example, the pattern string I_ORCA_TOP/I_CONTEXT_MEM/
+I_CONTEXT_RAM_?_* matches 16 macros in the layout. The tool creates four groups of 
+four macros each with the following index partitioning: {0_1 0_2 0_3 0_4}, {1_1 1_2 1_3 
+1_4}, {2_1 2_2 2_3 2_4}, and {3_1 3_2 3_3 3_4}.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+252
+
+
+===== PDF page 253 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Using the Macro Placement Assistant
+Feedback
+Figure 84
+Group by name index
+By selection set
+Creates a single group that contains the currently selected macros. In the GUI, select the 
+macros, click “By selection set”, and click OK. Add a new macro to the list by selecting it in 
+the layout and clicking the [+] button. If the macro already belongs to a group, it is moved 
+to a new group. Remove one or more macros from the list by selecting them in the list and 
+clicking the [-] button. Alternatively, use the following Tcl command to create the macro 
+groups:
+create_macro_groups -method by_macros -macros [get_selection]
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+253
+
+
+===== PDF page 254 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Using the Macro Placement Assistant
+Feedback
+Figure 85
+Create Macro Groups
+Performing Other Tasks on Macros
+The Macro Placement Assistant supports other tasks that you can perform on macros and 
+macro groups:
+Delete
+Select one or more macro groups and click the Delete button to remove the currently 
+selected macro groups.
+Edit
+Select one macro group in the layout and click Edit to add or delete macros from the 
+group. You can perform the following tasks in this tool:
+•
+Select one or more macros in the left or right boxes, then use the arrows to move the 
+selected macros from one side to the other.
+•
+Select one or more macros in the left or right boxes and click the orientation buttons in 
+the Flip section to change the orientation of the selected macros to MX or MY.
+Click OK when finished.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+254
+
+
+===== PDF page 255 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Using the Macro Placement Assistant
+Feedback
+Figure 86
+Edit macro groups
+List
+Click the List button to show a list of the current macro groups. You can select macro 
+groups, collections of macros, or individual macros in the layout by clicking their instance 
+name in the list.
+Net Connections
+Click the Net Connections button to open the Net Connections panel.
+Split
+Create a new group and move some macros from the currently selected group into the 
+new group based on connectivity.
+Macro Array
+Select two or more macros in the layout and click the Macro Array button to start the 
+Macro Array tool. Alternatively, choose Edit > Macro Array from the menu to open the 
+Macro Configuration dialog box.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+255
+
+
+===== PDF page 256 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Using the Macro Placement Assistant
+Feedback
+Figure 87
+Macro configuration
+Macro Group Shape
+Select one or more macro group shapes in the layout, click Rectangle, L, Auto, or Manual, 
+then click Set to set the shape. Alternatively, use the set_macro_group_shape command 
+to set the shape.
+Pack
+Select one or more macro group shapes in the layout and click the Pack button to place 
+the macros into the macro group shape. Alternatively, use the pack_macro_group 
+command.
+Revert
+Click the Revert button to undo the most recent pack operation. You can click the Revert 
+button multiple times to perform multiple undos.
+Clone
+Click the Clone button to copy the macro placement from one macro group to another. 
+First, select the source macro placement group. Next, click the Clone Packing to button, 
+choose the destination group from the list, and click OK.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+256
+
+
+===== PDF page 257 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Performing Timing-Driven and Congestion-Driven Placement
+Feedback
+Macro Group and Macros
+Select a macro in the layout and click the Macro Group and Macros button to select the 
+corresponding macro group. Alternatively, select a macro group and click the Macro Group 
+and Macros button to select the macros in the group.
+Performing Timing-Driven and Congestion-Driven Placement
+The create_placement command supports both timing-driven and congestion-
+driven placement of macros and standard cells. Use command options with the 
+create_placement command and the plan.place.timing_driven_mode and 
+plan.place.congestion_driven_mode application options to control how timing-driven 
+and congestion-driven placements are performed.
+Congestion-Driven Placement
+To create a congestion-driven placement, use both the -congestion and -floorplan 
+options with the create_placement command. When you use the -congestion option, 
+you can also control the level of effort applied to congestion-driven placement with the 
+-congestion_effort low | medium | high option. You can specify both timing-
+driven placement and congestion-driven placement within the same create_placement 
+command.
+Congestion-driven placement can perform three types of congestion reduction, based on 
+the setting of the plan.place.congestion_driven_mode application option:
+•
+macro: Reduces the congestion over and between the macros only
+•
+std_cell: Reduces congestion between standard cells
+•
+both: Reduces congestion both between macros and between standard cells
+The following example applies congestion reduction only between hard macros, and 
+performs coarse placement with high effort:
+icc2_shell> set_app_options -name plan.place.congestion_driven_mode \
+   -value macro
+icc2_shell> create_placement -floorplan -congestion \
+   -congestion_effort high
+Timing-Driven Placement
+To create a timing-driven placement, use the -timing_driven and -floorplan options 
+with the create_placement command. You can specify both timing-driven placement and 
+congestion-driven placement within the same create_placement command.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+257
+
+
+===== PDF page 258 =====
+Chapter 9: Performing Block Shaping and Macro Placement
+Performing Timing-Driven and Congestion-Driven Placement
+Feedback
+Timing-driven placement can perform three types of placement, based on the setting of the 
+plan.place.timing_driven_mode application option:
+•
+macro : Performs timing-driven placement only for macros
+•
+std_cell : Performs timing-driven placement only for standard cells
+•
+both : Performs timing-driven placement for both macros and standard cells
+The following example applies timing-driven placement only to standard cells; macros are 
+placed normally.
+icc2_shell> set_app_options -name plan.place.timing_driven_mode \
+   -value std_cell
+icc2_shell> create_placement -floorplan -timing_driven
+Combined Congestion-Driven and Timing-Driven Placement
+To perform congestion-driven placement and timing-driven placement with 
+the same create_placement command, use both the -congestion and 
+-timing_driven options and specify the plan.place.congestion_driven_mode and 
+plan.place.timing_driven_mode application options. The following example performs 
+congestion-driven and timing-driven placement on both macros and standard cells.
+icc2_shell> set_app_options -name plan.place.congestion_driven_mode \
+   -value both
+icc2_shell> set_app_options -name plan.place.timing_driven_mode \
+   -value both
+icc2_shell> create_placement -floorplan -congestion -timing_driven
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+258

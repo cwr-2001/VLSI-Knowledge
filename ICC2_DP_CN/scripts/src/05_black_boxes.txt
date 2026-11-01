@@ -1,0 +1,370 @@
+
+
+===== PDF page 82 =====
+Feedback
+5
+Handling Black Boxes
+The IC Compiler II tool supports black boxes for modules in the design planning flow. 
+A black box is a module that has no netlist, has only a partial netlist, or is not bound to 
+a higher level module. Use black boxes to continue design planning without requiring a 
+complete netlist for all modules. The tool supports block boxes for both physical and timing 
+purposes, and for all stages of design planning. Note that only physical hierarchies can be 
+black boxes in the tool.
+The following design planning operations are available for black boxes:
+•
+Multiply-Instantiated black box support
+•
+Shaping
+•
+Macro and standard placement (for partial netlist Black Boxes)
+•
+PG Routing
+•
+Pin assignment and feedthrough creation
+•
+Push-down and pop-up
+•
+Feedthrough buffering
+•
+Abstract creation and merging
+•
+Timing model creation
+•
+Budgeting
+The flow to create black box physical models and timing models is shown in Figure 18.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+82
+
+
+===== PDF page 83 =====
+Chapter 5: Handling Black Boxes
+Identifying Potential Black Boxes
+Feedback
+Figure 18
+Black Box Flow
+ 
+Identify potential black boxes
+(get_attribute)
+Create black box references
+(create_blackbox)
+Create black box timing models
+(create_blackbox_*,set_blackbox_*)
+Commit the black box timing models
+(commit_blackbox_timing
+ 
+For more details, see the following topics:
+•
+Identifying Potential Black Boxes
+•
+Creating Black Box References
+•
+Creating a Black Box Timing Model
+•
+Black Box Timing Example
+•
+UPF for Black Box Designs
+Identifying Potential Black Boxes
+Black boxes can be identified by retrieving cells with a black_box attribute set to true. 
+Black boxes can be further classified into missing/unbound, empty, partial, feedthrough, 
+and tie-off. In addition, feedthrough and tie-off modules can be identified by examining the 
+following attributes on the block:
+•
+has_timing_model
+•
+hierarchy_hard_macro_count
+•
+hierarchy_has_shadow_netlist
+•
+hierarchy_has_shadow_netlist_only
+•
+hierarchy_pad_cell_count
+•
+hierarchy_physical_only_cell_count
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+83
+
+
+===== PDF page 84 =====
+Chapter 5: Handling Black Boxes
+Identifying Potential Black Boxes
+Feedback
+•
+hierarchy_std_cell_count
+•
+hierarchy_switch_cell_count
+•
+is_unbound
+•
+target_boundary_area
+Use the following guidelines to identify different types of black boxes:
+•
+Missing modules
+Missing modules have no module definition (no module statement) in the Verilog netlist 
+and have the is_unbound attribute set to true.
+icc2_shell> get_attribute -objects $cells -name is_unbound
+true
+icc2_shell> get_attribute -objects $cells \
+   -name hierarchy_std_cell_count
+0
+icc2_shell> get_attribute -objects $cells \
+   -name hierarchy_has_shadow_netlist
+false
+•
+Empty modules
+Empty modules have a module definition but no content. Use the hierarchy count 
+attributes for standard cells and hard macros to identify these types of modules.
+icc2_shell> get_attribute -objects $cells -name is_unbound
+false
+icc2_shell> get_attribute -objects $cells \
+   -name hierarchy_std_cell_count
+0
+icc2_shell> get_attribute -objects $cells \
+   -name hierarchy_hard_macro_count
+0
+icc2_shell> get_attribute -objects $cells \
+   -name hierarchy_has_shadow_netlist
+false
+•
+Partial modules
+Modules with only a partial netlist contain an incomplete set of cells. Use the hierarchy 
+count attributes to identify these types of modules.
+icc2_shell> get_attribute -objects $cells \
+   -name hierarchy_hard_macro_count
+3
+icc2_shell> get_attribute -objects $cells \
+   -name hierarchy_std_cell_count
+119
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+84
+
+
+===== PDF page 85 =====
+Chapter 5: Handling Black Boxes
+Identifying Potential Black Boxes
+Feedback
+icc2_shell> get_attribute -objects $cells \
+   -name hierarchy_has_shadow_netlist
+true
+icc2_shell> get_attribute -objects $cells \
+   -name hierarchy_has_shadow_netlist_only
+false
+icc2_shell> get_attribute -objects $cells \
+   -name hierarchy_pad_cell_count
+0
+icc2_shell> get_attribute -objects $cells \
+   -name hierarchy_physical_only_cell_count
+0
+icc2_shell> get_attribute -objects $cells \
+   -name hierarchy_switch_cell_count
+0
+•
+Feedthrough modules
+Feedthrough modules contain net connections between input and output ports, but 
+contain no cells.
+icc2_shell> get_attribute -objects $cells \
+   -name hierarchy_std_cell_count
+0
+icc2_shell> get_attribute -objects $cells \
+   -name hierarchy_hard_macro_count
+0
+icc2_shell> get_attribute -objects $cells \
+   -name hierarchy_has_shadow_netlist
+true
+icc2_shell> get_attribute -objects $cells \
+   -name hierarchy_has_shadow_netlist_only
+true
+•
+Tie-off modules
+Tie-off modules have only output ports with are tied to a logical value.
+icc2_shell> get_attribute -objects $cells \
+   -name hierarchy_std_cell_count
+0
+icc2_shell> get_attribute -objects $cells \
+   -name hierarchy_hard_macro_count
+0
+icc2_shell> get_attribute -objects $cells \
+   -name hierarchy_has_shadow_netlist
+false
+icc2_shell> get_attribute -objects $cells \
+   -name hierarchy_has_shadow_netlist_only
+false
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+85
+
+
+===== PDF page 86 =====
+Chapter 5: Handling Black Boxes
+Creating Black Box References
+Feedback
+Creating Black Box References
+After identifying the modules which to treat as black boxes, use the create_blackbox 
+command to create a black box physical hierarchy for the cell. The command also updates 
+the reference for the specified cell. Note that you can convert empty, partial, or missing 
+modules to black boxes after reading in the netlist, or after committing the blocks.
+The following example creates a black box in the current library for instance u0_3 and 
+sets a target boundary area of 2000000. The layout window after creating the black box is 
+shown in Figure 19:
+icc2_shell> create_blackbox -target_boundary_area 2000000 u0_3
+0
+Figure 19
+Black Box in the GUI
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+86
+
+
+===== PDF page 87 =====
+Chapter 5: Handling Black Boxes
+Creating Black Box References
+Feedback
+To find black boxes in the design created with the create_blackbox command, or to 
+check whether a specific module is a black box, check the design_type attribute of the 
+module as follows:
+icc2_shell> get_cells -hierarchical \
+   -filter ref_block.design_type==black_box
+{I_ORCA_TOP/I_BLENDER_0}
+ 
+icc2_shell> get_attribute [get_cells I_ORCA_TOP/I_BLENDER_0] design_type
+black_box
+The GUI provides annotations in the Hierarchy Browser and Properties Editor to help 
+identify black boxes as shown in Figure 20.
+Figure 20
+Black Box Display in Hierarchy Browser and Properties Editor
+To modify the area set by the create_blackbox -target_boundary_area area 
+command, set the target_boundary_area attribute directly on the black box cell with the 
+following command:
+icc2_shell> set_attribute -objects [get_cells I_ORCA_TOP/I_BLENDER_0] \
+   -name target_boundary_area -value 1500000
+{u0_3}
+For black boxes created from a partial Verilog netlist, you can specify a target utilization 
+with the following command:
+icc2_shell> set_attribute -objects [get_cells I_ORCA_TOP/I_BLENDER_0] \
+   -name target_utilization -value 0.5
+{u0_3}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+87
+
+
+===== PDF page 88 =====
+Chapter 5: Handling Black Boxes
+Creating a Black Box Timing Model
+Feedback
+Both the target_boundary_area and target_utilization attributes are honored by the 
+shape_blocks command during block shaping.
+Creating a Black Box Timing Model
+A black box contains no timing information by default. Any path that begins or ends at 
+a black box is unconstrained. The IC Compiler II tool provides commands to create a 
+timing model for a black box, which allows the module to be used for timing budgeting and 
+optimization.
+To create a black box timing model,
+1. Define the clock ports, drive and load.
+icc2_shell> set_blackbox_clock_port ...
+icc2_shell> set_blackbox_port_drive ...
+icc2_shell> set_blackbox_port_load ...
+2. Set the clock network delay, pin-to-pin delays, setup and hold constraints.
+icc2_shell> create_blackbox_clock_network_delay ...
+icc2_shell> create_blackbox_constraint ...
+icc2_shell> create_blackbox_delay ...
+icc2_shell> create_blackbox_drive_type ...
+icc2_shell> create_blackbox_load_type ...
+3. Commit the timing model to the black box.
+icc2_shell> commit_blackbox_timing
+1
+You create timing model for a black box by specifying the model ports, the setup and hold 
+constraints on the inputs, the clock-to-output path delays, and the input-to-output path 
+delays. You can also specify the loads on input ports and the drive strength of output ports.
+Black box timing information is stored in the design view. When an abstract is created from 
+a black box, specially marked cells, nets, and connections are created on-the-fly within the 
+abstract view. This approach enables timing on an empty or partial netlist and allows newly 
+created feedthroughs to be timed immediately without recreating the models.
+For a partial black box, only the unconnected ports can be constrained with black box 
+timing constraints. Other ports on the partial black box should be constrained by using 
+Synopsys Design Constraints (SDC) files.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+88
+
+
+===== PDF page 89 =====
+Chapter 5: Handling Black Boxes
+Black Box Timing Example
+Feedback
+When generating timing budgets, the tool maintains the timing you specified with the black 
+box timing commands. To allow the budgeter to adjust the black box timing budgets, set 
+the plan.budget.bbt_fixed_delay application option as follows:
+icc2_shell> set_app_options -name plan.budget.bbt_fixed_delay \
+   -value false
+plan.budget.bbt_fixed_delay false
+Black Box Timing Example
+The following example shows the commands used to create a black box timing model. The 
+resulting model is shown in Figure 21.
+set_blackbox_clock_port [get_ports {clk1_in clk1_out clk2_in}]
+create_blackbox_load_type -lib_cell buf1 lt1
+set_blackbox_port_load -type lt1 -factor 3 [get_ports in1]
+create_blackbox_clock_network_delay -value 3.5 clk_1
+create_blackbox_delay -rise_from in1 -fall_to out1 -value 5.0
+create_blackbox_delay -fall_from in1 -rise_to out1 -value 5.2
+create_blackbox_delay -from in2 -to out2 -clock main_clock \
+   -value 0.4
+create_blackbox_constraint -setup -edge rise -from clk2_in \
+   -to in3 -value 1.2
+create_blackbox_constraint -hold -edge rise -from clk2_in \
+   -to in3 -value 0.8
+create_blackbox_delay -from clk1_in -to clk1_out -value 1.1
+create_blackbox_constraint -edge rise -from clk1_in -to in3 \
+   -clock main_clock -value 0.5
+create_blackbox_constraint -edge rise -from clk1_in -to in2 \
+   -value 1.3
+create_blackbox_delay -rise_from clk1_in -to out2 -value 2.2
+create_blackbox_delay -fall_from clk1_in -to out3 -value 1.7
+commit_blackbox_timing
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+89
+
+
+===== PDF page 90 =====
+Chapter 5: Handling Black Boxes
+UPF for Black Box Designs
+Feedback
+Figure 21
+Example Black Box Timing Model
+UPF for Black Box Designs
+The UPF constraints for black boxes are specified differently from the UPF constraints for 
+normal blocks, because black boxes act as leaf cells and the black box UPF constraints 
+describe the context in terms of the top level. The black box UPF also defines the receiver 
+supply information to the block input ports.
+The UPF for black boxes can be written specifically for the black box or extracted from an 
+existing design with the save_upf -for_empty_blackbox command and option as shown 
+in the following example.
+create_blackbox I_ORCA_TOP/I_BLENDER
+current_design BLENDER
+load_upf inputs/BLENDER.upf
+commit_upf
+save_upf -for_empty_blackbox ./split/BLENDER/top.upf
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+90
+
+
+===== PDF page 91 =====
+Chapter 5: Handling Black Boxes
+UPF for Black Box Designs
+Feedback
+You would not typically run the split_constraints command to generate UPF 
+constraints for black boxes or empty modules. If a net does not have a real driver, 
+the primary supply for the domain is used. Black boxes are the only hierarchical cells 
+where the set_port_attributes command or the set_related_supply_net (SRSN) 
+command can be used to override the supply information.
+You should create abstracts for black boxes in your design, as this creates black box 
+timing cells. In addition to providing drive and load information for outputs and inputs, 
+these cells also provide drivers and receivers on the net and enable mulitvoltage-related 
+commands such as check_mv_design to perform as expected.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+91

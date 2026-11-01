@@ -1,0 +1,1997 @@
+
+
+===== PDF page 92 =====
+Feedback
+6
+Planning I/Os and Flip-Chip Bumps
+After creating the floorplan, you can instantiate the I/O drivers and bump cells for your 
+design. The IC Compiler II tool supports advanced features for unconstrained and 
+constraint-based placement of I/O drivers and flip-chip bump cells. You can create I/O 
+placement constraints and specify the ordering, xy coordinate, and placement side for 
+each I/O. The tool supports both package-driven and die-driven I/O placement flows, and 
+you can adapt the tool for different chip packaging scenarios. Different I/O driver styles, 
+such as pads with integrated drivers, are supported by the tool.
+Chip I/Os can be placed along the chip periphery or in islands within the chip core. 
+Constraints include signal constraints and power constraints to specify I/O adjacency 
+requirements and power requirements. You can perform I/O placement by using Tcl 
+commands and GUI interfaces.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+92
+
+
+===== PDF page 93 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+ 
+Feedback
+The flow for instantiating I/O drivers and pads is shown in Figure 22.
+Figure 22
+I/O Planning Flow
+ 
+Create I/O rings or guides
+(create_io_ring, create_io_guide)
+Create bump pad arrays
+(create_bump_array)
+Create power I/O constraints
+(set_power_io_constraints)
+Create signal I/O constraints
+(set_signal_io_constraints)
+Create matching types
+(create_matching_type)
+Place I/O drivers
+(place_io)
+Place physical-only I/O cells
+(create_io_*_cells)
+Write I/O placement constraints
+(write_io_constraints)
+Route RDL nets
+(route_rdl_flip_chip)
+Optimize RDL nets
+(optimize_rdl_routes)
+Create RDL route shields
+(create_rdl_shields)
+ 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+93
+
+
+===== PDF page 94 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Validating Library Requirements
+Feedback
+For more details, see the following topics:
+•
+Validating Library Requirements
+•
+Creating I/O Rings or Guides
+•
+Creating Arrays of Bump Cells
+•
+Creating Rows or Columns of Bump Cells
+•
+Placing Bump Cells in Predetermined Locations
+•
+Creating Power I/O Placement Constraints
+•
+Creating Signal I/O Placement Constraints
+•
+Assigning I/O Pads to Bumps
+•
+Placing I/Os and Writing Constraints
+•
+Adding and Placing Physical-Only I/O Cells
+•
+Checking I/O Placement
+•
+Routing RDL Nets
+•
+Optimizing RDL Routes
+•
+Creating RDL Net Shields
+•
+Creating a Flip-Chip Design With Multiple Levels of Hierarchy
+Validating Library Requirements
+Before beginning a flip-chip design, you must ensure that the reference library that 
+contains flip-chip component cells is properly configured for the tool. Specifically, the 
+design_type attribute should be checked for the following flip-chip reference cells by 
+using the IC Compiler II Library Manager tool or the IC Compiler II tool:
+•
+Bump cells: the design_type attribute must be set to flip_chip_pad.
+On the library cell pin of the bump cell, the is_pad attribute must be set to true. You 
+must set this attribute for the tool to automatically create terminals for top-level ports, 
+when bumps are connected or assigned to ports.
+•
+Driver cells: the design_type attribute must be set to flip_chip_driver or pad.
+You can also set the design_type attribute to macro and use the driver cell for I/O 
+placement if the flip-chip matching types are defined.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+94
+
+
+===== PDF page 95 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Validating Library Requirements
+Feedback
+The terminal or pin shape of the driver cell to be connected to an RDL route should 
+have the class attribute set to bump. If there is no terminal with this setting, the RDL 
+router chooses the topmost layer terminal of the port.
+•
+Filler and break cells: the design_type attribute must be set to pad_spacer.
+•
+Corner cells: the design_type attribute must be set to corner.
+Property types and attribute settings on the frame view for flip-chip library cells can be 
+examined in the IC Compiler II Library Manager as shown in the following figure.
+Figure 23
+design_type Property for Driver Cell
+Note that the design_type attribute setting can be derived from the LEF file for the library 
+cell. A value of pad is created based on the "PAD" macro class in the LEF file. A value of 
+flip_chip_pad is created based on the "COVER BUMP" macro class in the LEF file.
+Some attributes of a library reference cell can be overridden by using the set_attribute 
+command in the IC Compiler II tool. Attribute settings performed in the IC Compiler II tool 
+are not propagated to the reference library.
+For macros, the default design_type attribute setting is macro and bump assignment is 
+not performed. To perform bump assignment for macros, you must create matching types 
+that include macros, pins of macros, or terminals of macro pins. Matching any part of the 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+95
+
+
+===== PDF page 96 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Creating I/O Rings or Guides
+Feedback
+macro is sufficient for the place_io command to identify a cell instance. To identify the 
+pins that are assigned to bumps, do one of the following:
+•
+Explicitly include the pin in the matching type. This is the recommended methodology.
+•
+Set the class attribute to bump for any terminal pin during library preparation, or use 
+the set_attribute command in the IC Compiler II tool.
+Creating I/O Rings or Guides
+The IC Compiler II tool supports I/O guides, which form a placement area for I/O drivers. 
+You can create an I/O ring by placing four I/O guides along the periphery of the floorplan 
+with four create_io_guide commands, or by using one create_io_ring command. The 
+IC Compiler II tool also supports multiple I/O rings and supports multiple I/O guides on the 
+same side of the die.
+I/O guides can be placed anywhere in the hierarchy, if the following are honored:
+•
+All flip-chip bump cells must be placed at the top level.
+•
+I/O guides are not allowed to cross block boundaries for a placed block.
+•
+I/O pad cells and the associated I/O guide must be placed within the same physical 
+block instance.
+•
+Only pads in the same logical hierarchy as the I/O guide can be constrained with the 
+set_signal_io_constraints command.
+•
+I/O guides must not overlap.
+You must create I/O guides or I/O rings before placing I/O cells. The following commands 
+create a ring containing four I/O guides around the periphery of the floorplan and retrieve 
+the names of the I/O guides created by the create_io_ring command.
+icc2_shell> create_io_ring -name outer_ring -corner_height 300
+{outer_ring}
+icc2_shell> get_io_guides
+{outer_ring.left outer_ring.bottom outer_ring.right outer_ring.top}
+You can also use four create_io_guide commands to create I/O guides on the left, top, 
+right, and bottom sides of the die.
+icc2_shell> create_io_guide -name "ring_left" -line {{0 300} 3000} \
+   -side left
+{ring_left}
+icc2_shell> create_io_guide -name "ring_top" -line {{300 3640} 3000} \
+   -side top
+{ring_top}
+icc2_shell> create_io_guide -name "ring_right" -line {{3680 3380} 3000} \
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+96
+
+
+===== PDF page 97 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Creating I/O Rings or Guides
+Feedback
+   -side right
+{ring_right}
+icc2_shell> create_io_guide -name "ring_bottom" -line {{3380 0} 3000} \
+   -side bottom
+{ring_bottom}
+icc2_shell> get_io_guides
+{ring_left ring_top ring_right ring_bottom}
+Alternatively, you can use the Floorplan Task Assistant to create the I/O rings and I/O 
+guides in the GUI. Select Task > Task Assistant, then select Floorplan Preparation > I/O 
+Planning > I/O Ring and Guide. Enter the information for the I/O ring or I/O guide and click 
+Apply to create the ring or guide.
+I/O Ring and I/O Guide Tasks
+Use options with the create_io_ring and create_io_guide commands to control how 
+the ring is created:
+•
+Assign a name to the ring with the -name option. The name is used as a prefix for the 
+I/O guide names.
+icc2_shell> create_io_ring -name outer_ring
+{outer_ring}
+icc2_shell> get_io_rings
+{outer_ring}
+icc2_shell> get_io_guides
+{outer_ring.left outer_ring.bottom outer_ring.right outer_ring.top}
+•
+Create a ring inside an existing ring with the -inside option. The existing ring is used 
+as the outer boundary for the new ring.
+icc2_shell> create_io_ring -name inner -inside outer_ring
+•
+Specify the distance between the inner and outer ring boundaries with the -offset 
+option.
+icc2_shell> create_io_ring -name inner -inside outer -offset 500
+•
+Create a ring within a specific bounding box with the -bbox option.
+icc2_shell> create_io_ring -bbox {{1000 1000} {2000 2000}}
+•
+Specify a list of pad cell instances to assign to the ring with the -pad_cell_list 
+option.
+icc2_shell> create_io_ring -pad_cell_list {pad_iopad_0 pad_iopad_1}
+•
+Include specific I/O guides in the ring with the -guides option.
+icc2_shell> get_io_guides
+{ring_left ring_top ring_right ring_bottom}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+97
+
+
+===== PDF page 98 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Creating Arrays of Bump Cells
+Feedback
+icc2_shell> create_io_ring -guides [get_io_guides]
+{_default_io_ring1}
+•
+Specify the minimum distance between the startpoint of the I/O guide and the first I/O 
+driver, and the minimum distance between the endpoint of the I/O guide and the last 
+I/O driver with the -offset option of the create_io_guide command.
+Editing, Reporting, and Removing I/O Guides and I/O Rings
+•
+Add I/O pad cells to an I/O guide with the add_to_io_guide command.
+icc2_shell> add_to_io_guide guide_left {pad_iopad_0 pad_iopad_1}
+•
+Create a collection of I/O guides with the get_io_guides command and create a 
+collection of I/O rings with the get_io_rings command.
+icc2_shell> get_io_guides
+{guide_left guide_top guide_right guide_bottom}
+icc2_shell> get_io_rings
+{ring_outer}
+•
+Remove I/O pad cells from an I/O guide with the remove_from_io_guide command.
+icc2_shell> remove_from_io_guide guide_left {pad_iopad_0 pad_iopad_1}
+total 2 cells removed from io guide
+•
+Remove an I/O guide from an I/O ring with the remove_from_io_ring command.
+icc2_shell> remove_from_io_ring ring_outer {guide_left guide_top}
+•
+Report I/O rings or I/O guides in the block with the report_io_rings and 
+report_io_guides commands.
+•
+Remove I/O rings or I/O guides from the block with the remove_io_rings and 
+remove_io_guides commands.
+Creating Arrays of Bump Cells
+The IC Compiler II tool supports bump cell placement for flip-chip designs. You can place 
+bump cells based on placement coordinates in a DEF or AIF file, or by creating a bump 
+array with the create_bump_array command. You should place bump cells before placing 
+I/O driver cells. In the die-driven flow, you create a region for bump cell placement and 
+let the tool determine the locations for the bump cells. The following example creates five 
+bump array regions, one each for the left, top, right, bottom, and center die areas, and fills 
+each region with BUMP library cells.
+icc2_shell> create_bump_array -lib_cell BUMP -delta {140 140} \
+   -bbox {{410 450} {1175 3278}} -name left
+icc2_shell> create_bump_array -lib_cell BUMP -delta {140 140} \
+   -bbox {{2620 450} {3325 3278}} -name right
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+98
+
+
+===== PDF page 99 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Creating Arrays of Bump Cells
+Feedback
+icc2_shell> create_bump_array -lib_cell BUMP -delta {140 140} \
+   -bbox {{1100 450} {2650 1125}} -name bottom
+icc2_shell> create_bump_array -lib_cell BUMP -delta {140 140} \
+   -bbox {{1100 2555} {2650 3250}} -name top
+icc2_shell> create_bump_array -bbox {{1100 1150} {2650 2550}} \
+   -pattern staggered_1 -lib_cell {BUMP} -delta {140 140} -name pg_bump
+Figure 24 shows the layout after running the previous commands.
+Figure 24
+Layout After create_bump_array
+Bump Array Options
+Use options with the create_bump_array command to control how the bump array is 
+created:
+•
+Specify the horizontal and vertical spacing between adjacent rows with the -delta 
+option; -delta and -lib_cell are required options.
+icc2_shell> create_bump_array -lib_cell BUMP -delta {150 150}
+•
+Create a name for the bump array with the -name option.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+99
+
+
+===== PDF page 100 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Creating Arrays of Bump Cells
+Feedback
+icc2_shell> create_bump_array -lib_cell BUMP -delta {150 150} \
+   -name pg_bump
+•
+Specify a rectangular bounding box to contain the bump cells with the -bbox option.
+icc2_shell> create_bump_array -lib_cell BUMP -delta {150 150} \
+   -bbox {{1000 1000} {3000 3000}}
+•
+Create the bump array within a complex rectilinear shape with the -boundary option.
+icc2_shell> create_bump_array -lib_cell BUMP -delta {150 150} \
+   -boundary {{1000 1000} {3000 1000} {3000 3000} {1000 3000}}
+•
+Limit the bump array size by number of columns or number of rows with the -repeat 
+option. Bumps are centered in the die or bounding box.
+icc2_shell> create_bump_array -lib_cell BUMP -delta {150 150} \
+   -repeat {5 5}
+•
+Set the spacing between the lower-left corner of the bump array bounding box and the 
+lower-left corner of the bump cell instance at column 0 and row 0 with the -origin 
+option.
+icc2_shell> create_bump_array -lib_cell BUMP -delta {150 150} \
+   -origin {1000 1000}
+•
+Specify the orientation of each bump cell in the bump array with the -orientation 
+option.
+icc2_shell> create_bump_array -lib_cell BUMP -delta {150 150} \
+   -orientation N
+Legal orientation values are N, W, S, E, FN, FS, FE, and FW.
+•
+Specify whether the bump cells occupy each possible location or alternate locations 
+with the -pattern inline | staggered_1 | staggered_2 option.
+icc2_shell> create_bump_array -lib_cell BUMP -delta {150 150} \
+   -pattern staggered_1
+The inline keyword places bump cells at each point in the array specified by the 
+-delta option. The staggered_1 keyword places bump cells at points where the sum 
+of the column index and the row index is even. The staggered_2 keyword places 
+bump cells at points where the sum of the column index and the row index is odd. 
+Figure 25 shows a small bump placement example that uses these three placement 
+patterns.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+100
+
+
+===== PDF page 101 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Creating Rows or Columns of Bump Cells
+Feedback
+Figure 25
+Bump Array Placement Pattern Options
+left_
+2_0
+left_
+2_1
+left_
+2_2
+left_
+1_0
+left_
+1_1
+left_
+1_2
+left_
+0_0
+left_
+0_1
+left_
+0_2
+left_
+2_0
+empty
+left_
+2_2
+empty
+left_
+1_1
+empty
+left_
+0_0
+empty
+left_
+0_2
+empty
+left_
+2_1
+empty
+left_
+1_0
+empty
+left_
+1_2
+empty
+left_
+0_1
+empty
+-pattern inline
+(default)
+-pattern staggered_1
+-pattern staggered_2
+Creating Rows or Columns of Bump Cells
+In designs where I/O pad cells are not placed by using I/O guides, you can use the 
+create_bump_pattern command to instantiate bump cells and specify bump spacing, 
+matching types, and other information. This command is useful for designs that contain 
+clusters of I/O cells and require that the bump cells be placed in rows or columns 
+perpendicular to the I/O pad cells.
+To create a bump pattern for a set of pad cells, create the bump pattern file as described in 
+this section and load the file with the create_bump_pattern command as follows:
+icc2_shell> create_bump_pattern -file_name bump_patterns.txt
+12 bumps and 5 matching types are created successfully
+The following bump pattern file is used in this example; the layout result is shown in 
+Figure 26.
+# Bump pattern file for area I/O pad cluster
+bump_lib_cell BUMP_PAD   // Bump library cell
+bump_pitch 150           // (A) Bump pitch
+ 
+io_group {               // I/O group description
+  {{bus_3}   {bus_2}       {bus_1}       {bus_0 s}
+   {vss g0_} {vcc_main p_} {vss_io g1_}  {vcc_io p1_}
+   {bus_7}   {bus_6}       {bus_5}       {bus_4}}
+  {orientation row} // Valid orientations are row, column,
+                    // or perpendicular
+  {{-50}        // (B) Offset between center line of bumps
+                //     and pad bbox center
+   {100}        // (C) Spacing between the left or bottom
+                //     of pad bbox and nearest bump cell center
+   {s s p_ g0_} // Left or bottom bumps
+   {75}         // (D) Spacing between the right/top
+                //     of pad bbox and nearest bump cell center
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+101
+
+
+===== PDF page 102 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Creating Rows or Columns of Bump Cells
+Feedback
+   {s p1_ g1_   // Right or top bumps
+    s s s s s}
+   }
+}
+The pattern file specified by the -file_name option defines the bump library cell, bump 
+placement pitch, spacing, matching types, and other information used to create the bump 
+pattern. Commented lines begin with a pound sign (#), and inline comments begin with two 
+forward slashes (//). The pattern file uses the following format:
+•
+bump_lib_cell: The bump library cell; specify the bump library cell as library_cell or 
+library_name/library_cell
+•
+bump_pitch: The bump pitch in microns
+•
+io_group: The I/O group description, surrounded by curly braces ({}), contains the 
+following information:
+◦
+I/O pad instance names: The list of instance names specified within curly braces. 
+Each instance name is specified within its own curly braces together with an 
+optional matching type prefix. If no matching type prefix is specified, the “s” 
+matching type prefix is used. Bump instance names are based on the I/O pad name 
+of the first instance.
+In this example, the {vss g0_} item creates a bump cell with an instance name 
+of bus_3_n and a matching type named g0_bus_3. “g0_” is the matching type 
+prefix. “bus_3” is the first I/O pad specified and this string is used for all bump cell 
+instances created with this pattern file.
+◦
+orientation: (Optional) the orientation specification, either row, column, or 
+perpendicular.
+If the orientation keyword is omitted, the command places the bump cells based 
+on the height and width of the I/O pad bounding box. If the width is greater than the 
+height, the tool places the bump cells in columns. If the height is greater than the 
+width, the command places the bump cells in rows.
+◦
+Pad ordering and spacing: The ordering and spacing list is specified within curly 
+braces; a pattern file can contain multiple ordering and spacing sections. The 
+specification is as follows:
+▪
+Center line offset: The distance in microns between the center line of new bump 
+cells the center line of the bounding box defined by the I/O pads
+▪
+Left or bottom first bump spacing: The distance between the left or bottom edge 
+of the I/O pad bounding box and the nearest bump cell center
+▪
+Left or bottom bump cells: The list of matching type prefixes corresponding to 
+the matching type prefixes defined in the list of I/O pad instances
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+102
+
+
+===== PDF page 103 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Creating Rows or Columns of Bump Cells
+Feedback
+▪
+Right or top first bump spacing: The distance between the right or top edge of 
+the I/O pad bounding box and the nearest bump cell center
+▪
+Right or top bump cells: The list of matching type prefixes corresponding to the 
+matching type prefixes defined in the list of I/O pad instances
+▪
+orientation: (Optional) the orientation specification for this group, either row, 
+column, or perpendicular.
+The following figure shows the layout result created by the example bump pattern file.
+Figure 26
+Bump Cell Instances
+bus_3_3
+bus_3_2
+bus_3_1
+bus_3_0
+bus_3_4
+bus_3_5
+bus_3_6
+bus_3_8
+bus_3_7
+bus_3_10
+bus_3_9
+bus_3_11
+g0_
+p_
+s
+s
+s
+p1_
+g1_
+s
+s
+s
+s
+s
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+103
+
+
+===== PDF page 104 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Creating Rows or Columns of Bump Cells
+Feedback
+The following figure shows how the spacing values in the pattern file correspond to the 
+bump cell and I/O pad cell spacings in the layout.
+Figure 27
+Bump Cell Offsets and Spacings
+(B)
+(C)
+(D)
+(A)
+bump_lib_cell BUMP_PAD
+bump_pitch 150 // (A)
+io_group {
+  {{bus_3} {bus_2}
+   ...}
+  {orientation row}
+  {{-50}    // (B)
+   {100}    // (C)
+   {s ...}  // Left bumps
+   {75}     // (D)
+   {s ...}  // Right bumps
+  }
+}
+The output of the report_matching_types command shows the matching types 
+generated by the preceding pattern file. Note that the Uniquify and Object Type columns 
+are removed from this example.
+Matching Type  Object Name      |      Matching Type  Object Name
+--------------------------      |      --------------------------
+sbus_3         bus_0            |      g0_bus_3       bus_3_3
+               bus_1            |                     vss
+               bus_2            |      g1_bus_3       bus_3_6
+               bus_3            |                     vss_io
+               bus_3_0          |      p1_bus_3       bus_3_5
+               bus_3_1          |                     vcc_io
+               bus_3_10         |      p_bus_3        bus_3_2
+               bus_3_11         |                     vcc_main
+               bus_3_4          |
+               bus_3_7          |
+               bus_3_8          |
+               bus_3_9          |
+               bus_4            |
+               bus_5            |
+               bus_6            |
+               bus_7            |
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+104
+
+
+===== PDF page 105 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Placing Bump Cells in Predetermined Locations
+Feedback
+You can create more complex bump patterns by including multiple groups of row or 
+column specifications. The following bump pattern file creates three rows of bump cells by 
+including three groups of offsets and matching types. Each row contains two bumps to the 
+left of the I/O drivers and two bumps to the right of the I/O drivers.
+# Pattern file for three bump rows
+bump_lib_cell BUMP_PAD   // bump lib cell
+bump_pitch 200           // pitch
+ 
+io_group {               // I/O group description
+  {{bus_3}    {bus_2 }       {bus_1}       {bus_0 s}
+   {vss g0_}  {vcc_main p_}  {vss_io g1_}  {vcc_io p1_}
+   {bus_7}    {bus_6}        {bus_5}       {bus_4}}
+  {orientation row}
+  {{150}  {100} {s s}   {150} {p_ g0_}} // top row
+  {{0}    {100} {s p1_} {150} {g1_ s}}  // middle row
+  {{-150} {100} {s s}   {150} {s s}}    // bottom row
+}
+The layout result is shown in the following figure with cells highlighted by matching types.
+Figure 28
+Bump Pattern With Three Rows
+s
+s
+p_
+g0_
+p1_
+s
+g1_
+s
+s
+s
+s
+s
+Placing Bump Cells in Predetermined Locations
+If the locations of the bump cells are determined by the constraints of the package, use the 
+read_aif command to read in a list of bump cells and locations. The location information 
+is typically read from a DEF or AIF file, which contains x- and y-coordinates and bump cell 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+105
+
+
+===== PDF page 106 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Creating Power I/O Placement Constraints
+Feedback
+names for the bump cells in the block. Use the -hierarchy option to read in bump cell 
+and I/O pad locations and place the I/O pads in any level of physical hierarchy.
+icc2_shell> read_aif bumps.aif
+A short example from an AIF file is as follows:
+[DATABASE]
+TYPE=AIF
+VERSION=2.0
+UNITS=UM
+[DIE]
+NAME=mydesign_die
+WIDTH=3840.575700
+HEIGHT=3690.006000
+[PADS]
+BUMP_N = POLY -17.000 46.500 -17.000 46.475 ...
+[NETLIST]
+;Netname Pad#    Type    Pad_X       Pad_Y       Ball#
+-  left_0_0      BUMP_N  -1463.7878  -1348.5030
+-  left_0_1      BUMP_N  -1323.7878  -1348.5030
+...
+-  right_0_0     BUMP_N  746.2122    -1348.5030
+-  right_0_1     BUMP_N  886.2122    -1348.5030
+...
+-  bottom_0_0    BUMP_N  -773.7878   -1348.5030
+-  bottom_0_1    BUMP_N  -633.7878   -1348.5030
+...
+-  top_0_0       BUMP_N  -773.7878   756.4970
+-  top_0_1       BUMP_N  -633.7878   756.4970
+...
+-  pg_bump_0_0   BUMP_N  -773.7878   -648.5030
+-  pg_bump_0_2   BUMP_N  -493.7878   -648.5030
+...
+Creating Power I/O Placement Constraints
+Power I/O placement constraints specify spacing and other requirements for power 
+I/O drivers. Use the set_power_io_constraints command to set constraints for the 
+placement of I/O driver pads and use the place_io command to place the drivers into the 
+I/O guides. The following example sets placement constraints on power I/O drivers.
+icc2_shell> set_power_io_constraints \
+   -io_guide_object [get_io_guides "*left *right"] \
+    {{reference: VDD_EW}
+     {ratio: 3}
+     {prefix: VDD}
+     {connect: {VDDIO VDDIO} {VDD VDD1} {VSS VSS1}}}
+icc2_shell> set_power_io_constraints \
+   -io_guide_object [get_io_guides "*left *right"] \
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+106
+
+
+===== PDF page 107 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Creating Power I/O Placement Constraints
+Feedback
+    {{reference: VSS_EW}
+     {ratio: 7}
+     {prefix: VSS}
+     {connect: {VSSIO VSSIO} {VDD VDD1} {VSS VSS1}}}
+Power IO constraints set successfully
+1
+In this example, the first set_power_io_constraints command specifies the following 
+constraint:
+•
+The constraint applies only to the left and right I/O guides.
+•
+The power pad cell VDD_EW is inserted based on the constraint.
+•
+The number of signal pads between successive VDD_EW pads is three.
+•
+The string “VDD” is inserted into the instance name.
+•
+The VDDIO pad cell pin is connected to the VDDIO net, the VDD pad cell pin is 
+connected to the VDD1 net, and the VSS pad cell pin is connected to the VSS1 net.
+The second set_power_io_constraints command creates a similar constraint for 
+the VSS_EW cell references, but specifies that seven signal I/O pads might be inserted 
+between successive VSS_EW cells.
+Figure 29 shows a small section of the lower-left corner of the layout after running the 
+set_power_io_constraints and place_io commands.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+107
+
+
+===== PDF page 108 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Creating Power I/O Placement Constraints
+Feedback
+Figure 29
+Layout With Power I/O Constraints
+If you do not specify constraints with the set_power_io_constraints command, the 
+place_io command places the power pads evenly throughout the I/O guide.
+Power I/O Placement Constraint Options
+Use options with the set_power_io_constraints command to further control power 
+signal I/O placement.
+•
+Assign more than one power pad to a given bump cell with the -share option.
+icc2_shell> set_power_io_constraints \
+   -reference_cell {VDD_NS VSS_NS} -share {{2 VDD_NS} {3 VSS_NS}}
+In this example, -share {{2 VDD_NS} {3 VSS_NS}} allows up to two VDD power 
+pads to drive a single VDD bump cell, and three VSS power pads to drive a single VSS 
+bump cell.
+•
+Define the number of signal pads that can be placed between successive power pads 
+with the -ratio option.
+icc2_shell> set_power_io_constraints \
+   -reference_cell {VDD_NS VSS_NS} -ratio {{7 VDD_NS} {6 VSS_NS}}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+108
+
+
+===== PDF page 109 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Creating Signal I/O Placement Constraints
+Feedback
+In this example, the tool places no more than seven I/O pads between VDD_NS pad 
+cells, and no more than six I/O pads between VSS_NS pad cells.
+•
+Specify the maximum spacing between successive power pads of the same type with 
+the -spacing option.
+icc2_shell> set_power_io_constraints -reference_cell {VDD_NS VSS_NS} \
+   -spacing {{100 VDD_NS} {100 VSS_NS}}
+•
+Specify the maximum distance between the starting point of the I/O guide and the 
+closest edge of the first power pad of the specified type with the -offset option.
+icc2_shell> set_power_io_constraints -reference_cell {VDD_NS VSS_NS} \
+   -offset {{100 VDD_NS} {100 VSS_NS}}
+Creating Signal I/O Placement Constraints
+To create signal I/O placement constraints to specify the ordering and spacing for signal 
+I/O drivers, use the set_signal_io_constraints command. This command can be used 
+to specify constraints for I/O guides at the top level or specify constraints for I/O guides 
+within lower levels of the design hierarchy.
+In the following example, the set_signal_io_constraints command specifies an order-
+only constraint for the placement of three signal I/O drivers in the _default_io_ring1.left I/O 
+guide: u_p/clk_pad_P1, u_p/sdclk_pad_P1, and u_p/test_so_4_pad_P1.
+icc2_shell> set_signal_io_constraints -constraint {{order_only} \
+   u_p/clk_pad_P1 u_p/sdclk_pad_P1 u_p/test_so_4_pad_P1} \
+   -io_guide_object {_default_io_ring1.left}
+Signal IO constraints set successfully
+1
+The -constraint {constraint_spec} option supports different formats for specifying 
+the placement of signal I/O drivers. Use the -constraint {{order-only} pad_1 
+pad_2 ...} option to place the pads in the specified order. Note that additional spacing 
+and other pad cells might be inserted between adjacent pads. To create a fixed space 
+between I/O drivers, insert a spacing value in microns between the signal names. For 
+example, the -constraint {pad_1 10 pad_2 20 pad_3} option inserts a 10 micron 
+space between pads pad_1 and pad_2, and a 20 micron space between pads pad_2 
+and pad_3. To place each signal I/O driver at a specified pitch, use the -constraint 
+{{pitch} pad_1 pad_2 ...} option format.
+Alternatively, you can write out the signal I/O placement constraints with the 
+write_io_constraints -filename constraint_file_name command and use the 
+set_signal_io_constraints -file constraint_file_name command to load the 
+constraints. The constraint file is useful when there is a large number of signal constraints 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+109
+
+
+===== PDF page 110 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Creating Signal I/O Placement Constraints
+Feedback
+to specify. The following example loads signal I/O placement constraints from the 
+signal_io_constraints.txt constraints file.
+icc2_shell> set_signal_io_constraints -file signal_io_constraints.txt
+Signal IO constraints set successfully
+1
+icc2_shell> sh cat signal_io_constraints.txt
+_default_io_ring1.left
+{{order_only}
+u_p/clk_pad_P1
+u_p/sdclk_pad_P1
+u_p/test_so_4_pad_P1};
+Signal ordering begins at the lower-left pad for the left edge, the upper-left pad for the top 
+edge, the upper-right pad for the right edge, and the lower-right pad for the bottom edge 
+as shown in Figure 30.
+Figure 30
+Signal I/O Constraints Side Ordering
+Corner
+Corner
+Corner
+Corner
+left
+right
+top
+bottom
+start
+end
+end
+start
+end
+start
+start
+end
+In the following example, a signal I/O constraints file creates an ordering and spacing 
+constraint for the top I/O guide in the ring. The constraint creates an 80 micron gap 
+between the start of the I/O guide and the first signal I/O pad. A 55 micron pitch is used 
+to place the Pad_1, Pad_2, and Pad_3 I/O drivers. The constraint creates a 10 micron 
+spacing between the Pad_3 and Pad_4 I/O drivers, a 40 micron spacing between Pad_4 
+and Pad_5, a 60 micron spacing between Pad_5 and Pad_6, and no spacing between 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+110
+
+
+===== PDF page 111 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Creating Signal I/O Placement Constraints
+Feedback
+Pad_6, Pad_7, and Pad_8. Example 15 shows the signal I/O constraint file, and Figure 31 
+shows the layout results after running the place_io command.
+Example 15
+I/O Constraints File Example
+ring.top
+{80}
+{{55} Pad_1 Pad_2 Pad_3}
+{10}
+{Pad_4 40 Pad_5 60 Pad_6}
+{Pad_7 Pad_8}
+;
+Figure 31
+ring.top I/O Placement
+ring.top I/O guide
+Pad_1
+Pad_2
+Pad_3
+Pad_4
+Pad_5
+Pad_6
+Pad_7
+Pad_8
+80
+55
+55
+10
+40
+60
+Specifying I/O Placement Constraints With a CSV File
+Instead of a constraint file, you can use a comma-separated values (CSV) file to define the 
+ordering and location of I/O cells for a specific I/O guide. Note the following when placing 
+I/Os by using a CSV file:
+•
+The CSV file must contain a header row that defines the ordering of the fields
+•
+Only the “Pad Name” field is required in the CSV file, the “Offset Value” field is optional
+•
+Any other fields in the CSV file are read and ignored
+•
+Fields can appear in any order
+•
+Fields must not be repeated
+•
+The number of fields must be the same for each row
+To specify an order-only constraint, create a CSV file and list the I/O pad cell 
+names starting from the beginning of the I/O guide. Use the -csv option with the 
+set_signal_io_constraints command to specify the CSV file name. In the 
+following example, the “ref_cell” field is for information only and is not used by the 
+set_signal_io_constraints command.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+111
+
+
+===== PDF page 112 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Creating Signal I/O Placement Constraints
+Feedback
+icc2_shell> set_signal_io_constraints -csv iopads.csv \
+   -io_guide_object io_guide_1
+Signal IO constraints set successfully
+ 
+icc2_shell> sh cat iopads.csv
+ref_cell,Pad Name
+B4ISH1025_EW,pad0
+B4ISH1025_EW,pad1
+B4ISH1025_EW,pad2
+B4ISH1025_EW,pad3
+To set an offset value for each I/O pad, specify both the “Pad Name” and “Offset Value” 
+fields as shown in the following example. Any other fields, such as the “Comment” field in 
+this example, are for information only and are not used by the tool:
+icc2_shell> sh cat iopads_offsets.csv
+Pad Name,Offset Value,Comment
+pad0,200,pad0 offset is 200
+pad1,400,pad1 offset is 400
+pad2,600,pad2 offset is 600
+pad3,800,pad3 offset is 800
+pad4,1000,pad4 offset is 1000
+pad5,1200,pad5 offset is 1200
+pad6,1400,pad6 offset is 1400
+pad7,1600,pad7 offset is 1600
+If your CSV file contains custom column names, create a map file with comma-separated 
+pairs of custom column names and standard column names and use the -map_file 
+option to specify the map file name with the set_signal_io_constraints command. The 
+following example uses the custom column names REFERENCE_CELL, PAD_NAME, and 
+PAD_OFFSET in the CSV file. The map file lists the custom column name and standard 
+column name, separated by a comma. Note that the REFERENCE_CELL column is not 
+used by the tool and is not included in the map file.
+icc2_shell> sh head ioconstraints2.csv
+REFERENCE_CELL,PAD_NAME,PAD_OFFSET
+B4ISH1025_EW,pad_iopad_0,0
+B4ISH1025_EW,pad_iopad_1,100
+...
+ 
+icc2_shell> sh cat map.txt
+PAD_NAME,Pad Name
+PAD_OFFSET,Offset Value
+ 
+icc2_shell> set_signal_io_constraints -csv ioconstraints2.csv \
+   -io_guide _default_io_ring1.left -map_file map.txt
+Setting PAD_NAME as custom name for column Pad Name.
+Setting PAD_OFFSET as custom name for column Offset Value.
+Signal IO constraints set successfully
+1
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+112
+
+
+===== PDF page 113 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Creating Signal I/O Placement Constraints
+Feedback
+Placing I/Os Pads Together With Fixed Objects
+By default, the place_io command places I/O pads into the I/O guides and overlaps 
+any existing fixed objects. To honor a fixed object that is placed at the start of the I/O 
+guide and specify that I/O pads are inserted away from the object, create a constraint file 
+that contains an absolute constraint and order-based constraint. The absolute constraint 
+contains the first pad to be placed and the spacing value. The order-based constraint also 
+contains the first pad and other order-dependent pads.
+The following constraint file creates a constrained I/O placement for the top I/O ring named 
+ring1.top. The constraint places the pad_iopad_1 pad 200 microns from the start of the I/O 
+guide. Note that pad_iopad_1 is specified both in the absolute constraint and in the order-
+based constraint.
+ring1.top
+{{absolute} pad_iopad_1 200.0}
+{
+  pad_iopad_1
+  pad_iopad_2
+  pad_iopad_6
+  pad_iopad_12
+  pc_be_iopad_0
+}
+;
+The following figure shows the design after running the place_io command without the 
+previous constraint and with the constraint.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+113
+
+
+===== PDF page 114 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Assigning I/O Pads to Bumps
+Feedback
+Figure 32
+place_io Fixed Pad Constraint Comparison
+Assigning I/O Pads to Bumps
+The IC Compiler II tool supports both automatic and user-specified pad-to-bump 
+assignment as explained in the following topics.
+•
+Automatic Bump Assignment
+•
+User-Specified Bump Assignment With Matching Types
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+114
+
+
+===== PDF page 115 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Assigning I/O Pads to Bumps
+Feedback
+Automatic Bump Assignment
+Before routing flip-chip drivers to flip-chip bump cells, you must create assignments 
+between the I/O drivers and bump cells. The tool supports both automatic assignment with 
+the place_io command and user-generated assignment with the create_matching_type 
+command. To perform automatic assignment, specify the -bump_assignment_only option 
+with the place_io command as follows:
+icc2_shell> place_io -bump_assignment_only
+To verify the assignments, use the RDL Flylines panel in the GUI to view the assignments. 
+Choose View > Flylines > RDL Flylines from the menu and select the RDL net names to 
+view the RDL flylines.
+Figure 33
+Default RDL Net Assignments
+Alternatively, use the write_matching_types command with the 
+-from_existing_assignment and -file_name options to write out the assignments 
+created by the place_io command. Examine the file written by this command to view the 
+assignments created by the tool.
+icc2_shell> write_matching_types -from_existing_assignment \
+   -file_name existing.tcl
+1
+ 
+icc2_shell> sh head existing.tcl
+create_matching_type -name existing_assignment_0
+   -uniquify 1 [list [get_cells { bottom_0_0 }] \
+   [get_pins { __added_power_driver_1/VDDPAD }]]
+create_matching_type -name existing_assignment_1
+   -uniquify 1 [list [get_cells { bottom_0_1 }] \
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+115
+
+
+===== PDF page 116 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Assigning I/O Pads to Bumps
+Feedback
+   [get_pins { sdram_DQ_iopad_59/PADIO }]]
+create_matching_type -name existing_assignment_2
+   -uniquify 1 [list [get_cells { bottom_0_10 }] \
+   [get_pins { sdram_DQ_iopad_38/PADIO }]]
+...
+User-Specified Bump Assignment With Matching Types
+Instead of automatic bump assignment, you can associate flip-chip drivers and bump cells 
+by creating one or more user-specified matching types. The matching type for a cell has 
+two primary functions: provide support for driver-to-bump pairing and provide support for 
+driver placement. The tool assigns flip-chip drivers to flip-chip bump cells that have the 
+same matching type.
+The following example uses two create_matching_type commands. The first command 
+associates pad cells pad_iopad_46 through pad_iopad_49 with bump cells in row 25. 
+The second command associates pad cells pad_iopad_42 through pad_iopad_45 with 
+bump cells in row 24. The -uniquify option specifies the number of pad pins that can be 
+assigned to a single bump cell; a value of 0 specifies that each bump cell can be assigned 
+to only one pad cell.
+icc2_shell> create_matching_type -name match1 \
+   -uniquify 0 {left_25_0 left_25_1 left_25_2 left_25_3 \
+   pad_iopad_46 pad_iopad_47 pad_iopad_48 pad_iopad_49}
+icc2_shell> create_matching_type -name match2 \
+   -uniquify 0 {left_24_0 left_24_1 left_24_2 left_24_3 \
+   pad_iopad_42 pad_iopad_43 pad_iopad_44 pad_iopad_45}
+After creating the matching types, use the check_pre_place_io command with the 
+-matching_types option to check the following:
+•
+Top-level matching type consistency
+•
+Matching types do not contain bump cells, bump pins, or bump terminals at lower 
+levels of hierarchy
+•
+Each object has only one matching type
+•
+Each matching type has enough bumps for bump assignment
+•
+Netlist violations; components within the same matching type must be connected to the 
+same net or be unconnected
+•
+Matching types agreement across all multiply instantiated block instances
+icc2_shell> check_pre_place_io -matching_types
+Warning: Matching type m1 and matching type m2 conflict
+  over bump io_pg_0. (DPI-575)
+Warning: bump io_pg_0 in matching type m1 cannot be skipped since
+  it is connected to an IO pad pin. (DPI-547)
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+116
+
+
+===== PDF page 117 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Assigning I/O Pads to Bumps
+Feedback
+Warning: bump io_pg_0 in matching type m2 cannot be skipped since
+  it is connected to an IO pad pin. (DPI-547)
+0
+The place_io command applies the matching type assignments to the pad and bump 
+cells; this command is required to view the updated flylines with the RDL flylines panel. 
+Figure 34 shows the RDL flyline connections created by the place_io command. View 
+RDL flylines in the layout by choosing View > Flylines > RDL Flylines in the GUI.
+Figure 34
+RDL Flylines Between Matching Cells
+Other Matching Type Command Examples
+Use the following commands to modify, report, and delete matching types.
+•
+Return a collection of matching types with the get_matching_types command.
+icc2_shell> get_matching_types
+{SIGNAL POWER}
+•
+Create a collection of cells that are assigned a specified matching type name with the 
+get_cells command and matching_type.name attribute.
+icc2_shell> get_cells -filter "matching_type.name == SIGNAL"
+{pad_iopad_49 pad_iopad_48 ...
+icc2_shell> get_cells -filter "matching_type.name =~ SIG*"
+{pad_iopad_49 pad_iopad_48 ...
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+117
+
+
+===== PDF page 118 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Assigning I/O Pads to Bumps
+Feedback
+•
+Add I/O pad or bump cells to the matching type with the add_to_matching_type 
+command.
+icc2_shell> add_to_matching_type match2 {pad_iopad_40 pad_iopad_41}
+•
+Write out your user-defined matching type assignments with the 
+write_matching_types command.
+icc2_shell> write_matching_types -file_name user_matching.tcl
+If you did not create any matching type assignments, the file is empty.
+•
+Write out the default matching types assigned by the tool with the 
+write_matching_types -from_existing_assignment command.
+icc2_shell> write_matching_types -from_existing_assignment \
+   -file_name existing.tcl
+1
+ 
+icc2_shell> sh head existing.tcl
+create_matching_type -name existing_assignment_0
+   -uniquify 1 [list [get_cells { bottom_0_0 }] \
+   [get_pins { __added_power_driver_1/VDDPAD }]]
+create_matching_type -name existing_assignment_1
+   -uniquify 1 [list [get_cells { bottom_0_1 }] \
+   [get_pins { sdram_DQ_iopad_59/PADIO }]]
+create_matching_type -name existing_assignment_2
+   -uniquify 1 [list [get_cells { bottom_0_10 }] \
+   [get_pins { sdram_DQ_iopad_38/PADIO }]]
+...
+You can re-create the matching types at a later time by sourcing the file written by the 
+write_matching_types command.
+icc2_shell> source existing.tcl
+•
+Remove one or more matching types with the remove_matching_types command.
+icc2_shell> remove_matching_types {match2}
+1
+icc2_shell> remove_matching_types -all
+1
+•
+Remove specific I/O pad or bump cells with the remove_from_matching_type 
+command.
+icc2_shell> remove_from_matching_type match2 {pad_iopad_42}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+118
+
+
+===== PDF page 119 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Placing I/Os and Writing Constraints
+Feedback
+•
+Create a list of matching types and associated I/O pad or bump cells with the 
+report_matching_types command.
+icc2_shell> report_matching_types match2
+Matching Type  Uniquify  Object Type  Object Name
+------------------------------------------------------
+match2         0         cell         left_24_0
+                         cell         left_24_1
+                         cell         pad_iopad_42
+                         cell         pad_iopad_43
+...
+Placing I/Os and Writing Constraints
+After setting power and signal I/O placement constraints, you can place the I/O drivers and 
+write out the placement constraints.
+To place I/Os and write out the placement constraints,
+1. Place the I/Os with the place_io command.
+icc2_shell> place_io
+2. Write out the I/O placement constraints file based on the current I/O placement with the 
+write_io_constraints command.
+icc2_shell> write_io_constraints -filename io_constraints.txt
+1
+icc2_shell> sh cat io_constraints.txt
+_default_io_ring1.left
+{{order_only} u_p/test_si_13_pad_P1
+u_p/data_pad_1_x0_3_P1
+u_p/data_pad_2_x0_3_P1
+u_p/data_pad_2_x0_2_P1
+...
+The place_io command supports options to control how I/Os are placed. Use the 
+-io_guide io_guide_list option to place I/Os only in the specified I/O guides. If the 
+I/O guide is not long enough to contain all pads, the pads are placed after the endpoint 
+of I/O guides. Use the -rule rule_name option to specify a single routing spacing rule 
+for redistribution layer (RDL) routes. Use the -incremental option to place additional I/O 
+drivers for nonflip-chip designs.
+Note that the place_io command removes existing filler cells if the physical_status 
+property is not set to fixed. This condition occurs when all pads are considered during 
+flip-chip I/O placement. If only a fraction of pads are incrementally replaced, then filler cells 
+are not removed.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+119
+
+
+===== PDF page 120 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Adding and Placing Physical-Only I/O Cells
+Feedback
+If you dedicate a matching type to a collection of only bump cells, the tool does not 
+connect these bump cells to I/O drivers. Use this feature to reserve certain bump cells for 
+power or ground and avoid connecting the bump cells to I/O driver cells. If you apply a 
+matching type to I/O drivers, I/O driver pins, and I/O driver terminals, but do not assign a 
+matching type for bumps, the place_io command skips bump assignment and continues 
+to place other I/Os. If an I/O driver pin is already connected to a bump through a two-
+pin net, the pad pin remains connected to the bump. For isolated pad cells which are not 
+assigned to an I/O guide, the tool locates the closest unassigned bump cell and calculates 
+a flyline route between the pad cell and bump cell. For groups of pad cells not within an 
+I/O guide, the tool creates a virtual I/O guide.
+The write_io_constraints command supports options to control the name and contents 
+of the output file. Use -filename file_name option to specify the output constraints file 
+name. Use the -format order_only | spacing | pitch | fixed option to specify the 
+type of constraints to write to the output file. The order_only argument writes only pad 
+order information to the file. The spacing argument writes the spacing values between 
+pads and the pad cell names to the file. The pitch argument writes pad cell locations by 
+using cell pitch instead of spacing values and requires that all pad cells be placed evenly 
+in the I/O guide. The fixed argument specifies that all pad cells are fixed at their current 
+locations.
+Adding and Placing Physical-Only I/O Cells
+After I/O cells are placed, additional cells are inserted into the I/O pad ring to fill the 
+gaps between the I/O driver cells to create more uniform density in the die. The IC 
+Compiler II tool provides the create_io_break_cells, create_io_corner_cell, and 
+create_io_filler_cells commands for this purpose. The following figure shows a 
+typical I/O ring with pad, corner, filler, and break cells.
+Figure 35
+I/O Pad, Corner, Filler, and Break Cells
+filler
+pad
+break
+filler
+pad
+pad
+pad
+pad
+VSSO
+VDDO
+VDDI
+VSSI
+VDDO = 2V
+VDDO = 3V
+pad
+corner
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+120
+
+
+===== PDF page 121 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Adding and Placing Physical-Only I/O Cells
+Feedback
+For information about inserting these cells, see the following topics:
+•
+Inserting Corner Cells
+•
+Inserting Break Cells
+•
+Inserting Filler Cells
+Inserting Corner Cells
+Corner cells are placed at the intersection or projected intersections of two perpendicular 
+I/O guides. Use options to the create_io_corner_cell command as shown in the 
+following examples to control how the cells are inserted.
+•
+Insert a reference of the corner cell named “CORNER” at the intersection of the I/O 
+guides named “left” and “bottom”.
+icc2_shell> create_io_corner_cell \
+   -reference_cell CORNER {left bottom}
+•
+Place an existing corner cell instance at the intersection of the I/O guides named 
+“bottom” and “right.”
+icc2_shell> create_io_corner_cell -cell corner_cell_1 {bottom right}
+•
+In a design with multiple levels of hierarchy and overlapping blocks, insert a reference 
+of the corner cell named “CORNER” at the intersection of the I/O guides named “right” 
+and “top” and instantiate the corner cell within the I_ORCA_TOP block.
+icc2_shell> create_io_corner_cell \
+   -reference_cell CORNER {right top} -force I_ORCA_TOP
+Inserting Break Cells
+I/O break cells are used to create a space between the abutted connections of power nets 
+in the I/O ring to allow for different voltages. A library might contain multiple I/O break cells, 
+depending on the supply structure of the I/O drivers and the requirements of the design.
+I/O break cells are inserted by using the create_io_break_cells command. Use options 
+to the command as shown in the following examples to control how the cells are inserted.
+•
+Insert a reference of the break cell named “BREAK” just before the start of the I/O 
+guide named “left”.
+icc2_shell> create_io_break_cells -reference_cells BREAK \
+   -location start left
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+121
+
+
+===== PDF page 122 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Adding and Placing Physical-Only I/O Cells
+Feedback
+Use the -location end option to place the break cell just after the end of the I/O 
+guide. Use the -location both option to place the break cell at both ends of the I/O 
+guide.
+•
+Move the existing break_cell_1 instance 600 microns from the start of the I/O guide 
+named “left”.
+icc2_shell> create_io_break_cells -cells break_cell_1 \
+   -location 600 left
+•
+Insert a reference of the break cell named “BREAK” at the intersection of the I/O guides 
+named “top” and “right”.
+icc2_shell> create_io_break_cells -reference_cells BREAK {right top}
+Inserting Filler Cells
+Filler cells are used to populate empty spaces between driver cells and complete an 
+abutted power connection for I/O drivers. Many cell libraries contain multiple filler cell 
+references of varying widths; wide filler cells are used to fill wide gaps and narrow filler 
+cells are used to fill narrow gaps.
+Use options to the create_io_filler_cells command as shown in the following 
+examples to control how the cells are inserted. Note that when multiple filler cell 
+references are specified with the -reference_cells option, the tool chooses the largest 
+possible cell from the list that fills the space.
+•
+Insert filler cell references FILLER20A, FILLER10A, FILLER5A, FILLER1A, 
+FILLER05A, and FILLER0005A into gaps between I/O drivers in all I/O guides and use 
+“filler_” as a prefix when creating the instance name. The largest filler cell, FILLER20A, 
+is specified at the beginning of the list with decreasing filler cell sizes specified in order.
+icc2_shell> create_io_filler_cells \
+   -prefix filler_ \
+   -reference_cells {{ FILLER20A FILLER10A FILLER5A
+                       FILLER1A FILLER05A FILLER0005A }}
+•
+Insert filler cell references FILLER10A on I/O guides named “top” and “right”. An error 
+message is issued if gaps remain after inserting the filler cells.
+icc2_shell> create_io_filler_cells -reference_cells FILLER10A \
+   -io_guides {right top}
+Error: In IO guide right, filler cells cannot cover the gap
+at (6500,6090) with length 2. (DPI-089)
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+122
+
+
+===== PDF page 123 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Checking I/O Placement
+Feedback
+•
+Insert filler cell references FILLER10A on the I/O guides named “guide_1” and force 
+the filler cell to be placed within the block named “top”. In this example, the guide_1 I/O 
+guide overlaps multiple blocks and the design contains multiple levels of hierarchy.
+icc2_shell> create_io_filler_cells -reference_cells FILLER10A \
+   -io_guides guide_1 -force top
+Checking I/O Placement
+After placing I/O cells with the place_io command, use the check_io_placement 
+command to validate the I/O placement. The command writes a report containing a list of 
+violating cells and returns a collection of the cells. Options to the check_io_placement 
+command control which checks are performed.
+•
+Check specific cells with the -cells option.
+•
+Check whether unplaced I/O cells exist in the design with the -unplaced option.
+icc2_shell> check_io_placement -unplaced
+---------- Start of Unplaced Pads Check ----------
+Cell u13 is unplaced.
+Total 1 cell is unplaced in current design.
+---------- End of Unplaced Pads Check ----------
+•
+Check for overlapping cells with the -overlap overlap_checks option, where 
+overlap_checks is one or more of: pad2pad, pad2filler, filler2filler, bump, 
+corner2pad, or all.
+icc2_shell> check_io_placement -overlap {pad2pad bump}
+---------- Start of Overlap Check ----------
+Pad u488 and pad u547 overlap.
+Pad u488 and pad u553 overlap.
+Total 3 cells have overlap violation.
+---------- End of Overlap Check ----------
+•
+Check specific I/O guides with the -io_guides option.
+icc2_shell> check_io_placement \
+   -io_guides [get_io_guides {_default_io_ring1.bottom}]
+---------- Start of Pad to Guide Assignment Check ----------
+Pad u547 violates pad-to-guide constraints: assigned to
+  IO guide _default_io_ring1.bottom, but placed outside
+  of _default_io_ring1.bottom with 4089.49 gap.
+Total 1 violation is found.
+---------- End of Pad to Guide Assignment Check ----------
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+123
+
+
+===== PDF page 124 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Checking I/O Placement
+Feedback
+•
+Check the placement of I/O cells against the minimum pitch specified for the I/O guide 
+with the -min_pitch option.
+icc2_shell> check_io_placement -min_pitch
+---------- Start of Min Pitch Check ----------
+bus_0 to bus_4 violates min_pitch 5. Current spacing is 28.
+bus_2 to bus_7 violates min_pitch 5. Current spacing is 42.
+Total 2 violations are found.
+---------- End of Min Pitch Check ----------
+•
+Check whether I/O pad placement is consistent with the is_flipped attribute for the 
+pad with the -flipping option.
+icc2_shell> check_io_placement -flipping
+---------- Start of Pad Flip Check ----------
+Pad bus_0 is not flipped, but has
+  is_flipped attribute set to true.
+Total 3 violations are found.
+---------- End of Pad Flip Check ----------
+•
+Check for spaces between I/O cells, including pads, corners, fillers and break cells, 
+with the -gap option.
+icc2_shell> check_io_placement -gap
+---------- Start of Gap Check ----------
+Cell bus_0 and cell bus_4 have a gap between them.
+Total 2 cells have gap violation.
+---------- End of Gap Check ----------
+•
+Check the I/O pad placement against constraints set with the 
+set_signal_io_constraints command by using the -signal_constraints option.
+icc2_shell> check_io_placement -signal_constraints
+---------- Start of Signal I/O constraints Check ----------
+The order of pad bus_1 and pad vss violates I/O guide
+  default_guide_0 order constraint.
+The order of pad bus_6 and pad bus_1 violates I/O guide
+  default_guide_0 order constraint.
+Total 2 violations are found.
+---------- End of Signal I/O constraints Check ----------
+Signal I/O constraints include order, pitch, spacing, offset of pads and boundary 
+spacing.
+•
+Check whether I/O pads are placed on the correct I/O guides with the 
+-pad_to_guide_assignment option.
+icc2_shell> sh cat padAssign
+bus_5 default_guide_0 default_guide_2;
+{bus_1 bus_6} default_guide_0;
+ 
+icc2_shell> check_io_placement -pad_to_guide_assignment \
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+124
+
+
+===== PDF page 125 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Checking I/O Placement
+Feedback
+   -pad_assignment_file padAssign
+---------- Start of Pad to Guide Assignment Check ----------
+Pad bus_5 violates pad-to-guide constraints: assigned to
+   IO guide default_guide_0, but placed outside of
+   default_guide_0 with 500 gap.
+Total 1 violation is found.
+---------- End of Pad to Guide Assignment Check ----------
+Use the -pad_assignment_file option to specify a file that contains I/O pads and 
+corresponding I/O guides. The format of the file is
+pad1 guide1;
+pad2 guide2 guide3;
+{pad3 pad4} guide4;
+where one or more I/O guides can be specified for a single pad or collection of pads, 
+and collections of I/O pads are surrounded with curly brackets ({}).
+•
+Write the I/O placement report to a specific file with the -filename option.
+icc2_shell> check_io_placement -filename io_placement_report.txt
+•
+Write out I/O placement violation reports to a specific directory with the 
+-output_directory option.
+icc2_shell> check_io_placement -output_directory io_checks
+Writing IO placement checking reports to directory io_checks.
+ 
+icc2_shell> ls io_checks/*
+io_checks/bumpassignment_violations.rpt
+io_checks/flip_violations.rpt
+io_checks/gap_violations.rpt
+io_checks/minPitch_violations.rpt
+io_checks/overlap_violations.rpt
+io_checks/pad2guide_violations.rpt
+io_checks/powerIOConstraints_violations.rpt
+io_checks/signalIOConstraints_violations.rpt
+io_checks/unplacedpads_violations.rpt
+The command creates the specified directory and writes out individual files for each 
+violation type.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+125
+
+
+===== PDF page 126 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Routing RDL Nets
+Feedback
+Routing RDL Nets
+After placing the bump and I/O driver cells, you can route the redistribution layer (RDL) 
+nets.
+To route the RDL nets,
+1. Define the routing rules for the RDL net routes. If you plan to add net shields for 
+the RDL routes, specify the -shield_spacings and -shield_widths options as 
+described in Creating RDL Net Shields.
+icc2_shell> create_routing_rule rdlrule -widths {MRDL 2} \
+   -spacings {MRDL 1}
+2. Apply the routing rule to the flip-chip bump cells.
+icc2_shell> set rdl_nets [get_nets -of_objects [get_pins \
+   -of_objects [get_cells -filter "design_type==flip_chip_pad"]]]
+{...}
+icc2_shell> set_routing_rule [get_nets $rdl_nets] -rule rdlrule
+3. Set the flip_chip.route.layer_routing_angles application option to 90_degree or 
+45_degree to specify the routing type for the RDL layer.
+icc2_shell> set_app_options \
+   -name flip_chip.route.layer_routing_angles \
+   -value {{MRDL 90_degree}}
+1
+4. Route the RDL nets.
+icc2_shell> route_rdl_flip_chip -layers {MRDL}
+-- START GLOBAL ROUTING --
+-- END GLOBAL ROUTING --
+ 
+-- START DETAIL ROUTING --
+-- END DETAIL ROUTING --
+1
+5. Check the RDL routes for open nets.
+icc2_shell> report_rdl_routes -open_nets true
+****************************************
+Report : RDL routes
+****************************************
+Open Net:
+DATA[7]
+DATA[6]
+...
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+126
+
+
+===== PDF page 127 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Routing RDL Nets
+Feedback
+6. (Optional) Write out an error database for the Error Browser in the GUI.
+icc2_shell> report_rdl_routes -create_error_data verification
+Use the verification keyword with the -create_error_data option to write out 
+error data for open and short violations. Use the flyline_only keyword to write out 
+flyline data.
+Figure 36 shows the layout result after RDL routing. The RDL nets are routed at 90-degree 
+angles and connect the I/O drivers and bump cells.
+Figure 36
+Layout After Flip-Chip Routing
+Other RDL Routing Tasks
+Use the following commands and application options to perform different RDL routing 
+tasks.
+•
+Create 45-degree routes by setting the flip_chip.route.layer_routing_angles 
+application option to 45_degree before running the route_rdl_flip_chip command.
+icc2_shell> set_app_options \
+   -name flip_chip.route.layer_routing_angles \
+   -value {{MRDL 45_degree} {M9 45_degree}}
+icc2_shell> route_rdl_flip_chip -layers {MRDL M9} -nets $rdl_nets
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+127
+
+
+===== PDF page 128 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Routing RDL Nets
+Feedback
+The tool creates RDL routes as shown in Figure 37.
+Figure 37
+45-Degree RDL Routes
+•
+Create an RDL route on an adjacent layer that overlaps the current route by using the 
+split_rdl_routes command.
+icc2_shell> split_rdl_routes -nets {pad[48] pad[49]} \
+   -mode adjacent_layer -via_interval 25 -from_layers MRDL \
+   -to_layers M9
+The tool adds a parallel route on the M9 layer and inserts vias as shown in the upper 
+two routes in Figure 38.
+Figure 38
+Split Routes
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+128
+
+
+===== PDF page 129 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Routing RDL Nets
+Feedback
+•
+Split an existing route into multiple thin routes on the same layer with the 
+split_rdl_routes command and the -widths, -spacings, and -number_of_routes 
+options.
+icc2_shell> split_rdl_routes -nets {pad[46] pad[47]} \
+   -widths {MRDL {2 2 2}} -spacings {MRDL {2 2}} \
+   -number_of_routes {MRDL 3}
+The tool splits the existing route into multiple thin routes as shown in the lower two 
+routes in Figure 38.
+•
+Route RDL nets by using the route_rdl_differential command.
+The following command creates length-matched routes for the specified nets in the 
+specified layer.
+icc2_shell> route_rdl_differential -layers {MRDL} \
+   -nets {pad[41] pad[43]}
+The tool creates routes for the specified nets as shown in Figure 39.
+Figure 39
+Differential Routes
+You can also route the RDL nets in parallel by using the route_rdl_differential 
+-mode parallel command.
+You can control the target nets in parallel mode by using the 
+-nets option with the route_rdl_differential command or the 
+flip_chip.route.differential_groups application option.
+In the following example, when the tool runs with the -mode parallel option and the 
+target nets are specified by using the -nets option, there are four nets that are routed, 
+having a long distance running in parallel in the middle part. In this mode, the tool can 
+only route one group.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+129
+
+
+===== PDF page 130 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Routing RDL Nets
+Feedback
+Figure 40
+Differential Routes - Normal Mode
+However, when you use the -mode parallel option and the target nets are specified 
+by using the flip_chip.route.differential_groups application option, multiple 
+net groups are routed at once and there are two nets in each group (as shown in the 
+following figure).
+Figure 41
+Differential Routes - Parallel Mode
+•
+Create a tapered route by setting taper distances and widths with the 
+create_routing_rule command. Create the tapered route with the 
+route_rdl_flip_chip command.
+icc2_shell> create_routing_rule taperrule \
+   -widths {MRDL 10 M9 10} -spacings {MRDL 10 M9 10} \
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+130
+
+
+===== PDF page 131 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Routing RDL Nets
+Feedback
+   -rdl_taper_distances {MRDL 40 M9 40} \
+   -rdl_taper_widths {MRDL 5 M9 5}
+icc2_shell> set_routing_rule [get_nets $rdl_nets] -rule taperrule
+icc2_shell> route_rdl_flip_chip -layers {MRDL M9} -nets $rdl_nets
+The tool creates the tapered routes as shown in Figure 42.
+Figure 42
+Tapered RDL Routes
+•
+Create an RDL route between a bump cell and a power ring net by setting the 
+flip_chip.route.route_to_ring_nets application option to the net name. Use 
+the flip_chip.route.route_to_stripe_nets application option to create an RDL 
+route between a bump cell and PG net shape in the PG mesh. The following example 
+specifies these application options.
+icc2_shell> set_app_options \
+   -name flip_chip.route.route_to_ring_nets -value VDD1
+icc2_shell> set_app_options \
+   -name flip_chip.route.route_to_stripe_nets -value VDD1
+icc2_shell> route_rdl_flip_chip -layers $rdl_layers -nets VDD1
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+131
+
+
+===== PDF page 132 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Routing RDL Nets
+Feedback
+The layout for a typical flip-chip route is shown on the left; the layout for the flip-chip 
+route created by the preceding commands is shown on the right.
+Figure 43
+RDL Route to Pad and PG Stripe
+•
+Create additional stacked vias between RDL routes and I/O driver pins by setting the 
+flip_chip.route.extend_vias_on_pin application option as shown in the following 
+figure. By default, the value is false and the tool creates a simple connection to the 
+pin. Set the application option to true to extend the wire and insert additional stacked 
+vias. The width of the wire extension is the same as the wire width defined by the 
+routing rule. Set the application option to full_pin to extend and widen the wire to 
+cover the pin and insert additional stacked vias. The tool ignores the route width set by 
+the routing rule and attempts to cover the entire I/O driver pin.
+icc2_shell> set_app_options \
+   -name flip_chip.route.extend_vias_on_pin -value full_pin
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+132
+
+
+===== PDF page 133 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Routing RDL Nets
+Feedback
+Figure 44
+Additional Stacked Vias for RDL Routes to I/O Driver Pins
+flip_chip.route.extend_vias_on_pin
+false
+true
+full_pin
+•
+Specify the bump-to-route spacing values in microns for each flip-chip routing layer by 
+using the flip_chip.route.layer_bump_spacings application option. You can also 
+use the sameNetRDLMetalToPadMinSpacing and diffNetRDLMetalToPadMinSpacing 
+technology file rules to specify the bump-to-route spacing.
+icc2_shell> set_app_options \
+   -name flip_chip.route.layer_bump_spacings \
+   -value {{M9 10.0} {MRDL 10.0}}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+133
+
+
+===== PDF page 134 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Routing RDL Nets
+Feedback
+Figure 45
+Bump-to-Route Spacing
+flip_chip.route.layer_bump_spacings {}
+flip_chip.route.layer_bump_spacings {MRDL 10}
+The jogRDLKeepoutRange design rule specifies the keepout range between the bump 
+cell and the route. The following figure shows the RDL routing result for two different 
+jogRDLKeepoutRange settings.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+134
+
+
+===== PDF page 135 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Optimizing RDL Routes
+Feedback
+Figure 46
+Jog Keepout Range
+jogRDLKeepoutRange=2.0
+jogRDLKeepoutRange=5.0
+•
+Remove all RDL routes with the remove_routes -rdl command.
+icc2_shell> remove_routes -rdl
+Successfully removed 321 route shapes.
+Optimizing RDL Routes
+After creating RDL routes with the route_rdl_flip_chip command or by using the 
+GUI, use the optimize_rdl_routes command to improve the RDL routing patterns by 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+135
+
+
+===== PDF page 136 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Optimizing RDL Routes
+Feedback
+reducing the number of U- and Z-shaped routes in the block and create additional space 
+for RDL power routes. Perform the following tasks to optimize RDL routes:
+•
+Improve RDL routing.
+icc2_shell> optimize_rdl_routes -nets $rdl_nets
+Figure 47 shows the layout result before and after running the previous command.
+Figure 47
+RDL Route Optimization
+•
+Move signal routes to create additional routing area for power and ground routes with 
+the -reserve_power_resources option.
+icc2_shell> optimize_rdl_routes -layer {MRDL} -nets $rdl_nets \
+   -reserve_power_resources true
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+136
+
+
+===== PDF page 137 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Creating RDL Net Shields
+Feedback
+After running the command with this option, the amount of U- and Z-shaped routes 
+might increase. Figure 48 shows the layout result before and after running the previous 
+command.
+Figure 48
+RDL Route Optimization to Reserve Power Resources
+Creating RDL Net Shields
+RDL net shields provide isolation for RDL nets. You can shield nets on the same layer 
+(known as side-wall shielding) or shield nets above and below the layer (known as coaxial 
+shielding). Coaxial shielding provides better signal isolation than side-wall shielding, but it 
+uses more routing resources.
+The following procedure creates RDL routes and shields the routes using side-wall 
+shielding:
+1. Set the flip_chip.route.shielding_net application option to define the shielding 
+net connection.
+icc2_shell> set_app_options -name flip_chip.route.shielding_net \
+   -value VSS
+2. Create the routing rule and specify the shield spacings and shield widths.
+icc2_shell> create_routing_rule shieldrule \
+   -shield_spacings {MRDL 2 M9 2} -shield_widths {MRDL 5 M9 5} \
+   -widths {MRDL 6 M9 5}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+137
+
+
+===== PDF page 138 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Creating RDL Net Shields
+Feedback
+3. Assign the routing rule to the RDL nets.
+icc2_shell> set_routing_rule $rdl_nets -rule shieldrule
+4. Route the RDL nets.
+icc2_shell> route_rdl_flip_chip -layers {MRDL M9} -nets $rdl_nets
+5. Create the RDL net shields.
+icc2_shell> create_rdl_shields -layers {MRDL M9} -nets $rdl_nets
+Figure 49 shows the layout result produced by the previous commands.
+Figure 49
+RDL Net Shields
+RDL Net Shielding Options
+Use the following options with the create_rdl_shields command to control how the 
+shields are created.
+•
+List the RDL nets in a file and specify the file name with the -nets_in_file option.
+icc2_shell> create_rdl_shields -layers {MRDL M9} \
+   -nets_in_file rdlnets.txt
+icc2_shell> sh cat rdlnets.txt
+pad[40]
+pad[41]
+...
+•
+Enable or disable shielding on via ties with the -shield_via_tie option.
+•
+Remove floating shields after creating them with the -trim_floating true option.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+138
+
+
+===== PDF page 139 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Creating RDL Net Shields
+Feedback
+For side-wall shielding only,
+•
+Enable or disable shielding on bumps with the -shield_on_bump option.
+icc2_shell> create_rdl_shields -layers {MRDL M9} -nets $rdl_nets \
+   -shield_on_bump true
+Figure 50 shows the layout result with the -shield_on_bump option set to true (left) 
+and false (right).
+Figure 50
+Bump Shields -shield_on_bump Option
+•
+Create a side-wall shield on one side of a net by using the -half_shield option and 
+specifying one of the following values: up, down, left, or right. To create a shield on 
+the upper or lower side of a horizontal flyline, specify up or down. To create a shield 
+on the left or right side of a vertical flyline, specify left or right. By default, the 
+create_rdl_shields command creates side-wall shields on both sides of a net.
+For coaxial shielding only,
+•
+Specify the reference layer for routing by using the -reference_layer option. The 
+target layer and reference layer must be different. To specify the target routing layer, 
+use the -layers option. To specify the center line of the net shield, use the -offset 
+option.
+•
+Report the coaxial shield ratio by using the 
+-report_coaxial_shield_ratio_offsets option and specifying the following layers 
+and offset value: {shield_layer route_layer shield_route_offset}
+The following example creates METAL7 coaxial shielding wires to shield METAL8 routes. 
+The shield-to-route center line offset is 5.
+icc2_shell> create_rdl_shields -reference_layer METAL8 -layers METAL7 \
+   -offset 5 -report_coaxial_shield_ratio_offsets {{METAL7 METAL8 5}}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+139
+
+
+===== PDF page 140 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Creating a Flip-Chip Design With Multiple Levels of Hierarchy
+Feedback
+The following figures show nets before and after coaxial shielding:
+Figure 51
+Before Coaxial Shielding
+Figure 52
+After Coaxial Shielding
+Creating a Flip-Chip Design With Multiple Levels of Hierarchy
+The tool supports top-level and block-level flip chip planning for designs that contain 
+multiple levels of physical hierarchy. For this design style, performing top-level flip-chip 
+routing connects bump cells at the top level and ignores bump cells within the blocks. 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+140
+
+
+===== PDF page 141 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Creating a Flip-Chip Design With Multiple Levels of Hierarchy
+Feedback
+Note the following additional considerations for top-level flip-chip routing in a design with 
+multiple levels of hierarchy:
+•
+Blocks which contain I/O bump cells or pad cells must be preplaced.
+•
+I/O pad cells can be placed at the top level or at the block level.
+•
+I/O pad cells at the block level are considered as fixed.
+•
+I/O guides are created at the top level.
+•
+Matching types that assign top-level bumps to block-level I/O cells must be created at 
+the top level.
+•
+I/O pads are placed at the block level for blocks that contain the I/O pads.
+•
+Block-level I/O pads should be specified with the create_matching_type command.
+•
+For block-level I/O pads not specified with the create_matching_type command, the 
+pin shapes should have their class attribute set to bump in the IC Compiler II Library 
+Manager.
+For IC Compiler II versions before N-2017.09, you can use a frame-based flow to assign 
+bump cells to I/O drivers in the blocks. To prepare the frame view for I/O assignment,
+1. Push into the block or edit the block that contains the I/O pad.
+icc2_shell> set_working_design -push [get_selection]
+2. (Optional) For power and ground pins, use the create_shape -port command to 
+create terminal shapes based on the pin shapes of the pad cell.
+Pin shapes for I/O signal pins are created automatically in the next step by the 
+create_frame command.
+3. Create the frame view for the blocks.
+icc2_shell> create_frame
+To reduce runtime when creating frame views for multiple blocks, you can create 
+a script that contains the create_frame command and run the script with the 
+run_block_script command.
+4. Return to the top-level design.
+icc2_shell> set_working_design -pop
+5. Select the block and change the view type to the frame view of the block.
+icc2_shell> change_view -view frame [get_selection]
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+141
+
+
+===== PDF page 142 =====
+Chapter 6: Planning I/Os and Flip-Chip Bumps
+Creating a Flip-Chip Design With Multiple Levels of Hierarchy
+Feedback
+6. Change the design_type attribute of the block to flip_chip_driver.
+icc2_shell> set_attribute [get_selection] design_type flip_chip_driver
+7. Select the terminals created in step 2 in the block and change the class attribute of 
+terminals to bump.
+icc2_shell> set_attribute [get_selection] class bump
+8. Continue with the normal top-level flip-chip flow.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+142

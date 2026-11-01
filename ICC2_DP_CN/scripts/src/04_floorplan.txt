@@ -1,0 +1,1842 @@
+
+
+===== PDF page 47 =====
+Feedback
+4
+Creating a Floorplan
+This section describes how to create and refine a floorplan from an existing netlist 
+or floorplan description. The floorplan describes the size of the core; the shape and 
+placement of standard cell rows and routing channels; standard cell placement 
+constraints; and the placement of peripheral I/O, power, ground, corner, and filler pad 
+cells.
+For more information, see the following topics:
+•
+Supported Types of Floorplans
+•
+Reading the Verilog Netlist
+•
+Creating Dense and Sparse Outline Views for Large Designs
+•
+Creating an Initial Floorplan
+•
+Creating an L-, T-, or U-Shaped Floorplan
+•
+Creating a Complex Rectilinear Floorplan
+•
+Creating a Floorplan Based on a Physical Rules File
+•
+Adjusting the Floorplan Aspect Ratio
+•
+Defining Routing Tracks
+•
+Flipping the First Row in the Floorplan
+•
+Updating the Floorplanning Without Disturbing Specified Object Types
+•
+Validating the FinFET Grid
+•
+Scaling the Die Area
+•
+Reporting Floorplan Information
+•
+Reading, Writing, and Copying Floorplan Information
+•
+Creating and Validating Floorplan Rules for Advanced Technology Nodes
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+47
+
+
+===== PDF page 48 =====
+Chapter 4: Creating a Floorplan
+Supported Types of Floorplans
+Feedback
+Supported Types of Floorplans
+The IC Compiler II tool supports different floorplan styles to meet the requirements of your 
+design. The channeled, abutted, and narrow-channel floorplan styles are described in the 
+following sections.
+•
+Channeled Floorplans
+•
+Abutted Floorplans
+•
+Narrow-Channel Floorplans
+Channeled Floorplans
+Channeled floorplans contain spacing between blocks for the placement of top-level macro 
+cells, as shown in the floorplan example in Figure 6. The spacing enables the tool to place 
+standard cells between blocks.
+Figure 6
+Channeled Floorplan
+Abutted Floorplans
+In the abutted floorplan style, blocks are touching and the tool does not allocate space 
+for macro cell placement between blocks. Designs with abutted floorplans do not require 
+top-level optimization, as all logic is pushed down into the blocks. However, abutted 
+floorplans might require over-the-block routing to meet design requirements. This floorplan 
+style also requires more attention to clock planning and feedthrough management. 
+Routing congestion might also become an issue for abutted floorplan designs. Due to the 
+difficulties in implementing an abutted floorplan, the narrow-channel floorplan style is often 
+used to minimize the spacing between blocks.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+48
+
+
+===== PDF page 49 =====
+Chapter 4: Creating a Floorplan
+Supported Types of Floorplans
+Feedback
+An example of an abutted floorplan is shown in Figure 7.
+Figure 7
+Abutted Floorplan
+Narrow-Channel Floorplans
+The narrow-channel floorplan style provides a balance between the channeled floorplan 
+and abutted floorplan styles. You can abut certain blocks in the design where top-level 
+cells are not needed. In other areas, you can reserve a channel between certain blocks 
+for top-level clock routing or other special purpose cells. An example of a narrow-channel 
+floorplan is shown in Figure 8.
+Figure 8
+Narrow-Channel Floorplan
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+49
+
+
+===== PDF page 50 =====
+Chapter 4: Creating a Floorplan
+Reading the Verilog Netlist
+Feedback
+Reading the Verilog Netlist
+To read the Verilog netlist and begin floorplanning,
+1. Create the design library to contain the design by using the create_lib command. If 
+the library already exists, use the open_lib command to open the library.
+icc2_shell> set libs [glob -directory ${lib_dir} *.ndm]
+icc2_shell> create_lib -technology technology_file.tf \
+   -ref_libs $libs lib/design
+2. Read the Verilog netlist with the read_verilog_outline command and specify the 
+appropriate options.
+icc2_shell> read_verilog_outline -top ORCA ORCA.v
+The Verilog netlist outline reader in the IC Compiler II tool efficiently processes very large 
+designs. To conserve resources and minimize turnaround time, the netlist reader creates 
+an outline view of the blocks in the different levels of design hierarchy. The outline design 
+contains hierarchy, but no leaf cells or nets.
+The read_verilog_outline command does not partition the design. To partition the 
+design, you commit the design blocks with the commit_block command and expand the 
+blocks to their full netlist representations with the expand_outline command. For more 
+information on committing blocks, see Committing Design Blocks.
+You can also process a design in the full netlist flow by using the flat netlist reader. For 
+information about reading a design with the flat netlist reader, see the read_verilog 
+command.
+Creating Dense and Sparse Outline Views for Large Designs
+The read_verilog_outline command reads the Verilog netlists for large designs and 
+prepares the design database for efficient handling and processing of the design data. 
+During early floorplanning, you can reduce disk and memory requirements for the tool 
+by saving only hard macros, interface logic, standard cell area, and standard cell count 
+information. This reduced information set is stored in an outline view; this view is sufficient 
+for refining block shapes before floorplan-level placement and pin assignment.
+To maximize the performance of the tool during design planning, you can further tune 
+the contents of the outline views for the blocks in your design. When performing design 
+planning on a very large design, blocks should contain the smallest amount of information 
+necessary to perform a meaningful analysis. To support the analysis, the tool enables 
+separating Verilog modules into two content types: sparse modules and dense modules. 
+Dense modules retain most of their contents, except for buffers and inverters, and support 
+comprehensive data flow analysis. Sparse modules have greatly reduced content, 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+50
+
+
+===== PDF page 51 =====
+Chapter 4: Creating a Floorplan
+Creating Dense and Sparse Outline Views for Large Designs
+Feedback
+contain only macro cells, and support only the size and interface information needed for 
+connectivity analysis.
+To help define the contents of the outline views, the tool supports the allocation and 
+partition methods to determine which modules are marked as dense or sparse. Choose 
+the method to use by including the -partition or -allocation option with the 
+read_verilog_outline command. Alternatively, set the plan.outline.partition 
+application option to specify the method. By default, the partition method is used.
+For data flow analysis, dense connectivity is needed in top-level modules. Use the 
+plan.outline.dense_module_depth application option to specify the module hierarchy 
+depth that should be marked as dense. By default, the depth is one and only the top-level 
+module is marked as a dense module. Alternatively, use the -depth option to override the 
+default setting. A value of -1 marks all non-sparse modules as dense. The hierarchy depth 
+overrides the target cell count specified by the -target_cell_count option.
+Partition Method
+In the partition method, the tool examines the modules in the hierarchy and determines 
+the module density based on the target block size and number of leaf cells in the block. 
+Top-level modules in the module hierarchy are marked as dense until the hierarchical 
+cell count beneath the module is less than a target block size. Buffers and inverters 
+are included in the hierarchical cell count. This technique maintains connectivity in the 
+top levels of hierarchy for data flow analysis. The target block size is specified by the 
+plan.outline.target_block_size application option; by default, the target block size is 
+1,000,000 leaf cells. The -target_block_size option can be used to override the default.
+After the partition blocks are designated, small module hierarchies within each partition 
+are designated as dense modules to maintain connectivity for data flow analysis. The 
+target number of leaf cells to allocate to these module hierarchies is specified by the 
+plan.outline.glue_cell_count application option; by default the count is 100,000 leaf 
+cells. Specify a value of -1 to avoid marking any of the small modules as dense modules. 
+Buffers and inverters are not represented in the outline design and are not included in the 
+target glue cell count. The -glue_cell_count option can be used to override the default 
+setting.
+Allocation Method
+The allocation method is the default method for designating dense and sparse modules 
+and is used to explore as much of the design hierarchy as possible within a memory 
+budget of a maximum number of leaf cell instances. Specify the allocation method by 
+setting the plan.outline.partition application option to false or by specifying the 
+-allocation option to the read_verilog_outline command.
+In the allocation method, modules that exceed a leaf cell count threshold are considered 
+to be large modules and are treated as sparse modules in the outline view. Buffers and 
+inverters are not represented in the outline design and are not included in the leaf cell 
+count. The leaf cell count threshold is specified by the plan.outline.large_threshold 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+51
+
+
+===== PDF page 52 =====
+Chapter 4: Creating a Floorplan
+Creating an Initial Floorplan
+Feedback
+application option; by default the leaf cell count is 10,000. Alternatively, use the 
+-large_threshold option to override the default setting.
+Creating an Initial Floorplan
+After reading the Verilog netlist, use the initialize_floorplan command (or choose 
+Floorplan Preparation > Floorplan Initialization from the Task Assistant in the GUI) to 
+define a floorplan boundary based on your design criteria. You can create a floorplan 
+by specifying the length ratio between the floorplan edges, the length of the core or die 
+edges, the aspect ratio, or the exact width and height. This step uses the outline view for 
+the top-level design.
+To create the floorplan,
+1. Use the initialize_floorplan command with the appropriate options to create the 
+initial floorplan.
+icc2_shell> initialize_floorplan -core_offset 100
+Alternatively, select the Floorplan Initialization panel in the Floorplan Task Assistant 
+from the GUI.
+2. If needed, refine the floorplan by running the initialize_floorplan command again 
+with different settings for the utilization ratio, side lengths, core-to-boundary spacing, 
+and other settings.
+The initialize_floorplan command creates the floorplan according to the options you 
+specify. The floorplan is shown in Figure 9.
+Figure 9
+Floorplan With Core Offset of 100
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+52
+
+
+===== PDF page 53 =====
+Chapter 4: Creating a Floorplan
+Creating an L-, T-, or U-Shaped Floorplan
+Feedback
+Creating an L-, T-, or U-Shaped Floorplan
+To create an L-, T-, or U-shaped floorplan,
+1. Use the initialize_floorplan command with the -shape shape option to create 
+the floorplan. Supported shapes are R (rectangular), L, T, and U. The following 
+example creates an L-shaped floorplan as shown in Figure 10.
+icc2_shell> initialize_floorplan -core_utilization 0.7 -shape L \
+   -orientation N -side_ratio {1 1 1 1} -core_offset {100.0} \
+   -flip_first_row true -coincident_boundary true
+2. Adjust the length of the sides if needed by changing the arguments to the -side_ratio 
+or -side_length options and reissue the initialize_floorplan command.
+To further change the shape of the floorplan, you must set the dimensions of the 
+floorplan boundary by specifying the -side_ratio {side_a side_b ...} option or 
+the -side_length {side_a side_b ...} option. See Figure 11 for a cross reference 
+between the position of the number in the argument and the edge on the floorplan 
+shape. This information is also available in the Task Assistant.
+Figure 10
+L-Shaped Floorplan
+Figure 11
+Edge Label Reference for Floorplan Shapes
+Rectangular
+a
+b
+L-shape
+a
+b
+c
+d
+U-shape
+T-shape
+f
+a
+b
+c
+e
+d
+f
+a
+b c
+e
+d
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+53
+
+
+===== PDF page 54 =====
+Chapter 4: Creating a Floorplan
+Creating a Complex Rectilinear Floorplan
+Feedback
+Note that the side ratios apply to the core boundary by default. To apply the ratios to the 
+die boundary, specify the -control_type die option.
+The following example creates a U-shaped floorplan. The right arm is twice the width of 
+the left arm by specifying the -side_ratio option with 1 in the second (b) position and 2 
+in the sixth (f) position.
+icc2_shell> initialize_floorplan -core_utilization 0.7 -shape U \
+   -orientation N -side_ratio {2 1 1 1 1 2} -core_offset 100 \
+   -coincident_boundary true
+Creating a Complex Rectilinear Floorplan
+Create a complex floorplan shape by using the initialize_floorplan command with 
+the -boundary option. Specify the -control_type die or -control_type core option of 
+the -boundary option to specify the coordinates of the die or the core.
+The following example creates an H-shaped floorplan by setting the coordinates of the 
+floorplan die.
+icc2_shell> initialize_floorplan -control_type die \
+   -core_offset 100 \
+   -boundary { {0 0} {0 3000} {1000 3000} {1000 2000} \
+   {2000 2000} {2000 3000} {3000 3000} {3000 0} \
+   {2000 0} {2000 1000} {1000 1000} {1000 0} }
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+54
+
+
+===== PDF page 55 =====
+Chapter 4: Creating a Floorplan
+Creating a Floorplan Based on a Physical Rules File
+Feedback
+Figure 12 shows a floorplan created by using the previous command.
+Figure 12
+Complex Rectilinear Floorplan
+Creating a Floorplan Based on a Physical Rules File
+Use the following example flow to create a floorplan based on the specifications listed in a 
+physical rules file.
+Note:
+In the physical rules file, you can include placement rule constraints, physical 
+cell and pin properties, and stream-in instructions in a unified file format.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+55
+
+
+===== PDF page 56 =====
+Chapter 4: Creating a Floorplan
+Creating a Floorplan Based on a Physical Rules File
+Feedback
+Figure 13
+Example - Physical Rule File Based Floorplan Creation Flow
+PRF loaded?
+No
+initialize_floorplan follows the existing behavior
+initialize_floorplan refers to the PRF file
+Include hybrid site rows?
+Yes
+initialize_floorplan -row_pattern <pattern_name>
+Yes
+No
+initialize_floorplan -site_def <site_name>
+Create wire track for layers with track_pattern 
+defined in the PRF file
+Create wire track for layers without track_pattern 
+defined in the PRF file
+1. Set up the physical rules file to meet your requirements.
+For more information about the physical rules file, see SolvnetPlus.
+2. Load the physical rules file.
+You can include the physical rules file content either in a technology file or a separate 
+file that can be read by using the read_physical_rules command.
+icc2_shell> read_physical_rules in.prf
+3. Run the initialize_floorplan command with the necessary options.
+For example, if you have defined hybrid rows in the physical row file, you can 
+run the initialize_floorplan -row_pattern command. The tool then 
+uses the information in this file to create the floorplan. However, when a hybrid 
+design has site rows with different heights, there is a need to balance the cells 
+to arrive at an optimal core area. You can achieve this balancing by setting the 
+plan.floorplan.enable_adjust_core_area_for_hybrid_design application option 
+to balance.
+Note:
+To ensure that the tool uses the information in the physical rules file to 
+calculate the core area,
+a. Set initialize_floorplan -row_pattern
+b. Do not set -boundary, -keep_boundary, or -side_length options in 
+the initialize_floorplan command
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+56
+
+
+===== PDF page 57 =====
+Chapter 4: Creating a Floorplan
+Adjusting the Floorplan Aspect Ratio
+Feedback
+Adjusting the Floorplan Aspect Ratio
+To create a floorplan with different side lengths, specify an aspect ratio with the 
+-side_ratio option. To set the aspect ratio of the floorplan,
+1. Determine the ratio between the width and height of the floorplan.
+2. Use the initialize_floorplan command with the -side_ratio option to create a 
+floorplan with the specified width-to-height ratio.
+icc2_shell> initialize_floorplan -core_utilization 0.7 -shape R \
+   -orientation N -side_ratio {3.0 1.0} -core_offset {100.0} \
+   -flip_first_row true  -coincident_boundary true
+Note that the ratios apply to the core boundary by default. To apply the ratios to the die 
+boundary, specify the -control_type die option.
+Figure 14 shows two floorplans created by using different -side_ratio option settings 
+to produce different aspect ratios. The floorplan on the left is created by specifying 
+-side_ratio {3.0 1.0}, the floorplan on the right is created by specifying -side_ratio 
+{1.0 3.0}.
+Figure 14
+Floorplans With Aspect Ratios of 3.0 (left) and 0.33 (right)
+To create these floorplans by using the Floorplan Task Assistant in the GUI,
+1. Open the Floorplan Task Assistant by selecting Task > Task Assistant in the GUI and 
+selecting the Floorplan Initialization panel under Floorplan Preparation.
+2. Select Core side ratio and enter a width/height value in the Aspect ratio box.
+3. Click Preview to display a wireframe preview of the floorplan.
+4. Click Apply to create the floorplan.
+To create the floorplans shown in Figure 14, enter 3.0 in the Aspect ratio box to create the 
+floorplan on the left, or enter 0.33 to create the floorplan on the right.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+57
+
+
+===== PDF page 58 =====
+Chapter 4: Creating a Floorplan
+Defining Routing Tracks
+Feedback
+Defining Routing Tracks
+To create routing tracks in the floorplan, use the create_track command. You can specify 
+the layer, the number of tracks, the pitch distance between tracks, and so on.
+You can specify the track location in two ways:
+•
+To specify the location of the first track, use the -coord option. The tool uses the x- and 
+y-coordinates set by the -dir option, which specifies the stepping direction in which 
+the tracks are placed. By default, the first track is located at half the space distance 
+inside the die area.
+•
+To specify that one of the track lines be aligned to the lower boundary of either the 
+core area bounding box or the block bounding box, use the -relative_to option. The 
+tracks are created completely within the block boundary even if the block boundary is 
+larger than the core boundary.
+You can also specify that subsequent grid points be created with respect to the 
+core area bounding box or the lower-left of the block bounding box by using the 
+-end_grid_relative_to option.
+Alternatively, you can create routing tracks in the GUI by choosing Create > Track from the 
+menu.
+Figure 15 shows a floorplan created with the create_track command. In this example, 
+the remove_tracks command removes all existing routing tracks, and then the 
+create_track command creates routing tracks on METAL3 in the preferred direction with 
+a pitch of 0.5. The report_tracks command reports the routing track direction, startpoint, 
+number of tracks, and pitch for each set of routing tracks in the design.
+icc2_shell> remove_tracks -all
+1
+icc2_shell> create_track -layer METAL3 -space 0.5
+{TRACK_0}
+icc2_shell> report_tracks
+****************************************
+Report report_tracks
+Design : TEST
+...
+****************************************
+Layer          Direction     Start         Tracks    Pitch          Attr
+------------------------------------------------------------------------
+METAL3             Y         0.250          4023     0.500       default
+1
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+58
+
+
+===== PDF page 59 =====
+Chapter 4: Creating a Floorplan
+Flipping the First Row in the Floorplan
+Feedback
+Figure 15
+Floorplan After Inserting Routing Tracks
+You can also create tracks based on nondefault rules with the create_track command. 
+For information about creating tracks with nondefault rules, see SolvNet article 3001923, 
+“How Can I Create Routing Tracks Based on Nondefault Rules (NDRs)?”
+Flipping the First Row in the Floorplan
+To avoid flipping the first row in the floorplan, specify the -flip_first_row false option 
+as shown in the following example.
+icc2_shell> initialize_floorplan -flip_first_row false
+In Figure 16, the layout image on the left shows the layout created by using the 
+-flip_first_row true option, and the layout image on the right shows the 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+59
+
+
+===== PDF page 60 =====
+Chapter 4: Creating a Floorplan
+Flipping the First Row in the Floorplan
+Feedback
+floorplan created by using the -flip_first_row false option. By default, the 
+initialize_floorplan command flips the first row.
+Figure 16
+Floorplan With First Row Flipped and Not Flipped
+F
+F
+F
+F
+F
+F
+F
+F
+-flip_first_row true
+-flip_first_row false
+To create an offset between the boundary and the core, specify the -core_offset option 
+with the initialize_floorplan command as shown in the following example.
+icc2_shell> initialize_floorplan -core_utilization 0.8 \
+   -core_offset {50 100}
+Figure 17 shows a zoomed-in view of a floorplan created by using the 
+initialize_floorplan command with the -core_offset option. This option sets the 
+distance between the floorplan core and the floorplan boundary. The -core_offset option 
+accepts a list of offsets, where each offset corresponds to an edge of the floorplan. See 
+the initialize_floorplan man page for information about mapping the argument 
+position to an edge of the floorplan.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+60
+
+
+===== PDF page 61 =====
+Chapter 4: Creating a Floorplan
+Updating the Floorplanning Without Disturbing Specified Object Types
+Feedback
+Figure 17
+Floorplan With Boundary to Core Spacing
+Updating the Floorplanning Without Disturbing Specified Object 
+Types
+After creating the initial floorplan with the initialize_floorplan command, repeat 
+the command with different options to experiment with different floorplan shapes and 
+characteristics. To retain the placement or shape for specified object types when changing 
+the floorplan, use one or more of the -keep_* options.
+•
+-keep_boundary: Retain the floorplan boundary when updating the floorplan.
+•
+-keep_pg_route: Retain power and ground routes when updating the floorplan.
+•
+-keep_detail_route: Retain all routes except power and ground routes when 
+updating the floorplan.
+•
+-keep_placement {block}: Retain block placement when updating the floorplan.
+•
+-keep_placement {io}: Retain terminal and pad placement when updating the 
+floorplan.
+•
+-keep_placement {macro}: Retain macro placement when updating the floorplan.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+61
+
+
+===== PDF page 62 =====
+Chapter 4: Creating a Floorplan
+Validating the FinFET Grid
+Feedback
+•
+-keep_placement {std_cell}: Keep standard cell placement when updating the 
+floorplan.
+•
+-keep_placement {physical_only}: Keep the placement for physical only cells 
+when updating the floorplan; the cells can be identified with the following commands:
+icc2_shell> get_cells -filter "design_type==physical_only"
+icc2_shell> get_cells -filter "design_type==fill"
+•
+-keep_placement {all}: Retain terminal, pad, macro, block, standard cell, and 
+physical-only objects when updating the floorplan options.
+Validating the FinFET Grid
+The IC Compiler II tool supports a FinFET grid to guide the placement of library cells that 
+contain FinFET devices. The x- and y-spacing and offset values for the FinFET grid are 
+specified in the technology file.
+To report information about the FinFET grid, use the report_grids -type finfet 
+command as follows:
+icc2_shell> report_grids -type finfet
+FinFET Grid             Description
+-------------------------------------------------
+Top Design              orca_hier_lib:ORCA.design
+FinFET Grid defined     true
+FinFET Grid X Pitch     0.001
+FinFET Grid Y Pitch     0.048
+FinFET Grid X Offset    0
+FinFET Grid Y Offset    0
+1
+To check for placement or boundary violations with respect to the FinFET grid, use the 
+check_finfet_grid command as follows:
+icc2_shell> check_finfet_grid
+...
+Error: boundary point (0 101.97) of hard macro
+'I_ORCA_TOP/I_PCI_TOP/I_PCI_WRITE_FIFO/PCI_FIFO_RAM_7'
+   is not on FinFET grid. (DPCHK-002)
+Error: boundary point (0 101.97) of hard macro
+'I_ORCA_TOP/I_PCI_TOP/I_PCI_WRITE_FIFO/PCI_FIFO_RAM_6'
+   is not on FinFET grid. (DPCHK-002)
+...
+To check specific object types, specify only those objects to the check_finfet_grid 
+command as follows:
+icc2_shell> check_finfet_grid -objects [get_cells -hierarchical \
+   -filter "design_type==pad"]
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+62
+
+
+===== PDF page 63 =====
+Chapter 4: Creating a Floorplan
+Scaling the Die Area
+Feedback
+...
+Reporting violations in block ORCA ...
+Error: boundary point (0 345.565) of io pad 'test_mode_iopad'
+   is not on FinFET grid. (DPCHK-002)
+Error: boundary point (0 345.565) of io pad 'sdr_clk_iopad'
+   is not on FinFET grid. (DPCHK-002)
+The following commands are aware of the FinFET grid in the tool:
+•
+create_blackbox
+•
+create_grid
+•
+create_io_guide
+•
+create_io_ring
+•
+create_macro_array
+•
+create_placement
+•
+create_power_switch_array
+•
+create_power_switch_ring
+•
+create_site_array
+•
+create_site_row
+•
+initialize_floorplan
+•
+place_io
+•
+report_grids
+•
+set_block_grid_references
+•
+set_grid
+•
+set_signal_io_constraints
+•
+shape_blocks
+Scaling the Die Area
+You can shrink or expand the die area or the size of your design by using the 
+modify_die_area command.
+•
+Reducing the size of the design can offer some potential benefits such as, smaller 
+the die, more the number of dies per wafer. However, ensure that you aim for minor 
+changes. Major changes can cause issues including excessive utilization or macros 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+63
+
+
+===== PDF page 64 =====
+Chapter 4: Creating a Floorplan
+Scaling the Die Area
+Feedback
+not being able to fit in a design. You can consider this action successful when your 
+shrunken design is still routable, meets operating speed requirements, and also meets 
+allowable power consumption requirements.
+•
+Enlarging the design can help with congestion.
+Table 2
+Options to the modify_die_area Command Control How Much the Die Area is 
+Resized
+To do this...
+Use this...
+To control the resizing of the core area, its 
+height, and its width
+Valid values range from 0.1 to 10
+-area_scaling_factor
+-height_scaling_factor
+-width_scaling_factor
+To specify the required utilization of the core 
+area
+-core_utilization
+To list the edges whose length you want to 
+remain unchanged
+-fixed_edges
+To define constraints on aspect ratios
+-sizing_type
+To specify the row pattern to be used in 
+floorplan creation
+-row_pattern
+To calculate and print the summary of the 
+estimated floorplan layout and create a new 
+floorplan based on the estimates
+-compile
+To run a custom script that re-creates the tracks 
+after the resizing of the die
+By default, the command derives the track 
+information from the input floorplan and reuses 
+it
+-run_track_creation_script
+The following example shrinks the core area to 85% of its original size.
+icc2_shell> modify_die_area -area_scaling_factor 0.85
+The following example shrinks core height to 80% of the original height of the die, which is, 
+20% reduction.
+icc2_shell> modify_die_area -height_scaling_factor 0.8
+The following example shrinks core so that its utilization is 75%.
+icc2_shell> modify_die_area -core_utilization 0.75
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+64
+
+
+===== PDF page 65 =====
+Chapter 4: Creating a Floorplan
+Scaling the Die Area
+Feedback
+The following example increases the core height to 110% of the original height of the core, 
+which is a 10% increase.
+icc2_shell> modify_die_area -height_scaling_factor 1.1
+In the following example, the core area is shrunk to 85% of the original size but the 
+horizontal dimension is fixed.
+icc2_shell modify_die_area -area_scaling_factor 0.85 -sizing_type fixed_width 
+-compile
+--------------------------------------------------------------------------------
+-------------------------------
+Die Size Exploration Summary
+--------------------------------------------------------------------------------
+-------------------------------
+Original Floorplan Layout
+        Utilization Ratio: 0.3934
+        Core Area: 3150962.2170
+        Core Width: 1775.3000
+        Core Height: 1774.8900
+        Boundary Co-ordinates: {350.0000 350.0000} {350.0000 2124.8900} 
+ {2125.3000 2124.8900} {2125.3000 350.0000}
+ 
+Estimated Floorplan Layout
+        Utilization Ratio: 0.4628
+        Core Area: 2678317.8845
+        Core Width: 1775.3000
+        Core Height: 1508.6565
+        Boundary Co-ordinates: {350.0000 350.0000} {350.0000 1858.6565} 
+ {2125.3000 1858.6565} {2125.3000 350.0000}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+65
+
+
+===== PDF page 66 =====
+Chapter 4: Creating a Floorplan
+Reporting Floorplan Information
+Feedback
+Reporting Floorplan Information
+Use the report_design -floorplan or report_design -all command to report the 
+following information for the floorplan:
+•
+Area: Core and chip area.
+•
+Site row: Name, width, height, number of rows, number of tiles, and area for each site 
+row.
+•
+Blockages: Count and area for each blockage type, including hard placement 
+blockages, soft placement blockages, hard macro blockages, partial placement 
+blockages, routing blockages, category blockages, reserved placement group 
+blockages, shaping blockages, routing for design rule blockages, placement blockages 
+which only allow buffers, and no-register blockages for each blockage type.
+•
+Power domains: Power domain name, voltage area name, and primary power and 
+ground nets for each power domain.
+•
+Voltage areas: Name, number of shapes, area, target utilization, and bounding box 
+coordinates for each voltage area.
+•
+Group bounds: Number of dimensionless group bounds.
+•
+Move bounds: Name, area, utilization, and bounding box for each hard, soft, and 
+exclusive move bound.
+•
+Route guide: Count and area for each extra detour region, route guide over in-chip 
+overlay cell layers, river routing guide, all double vias in the route guides, access 
+preference route guide, default route guide, switched direction only route guide.
+•
+Multibit registers: Number of multibit registers.
+•
+Reserved placement groups: Number of top-level reserved placement groups, number 
+of reserved placement cells, reserved placement cell area, and reserved placement cell 
+area percentage for each reserved placement group.
+•
+Layers: layer name, direction, pitch, default width, minimum width, minimum spacing, 
+and minimum spacing between the same nets for each layer.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+66
+
+
+===== PDF page 67 =====
+Chapter 4: Creating a Floorplan
+Reading, Writing, and Copying Floorplan Information
+Feedback
+Reading, Writing, and Copying Floorplan Information
+After you create the floorplan, you can save a Tcl script that describes the floorplan 
+by using the write_floorplan command, or save a DEF file by using the write_def 
+command.
+•
+Reading in Floorplan Information
+•
+Reading DEF Files
+•
+Writing Out Floorplan Files
+•
+Copying Floorplan Objects From Block to Block
+Reading in Floorplan Information
+To load floorplan information written by the write_floorplan command for a flat block, 
+use the source command to read in the fp.tcl file for the design as follows.
+icc2_shell> source floorplan/fp.tcl
+For a hierarchical design which might contain a mix of design and abstract block 
+representations, use the set_constraint_mapping_file and load_block_constraints 
+commands as follows:
+icc2_shell> set_constraint_mapping_file floorplan/mapfile
+icc2_shell> load_block_constraints -type FLOORPLAN -all_blocks
+The load_block_constraints -type FLOORPLAN command and option source each 
+fp.tcl file contained in the mapping file to re-create the floorplan for each block. The 
+constraint mapping file written by the write_floorplan command contains a list of block 
+names, FLOORPLAN keywords, and fp.tcl file locations for each block as shown in the 
+following constraint mapping file:
+BLENDER_0    FLOORPLAN  floorplan/BLENDER_0/fp.tcl
+BLENDER_1    FLOORPLAN  floorplan/BLENDER_1/fp.tcl
+BLENDER_2    FLOORPLAN  floorplan/BLENDER_2/fp.tcl
+CONTEXT_MEM  FLOORPLAN  floorplan/CONTEXT_MEM/fp.tcl
+ORCA         FLOORPLAN  floorplan/fp.tcl
+PCI_TOP      FLOORPLAN  floorplan/PCI_TOP/fp.tcl
+RISC_CORE    FLOORPLAN  floorplan/RISC_CORE/fp.tcl
+SDRAM_TOP    FLOORPLAN  floorplan/SDRAM_TOP/fp.tcl
+Reading DEF Files
+To read a DEF file, use the read_def command. The following command reads the 
+orca.def DEF file.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+67
+
+
+===== PDF page 68 =====
+Chapter 4: Creating a Floorplan
+Reading, Writing, and Copying Floorplan Information
+Feedback
+icc2_shell> read_def orca.def
+To analyze the syntax of the input DEF files before annotating the objects on the design, 
+specify the -syntax_only option.
+icc2_shell> read_def -syntax_only orca.def
+Writing Out Floorplan Files
+To write the current floorplan, use the write_floorplan command. The 
+write_floorplan command creates a directory named “floorplan” and writes out the 
+floorplan.def, floorplan.tcl, and fp.tcl files to the directory. The floorplan.def file contains 
+the physical layout, connectivity, and design constraint information for the design. The 
+floorplan.tcl file contains additional design intent that cannot be described in the DEF file, 
+such as hard macro keepout margins. The fp.tcl file contains commands to remove design 
+constraints such as voltage areas, bounds, routing guides, and so on. You can control 
+the information written to the files by using command options. The write_floorplan 
+command supports both design views and abstract views for blocks.
+The write_floorplan command also writes out the constraint mapping file which maps 
+each block to its corresponding fp.tcl file. When reading in the floorplan data, the mapping 
+file is assigned with the set_constraint_mapping_file command and used by the 
+load_block_constraints command.
+The write_floorplan command can include or exclude one or more object types. By 
+default, all supported object types are written out. Use the -include object_type_list 
+or -exclude object_type_list option to specify the object types that are included or 
+excluded. Valid object types are as follows:
+The following examples write out floorplan files for different design requirements:
+•
+blockages
+•
+bounds
+•
+cells
+•
+corridors
+•
+die_area
+•
+edit_groups
+•
+io_guides
+•
+macros
+•
+module_boundaries
+•
+nets
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+68
+
+
+===== PDF page 69 =====
+Chapter 4: Creating a Floorplan
+Reading, Writing, and Copying Floorplan Information
+Feedback
+•
+pin_guides
+•
+pins
+•
+route_guides
+•
+rows
+•
+tracks
+•
+vias
+•
+scan_chains
+•
+routing_directions
+•
+voltage_areas
+•
+fills
+•
+pg_metal_fills
+•
+routing_rules
+•
+pg_regions
+•
+placement_attractions
+•
+bump_regions
+•
+anchors
+•
+Write out macros and set origin, orientation, status, and other attributes.
+icc2_shell> write_floorplan -output "macros" -objects [get_cells \
+   -physical_context -filter is_hard_macro==true]
+•
+Write out PG regions, overwrite files in the pg directory if they exist.
+icc2_shell> write_floorplan -force -objects [get_pg_regions] \
+   -output pg
+•
+Write out pad cells and macro cells with a physical status of fixed or unplaced.
+icc2_shell> write_floorplan -force -include cells \
+   -include_physical_status {fixed unplaced} -cell_types {pad macro}
+•
+Write out clock, power, and ground nets to the DEF file; signal nets are excluded.
+icc2_shell> write_floorplan -force -output nets \
+   -net_types {clock power ground}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+69
+
+
+===== PDF page 70 =====
+Chapter 4: Creating a Floorplan
+Reading, Writing, and Copying Floorplan Information
+Feedback
+•
+Add the -add_def_only_objects {cells} -no_incremental options to the 
+read_def command in the output fp.tcl floorplan file.
+icc2_shell> write_floorplan -output fp -nosplit -def_version 5.8 \
+   -read_def_options {-add_def_only_objects {cells} -no_incremental}
+Copying Floorplan Objects From Block to Block
+To copy floorplan information from one block to another, use the copy_floorplan 
+command. The command copies the floorplan data from the design view of source block to 
+the design view of an existing destination block. The designs can be in the same library or 
+in different libraries. A design label can be specified along with the block name.
+The copy_floorplan command can include or exclude one or more object types when 
+copying. By default, all object types are copied. Use the -include object_type_list 
+or -exclude object_type_list option to specify the object types that are included or 
+excluded. Valid object types are as follows:
+•
+blockages
+•
+bounds
+•
+cells
+•
+corridors
+•
+die_area
+•
+edit_groups
+•
+io_guides
+•
+macros
+•
+module_boundaries
+•
+pin_guides
+•
+pins
+•
+route_guides
+•
+rows
+•
+tracks
+•
+vias
+•
+scan_chains
+•
+routing_directions
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+70
+
+
+===== PDF page 71 =====
+Chapter 4: Creating a Floorplan
+Reading, Writing, and Copying Floorplan Information
+Feedback
+•
+voltage_areas
+•
+fills
+•
+pg_metal_fills
+•
+routing_rules
+•
+pg_regions
+•
+port
+•
+supernet
+•
+bundle
+•
+topology_plan
+•
+net_estimation_rule
+The copy_floorplan command can also copy the following object types from the source 
+block to the destination block.
+•
+block
+•
+design
+•
+routing_blockage
+•
+shaping_blockage
+•
+placement_blockage
+•
+bound
+•
+cell
+•
+routing_corridor
+•
+core_area
+•
+edit_group
+•
+fill_cell
+•
+io_guide
+•
+via
+•
+shape
+•
+net
+•
+pin_guide
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+71
+
+
+===== PDF page 72 =====
+Chapter 4: Creating a Floorplan
+Reading, Writing, and Copying Floorplan Information
+Feedback
+•
+pg_region
+•
+routing_guide
+•
+site_row
+•
+site_array
+•
+track
+•
+voltage_area
+•
+routing_rule
+•
+port
+•
+supernet
+•
+bundle
+•
+topology_plan
+Use the -objects option to specify the collection of objects. Use other options to the 
+command to specify the source floorplan, destination floorplan, and which floorplan objects 
+are copied.
+•
+Copy all floorplan information from the mem design with the “placed” label in the test 
+library to the currently opened block and library.
+icc2_shell> copy_floorplan -from_block test:mem/placed
+If you use the -force option, objects are copied to the existing floor plan with new 
+names even though they are present in the floor plan.
+•
+Copy all floorplan information along with power switch logical connectivity information 
+from the mem design with the “placed” label in the test library to the mem_copy block 
+with the “placed” label in the test library by using the -to_block option.
+icc2_shell> copy_floorplan -from_block test:mem/placed \
+   -to_block test:mem_copy/placed
+Note:
+The -force option has no effect on the power switch cells and connections. 
+This option does not rename the cells unlike other objects. Therefore, 
+if the cells already exist but not the logical connectivity, running the 
+copy_floorplan command again with the -force option creates only the 
+logical connections.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+72
+
+
+===== PDF page 73 =====
+Chapter 4: Creating a Floorplan
+Reading, Writing, and Copying Floorplan Information
+Feedback
+•
+Copy only floorplan information for blockages and bounds by using the -include 
+option.
+icc2_shell> copy_floorplan -verbose -from_block test:mem/placed \
+   -to_block test:mem_copy/placed -include {blockages bounds}
+•
+Copy all floorplan information except for blockages and bounds by using the -exclude 
+option.
+icc2_shell> copy_floorplan -verbose -from_block test:mem/placed \
+   -to_block test:mem_copy/placed -exclude {blockages bounds}
+•
+Copy only vias VIA_S_0 and VIA_C_0 from the source design to the destination design 
+by using the -objects option.
+icc2_shell> copy_floorplan -verbose -from_block test:mem/placed \
+   -to_block test:mem_copy/placed \
+   -objects [get_vias {VIA_S_0 VIA_C_0}]
+•
+Copy floorplan objects hierarchically with the -hierarchical option.
+icc2_shell> copy_floorplan -verbose -from_block test:mem/placed \
+   -to_block test:mem_copy/placed \
+   -hierarchical
+Table 3 shows examples of how the copy_floorplan works for some of the objects.
+Table 3
+How the copy_floorplan Command Works
+Object
+copy_
+floorplan
+default
+copy_
+floorplan
+-objects
+copy_
+floorplan
+-include
+copy_
+floorplan
+-exclude
+copy_
+floorplan
+-force
+supernet
+Copy to the 
+destination 
+design
+Copy to the 
+destination 
+design
+Copy to the 
+destination 
+design
+Does not 
+copy to the 
+destination 
+design
+Copy to the 
+destination 
+design
+bundle
+Copy to the 
+destination 
+design
+Copy to the 
+destination 
+design
+Copy to the 
+destination 
+design
+Does not 
+copy to the 
+destination 
+design
+Copy to the 
+destination 
+design
+When the 
+copied objects 
+do not exist in 
+the destination 
+design
+net_estimation_rule
+Copy to the 
+destination 
+design
+Cannot be 
+specified 
+with the 
+-objects 
+option
+Copy to the 
+destination 
+design
+Does not 
+copy to the 
+destination 
+design
+Copy to the 
+destination 
+design
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+73
+
+
+===== PDF page 74 =====
+Chapter 4: Creating a Floorplan
+Reading, Writing, and Copying Floorplan Information
+Feedback
+Table 3
+How the copy_floorplan Command Works (Continued)
+Object
+copy_
+floorplan
+default
+copy_
+floorplan
+-objects
+copy_
+floorplan
+-include
+copy_
+floorplan
+-exclude
+copy_
+floorplan
+-force
+topology_plan
+Copy to the 
+destination 
+design
+Copy to the 
+destination 
+design
+Copy to the 
+destination 
+design
+Does not 
+copy to the 
+destination 
+design
+Copy to the 
+destination 
+design
+topology_edge
+Copy to 
+destination 
+design 
+if the 
+associated 
+topology_p
+lan is also 
+copied
+Cannot be 
+specified 
+with the 
+-objects 
+option
+Cannot be 
+specified 
+with the 
+-include 
+option
+Cannot be 
+specified 
+with the 
+-exclude 
+option
+Cannot be 
+specified 
+with the 
+-force 
+option
+topology_node
+Copy to 
+destination 
+design 
+if the 
+associated 
+topology_p
+lan is also 
+copied
+Cannot be 
+specified 
+with the 
+-objects 
+option
+Cannot be 
+specified 
+with the 
+-include 
+option
+Cannot be 
+specified 
+with the 
+-exclude 
+option
+Cannot be 
+specified 
+with the 
+-force 
+option
+topology_repeater
+Copy to 
+destination 
+design 
+if the 
+associated 
+topology_p
+lan is also 
+copied
+Cannot be 
+specified 
+with the 
+-objects 
+option
+Cannot be 
+specified 
+with the 
+-include 
+option
+Cannot be 
+specified 
+with the 
+-exclude 
+option
+Cannot be 
+specified 
+with the 
+-force 
+option
+supernet
+Does not 
+copy to the 
+destination 
+design
+Does not 
+copy to the 
+destination 
+design
+Does not 
+copy to the 
+destination 
+design
+Cannot be 
+specified 
+with the 
+-exclude 
+option
+Does not 
+copy to the 
+destination 
+design
+When the 
+copied objects 
+exist in the 
+destination 
+design
+bundle
+Does not 
+copy to the 
+destination 
+design
+Does not 
+copy to the 
+destination 
+design
+Does not 
+copy to the 
+destination 
+design
+Does not 
+copy to the 
+destination 
+design
+Copy to the 
+destination 
+design
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+74
+
+
+===== PDF page 75 =====
+Chapter 4: Creating a Floorplan
+Creating and Validating Floorplan Rules for Advanced Technology Nodes
+Feedback
+Table 3
+How the copy_floorplan Command Works (Continued)
+Object
+copy_
+floorplan
+default
+copy_
+floorplan
+-objects
+copy_
+floorplan
+-include
+copy_
+floorplan
+-exclude
+copy_
+floorplan
+-force
+net_estimation_rule
+Does not 
+copy to the 
+destination 
+design
+Cannot be 
+specified 
+with the 
+-objects 
+option
+Does not 
+copy to the 
+destination 
+design
+Does not 
+copy to the 
+destination 
+design
+Copy to the 
+destination 
+design
+topology_plan
+Does not 
+copy to the 
+destination 
+design
+Does not 
+copy to the 
+destination 
+design
+Does not 
+copy to the 
+destination 
+design
+Does not 
+copy to the 
+destination 
+design
+Copy to the 
+destination 
+design
+topology_edge
+Does not 
+copy to the 
+destination 
+design
+Cannot be 
+specified 
+with the 
+-objects 
+option
+Cannot be 
+specified 
+with the 
+-include 
+option
+Cannot be 
+specified 
+with the 
+-force 
+option
+topology_node
+Does not 
+copy to the 
+destination 
+design
+Cannot be 
+specified 
+with the 
+-objects 
+option
+Cannot be 
+specified 
+with the 
+-include 
+option
+Cannot be 
+specified 
+with the 
+-exclude 
+option
+Cannot be 
+specified 
+with the 
+-force 
+option
+topology_repeater
+Does not 
+copy to the 
+destination 
+design
+Cannot be 
+specified 
+with the 
+-objects 
+option
+Cannot be 
+specified 
+with the 
+-include 
+option
+Cannot be 
+specified 
+with the 
+-exclude 
+option
+Cannot be 
+specified 
+with the 
+-force 
+option
+Creating and Validating Floorplan Rules for Advanced 
+Technology Nodes
+The IC Compiler II tool supports additional rule creation and checking utilities for floorplans 
+developed for advanced technology nodes. These floorplans have additional requirements 
+for the placement and spacing of standard cells, macros, and other objects in the design.
+Creating Additional Floorplan Rules
+To create floorplan rules for floorplans that have additional requirements, use the 
+commands described in the following table. The commands are described in detail 
+following the table.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+75
+
+
+===== PDF page 76 =====
+Chapter 4: Creating a Floorplan
+Creating and Validating Floorplan Rules for Advanced Technology Nodes
+Feedback
+Command
+Description
+set_floorplan_area_rules
+Defines a minimum area, maximum area, list of valid or 
+invalid areas, or a range of valid or invalid areas.
+set_floorplan_enclosure_rules
+Defines an enclosure rule to check for legal spacing 
+between an enclosed object and its enclosing object.
+set_floorplan_halo_rules
+Defines a halo rule to check for legal spacing between an 
+enclosed object and its enclosing object.
+set_floorplan_spacing_rules
+Defines a spacing rule to check for legal spacing between 
+objects.
+set_floorplan_width_rules
+Defines a width rule to check for legal spacing between 
+objects.
+set_floorplan_density_rules
+Defines a rule to check for floorplan density.
+Floorplan Area Rules
+To define a minimum area, maximum area, a list of valid or invalid areas, or a 
+range of valid or invalid areas for a set of library cells or design objects, use the 
+set_floorplan_area_rules command. Valid objects are:
+•
+block_boundary
+•
+core_area
+•
+hard_macro
+•
+placement_blockage
+•
+routing_blockage
+•
+shape
+•
+soft_macro
+•
+va_boundary
+•
+unplaceable_area
+•
+std_cell_area
+The following example creates a floorplan area rule named area_rule_1. The rule 
+specifies that the minimum area for a standard cell is 100.
+icc2_shell> set_floorplan_area_rules -name area_rule_1 \
+   -object_types std_cell_area -min 100
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+76
+
+
+===== PDF page 77 =====
+Chapter 4: Creating a Floorplan
+Creating and Validating Floorplan Rules for Advanced Technology Nodes
+Feedback
+Floorplan Enclosure Rules
+To define an enclosure rule to check for legal spacing between an enclosed object and its 
+enclosing object, use the set_floorplan_enclosure_rules command. Use options to 
+specify:
+•
+object types
+•
+object sides
+•
+object corners
+•
+allowed object rotation
+•
+valid or invalid spacing ranges and values
+The following example creates a floorplan enclosure rule named enclosure_rule_1. The 
+rule specifies that when a routing blockage encloses one of the specified library cells, the 
+routing blockage must fully enclose the cell on all sides and there must be a spacing of 
+5.0 between the routing blockage and the library cell.
+icc2_shell> set_floorplan_enclosure_rules -name enclosure_rule_1 \
+   -from_object_types routing_blockage -layers METAL \
+   -to_lib_cells $lib_cells -follow_rotations -sides all \
+   -must_enclose -min 5.0
+Floorplan Halo Rules
+To define a halo rule to check for legal spacing between an enclosed object and its 
+enclosing objects, use the set_floorplan_halo_rules command. Use options to 
+specify:
+•
+object types
+•
+object sides
+•
+object corners
+•
+allowed object rotation
+•
+valid or invalid spacing ranges and values
+The following example creates a floorplan halo rule named halo_rule_1. The rule 
+specifies that when a routing blockage encloses a macro, the routing blockage must fully 
+enclose the macro on all sides and there must be a spacing of 3.0 between the routing 
+blockage and the library cell.
+icc2_shell> set_floorplan_halo_rules -name halo_rule_1 \
+   -from_object_types routing_blockage -layers METAL2 \
+   -to_object_types hard_macro -sides all -type outer \
+   -must_enclose -min 3.0
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+77
+
+
+===== PDF page 78 =====
+Chapter 4: Creating a Floorplan
+Creating and Validating Floorplan Rules for Advanced Technology Nodes
+Feedback
+Floorplan Spacing Rules
+To define a spacing rule to check for legal spacing between objects, use the 
+set_floorplan_spacing_rules command. Use options to specify:
+•
+object types
+•
+object sides
+•
+object layers
+•
+allowed object rotation
+•
+minimum parallel run length
+•
+overlaps
+•
+valid or invalid spacing ranges and values
+The following example creates a floorplan spacing rule named spacing_rule_1. The rule 
+specifies the spacing between the specified library cells and the standard cell area.
+icc2_shell> set_floorplan_spacing_rules -name spacing_rule_1 \
+   -from_lib_cells $lib_cells -follow_rotations \
+   -to_object_types std_cell_area -directions vertical \
+   -min_parallel_run_length -1.0 -step 2.0 -offset 13.0
+Floorplan Width Rules
+To define a width rule to check for legal spacing between objects, use the 
+set_floorplan_width_rules command. Use options to specify object types, width 
+type of the check, side or direction, object layers, allowed object rotation, maximum and 
+minimum width, and valid or invalid width ranges and values. Valid objects are:
+•
+block_boundary
+•
+core_area
+•
+hard_macro
+•
+placement_blockage
+•
+routing_blockage
+•
+shape
+•
+soft_macro
+•
+unplaceable_area
+•
+boundary_cell_region
+•
+io_pad
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+78
+
+
+===== PDF page 79 =====
+Chapter 4: Creating a Floorplan
+Creating and Validating Floorplan Rules for Advanced Technology Nodes
+Feedback
+•
+cover_bump
+•
+va_boundary
+•
+std_cell_area
+By default, the tool measures the width of each object separately. However, to measure 
+the merged shape of all objects, you can set the set_floorplan_width_rules 
+-merge_object to true.
+The following example creates a floorplan width rule named width_rule_1. The rule 
+specifies that the horizontal width of the standard cell area must be an even multiple of 
+8.0 plus the offset of 40.0.
+icc2_shell> set_floorplan_width_rules -name width_rule_1 \
+   -object_types std_cell_area -type simple -direction horizontal \
+   -step 8.0 -offset 40.0
+Floorplan Density Rules
+To define a floorplan density rule, use the set_floorplan_density_rules command. An 
+example of a floorplan density rule is the maximum bump density of the die. Use options to 
+specify:
+•
+object types
+•
+library cells
+•
+routing layers
+•
+density calculation method
+•
+cut method
+•
+region of the design where the density should be calculated
+•
+window size
+•
+window step
+•
+distance to be maintained between objects
+The following example creates a floorplan density rule named ds1.
+icc2_shell> set_floorplan_density_rules -name ds1 \
+   -from_object_types shape -to_object_types io_pad \
+   -numerator amount -cut_method drop -density_method local_window
+   -window_size {1 2} -window_step {3 4} -max 10
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+79
+
+
+===== PDF page 80 =====
+Chapter 4: Creating a Floorplan
+Creating and Validating Floorplan Rules for Advanced Technology Nodes
+Feedback
+Validating Floorplan Rules and Repairing Errors
+After creating advanced node floorplan rules with the commands listed in Creating 
+Additional Floorplan Rules, use the check_floorplan_rules command to check your 
+floorplan against the rules.
+To display violations in the error browser, select the “Display errors in layout window” 
+option in the check_floorplan_rules dialog box in the GUI.
+Use options and arguments of the check_floorplan_rules command as follows to 
+control how the floorplan rule checks are performed.
+•
+Specify the floorplan rules to check by listing them after the command name. Use the 
+check_floorplan_rules command to list the currently specified floorplan rules.
+icc2_shell> check_floorplan_rules {floorplan_rule_1 floorplan_rule_2}
+...
+Error: found region {{30 115} {47 262}} from {hard_macro: MACRO1} to
+{hard_macro: MACRO2} violates rule floorplan_rule_1 on vertical 
+ direction:
+not on grid. (DPCHK-010)
+•
+Specify the object types (hard_macro, std_cell_area, soft_macro, 
+block_boundary, or core_area) to check by using the -object_types option.
+icc2_shell> check_floorplan_rules -object_types {std_cell hard_macro}
+...
+Error: found region {{340 1} {431 58}} from
+{block_boundary} to {hard_macro: MACRO5} violates rule rule_1
+on horizontal direction: not on grid. (DPCHK-010)
+•
+Specify the library cells to check by using the -lib_cells option.
+icc2_shell> check_floorplan_rules -lib_cells MACRO4
+Error: found region {{262 58} {299 58}} from {cell: U3/MACRO4} to
+{cell: U0/MACRO4} violate rule rule_2 on vertical direction: less than
+offset, not on grid. (DPCHK-010)
+After creating and checking the floorplan rules with the set_floorplan_area_rules, 
+set_floorplan_enclosure_rules, set_floorplan_halo_rules, 
+set_floorplan_spacing_rules, set_floorplan_width_rules, and 
+check_floorplan_rules commands, use the fix_floorplan_rules command to 
+modify the design based on the rules. The command performs the following changes to 
+the design:
+•
+Moves macros to satisfy all grid-type spacing rules and enclosure rules from the block 
+boundary
+•
+Creates a hard keepout margin around hard macros to satisfy spacing and halo rules
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+80
+
+
+===== PDF page 81 =====
+Chapter 4: Creating a Floorplan
+Creating and Validating Floorplan Rules for Advanced Technology Nodes
+Feedback
+•
+Creates routing blockages after macro placement to satisfy all routing blockages to 
+macro enclosure and halo rules
+•
+Creates placement blockages after macro placement to satisfy all width rules, spacing 
+rules to macros, enclosure rules from block boundary, and area rules for the standard 
+cell area
+•
+Adjusts core area and block boundary to mitigate block boundary to core area 
+enclosure rule violations and core area width rule violations
+•
+(Optional) Writes out a Tcl file that contains commands to implement the design 
+changes made by the fix_floorplan_rules command
+The following example checks the floorplan rules, uses the fix_floorplan_rules 
+command to adjust the position of hard macros, and then performs a second check of 
+the floorplan rules. The second check shows that all floorplan rules are repaired by the 
+fix_floorplan_rules command.
+icc2_shell> check_floorplan_rules
+INFO: found 4 error(s) violate rule: rule_1
+INFO: found 4 error(s) violate rule: rule_2
+INFO: found 50 error(s) violate rule: rule_3
+INFO: found 8 error(s) violate rule: rule_4
+INFO: checking floorplan rules finished.
+ 
+icc2_shell> fix_floorplan_rules -include hard_macro
+Fixing hard macro floorplan spacing rules.
+ 
+icc2_shell> check_floorplan_rules
+INFO: found 0 error(s) violate rule: rule_1
+INFO: found 0 error(s) violate rule: rule_2
+INFO: found 0 error(s) violate rule: rule_3
+INFO: found 0 error(s) violate rule: rule_4
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+81

@@ -1,0 +1,525 @@
+% 第 7 章 Generating Reports
+\bichapter{生成报告}{Generating Reports}
+\label{chap:reports}
+
+IC Compiler II 可以生成关于设计内容与分析结果的多种报告。本章说明最常用的报告：
+\begin{itemize}
+  \item 控制延迟计算
+  \item 报告时序路径
+  \item 报告逻辑 DRC 违例
+  \item 报告 QoR
+  \item 生成并分析 QoR 快照
+  \item 报告时序弧的延迟
+  \item 报告引脚或端口上的时钟或数据到达时间
+  \item 检查时序约束与设置
+  \item 检查时序分析或提取设置的一致性
+  \item 分析 IC Compiler II 与 PrimeTime 之间的时序相关性
+\end{itemize}
+
+\section{控制延迟计算}
+\subsection*{Controlling Delay Calculation}
+
+IC Compiler II 同时支持 Elmore 与 Arnoldi 延迟计算模型。不能指定使用哪一种；工具根据设计状态选择最合适的模型。
+
+时序分析中若要忽略网线延迟，使用下列应用选项：
+\begin{lstlisting}
+icc2_shell> set_app_options -name time.delay_calculation_style \
+    -value zero_interconnect
+\end{lstlisting}
+
+\subsection{使用 PrimeTime 延迟计算引擎}
+\subsubsection*{Using the PrimeTime Delay Calculation Engine}
+
+设计布线之后，可以用下列应用选项在时序分析与布线后优化中启用 PrimeTime 延迟计算引擎：
+\begin{lstlisting}
+icc2_shell> set_app_options -name time.use_pt_delay -value true
+\end{lstlisting}
+
+使用 PrimeTime 延迟计算引擎时，除 \cmd{.ndm} 文件外，还需要参考库的 \cmd{.db} 文件。若创建参考库之后 \cmd{.db} 的位置已改变，把新位置加入 \cmd{search\_path}，例如：
+\begin{lstlisting}
+icc2_shell> lappend search_path /libraries/ref_libs/db_files
+\end{lstlisting}
+
+关于在 \cmd{route\_opt} 布线后优化中使用 PrimeTime 延迟计算引擎的更多信息，见 \textit{IC Compiler II Implementation User Guide}。
+
+\section{报告时序路径}
+\subsection*{Reporting Timing Paths}
+
+用 \cmd{report\_timing} 报告 block 中的时序路径。默认报告当前 block 上已启用 setup 分析的全部 scenario 中，最大（setup）延迟最差的那条路径。要报告最小（hold）延迟分析，使用 \opt{-delay\_type}。
+
+还可以：
+\begin{itemize}
+  \item 用 \opt{-modes} 报告与指定 mode 关联的全部 scenario。
+  \item 用 \opt{-corners} 报告与指定 corner 关联的全部 scenario。
+  \item 用 \opt{-scenarios} 报告指定 scenario。
+\end{itemize}
+
+要报告某个 scenario 的最大与最小时序信息，必须为该 scenario 启用 setup 与 hold 分析。
+
+还可以把报告进一步限制为：
+\begin{itemize}
+  \item 用 \opt{-groups} 只包含指定 path group。
+  \item 只包含满足下列条件的路径：
+  \begin{itemize}
+    \item 用 \opt{-from}、\opt{-rise\_from} 或 \opt{-fall\_from} 从指定点出发。
+    \item 用 \opt{-to}、\opt{-rise\_to} 或 \opt{-fall\_to} 结束于指定点。
+    \item 用 \opt{-through}、\opt{-rise\_through} 或 \opt{-fall\_through} 经过指定点。
+    \item 用 \opt{-start\_end\_pair} 位于指定起点与终点对之间。
+  \end{itemize}
+  \item 用 \opt{-max\_paths} 或 \opt{-nworst} 只包含指定条数的路径，或每个终点指定条数的路径。
+  \item 用 \opt{-slack\_lesser\_than} 只包含 slack 小于指定值的路径。
+  \item 排除下列时序路径：
+  \begin{itemize}
+    \item 用 \opt{-exclude} 排除从、经过或到达指定 pin、port、net 或单元实例的路径。
+    \item 用 \opt{-rise\_exclude} 排除在这些对象上为上升沿的路径。
+    \item 用 \opt{-fall\_exclude} 排除在这些对象上为下降沿的路径。
+  \end{itemize}
+\end{itemize}
+
+用下列选项控制打印的路径或对象信息：
+\begin{itemize}
+  \item \opt{-nets}：包含网线。
+  \item \opt{-physical}：包含引脚位置。
+  \item \opt{-attributes}：包含属性。
+  \item \opt{-input\_pins}：包含输入引脚。
+  \item \opt{-include\_hierarchical\_pins}：包含层次引脚。
+  \item \opt{-transition\_time}：包含转换时间。
+  \item \opt{-capacitance}：包含电容。
+  \item \opt{-exception}：包含作用于所打印每条时序路径的主导时序例外（false path、multicycle path，以及最小与最大延迟）。包含例外信息会增加运行时间。
+  \item \opt{-process}、\opt{-voltage}、\opt{-temperature}：包含工作条件的工艺、电压与温度。
+  \item \opt{-derate}：包含时序 derate。
+  \item \opt{-crosstalk\_delta}：在启用信号完整性时包含串扰信息。
+  \item \opt{-variation}：在启用 POCV 时，包含每个路径元素统计时间增量的均值与标准差。还可用应用选项 \appopt{time.pocvm\_use\_normalized\_reporting} 进一步控制该变异信息，详见其 man 页。
+  \item \opt{-skip\_transparency\_window}：对基于锁存器的设计，不打印透明窗口。
+\end{itemize}
+
+还可以这样控制报告格式：
+\begin{itemize}
+  \item 用 \opt{-path\_type} 指定路径报告风格，例如完整路径、只报告终点等。
+  \item 用 \opt{-report\_by} 按 mode、corner、scenario、path group 或整个 block 组织报告。
+  \item 用 \opt{-sort\_by} 按路径、path group 或 slack 排序。
+  \item 用 \opt{-significant\_digits} 指定显示的有效数字位数。
+  \item 用 \opt{-nosplit} 在列溢出时避免拆行。
+\end{itemize}
+
+下面是 \cmd{report\_timing} 默认输出的示例。
+
+\begin{lstlisting}[caption={report\_timing 报告示例}]
+icc2_shell> report_timing
+****************************************
+Report : timing
+        -path_type full
+        -delay_type max
+        -nworst 1
+        -max_paths 1
+        -report_by design
+Design : my_design
+****************************************
+ Startpoint: u0_3/p0/mul0/m0_U1_INT_SUMR_reg_1_/CLK
+             (rising edge-triggered flip-flop)
+ Endpoint: u0_3/p0/iu0/r_reg_E__OP2__31_/D
+             (rising edge-triggered flip-flop)
+ Mode: my_mode
+ Corner: wc_corner
+ Scenario: wc_scenario
+ Path Group: pci_clk
+ Path Type: max
+ Launch clock: pci_clk  r
+ Capture clock: pci_clk  r
+  Point                                    Fanout  Cap   Trans  Incr   Path
+--------------------------------------------------------------------------------
+  clock pci_clk (rise edge)                                   0.00   0.00
+  clock network delay (ideal)                                 2.00   2.00
+  .../CLK (SDFFX1_LVT)                                0.00  0.00   2.00 r
+  .../QN (SDFFX1_LVT)                          1      7.19  0.11  0.18   2.18 f
+  ...
+  data arrival time                                                  6.37
+  clock pci_clk (rise edge)                                   5.00   5.00
+  clock network delay (ideal)                                 2.00   7.00
+  clock uncertainty                                          -0.40   6.60
+  library setup time                                         -0.20   6.40
+  data required time                                                 6.40
+--------------------------------------------------------------------------------
+  slack (MET)                                                        0.03
+\end{lstlisting}
+
+\subsection{控制时序报告中的列顺序}
+\subsubsection*{Controlling the Column Order in a Timing Report}
+
+默认报告给出起点、终点、path group、路径类型、数据路径与时钟路径上的增量延迟与累积延迟、路径终点的数据要求时间，以及该路径的时序 slack。
+
+用应用选项 \appopt{time.report\_timing\_column\_order} 控制列顺序，例如：
+\begin{lstlisting}
+icc2_shell> set_app_options -name time.report_timing_column_order \
+    -value {point incr path cap fanout trans}
+\end{lstlisting}
+
+该应用选项的合法值为 \cmd{point}、\cmd{incr}、\cmd{path}、\cmd{cap}、\cmd{fanout}、\cmd{trans}、\cmd{derate}、\cmd{mean} 与 \cmd{sensit}。
+
+\subsection{报告无约束时序路径}
+\subsubsection*{Reporting Unconstrained Timing Paths}
+
+默认情况下，\cmd{report\_timing} 与 \cmd{get\_timing\_paths} 不报告无约束的时序路径。要报告它们，在运行这两条命令之前设置：
+\begin{lstlisting}
+icc2_shell> set_app_options -list {time.report_unconstrained_paths true}
+\end{lstlisting}
+
+无约束路径的 slack 为无穷大，只能用路径过滤来报告，例如：
+\begin{lstlisting}
+icc2_shell> report_timing [filter_collection \
+    [get_timing_paths -max_paths 200000 -to [all_outputs]] \
+    slack=="INFINITY"]
+\end{lstlisting}
+
+\section{报告逻辑 DRC 违例}
+\subsection*{Reporting the Logical DRC Violations}
+
+用 \cmd{report\_constraints} 报告逻辑 DRC 违例。该命令显示 block 中约束违例的摘要，包括违例量、最差违例对象的信息，以及违例的加权代价。
+
+默认检查下列时序约束：
+\begin{itemize}
+  \item 最小路径延迟：包括寄存器或带输出延迟的端口上的 hold 违例，以及 \cmd{set\_min\_delay} 的违例。
+  \item 最大路径延迟：包括寄存器或带输出延迟的端口上的 setup 违例，以及 \cmd{set\_max\_delay} 的违例。
+  \item 最大转换时间。
+  \item 最大电容。
+  \item 最小电容。
+\end{itemize}
+
+用下列选项把报告限制到某一种约束：\opt{-min\_delay}、\opt{-max\_delay}、\opt{-max\_transition}、\opt{-max\_capacitance}、\opt{-min\_capacitance}。
+
+默认只显示当前 block 中每种约束的最差违例以及总代价。要报告全部违例而不仅是最差违例，使用 \opt{-all\_violators}。
+
+下面是默认输出的节选。
+\begin{lstlisting}[caption={默认约束报告}]
+icc2_shell> report_constraints
+    Group (min_delay/hold)       Cost     Weight     Cost     Scenario
+    pci_clk                      0.00      1.00      0.00  wc_scenario
+    pci_clk                      1.12      1.00      1.12  bc_scenario
+    min_delay/hold                                   1.13
+    Group (max_delay/setup)      Cost     Weight     Cost     Scenario
+    pci_clk                      0.44      1.00      0.44  wc_scenario
+    max_delay/setup                                  0.68
+    Constraint                                       Cost
+    min_delay/hold                                   1.13  (VIOLATED)
+    max_delay/setup                                  0.68  (VIOLATED)
+    max_transition                                 417.69  (VIOLATED)
+    max_capacitance                              189895.48  (VIOLATED)
+    min_capacitance                                100.52  (VIOLATED)
+\end{lstlisting}
+
+\section{报告 QoR}
+\subsection*{Reporting the QoR}
+
+用 \cmd{report\_qor} 生成 block 的结果质量（quality of results，QoR）及其他统计摘要。它报告时序 path group 细节、单元数量，以及当前 block 的统计，包括组合面积、非组合面积与总面积。该命令还报告静态功耗与设计规则违例。
+
+默认报告全部 active scenario 的 QoR。还可以：
+\begin{itemize}
+  \item 用 \opt{-modes} 报告与指定 mode 关联的全部 scenario。
+  \item 用 \opt{-corners} 报告与指定 corner 关联的全部 scenario。
+  \item 用 \opt{-scenarios} 报告指定 scenario。
+\end{itemize}
+
+下面是 \cmd{report\_qor} 报告的节选。
+\begin{lstlisting}[caption={report\_qor 报告示例}]
+icc2_shell> report_qor
+Information: Design Average RC value per unit length: (NEX-011)
+Information: r = 1.792938 ohm/um, c = 0.079907 ff/um (X dir)
+Scenario           'bc_scenario'
+Timing Path Group  'pci_clk'
+Worst Hold Violation:             -0.15
+Total Hold Violation:             -8.79
+No. of Hold Violations:             283
+Scenario           'wc_scenario'
+Timing Path Group  'pci_clk'
+Levels of Logic:                     55
+Critical Path Length:              2.79
+Critical Path Slack:               0.03
+Critical Path Clk Period:          3.00
+Total Negative Slack:              0.00
+No. of Violating Paths:               0
+Cell Count
+Hierarchical Cell Count:            694
+Leaf Cell Count:                 116919
+Buf/Inv Cell Count:               17031
+Area
+Combinational Area:          8365846.92
+Noncombinational Area:        571218.74
+Cell Area:                   8937065.66
+Design Rules
+Total Number of Nets:            142890
+Nets with Violations:               273
+Max Trans Violations:                12
+Max Cap Violations:                 262
+\end{lstlisting}
+
+在 Cell Count 一节中，报告给出 block 中的宏单元数量。要算作宏单元，单元不能是层次单元，且其库单元上必须设置了 \cmd{is\_macro\_cell} 属性。
+
+\section{生成并分析 QoR 快照}
+\subsection*{Generating and Analyzing a QoR Snapshot}
+
+用 \cmd{create\_qor\_snapshot} 生成设计 QoR 的详细信息。该命令从时序、设计规则、面积与功耗几方面度量并报告设计质量，并把质量信息存入一组快照文件。
+
+随后可以：
+\begin{itemize}
+  \item 用 \cmd{report\_qor\_snapshot} 取出并报告快照中的 QoR 信息。
+  \item 用 \cmd{query\_qor\_snapshot} 有选择地取出、排序并显示快照中所需的信息。
+  \item 用 \cmd{remove\_qor\_snapshot} 删除快照。
+\end{itemize}
+
+用 \cmd{create\_qor\_snapshot} 创建快照时，必须用 \opt{-name} 指定名称。报告、查询或删除快照时使用该名称。
+
+默认对 block 的全部 scenario 创建 QoR 快照。要为指定 scenario 创建，使用 \opt{-scenarios}，例如：
+\begin{lstlisting}
+icc2_shell> create_qor_snapshot -name func1 -scenarios func1
+\end{lstlisting}
+
+报告节选如下。它给出各时序组的 WNS、setup / hold 的 WNS 与 TNS、违例条数、最大转换与最大电容违例、面积、单元数、缓冲器/反相器数量、标准单元利用率、CPU 时间与内存，以及 slack 直方图。
+\begin{lstlisting}
+No. of scenario = 1
+s1 = func1
+WNS of each timing group:                       s1
+SD_DDR_CLK                                    1.07
+PCI_CLK                                      -1.76
+Setup WNS:                                   -1.76
+Setup TNS:                                 -102.47
+Number of setup violations:                     95
+Hold WNS:                                    -0.50
+Number of max cap violations:                   28
+Area:                                   444776.034
+Cell count:                                  53399
+Histogram:             s1
+Max violations:        95
+   above ~ -0.7  ---   40
+    -0.6 ~ -0.7  ---   55
+\end{lstlisting}
+
+默认把快照存在当前工作目录下名为 \cmd{snapshot} 的目录中。要指定其他位置，使用应用选项 \appopt{time.snapshot\_storage\_location}。
+
+用 \cmd{create\_qor\_snapshot}、\cmd{report\_qor\_snapshot} 或 \cmd{query\_qor\_snapshot} 创建、报告或查询快照时，可用 \opt{-display} 在 GUI 中显示结果。
+
+下例分析快照，并显示最差负 slack 介于 $-2.0$ 与 $-1.0$ 之间的路径：
+\begin{lstlisting}
+icc2_shell> query_qor_snapshot -name func1 -display \
+    -filters "-wns -2.0,-1.0"
+\end{lstlisting}
+
+下例显示逻辑级数超过 10 的路径：
+\begin{lstlisting}
+icc2_shell> query_qor_snapshot -name func1 -display \
+    -filters "-logic_level 10, "
+\end{lstlisting}
+
+\section{报告时序弧的延迟}
+\subsection*{Reporting the Delay of a Timing Arc}
+
+用 \cmd{report\_delay\_calculation} 取得时序路径上某条单元或网线时序弧的延迟计算详细报告。
+
+用 \opt{-from} 与 \opt{-to} 指定单元或网线的 ``from'' 与 ``to'' 引脚。这两个引脚可以是单元的输入与输出，以报告单元延迟；也可以是网线的驱动引脚与负载引脚，以报告网线延迟。
+
+默认报告当前 scenario 的延迟计算。可用 \opt{-mode} 与 \opt{-corner} 指定要报告的 mode 与 corner，或用 \opt{-scenario} 指定 scenario。
+
+下面是当前 scenario 的报告节选。
+\begin{lstlisting}[caption={延迟计算报告}]
+icc2_shell> report_delay_calculation \
+    -from u0_3/p0/mul0/m0_U1_INT_SUMR_reg_1_/CLK \
+    -to u0_3/p0/mul0/m0_U1_INT_SUMR_reg_1_/QN
+cap units: 1.00fF  res units: 1.00MOhm  time units: 1.00ns
+Current delay calculation style: auto
+Current min Elmore tau: 0.00s
+Current min Arnoldi tau: 2.00ps
+Cell arc:
+Cell: .../m0_U1_INT_SUMR_reg_1_ (FD1_LVT)
+From-pin: CLK  To-pin: QN
+Sense:   rising_edge
+            Input                  Output  Stored   Stored        Delay
+            slew    Load   Delay   slew    delay    output slew   derate
+early rise: 0.29    7.27   0.22    0.11    0.22     0.11          0.99
+ late rise: 0.29    7.27   0.22    0.11    0.22     0.11          1.01
+early fall: 0.29    6.85   0.20    0.10    0.20     0.10          0.99
+ late fall: 0.29    6.85   0.20    0.10    0.20     0.10          1.01
+\end{lstlisting}
+
+\section{报告引脚或端口上的时钟或数据到达时间}
+\subsection*{Reporting the Clock or Data Arrival Time at Pins or Ports}
+
+要取得数据网上某个 pin 或 port 处数据信号的到达时间，用 \cmd{get\_attribute} 查询 \cmd{arrival\_window} 属性：
+\begin{lstlisting}
+icc2_shell> get_attribute [get_pins U50/Y] arrival_window
+{{{SYS_CLK} pos_edge {min_r_f 0.367955 0.361167} {max_r_f 0.385574 0.383949}}}
+\end{lstlisting}
+
+对到达窗口，工具报告时钟名、发射该路径的边沿类型，以及该引脚上最小与最大的上升、下降到达时间。若多个时钟发射的数据到达同一引脚，工具为每个时钟发射的数据分别报告一个到达窗口。
+
+要取得时钟网络上某个 pin 或 port 处时钟信号的到达时间，查询 \cmd{clock\_arrival\_window}：
+\begin{lstlisting}
+icc2_shell> get_attribute [get_pins CT_BUF_7/Y] clock_arrival_window
+{{{SYS_CLK} pos_edge {min_r_f 1.03046 --} {max_r_f 1.03067 --}}}
+\end{lstlisting}
+
+对时钟到达窗口，工具报告时钟名、有效边沿类型，以及按该有效边沿在时钟引脚上的最小与最大上升或下降到达时间。若多个时钟或同一时钟的多个有效边沿到达该引脚，工具为每个时钟或时钟边沿分别报告一个到达窗口。
+
+\section{检查时序约束与设置}
+\subsection*{Checking the Timing Constraints and Settings}
+
+约束不正确的路径可能不会出现在违例报告中，从而漏掉有违例的路径。用 \cmd{check\_timing} 检查指定错误或缺失的约束以及其他时序问题。
+
+表~\ref{tab:check-timing} 列出 \cmd{check\_timing} 所做的检查。
+\begin{itemize}
+  \item 用 \opt{-all} 执行全部检查。
+  \item 用 \opt{-include} 在默认检查之外再包含指定检查。
+  \item 用 \opt{-exclude} 从默认检查中排除指定检查。
+\end{itemize}
+
+默认对全部 active scenario 做时序检查。还可以用 \opt{-modes}、\opt{-corners} 或 \opt{-scenarios} 限定范围。
+
+\begin{table}[htbp]
+\centering
+\caption{\cmd{check\_timing} 所执行的检查类型}
+\label{tab:check-timing}
+\begin{tabularx}{\textwidth}{@{}l c X@{}}
+\toprule
+检查类型 & 默认 & 工具的行为 \\
+\midrule
+\cmd{gated\_clock} & 是 &
+对任何没有到达寄存器时钟引脚的门控时钟发出警告。 \\
+\cmd{generated\_clock} & 是 &
+检查生成时钟网络，并在下列情况下发出警告：生成时钟没有到达 master 时钟的路径；没有满足所指定极性关系的路径；多个生成时钟形成环路；生成时钟未被展开；生成时钟没有指定周期。 \\
+\cmd{loops} & 是 &
+发现组合反馈环时发出警告。 \\
+\cmd{no\_clock} & 是 &
+没有时钟到达寄存器时钟引脚时发出警告。 \\
+\cmd{no\_input\_delay} & 是 &
+输入端口没有指定与时钟相关的延迟时发出警告。 \\
+\cmd{unconstrained\_endpoints} & 是 &
+寄存器数据引脚或主输出无约束时发出警告。 \\
+\cmd{clock\_crossing} & 否 &
+时序路径跨越时钟域时发出警告。 \\
+\cmd{data\_check} & 否 &
+没有时钟信号或多个时钟信号到达 data check 寄存器的参考引脚时发出警告。 \\
+\cmd{multiple\_clock} & 否 &
+多个时钟到达寄存器引脚时发出信息消息。 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+下面是 \cmd{check\_timing} 的输出示例。
+\begin{lstlisting}
+icc2_shell> check_timing
+Warning: The register clock pin 'F1/CLK' has no fanin clocks. (TCK-002)
+Warning: The reported endpoint 'OUT' is unconstrained. Reason: 'no check'. (TCK-001)
+Warning: The reported endpoint 'F1/DATA' is unconstrained. Reason: 'unclocked'. (TCK-001)
+\end{lstlisting}
+
+也可以用 \cmd{check\_design -checks timing} 做时序检查：
+\begin{lstlisting}
+icc2_shell> check_design -checks timing
+Running atomic-check 'timing'
+Rule    Type   Count Message
+TCK-002  Warn   3      The register clock pin '%pin' has no fanin clocks.
+Total 7 EMS messages : 0 errors, 3 warnings, 0 info.
+Info: EMS database is saved to file 'check_design.ems'
+\end{lstlisting}
+
+除生成报告外，\cmd{check\_design} 还会生成增强消息系统（enhanced messaging system，EMS）数据库，可在 IC Compiler II GUI 的消息浏览器中查看。
+
+\section{检查时序分析或提取设置的一致性}
+\subsection*{Checking for Consistency in Timing Analysis or Extraction Settings}
+
+要更快地收敛时序，应保证 IC Compiler II 与 PrimeTime 用于时序分析的设置一致。同样，IC Compiler II 与 StarRC 用于提取的设置也应一致。用 \cmd{check\_consistency\_settings} 检查这些设置的一致性。
+
+该命令可以帮助识别：
+\begin{itemize}
+  \item IC Compiler II 与 PrimeTime 时序分析设置之间的不一致。
+  \item 与各自工具推荐设置不同的 IC Compiler II 与 PrimeTime 时序分析设置。
+  \item IC Compiler II 与 StarRC 提取设置之间的不一致。
+  \item 与各自工具推荐设置不同的 IC Compiler II 与 StarRC 提取设置。
+\end{itemize}
+
+运行 \cmd{check\_consistency\_settings} 之前，必须用 \cmd{set\_consistency\_settings\_options} 指定一致性检查选项。
+
+下例设置并检查 IC Compiler II 与 PrimeTime 设置之间的一致性：
+\begin{lstlisting}
+icc2_shell> set_consistency_settings_options \
+    -exec_path /global/SNPS_tools -tool pt \
+    -script PT_top.tcl
+icc2_shell> check_consistency_settings -tool pt \
+    -output icc2_pt_consistency_check.rpt
+\end{lstlisting}
+
+该例生成的输出文件节选：
+\begin{lstlisting}
+Error: The timing_crpr_threshold_ps PrimeTime setting should be set to 5.
+    (CORR-800)
+Error: The time.crpr_remove_clock_to_data_crp IC-Compile-II setting
+    should be set to FALSE. (CORR-812)
+Error: The time.enable_si(si_enable_analysis) setting is inconsistent
+    between IC-Compile-II and PrimeTime. (CORR-803)
+\end{lstlisting}
+
+下例设置并检查 IC Compiler II 与 StarRC 设置之间的一致性：
+\begin{lstlisting}
+icc2_shell> set_consistency_settings_options \
+    -exec_path /global/SNPS_tools -tool starrc \
+    -script run_starrc.tc -corner max
+icc2_shell> check_consistency_settings -tool starrc \
+    -output icc2_starrc_consistency_check.rpt
+\end{lstlisting}
+
+输出文件节选：
+\begin{lstlisting}
+Information: The ccap_ratio(COUPLING_REL_THRESHOLD) setting in both
+    IC Compiler II and StarRC are set to '0.02'; the recommendation
+    is '0.03'. (CORR-804)
+Error: The include_pin_resistance(INSTANCE_PORT) setting is inconsistent
+    between IC Compiler II and StarRC. (CORR-803)
+Error: The temperature(OPERATING_TEMPERATURE) setting is inconsistent.
+    The IC Compiler II value is 0; the StarRC value is -30. (CORR-803)
+Error: The virtual_shield_extraction IC Compiler II setting should be
+    set to FALSE. (CORR-812)
+Error: The EXTRACT_VIA_CAPS StarRC setting should be set to NO. (CORR-800)
+\end{lstlisting}
+
+\section{分析 IC Compiler II 与 PrimeTime 的时序相关性}
+\subsection*{Analyzing Timing Correlation Between the IC Compiler II and PrimeTime Tools}
+
+用 \cmd{analyze\_timing\_correlation} 分析 IC Compiler II 与 PrimeTime 之间的时序相关性。
+
+默认执行下列步骤：
+\begin{enumerate}
+  \item 根据当前 IC Compiler II 设置，为当前 block 的每个 scenario 生成运行 PrimeTime 所需的文件。
+  \item 调用 PrimeTime，为每个 scenario 生成时序数据。
+  \item 为每个 scenario 生成 IC Compiler II 时序数据。
+  \item 生成两个工具之间的时序相关性报告。
+\end{enumerate}
+
+必须指定：
+\begin{itemize}
+  \item 用 \opt{-work\_dir} 指定相关性分析的工作目录。该目录存放中间文件，例如为运行 PrimeTime 生成的设计网表、约束、寄生参数与 Tcl 脚本，以及为相关性分析生成的时序数据。
+  \item 用 \opt{-pt\_exec\_path} 指定 PrimeTime 可执行文件的路径。
+\end{itemize}
+\begin{lstlisting}
+icc2_shell> analyze_timing_correlation -work_dir run_correlation \
+    -pt_exec_path /tools/SNPS/linux64/bin/pt_shell
+\end{lstlisting}
+
+该命令生成的相关性报告示例如下。度量对象为 slack。
+\begin{lstlisting}
+Correlation Metric: slack
+Correlation Metric                           Value
+All Endpoints                                99.952% at 3.00% Threshold
+Violating Endpoints                          99.306% at 3.00% Threshold
+Absolute Slack Difference on Average         2.664 ps
+Absolute Slack Difference Standard Deviation 4.253 ps
+Context    WNS    TNS    NVE Unique NVE
+PT         -0.058 -1.476 132         39
+ICC2       -0.039 -0.997 105         12
+Difference -0.019 -0.480  27         27
+\end{lstlisting}
+
+该报告给出：
+\begin{itemize}
+  \item 在指定阈值内相关的时序终点百分比。默认阈值为 3\%。可用 \opt{-pass\_rate\_threshold} 修改该阈值。
+  \item 在该阈值内相关的违例时序终点百分比。
+  \item 全部终点上 IC Compiler II 与 PrimeTime slack 绝对差的平均值与标准差。
+  \item 两个工具以及二者之差的最差负 slack（WNS）、总负 slack（TNS）、违例终点数（NVE），以及各自独有的违例终点数。
+\end{itemize}

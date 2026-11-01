@@ -1,0 +1,3768 @@
+
+
+===== PDF page 259 =====
+Feedback
+10
+Performing Power Planning
+Power planning, which includes power network routing and power network analysis, is 
+required to create a design with good power integrity. A design with a robust power and 
+ground (PG) grid reduces IR drop and electromigration by providing an adequate number 
+of power and ground pads and rails. The power plan can be used to assess the routing 
+resources consumed by the power nets and to determine the impact on routability due to 
+the power plan. You can experiment with different power plans or fine-tune the existing 
+power plan by modifying the command option settings and regenerating the power plan.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+259
+
+
+===== PDF page 260 =====
+Chapter 10: Performing Power Planning
+ 
+Feedback
+The flow to create a power plan for your design is shown in Figure 88.
+Figure 88
+Pattern-Based Power Planning Flow
+Create and connect power nets
+(create_net, connect_pg_net)
+Set PG routing mode
+(set_pg_routing_mode)
+Define PG via masters
+(set_pg_via_master_rule)
+Create PG patterns
+(create_pg_*_pattern)
+Create PG regions
+(create_pg_region)
+Set PG strategy
+(set_pg_strategy)
+Instantiate power plan
+(compile_pg)
+Insert power switches
+(create_power_switch_*)
+Connect power switches
+(connect_power_switch)
+Create ring patterns
+(create_pg_ring_pattern)
+Create mesh patterns
+(create_pg_mesh_pattern)
+Create macro connection patterns
+(create_pg_macro_conn_pattern)
+Create rail patterns
+(create_pg_std_cell_conn_pattern)
+Create special patterns
+(create_pg_special_pattern)
+The pattern-based power planning flow separates the physical implementation details 
+(layer, width, spacing) of the power ring and mesh from the regions of the design where 
+the structures are inserted. In a typical design, you run the flow multiple times. The first 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+260
+
+
+===== PDF page 261 =====
+Chapter 10: Performing Power Planning
+ 
+Feedback
+pass defines and creates the power rings, the second pass defines and creates the power 
+mesh, and so on.
+The create_pg_ring_pattern, create_pg_mesh_pattern, 
+create_pg_macro_conn_pattern, and create_pg_std_cell_conn_pattern commands 
+create pattern specifications that define the physical implementation details of the power 
+plan and associate a width, spacing, offset, and via rule specification with the metal layers 
+in your design. After defining the patterns, they can be easily reused among different 
+power regions in the design.
+The set_pg_strategy command assigns a pattern specification to specific power nets 
+and regions in the design. You can also define the offset for the start of the pattern, the 
+power strap extension specification, and the blockage specification with this command.
+You can create and implement complex via rules during pattern-based power planning. 
+The set_pg_via_master_rule command defines the contact code, offset for the 
+contact code within the via structure, cut spacing, and other parameters for the custom 
+via structure. Power via masters are associated with a specific power plan strategy by 
+specifying the -via_rule option with the appropriate create_pg_*_pattern command.
+The create_pg_*_pattern and set_pg_strategy commands specify the power plan, 
+but they do not modify the design. After creating the pattern and strategy definitions, use 
+the compile_pg command to instantiate the power structures into the design. To make 
+changes to the power plan after creating the power rings and meshes, remove the rings 
+and meshes with the compile_pg -undo command and make changes to the via rules, 
+pattern specifications, or power plan strategies.
+After instantiating the power plan, you can validate the integrity of the power 
+plan by checking for DRC and connectivity violations. Use the check_pg_drc 
+command to report any power structures that violate the routing design rules. Use the 
+check_pg_connectivity command to check the physical connectivity of the power 
+network.
+These topics are described in the following sections:
+•
+Creating and Connecting Power Nets
+•
+Setting the PG Routing Mode
+•
+Defining PG Via Masters
+•
+Creating Power and Ground Ring Patterns
+•
+Creating Power and Ground Mesh Patterns
+•
+Creating Power and Ground Macro Connections
+•
+Creating Power and Ground Standard Cell Rails
+•
+Creating Channel and Alignment Power Straps
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+261
+
+
+===== PDF page 262 =====
+Chapter 10: Performing Power Planning
+Creating and Connecting Power Nets
+Feedback
+•
+Creating Complex Composite Patterns
+•
+Defining Power Plan Regions
+•
+Setting the Power Plan Strategy
+•
+Creating Via Rules Between Different Strategies
+•
+Instantiating the Power Plan
+•
+Pattern-Based Power Network Routing Example
+•
+PG Script Generator
+•
+Manually Creating Power Straps and Vias
+•
+Using Secondary PG Constraints
+•
+Honoring Metal and Via Spacing Rules to Blockages
+•
+Using PG Pattern Shapes
+•
+Using Via Matrixes
+•
+Debugging Vias and PG Straps Removed Due to DRC Violations
+•
+Merging Shapes in the PG Mesh
+•
+Inserting Stapling Vias Into an Existing Power Mesh
+•
+Connecting Via Ladders to Power and Ground
+•
+Inserting and Connecting Power Switches
+•
+Trimming the Power and Ground Mesh
+•
+Checking Power Network Integrity
+•
+Analyzing the Power Plan
+•
+Performing Distributed Power Network Routing
+Creating and Connecting Power Nets
+To begin pattern-based power planning, define the power and ground nets in your design 
+and connect them to the power and ground pins. If you use UPF to describe your power 
+network, you can skip these steps.
+1. Define the power and ground nets with the create_net command.
+icc2_shell> create_net -power VDD
+{VDD}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+262
+
+
+===== PDF page 263 =====
+Chapter 10: Performing Power Planning
+Setting the PG Routing Mode
+Feedback
+icc2_shell> create_net -ground VSS
+{VSS}
+2. Connect the power and ground nets to power and ground pins with the 
+connect_pg_net command.
+icc2_shell> connect_pg_net -net VDD [get_pins -physical_context *VDD]
+icc2_shell> connect_pg_net -net VSS [get_pins -physical_context *VSS]
+If your design has a UPF description of the power network, you can specify 
+connect_pg_net -automatic to derive the power and ground nets directly from the 
+power domain specification and perform the connection.
+Setting the PG Routing Mode
+Depending on which phase of the design planning you are in, you can set the PG routing 
+mode to ensure that the tool optimizes the PG routing for the specified mode.
+Use the set_pg_routing_mode command to set the PG routing mode to one of the values 
+in Table 9. When set to one of these values, the tool automatically changes the defaults of 
+some of the PG routing-related application options (see Table 10) to achieve the expected 
+PG routing in the design.
+Table 9
+PG Routing Modes
+To do this
+Use this
+To leave the defaults of the PG routing-related application option as is
+default
+To ensure that the design is DRC clean and is ready for tapeout
+tapeout
+To quickly check the PG structure at the beginning of PG planning. In 
+this mode, the tool might skip the DRC fixing of via creation or even 
+disable via creation.
+fast_exploration
+To create maximum PG vias by via definition selection or intersection 
+selection. In this mode, the tool creates more vias, which results in 
+lesser resistance and therefore more current flow.
+maximize_via
+Table 10
+PG Routing-Related Application Options Values When the PG Routing Mode is 
+Set
+Application option
+Default
+Default on specific mode
+plan.pgroute.discar
+d_stackvia_with_drc
+false
+true for the fast_exploration mode
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+263
+
+
+===== PDF page 264 =====
+Chapter 10: Performing Power Planning
+Setting the PG Routing Mode
+Feedback
+Table 10
+PG Routing-Related Application Options Values When the PG Routing Mode is 
+Set (Continued)
+Application option
+Default
+Default on specific mode
+plan.pgroute.disabl
+e_via_creation
+false
+true for the fast_exploration mode
+plan.pgroute.disabl
+e_stapling_via_fix
+ing
+false
+true for the fast_exploration mode
+plan.pgroute.fix_vi
+a_drc_multiple_via
+def
+false
+true for the maximize_via mode
+plan.pgroute.honor_
+ndr_same_net_spac
+ing
+false
+true for the tapeout mode
+plan.pgroute.honor_
+ndr_spacing_drc
+false
+true for the tapeout mode
+plan.pgroute.honor_
+signal_route_drc
+false
+true for the tapeout mode
+plan.pgroute.honor_
+std_cell_drc
+false
+true for the tapeout mode
+plan.pgroute.load_f
+rame_view
+false
+true for the fast_exploration mode
+plan.pgroute.create
+_via_cellalign_maxp
+in_only
+true
+false for the maximize_via mode
+To view the PG routing-related application options values for the current block, run the 
+report_pg_routing_mode. For example, the following report shows the application 
+options defaults when the PG routing mode is default.
+icc2_shell> report_pg_routing_mode -nosplit
+****************************************
+Report : report_pg_routing_mode
+Design : ORCA_TOP
+Version: T-2022.03-SP3-BETA
+Date   : Wed Jun 22 19:25:20 2022
+****************************************
+------------------------------------------------------------------------
+Mode                         default
+------------------------------------------------------------------------
+App option                                    Current  Mode     Default
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+264
+
+
+===== PDF page 265 =====
+Chapter 10: Performing Power Planning
+Defining PG Via Masters
+Feedback
+                                              value    default  value
+                                                       value
+------------------------------------------------------------------------
+plan.pgroute.create_via_cellalign_maxpin_only true     true     true
+plan.pgroute.load_frame_view                  false    false    false
+plan.pgroute.honor_ndr_same_net_spacing       false    false    false
+plan.pgroute.honor_std_cell_drc               false    false    false
+plan.pgroute.honor_signal_route_drc           false    false    false
+plan.pgroute.honor_ndr_spacing_drc            false    false    false
+plan.pgroute.disable_stapling_via_fixing      false    false    false
+plan.pgroute.disable_via_creation             false    false    false
+plan.pgroute.fix_via_drc_multiple_viadef      false    false    false
+plan.pgroute.discard_stackvia_with_drc        false    false    false
+1
+The following report shows the application options defaults when the PG routing mode is 
+default
+icc2_shell> report_pg_routing_mode -nosplit
+****************************************
+Report : report_pg_routing_mode
+Design : ORCA_TOP
+Version: T-2022.03-SP3-BETA
+Date   : Sun Jun 26 21:07:58 2022
+****************************************
+-------------------------------------------------------------------------
+-------
+Mode                         tapeout
+-------------------------------------------------------------------------
+-------
+App option                                     Current  Mode     Default
+                                               value    default  value
+                                                        value
+-------------------------------------------------------------------------
+-------
+plan.pgroute.create_via_cellalign_maxpin_only  true     true     true
+plan.pgroute.load_frame_view                   false    false    false
+plan.pgroute.honor_ndr_same_net_spacing        true     true     false
+plan.pgroute.honor_std_cell_drc                true     true     false
+plan.pgroute.honor_signal_route_drc            true     true     false
+plan.pgroute.honor_ndr_spacing_drc             true     true     false
+plan.pgroute.disable_stapling_via_fixing       false    false    false
+plan.pgroute.disable_via_creation              false    false    false
+plan.pgroute.fix_via_drc_multiple_viadef       false    false    false
+plan.pgroute.discard_stackvia_with_drc         false    false    false
+Defining PG Via Masters
+If your design requires a via master that is not defined in the technology file, you can 
+create a via master for your power network with the set_pg_via_master_rule command. 
+You can use the new via master in the power network by referencing it with the -via_rule 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+265
+
+
+===== PDF page 266 =====
+Chapter 10: Performing Power Planning
+Defining PG Via Masters
+Feedback
+option of the create_pg_composite_pattern, create_pg_macro_conn_pattern, 
+create_pg_mesh_pattern, or create_pg_ring_pattern command.
+To create a new via master for the power network, use the set_pg_via_master_rule 
+command as shown in the following example.
+icc2_shell> set_pg_via_master_rule VIA78_2x2 -contact_code VIA78 \
+   -via_array_dimension {2 2} -offset {3 1}
+To create an offset from the origin of the via bounding box, use the -offset {x y} 
+option. To specify a via master or contact code to use for this via, use the -contact_code 
+code_name option. To specify the dimensions of the via array for this rule, use the 
+-via_array_dimension {column row} option. To specify the horizontal and vertical 
+pitch to use when filling a via rule with multiple repetitions of the contact code or via 
+array, use the -allow_multiple {x_pitch y_pitch} option. To specify the horizontal 
+and vertical spacing values between cuts in a simple array via, use the -cut_spacing 
+{horizontal_spacing vertical_spacing} option.
+To use the new rule in your design, specify the via rule name after the via_master 
+keyword for the create_pg_composite_pattern, create_pg_macro_conn_pattern, 
+create_pg_mesh_pattern, and create_pg_ring_pattern commands. For example, the 
+following command uses the VIA78_2x2 via rule defined by the previous command.
+icc2_shell> create_pg_mesh_pattern mesh_pat \
+   -layers {layer_spec} \
+   -via_rule { \
+      {{layers: M6} {layers: M7} {via_master: default}} \
+      {{layers: M7} {layers: M8} {via_master: VIA78_2x2}}}
+Using the Via Master With the Maximum Total Cut Area
+To use the via master or ContactCode with the maximum total cut 
+area based on the bounding box for the route intersection, set the 
+plan.pgroute.maximize_total_cut_area application option to one of the following 
+values:
+•
+all : Consider all possible ContactCodes.
+•
+default : Use the default ContactCode.
+•
+Vs : Use a ContactCode with square cuts
+•
+Vh : Use a ContactCode with horizontal bar shape
+•
+Vv : Use a ContactCode with vertical bar shape
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+266
+
+
+===== PDF page 267 =====
+Chapter 10: Performing Power Planning
+Creating Power and Ground Ring Patterns
+Feedback
+Creating Power and Ground Ring Patterns
+The ring pattern specifies the horizontal and vertical layer names, ring width values, 
+spacing values, vias, and corner bridging to use to create the power and ground ring. 
+You can create ring patterns around the core, design blocks, macros, power and ground 
+regions, or rectilinear polygons that you specify. To define the ring pattern, use the 
+create_pg_ring_pattern command as follows:
+icc2_shell> create_pg_ring_pattern ring_pat -horizontal_layer M7 \
+   -horizontal_width {10} -horizontal_spacing {2} \
+   -vertical_layer M8 -vertical_width {10} \
+   -vertical_spacing {2} -corner_bridge false
+Alternatively, use the Task Assistant to define the ring pattern.
+1. Select Task > Task Assistant in the GUI.
+2. Select PG Planning > Ring/Hard Macro/Std Cell Pattern in the Task Assistant.
+3. Click the Ring tab.
+4. Enter the pattern name, layer names, widths, and other ring parameters in the Task 
+Assistant.
+5. Click Apply to create the pattern.
+You can also define the width, spacing, and other values for the 
+create_pg_ring_pattern command by using parameters. To create a parameter, include 
+the -parameters option followed by the parameter name, and replace the value for the 
+command option with a parameter name. Parameters are identified by the parameter 
+name preceded by the (@) character.
+The values for the parameters remain undefined until they are set with the 
+set_pg_strategy command. Parameters are set in the same order they are specified by 
+the -parameters option. Using this approach, you can reuse the pattern specified by the 
+command and apply different parameter values with the set_pg_strategy command.
+The following example uses parameters to define the metal layer, width, spacing, and 
+corner bridge settings for the ring pattern.
+icc2_shell> create_pg_ring_pattern ring_pat -horizontal_layer @hlayer \
+   -horizontal_width {@hwidth} -horizontal_spacing {@hspace} \
+   -vertical_layer @vlayer -vertical_width {@vwidth} \
+   -vertical_spacing {@vspace} -corner_bridge @cbridge \
+   -parameters {hlayer hwidth hspace
+                vlayer vwidth vspace cbridge}
+ 
+icc2_shell> set_pg_strategy ring_strat -core \
+   -pattern {{name: ring_pat} {nets: {VDD VSS}}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+267
+
+
+===== PDF page 268 =====
+Chapter 10: Performing Power Planning
+Creating Power and Ground Mesh Patterns
+Feedback
+             {offset: {3 3}} {parameters: {M7 10 2 M8 10 2 true}}} \
+   -extension {{stop: design_boundary}}
+Creating Power and Ground Mesh Patterns
+The mesh pattern specifies the horizontal and vertical layer names, metal width values, 
+metal spacing values, metal pitch, vias, and wire trimming to use to create the power and 
+ground mesh. To define the mesh pattern, use the create_pg_mesh_pattern command 
+as follows:
+icc2_shell> create_pg_mesh_pattern mesh_pat -layers {
+   {{vertical_layer: M8} {width: 5}
+       {spacing: interleaving} {pitch: 32}}
+   {{vertical_layer: M6} {width: 2}
+       {spacing: interleaving} {pitch: 32}}
+   {{horizontal_layer: M7} {width: 5}
+       {spacing: interleaving} {pitch: 28.8}}} \
+   -via_rule {
+       {{layers: M6} {layers: M7} {via_master: default}}
+       {{layers: M8} {layers: M7} {via_master: VIA78_3x3}}}
+Alternatively, use the Task Assistant to define the mesh pattern.
+1. Select Task > Task Assistant in the GUI.
+2. Select PG Planning > Mesh Pattern in the Task Assistant.
+3. Enter the pattern name and define the via rule.
+4. Select the layer, direction, width, spacing, pitch, and offset values.
+5. Click the entry in the table row to edit the setting.
+6. Click Preview to view the Tcl command in the Tcl Command box.
+7. Click Run Tcl Command to create the mesh pattern.
+You can also define the settings for the power mesh by using parameters as described 
+in Creating Power and Ground Ring Patterns. The following example uses parameters to 
+define the metal width values for the create_pg_mesh_pattern command.
+icc2_shell> create_pg_mesh_pattern mesh_pat -layers {
+   {{vertical_layer: M8} {width: @width8}
+       {spacing: interleaving} {pitch: 32}}
+   {{vertical_layer: M6} {width: @width6}
+       {spacing: interleaving} {pitch: 32}}
+   {{horizontal_layer: M7} {width: @width7}
+       {spacing: interleaving} {pitch: 28.8}}} \
+   -via_rule {
+       {{layers: M6} {layers: M7} {via_master: default}}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+268
+
+
+===== PDF page 269 =====
+Chapter 10: Performing Power Planning
+Creating Power and Ground Macro Connections
+Feedback
+       {{layers: M8} {layers: M7} {via_master: VIA78_3x3}}} \
+   -parameters {width6 width7 width8}
+ 
+icc2_shell> set_pg_strategy mesh_strat -core -pattern {
+   {name: mesh_pat} {nets: {VDD VSS}}
+      {parameters: {32 28.8 32}}}
+Creating Power and Ground Macro Connections
+The macro connection pattern specifies the power and ground nets, routing 
+direction, metal layers, layer width, layer spacing, metal pitch and other information 
+to create connections to macros. To define the macro connection pattern, use the 
+create_pg_macro_conn_pattern as in the following example.
+icc2_shell> create_pg_macro_conn_pattern macro_pat -nets {VDD VSS} \
+   -direction horizontal -width 1 -layers M5 -spacing minimum \
+   -pitch 5 -pin_conn_type long_pin
+Alternatively, use the Task Assistant to define the standard cell rail pattern.
+1. Select Task > Task Assistant in the GUI.
+2. Select PG Planning > Ring/Hard Macro/Std Cell Pattern.
+3. Click the HM scattered pin, HM long pin, or HM ring pin tab depending on the type of 
+hard macro pin connection.
+4. Enter the pattern name, layer, width, and other information in the form.
+5. Click Apply to create the pattern.
+You can also define the settings for the standard cell rails by using parameters as 
+described in Creating Power and Ground Ring Patterns. The following example uses 
+parameters to define the metal width for the standard cell rail pattern, and assigns values 
+to the parameters with the set_pg_strategy command.
+icc2_shell> create_pg_macro_conn_pattern macro_pat -nets {VDD VSS} \
+   -direction horizontal -width @width -layers M5 -spacing minimum \
+   -pitch @pitch -pin_conn_type long_pin -parameters {width pitch}
+ 
+icc2_shell> set_pg_strategy macro_strat -core \
+   -pattern {{pattern: macro_pat} {nets: {VDD VSS}}
+             {parameters: {1 5}}}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+269
+
+
+===== PDF page 270 =====
+Chapter 10: Performing Power Planning
+Creating Power and Ground Standard Cell Rails
+Feedback
+Creating Power and Ground Standard Cell Rails
+The standard cell rail pattern specifies the metal layers, rail width, and rail offset to use to 
+create the power and ground rails for the standard cell rows. To define the standard cell 
+rail pattern, use the create_pg_std_cell_conn_pattern as in the following example.
+icc2_shell> create_pg_std_cell_conn_pattern rail_pat -layers {M1} \
+   -rail_width {0.2 0.2}
+Alternatively, use the Task Assistant to define the standard cell rail pattern.
+1. Select Task > Task Assistant in the GUI.
+2. Select PG Planning > Ring/Hard Macro/Std Cell Pattern in the Task Assistant.
+3. Click the Std cell tab.
+4. Enter the pattern name, layer name, rail width, and offset in the Task Assistant.
+5. Click Apply to create the pattern.
+If you do not define a rail width, the command uses the width of the standard cell power 
+and ground pins as the width.
+You can also define the settings for the standard cell rails by using parameters as 
+described in Creating Power and Ground Ring Patterns. The following example uses 
+parameters to define the metal width for the standard cell rail pattern, and assigns values 
+to the parameters with the set_pg_strategy command.
+icc2_shell> create_pg_std_cell_conn_pattern rail_pat -layers {M1} \
+   -rail_width {@wtop @wbottom} -parameters {wtop wbottom}
+ 
+icc2_shell> set_pg_strategy rail_strat -core \
+   -pattern {{name: rail_pat} {nets: VDD VSS}
+             {parameters: {0.2 0.2}}}
+Creating Channel and Alignment Power Straps
+The special pattern defines the structure for the following types of power ground straps:
+•
+Straps placed in channels
+•
+Straps and vias inserted to connect and align terminals
+•
+Straps inserted to align power switches
+•
+Straps inserted to align physical-only and filler cells
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+270
+
+
+===== PDF page 271 =====
+Chapter 10: Performing Power Planning
+Creating Complex Composite Patterns
+Feedback
+Only one pattern type can be specified within a single create_pg_special_pattern 
+command. To define these patterns, use the create_pg_special_pattern command as 
+in the following example.
+icc2_shell> create_pg_special_pattern channel_pattern \
+   -insert_channel_straps {{layer: M6} {direction: vertical} \
+      {width: 2} \
+      {channel_between_objects: {macro placement_blockage voltage_area} \
+   }}
+Alternatively, use the Task Assistant to define the special pattern.
+1. Select Task > Task Assistant in the GUI.
+2. Select PG Planning > Special Pattern in the Task Assistant.
+3. Click the Channel straps tab. The Switch alignment, Terminal alignment, Physical cell 
+alignment, and Max stdcell distance tabs are also available.
+4. Enter the information for the form, such as the layer name, direction, width, spacing, 
+and other settings.
+5. Click Apply to create the pattern.
+Creating Complex Composite Patterns
+This section uses examples to create complex PG patterns using the 
+create_pg_composite_pattern command.
+•
+Creating Center-Aligned Vias
+•
+Creating Bridging Straps
+•
+Creating Via Bridging Straps
+•
+Creating Tapering Straps
+•
+Creating a Checkerboard Via Pattern
+Creating Center-Aligned Vias
+The following example creates horizontal power straps on layer M3 and vertical power 
+straps on layer M8. Stacked vias connect the horizontal and vertical straps, and the vias 
+are pushed toward the center of each VDD/VSS vertical power strap pair to save routing 
+resources beneath the straps. The create_pg_wire_pattern command defines the base 
+pattern, and the create_pg_composite_pattern command defines the parameters for 
+the horizontal and vertical PG routes.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+271
+
+
+===== PDF page 272 =====
+Chapter 10: Performing Power Planning
+Creating Complex Composite Patterns
+Feedback
+Figure 89
+Power Straps With Center-Aligned Vias
+This example defines two via master rules: via_5x6_shift_right and via_5x6_shift_left. For 
+each via, the -offset option is applied to shift the via from center by 0.8 microns.
+The -via_rule option of the create_pg_composite_pattern command specifies 
+which via is placed at each intersection of layers M3 and M8 as shown in Figure 90. In 
+this example, the -add_patterns option instantiates two create_pg_wire_pattern 
+definitions: the vertical power strap pattern on layer M8 (pattern_id: 1), 
+and the horizontal power strap pattern on layer M3: (pattern_id: 2). The 
+create_pg_composite_pattern also refers to four net ids for the two PG nets: VSS 
+(net_id: 1 and 4) and VDD (net_id: 2 and 3).
+The via_5x6_shift_right via is inserted at the intersections of pattern_id: 1 and net_id: 
+1 of the first pattern (layer M8 and net VSS), and pattern_id: 2 and net_id: 2 of the 
+second pattern (layer M3 and net VSS); location (A) in the figure. The via_5x6_shift_right 
+via is also inserted at pattern_id: 1 and net_id: 3 (layer M8 and net VDD), and 
+pattern_id: 2 and net_id: 1 (layer M3 and net VDD); location (D) in the figure. 
+Similarly, the remaining statements define vias at locations (B) and (C).
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+272
+
+
+===== PDF page 273 =====
+Chapter 10: Performing Power Planning
+Creating Complex Composite Patterns
+Feedback
+Figure 90
+Annotated Center-Aligned Vias
+The commands to create this power plan are as follows:
+set_pg_via_master_rule via_5x6_shift_right \
+   -via_array_dimension {5 6} -offset {0.8 0}
+ 
+set_pg_via_master_rule via_5x6_shift_left \
+   -via_array_dimension {5 6} -offset {-0.8 0}
+ 
+create_pg_wire_pattern wire_base -layer @l -direction @d \
+   -width @w -spacing @s -pitch @p -parameters {l d w p s}
+ 
+# For the vertical straps on M8 defined by pattern_id: 1
+# - net_id: 1 is VSS
+# - net_id: 2 is VDD
+# - net_id: 3 is VDD
+# - net_id: 4 is VSS
+#
+# For the horizontal straps on M3 defined by pattern_id: 2
+# - net_id: 1 is VDD
+# - net_id: 2 is VSS
+ 
+create_pg_composite_pattern center_aligned_vias -nets {VDD VSS} \
+   -add_patterns { \
+      {{pattern: wire_base} {nets: VSS VDD VDD VSS} \
+       {parameters: {M8 vertical 3 30 {1 4 1}}}{offset: 4}} \
+      {{pattern: wire_base} {nets: VDD VSS} \
+       {parameters: {M3 horizontal 2 15 2}}{offset: 4}} \
+   } \
+   -via_rule { \
+      {{{pattern_id: 1}{net_id: 1}} \
+       {{pattern_id: 2}{net_id: 2}} \
+       {via_master: via_5x6_shift_right}} \
+      {{{pattern_id: 1}{net_id: 2}} \
+       {{pattern_id: 2}{net_id: 1}} \
+       {via_master: via_5x6_shift_left}} \
+      {{{pattern_id: 1}{net_id: 3}} \
+       {{pattern_id: 2}{net_id: 1}} \
+       {via_master: via_5x6_shift_right}} \
+      {{{pattern_id: 1}{net_id: 4}} \
+       {{pattern_id: 2}{net_id: 2}} \
+       {via_master: via_5x6_shift_left}} \
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+273
+
+
+===== PDF page 274 =====
+Chapter 10: Performing Power Planning
+Creating Complex Composite Patterns
+Feedback
+      {{intersection: undefined}{via_master: NIL}} \
+  }
+set_pg_strategy core_patterns \
+    -pattern {{name: center_aligned_vias} \
+              {nets: VDD VSS } {offset: {5 5}}} -core
+ 
+compile_pg -strategies core_patterns
+Creating Bridging Straps
+The following example creates bridging straps to connect parallel vertical power straps. 
+This power plan contains the following features:
+•
+Three VDD power straps of width 2 microns, 4 microns, and 2 microns form a group of 
+vertical straps on layer M6
+•
+Three M6 VSS power straps of width 2 microns, 4 microns, and 2 microns also form a 
+group of vertical straps on layer M6
+•
+The groups of three vertical VDD straps are connected together with a 2 micron wide 
+strap on layer M3 with a pitch of 15 microns, length of 12 microns, and 5x1 stacked via 
+arrays between M6 and M3
+•
+The groups of three vertical VSS straps are connected together with a 2 micron wide 
+strap on layer M5 with a pitch of 15 microns, length of 12 microns, and 5x3 via arrays 
+between M5 and M6
+The bridging straps and via structures used to connect the straps are shown in Figure 91 
+and Figure 92.
+Figure 91
+Bridging Straps
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+274
+
+
+===== PDF page 275 =====
+Chapter 10: Performing Power Planning
+Creating Complex Composite Patterns
+Feedback
+Figure 92
+5x1 and 5x3 Vias
+The set_pg_via_master_rule command defines the via rules for the 5x1 and 5x3 via 
+arrays. The create_pg_composite_pattern command defines a power plan that uses 
+two distinct wire patterns: one pattern called wire_base used to define the VDD and 
+VSS vertical straps, one pattern called segment_base used to define both the M3 layer 
+straps that connect VDD and the M5 layer straps that connect VSS. The wire patterns 
+are referenced using the {pattern: wire_base} and {pattern: segment_base} 
+statements.
+The -via_rule option to create_pg_composite_pattern defines what vias are inserted 
+at different metal intersections in the power plan. The {{layers: M6} {layers: M5} 
+{via_master: via65_5x3}} statement inserts a via65_5x3 via master between any 
+intersection of layers M6 and M5 in the power plan.
+The -via_rule statement {{intersection: undefined} {via_master: NIL}} 
+ensures that only the specified vias are inserted in the power plan. For designs that 
+contain many wire patterns, this statement ensures that no vias are inserted between 
+undefined layer pairs; by default, vias are created for undefined layer pairs.
+The commands used to implement this power plan are as follows:
+set_pg_via_master_rule via63_5x1 \
+   -contact_code {VIA34 VIA45 VIA56} \
+   -via_array_dimension {5 1}
+ 
+set_pg_via_master_rule via65_5x3 \
+   -contact_code {VIA56} \
+   -via_array_dimension {5 3}
+ 
+create_pg_wire_pattern wire_base -layer @l -direction @d \
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+275
+
+
+===== PDF page 276 =====
+Chapter 10: Performing Power Planning
+Creating Complex Composite Patterns
+Feedback
+   -width @w -spacing @s -pitch @p -parameters {l d w p s}
+ 
+create_pg_wire_pattern segment_base -layer @l -direction @d \
+   -width @w -low_end_reference_point 0 \
+   -high_end_reference_point @len -pitch @p \
+   -parameters {l d w len p}
+create_pg_composite_pattern bridging_straps -nets {VDD VSS} \
+   -add_patterns { \
+   {{pattern: wire_base} {nets: VDD VSS} \
+    {parameters: {M7 horizontal 2 60 2}}{offset: 13}} \
+   {{pattern: wire_base} {nets: VDD VDD VDD VSS VSS VSS} \
+    {parameters: {M6 vertical {2 4 2 2 4 2} 45 {2 2 4 2 2}}}
+    {offset: 4}} \
+   {{pattern: segment_base} {nets: VDD} \
+    {parameters: {M3 horizontal 2 12 {45 15}}} {offset: {3 2}}} \
+   {{pattern: segment_base} {nets: VSS} \
+    {parameters: {M5 horizontal 2 12 {45 15}}} {offset: {19 10}}} } \
+   -via_rule { \
+       {{layers: M7}{layers: M6} {via_master: default}} \
+       {{layers: M6}{layers: M5} {via_master: via65_5x3}} \
+       {{layers: M6}{layers: M3} {via_master: via63_5x1}} \
+       {{intersection: undefined} {via_master: NIL}} \
+  }
+ 
+set_pg_strategy core_patterns \
+    -pattern {{name: bridging_straps} \
+                  {nets: VDD VSS } {offset: {5 5}}} -core
+ 
+compile_pg -strategies core_patterns
+Creating Via Bridging Straps
+The following example creates a complex, shifted via bridging structure to connect the 
+vertical VDD straps on layer M8 to the horizontal VDD straps on layer M3. The horizontal 
+and vertical VSS straps use a standard stacked via to connect layers M8 and M3.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+276
+
+
+===== PDF page 277 =====
+Chapter 10: Performing Power Planning
+Creating Complex Composite Patterns
+Feedback
+Figure 93
+Composite Bridging Patterns
+For the VDD power straps, a 13x13 via array connects the vertical straps on layer M8 with 
+the short horizontal metal segment on layer M7. On the same M7 segment, a smaller 6x12 
+stacked via array connects M7 with the horizontal VDD strap on layer M3.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+277
+
+
+===== PDF page 278 =====
+Chapter 10: Performing Power Planning
+Creating Complex Composite Patterns
+Feedback
+Figure 94
+Composite Bridging Pattern Structure
+The composite pattern technique allows you to shift the via locations and open 
+additional vertical routing tracks to reduce routing jogs and improve timing. The 
+via73_12x6_shift_right via array is typically inserted in the center of intersection between 
+the M7 layer metal segment and the M3 layer horizontal strap. In this example, the via 
+is shifted to the right with the -offset {3 0} option of the set_pg_via_master_rule 
+command. The offset is shown in Figure 95. Vertical routing tracks on layers M6 and M4 
+that are beneath the M8 layer VDD straps are not used for PG and can be used for signal 
+routing.
+Figure 95
+Via Offset From Center
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+278
+
+
+===== PDF page 279 =====
+Chapter 10: Performing Power Planning
+Creating Complex Composite Patterns
+Feedback
+The set_pg_via_master_rule command defines the via rule for the 12x6 stacked via 
+array. The create_pg_composite_pattern command defines a composite pattern that 
+uses two distinct wire patterns: wire_base and segment_base. The wire_base pattern 
+specifies the vertical straps on M8 and the horizontal straps on M3 for VDD and VSS. The 
+segment_base pattern specifies the short 10 micron wide horizontal segments for net VDD 
+on layer M7. The wire patterns are referenced using the {pattern: wire_base} and 
+{pattern: segment_base} statements.
+The -via_rule option specifies where vias are inserted for each layer intersection. 
+Consider the following definition for the right-shifted via73_12x6_shift_right stacked via:
+{{{pattern_id: 2}{net_id: 1}}
+ {{pattern_id: 3}{net_id: 1}}
+ {via_master: via73_12x6_shift_right} {between_parallel: true}}
+In the previous definition, {{pattern_id: 2}{net_id: 1}} refers to the second pattern 
+specified by the -add_patterns option: {{pattern: wire_base} ... {parameters: 
+{M3 horizontal ...}}}, and the first net specified by the -nets option: VDD. Likewise, 
+{{pattern_id: 3}{net_id: 1}} refers to the third pattern definition: {{pattern: 
+segment_base} ... {parameters: {M7 horizontal ...}}}, and the first net: VDD. 
+Based on this definition, the tool inserts a via73_12x6_shift_right stacked via at the 
+intersection of the M3 and M7 straps. The {between_parallel: true} statement allows 
+the tool to insert the vias between parallel straps.
+The commands to create this power plan, including the via master rules, are as follows:
+set_pg_via_master_rule via73_12x6_shift_right \
+   -contact_code {VIA34 VIA45 VIA56 VIA67} \
+   -via_array_dimension {12 6} -offset {3 0}
+ 
+create_pg_wire_pattern wire_base -layer @l -direction @d \
+   -width @w -spacing @s -pitch @p -parameters {l d w p s}
+ 
+create_pg_wire_pattern segment_base -layer @l -direction @d \
+   -width @w -low_end_reference_point 0 \
+   -high_end_reference_point @len -pitch @p \
+   -parameters {l d w len p}
+ 
+create_pg_composite_pattern via_bridging -nets {VDD VSS} \
+   -add_patterns { \
+    {{pattern: wire_base} {nets: VDD VSS} \
+     {parameters: {M8 vertical 4 15 2}}{offset: 4}} \
+    {{pattern: wire_base} {nets: VDD VSS} \
+     {parameters: {M3 horizontal 2 20 4}}{offset: 4}} \
+    {{pattern: segment_base} {nets: VDD} \
+     {parameters: {M7 horizontal 4 10 {30 20}}} {offset: {2 4}}} \
+    } \
+   -via_rule { \
+    {{{pattern_id: 1}{net_id: 1}}
+     {{pattern_id: 2}{net_id: 1}} {via_master: NIL}} \
+    {{{pattern_id: 1}{net_id: 2}}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+279
+
+
+===== PDF page 280 =====
+Chapter 10: Performing Power Planning
+Creating Complex Composite Patterns
+Feedback
+     {{pattern_id: 2}{net_id: 2}} {via_master: default}} \
+    {{{pattern_id: 1}{net_id: 1}}
+     {{pattern_id: 3}{net_id: 1}} {via_master: default}} \
+    {{{pattern_id: 2}{net_id: 1}}
+     {{pattern_id: 3}{net_id: 1}}
+     {via_master: via73_12x6_shift_right} {between_parallel: true}} \
+     {{intersection: undefined} {via_master: NIL}} \
+ }
+ 
+set_pg_strategy core_patterns \
+    -pattern {{name: via_bridging} \
+              {nets: VDD VSS } {offset: {5 5}}} -core
+ 
+compile_pg -strategies core_patterns
+Creating Tapering Straps
+The following example creates a power structure with narrowed power straps at the center 
+of the die. Vertical VDD and VSS straps are created on layer M6 and horizontal VDD and 
+VSS straps are created on layer M7. At the periphery of the die, horizontal M7 straps are 
+10 microns wide and vertical M6 straps are 8 microns wide. At the center of the die, the 
+M7 straps narrow to 5 microns and M6 straps narrow to 4 microns. The green square 
+annotates the bounding box {{500 500} {1000 1000}}.
+Figure 96
+Tapering Straps
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+280
+
+
+===== PDF page 281 =====
+Chapter 10: Performing Power Planning
+Creating Complex Composite Patterns
+Feedback
+Figure 97
+Tapering Straps Zoomed Out View
+The power plan begins with three create_pg_wire_pattern commands to create 
+three wire pattern definitions. These commands define the pattern layer, direction, 
+width, and spacing in a particular region of the routing boundary. The first_wire 
+wire pattern defines a pattern from the left and bottom of the routing boundary as 
+specified by the -extend_low boundary option, and extends to the point specified 
+by the -high_end_reference_point @pt1 argument. The center_wire wire 
+pattern extends from the -low_end_reference_point @pt1 and ends at the 
+-high_end_reference_point @pt2 points. The last_wire pattern starts from the 
+point specified by -low_end_reference_point @pt2 and extends to the -extend_high 
+boundary, which is the top or right edge of the routing boundary.
+The two create_pg_composite_pattern commands are used to define two 
+different relationships between the patterns. The create_pg_composite_pattern 
+tapering_base command associates the previous wire patterns with the left, center, and 
+right areas of the routing boundary, and the bottom, middle, and top areas respectively. 
+The second command, create_pg_composite_pattern tapering_straps, specifies 
+the actual values for the PG route layer, direction, side width, center width, side spacing, 
+and center spacing using the previous create_pg_composite_pattern tapering_base 
+definition to create horizontal and vertical PG routes.
+Note that the tapering_straps composite pattern uses another composite pattern called 
+tapering_base. Composite pattern can be defined hierarchically to create more complex 
+patterns for a demanding design requirement.
+The set_pg_strategy command passes the actual x- and y-locations where the tapered 
+straps should begin and end, together with the signal names for the PG straps. These 
+values are specified by using Tcl variables.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+281
+
+
+===== PDF page 282 =====
+Chapter 10: Performing Power Planning
+Creating Complex Composite Patterns
+Feedback
+The commands used to implement this power plan are as follows.
+create_pg_wire_pattern first_wire -layer @l -direction @d \
+   -width @w -spacing @s -extend_low boundary \
+   -high_end_reference_point @pt1 -parameters {l d w s pt1}
+ 
+create_pg_wire_pattern center_wire -layer @l -direction @d \
+   -width @w -spacing @s -low_end_reference_point @pt1 \
+   -high_end_reference_point @pt2 -parameters {l d w s pt1 pt2}
+ 
+create_pg_wire_pattern last_wire -layer @l -direction @d \
+   -width @w -spacing @s -low_end_reference_point @pt2 \
+   -extend_high boundary -parameters {l d w s pt2}
+ 
+create_pg_composite_pattern tapering_base \
+   -parameters {layer dir side_w center_w side_s center_s pt1 pt2} \
+   -add_patterns { \
+   {{pattern: first_wire} \
+    {parameters: {@layer @dir @side_w @side_s @pt1}}} \
+   {{pattern: center_wire} \
+    {parameters: {@layer @dir @center_w @center_s @pt1 @pt2}}} \
+   {{pattern: last_wire} \
+    {parameters: {@layer @dir @side_w @side_s @pt2}}} \
+}
+ 
+create_pg_composite_pattern tapering_straps \
+   -parameters {h_pt1 h_pt2 v_pt1 v_pt2} \
+   -add_patterns { \
+   {{pattern: tapering_base}
+    {parameters: {M7 horizontal 10 5 2 7.5 @h_pt1 @h_pt2}} \
+    {pitch: {0 30}}} \
+   {{pattern: tapering_base}
+    {parameters: {M6 vertical 8 4 2 6 @v_pt1 @v_pt2}} \
+    {pitch: {25 0}}} \
+}
+ 
+set x_start 500
+set x_end 1000
+set y_start 500
+set y_end 1000
+set c_offset 5
+set_pg_strategy core_patterns -core \
+    -pattern [list {name: tapering_straps} \
+                   {nets: VDD VSS } \
+                   {parameters: $x_start $x_end $y_start $y_end} \
+                   [list offset: [list 5 $c_offset]]]
+ 
+compile_pg -strategies core_patterns
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+282
+
+
+===== PDF page 283 =====
+Chapter 10: Performing Power Planning
+Creating Complex Composite Patterns
+Feedback
+Creating a Checkerboard Via Pattern
+The following example creates horizontal power straps on layer M5 and vertical power 
+straps on layer M4 for net VDD. Vias are inserted at alternating locations and form a 
+checkerboard pattern. The create_pg_wire_pattern command defines the base pattern, 
+and the create_pg_composite_pattern command defines the parameters for the 
+horizontal and vertical PG routes.
+Figure 98
+Checkerboard Vias
+The single create_pg_wire_pattern command creates a wire pattern named wire_base. 
+The create_pg_composite_pattern command instantiates the wire_base wire pattern 
+two times; one time for the vertical straps on layer M4 and one time for the horizontal 
+straps on layer M5. Each pattern defines a pair of nets, {VDD VDD}. The pitch between the 
+pairs of nets is 20 microns; the two nets are evenly distributed between the pitch due to 
+the -spacing interleaving option of the create_pg_wire_pattern command. Note 
+that interleaving is passed as a parameter by the {parameters: {M4 vertical 2 20 
+interleaving}} statement in the create_pg_composite_pattern command.
+The -via_rule option specifies which via is placed at each intersection of layers M4 
+and M5. The following figure is annotated with the pattern_id and net_id numbering 
+for this power plan. In this example, {pattern_id: 1} refers to the first pattern in the 
+-add_patterns option: the vertical power straps on layer M4. {pattern_id: 2} refers 
+to the second pattern: the horizontal power straps on layer M5. {pattern_id: 1} 
+{net_id: 1} refers to the first net following the nets: keyword listed for the first pattern 
+specification.
+Based on this specification, vias are placed at the intersections of {pattern_id: 
+1} {net_id: 1} and {pattern_id: 2} {net_id: 1}. Vias are also placed at the 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+283
+
+
+===== PDF page 284 =====
+Chapter 10: Performing Power Planning
+Creating Complex Composite Patterns
+Feedback
+intersections of {pattern_id: 1} {net_id: 2} and {pattern_id: 2} {net_id: 
+2}. At other locations, {via_master: NIL} specifies that no via is placed at those 
+intersections. The {intersection: undefined} {via_master: NIL} statement 
+specifies that no other vias should be inserted anywhere in the power plan.
+Figure 99
+Annotated Checkerboard Pattern
+The commands to create this power plan are as follows:
+create_pg_wire_pattern wire_base -layer @l -direction @d \
+   -width @w -spacing @s -pitch @p -parameters {l d w p s}
+ 
+create_pg_composite_pattern checker_board_vias -nets {VDD} \
+   -add_patterns { \
+      {{pattern: wire_base} {nets: VDD VDD} \
+       {parameters: {M4 vertical 2 20 interleaving}} \
+       {offset: 4}} \
+      {{pattern: wire_base} {nets: VDD VDD} \
+       {parameters: {M5 horizontal 2 20 interleaving}} \
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+284
+
+
+===== PDF page 285 =====
+Chapter 10: Performing Power Planning
+Defining Power Plan Regions
+Feedback
+       {offset: 4}}} \
+   -via_rule { \
+      {{{pattern_id: 1} {net_id: 1}} \
+       {{pattern_id: 2} {net_id: 1}} {via_master: default}} \
+      {{{pattern_id: 1} {net_id: 2}} \
+       {{pattern_id: 2} {net_id: 2}} {via_master: default}} \
+      {{{pattern_id: 1} {net_id: 2}} \
+       {{pattern_id: 2} {net_id: 1}} {via_master: NIL}} \
+      {{{pattern_id: 1} {net_id: 1}} \
+       {{pattern_id: 2} {net_id: 2}} {via_master: NIL}} \
+      {{intersection: undefined} {via_master: NIL}}}
+ 
+set_pg_strategy core_patterns -core \
+   -pattern {{name: checker_board_vias} {nets: VDD VSS } \
+      {offset: {5 5}}}
+ 
+compile_pg -strategies core_patterns
+Defining Power Plan Regions
+In the pattern-based power network routing flow, power plan regions define areas of 
+the design used to create the power rings and power straps to form the power network. 
+To create a power plan region, use the create_pg_region command as shown in the 
+following example.
+icc2_shell> create_pg_region region1 \
+   -exclude_macros {macro1 macro2} -core -expand -35 \
+   -macro_offset 35
+{region1}
+Alternatively, use the Task Assistant to define the power plan region.
+1. Select Task > Task Assistant in the GUI.
+2. Select PG Planning > PG Region in the Task Assistant.
+3. Enter the region name, region area, expansion parameters, and other information in 
+the Task Assistant.
+4. Click Preview to display the Tcl command you specified.
+5. Click Apply to create the power plan region.
+To create a power plan region that is bounded by a polygon, specify the -polygon option 
+followed by the coordinates of the polygon. The following example creates a power plan 
+region named region_polygon bounded by the coordinates (2000,2000), (4000,2000), 
+(4000,4000), and (2000,4000).
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+285
+
+
+===== PDF page 286 =====
+Chapter 10: Performing Power Planning
+Defining Power Plan Regions
+Feedback
+icc2_shell> create_pg_region region_polygon \
+   -polygon {{2000 2000} {4000 2000} {4000 4000} {2000 4000}}
+{region_polygon}
+To create a power plan region that excludes specified macros, use the -exclude_macros 
+option and specify the list of macros to exclude. You can create an offset around the 
+macro by including the -macro_offset option. In the following example, the tool creates 
+an indentation in the region to exclude the specified macro.
+icc2_shell> create_pg_region region_exclude -core \
+   -exclude_macros {u_l/u_m/ahbram0/aram_1/x0_t0} -macro_offset 50
+{region_exclude}
+Figure 100
+Region Excluding a Macro
+To create a PG region that surrounds macros in the design, use the -group_of_macros 
+option. You can create an offset by including the -expand option. In the following example, 
+the tool creates a region around the specified macros and expands the region by 50 
+microns.
+icc2_shell> set macros {u_l/u_m/ahbram0/aram_0/x0_t0
+   u_l/u_m/dsu0/x0/mem0_ram0_0_x0_x0_t0
+   u_l/u_m/ahbram0/aram_2/x0_t0
+   u_l/u_m/dsu0/x0/mem0_ram0_0_x1_x0_t0}
+ 
+icc2_shell> create_pg_region region_surround -group_of_macros $macros \
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+286
+
+
+===== PDF page 287 =====
+Chapter 10: Performing Power Planning
+Defining Power Plan Regions
+Feedback
+   -expand 50
+{region_surround}
+Figure 101
+Region Surrounding a Group of Macros
+If you run the create_pg_region command and specify an existing region name, the 
+command deletes the existing region, reuses the region name, and creates the new region 
+definition. You can also create a copy of an existing region and make modifications to the 
+region copy by using the -update option. The next example copies the region_surround 
+power plan region from the previous example, expands the region, and removes the jogs.
+icc2_shell> create_pg_region region_copy -update region_surround \
+   -expand 75 -remove_jog {expand: 50}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+287
+
+
+===== PDF page 288 =====
+Chapter 10: Performing Power Planning
+Setting the Power Plan Strategy
+Feedback
+Figure 102
+Copy Region and Expand
+To list all the power plan regions in the design, use the report_pg_regions command. 
+To list only a single region, specify the region name after the command. The following 
+example reports the currently defined power plan regions in the design.
+icc2_shell> report_pg_regions
+Region: region_surround
+Points: {{2202.360 3092.270} {2202.360 3575.890} ... }
+Region: region_copy
+Points: {{2127.360 3017.270} {2127.360 4647.760} ... }
+To delete a power plan region, use the remove_pg_regions command followed by the 
+region name. To remove all regions, use the remove_pg_regions -all command. The 
+following example removes the power plan region named region_copy.
+icc2_shell> remove_pg_regions region_copy
+PG region region_copy is removed.
+Setting the Power Plan Strategy
+After defining the ring, mesh, macro connection, and standard cell rail patterns for your 
+design, you can associate the patterns with the power plan regions or other areas of the 
+design by using the set_pg_strategy command. The command also defines the pattern 
+offset, how the patterns extend past the boundaries of the power plan region or area, and 
+routing blockages where the pattern is not created.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+288
+
+
+===== PDF page 289 =====
+Chapter 10: Performing Power Planning
+Setting the Power Plan Strategy
+Feedback
+To define the power plan strategy, use the set_pg_strategy command as in the following 
+example.
+icc2_shell> set_pg_strategy ring_strat -core \
+   -pattern {{name: ring_pattern} {nets: {VDD VSS}} \
+             {offset: {3 3}} {parameters: {M7 10 2 M8 10 2 true}}} \
+   -extension {{stop: design_boundary}}
+Alternatively, use the Task Assistant to define the standard cell rail pattern.
+1. Select Task > Task Assistant in the GUI.
+2. Select PG Planning > Strategy in the Task Assistant.
+3. Enter the strategy name, PG nets, pattern name, routing area, and other settings in the 
+Task Assistant.
+4. Click Apply to apply the strategy.
+In the previous example, the set_pg_strategy command defined a strategy that 
+associated the ring_pattern pattern with the ring_strat strategy. The following example 
+defines a strategy that associates the mesh_pattern pattern for the power mesh defined in 
+Creating Power and Ground Mesh Patterns with the mesh_strat strategy. The -extension 
+option extends the power mesh to the outermost ring.
+icc2_shell> set_pg_strategy mesh_strat -core \
+   -extension {{stop: outermost_ring}} \
+   -pattern {{pattern: mesh_pattern} {nets: {VDD VSS}}}
+The following example defines a strategy that associates the macro_pattern macro 
+connection pattern defined in Creating Power and Ground Macro Connections with the 
+macro_strat strategy.
+icc2_shell> set_pg_strategy macro_strat -core \
+   -pattern {{pattern: hm_pattern} {nets: {VDD VSS}}}
+The following example defines a strategy that associates the rail_pattern standard cell 
+connection pattern defined in Creating Power and Ground Standard Cell Rails with the 
+rail_strat strategy.
+icc2_shell> set_pg_strategy rail_strat -core \
+   -pattern {{pattern: std_cell_rail} {nets: VDD VSS}}
+The following sections summarize the specification keywords and their function for the 
+-pattern, -blockage and -extension options.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+289
+
+
+===== PDF page 290 =====
+Chapter 10: Performing Power Planning
+Setting the Power Plan Strategy
+Feedback
+Strategy Settings for the -pattern Option
+Arguments to the -pattern option define how the specified pattern is created in the 
+design. The following list describes the available arguments. Note that not all arguments 
+are valid for all pattern types.
+•
+The {name: pattern_name} argument assigns the pattern name to use with this 
+strategy. The name is the pattern name you created with the create_pg_*_pattern 
+pattern_name command.
+•
+The {nets: {net1 net2 ...}} argument specifies the power and ground net names 
+for the strategy. You can also define placeholder names in the create_pg_*_pattern 
+command and set the actual net names using this argument.
+To specify a null or empty slot for a net, replace the net name with the dash (-) 
+character. For example, {nets: {VDD - VSS -}}.
+•
+The {offset: {x_offset y_offset}} argument specifies the x- and y-offset to 
+apply when creating the first pattern. This argument is not used for scattered pin macro 
+connection patterns or standard cell rail patterns.
+•
+The {offset_start: boundary | {x y}} argument specifies the starting point 
+for the pattern offset. This argument is not used for scattered pin macro connection 
+patterns or standard cell rail patterns.
+•
+The {parameters: value1 value2 ...} argument specifies the ordered 
+list of values for the parameters defined with the -parameters option of the 
+create_pg_*_pattern command.
+•
+The {skip_sides: {side1 side2 ...}} argument defines the sides to omit when 
+creating the power ring. This argument is valid only for ring patterns.
+•
+The {side_offset: {side: number} {offset: offset}} argument defines the 
+offset for each specified side in the ring pattern. This argument is valid only for ring 
+patterns.
+Strategy Settings for the -blockage Option
+Arguments to the -blockage option define areas where the pattern should not be created. 
+A blockage is defined with three arguments: nets, layers, and the area specification 
+(voltage_areas, macros, polygon, blocks, or pg_regions). You can provide multiple 
+blockage specifications within a single set_pg_strategy command. The following list 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+290
+
+
+===== PDF page 291 =====
+Chapter 10: Performing Power Planning
+Creating Via Rules Between Different Strategies
+Feedback
+describes the available arguments. Note that not all arguments are valid for all pattern 
+types.
+•
+The {layers: {layer1 layer2 ...}} argument specifies the layers to avoid routing 
+over the blockage.
+•
+The {nets: {net1 net2 ...}} argument specifies the power and ground net names 
+to avoid routing over the blockage. This list of nets is a subset of the nets specified by 
+the -pattern option.
+•
+The area is defined by the pg_regions, blocks, macros, pg_regions, polygon, or 
+voltage_areas argument, followed by a list of elements or points.
+Strategy Settings for the -extension Option
+Arguments to the -extension option define how the power mesh extends beyond 
+the specified power plan region or design area. The extension specification enables a 
+connection between the power structure and other power structures in the design. An 
+extension is defined with the direction, layers, nets, side, and stop arguments. You 
+can define multiple extensions in the same set_pg_strategy command. The following 
+list describes the available arguments. Note that some arguments are invalid for some 
+commands.
+•
+The {direction: {L R T B}} argument limits the direction to extend the power mesh 
+to only the specified directions.
+•
+The {layers: {layer1 layer2 ...} argument limits the extension to only the 
+specified layers.
+•
+The {nets: {net1 net2 ...}} argument specifies the power and ground net names 
+to avoid routing over the blockage. This list of nets is a subset of the nets specified by 
+the -pattern option.
+•
+The {side: {side_a side_b ...}} argument limits power ring or macro connection 
+extension to only the specified sides.
+•
+The {stop: first_target | innermost_ring | outermost_ring | 
+pad_ring | design_boundary | design_boundary_and_generate_pin | 
+distance_in_microns} argument defines the stopping point for the extension.
+Creating Via Rules Between Different Strategies
+A complex power plan might require that you connect combinations of several 
+different power rings, meshes, power rails, and other structures. Use the 
+set_pg_strategy_via_rule command to set the via insertion rules when inserting vias 
+between different power plan strategies.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+291
+
+
+===== PDF page 292 =====
+Chapter 10: Performing Power Planning
+Instantiating the Power Plan
+Feedback
+icc2_shell> set_pg_strategy_via_rule via_rule1 \
+   -via_rule {
+     {{{strategies: strat1} {layers: M2}}
+      {{strategies: strat2} {layers: M3}}
+       {via_master: VIA23_FAT}}
+     {{intersection: undefined} {via_master: nil}}
+   }
+The preceding example creates a via rule that inserts the VIA23_FAT via between shapes 
+on layer M2 defined by strategy strat1 and shapes on layer M3 defined by strategy strat2. 
+New vias are omitted between other metal layer intersections.
+Alternatively, use the Task Assistant to define the via rule.
+1. Select Task > Task Assistant in the GUI.
+2. Select PG Planning > Create PG in the Task Assistant.
+3. Click the Via rule tab.
+4. Enter the rule name.
+5. Select Advanced, click Define and define the details of the via rule.
+6. Click Apply to create the via strategy.
+Instantiating the Power Plan
+The create_pg_*_pattern and set_pg_strategy commands define the power plan, 
+but do not add power straps or rails to the design. To instantiate the power plan, use the 
+compile_pg command with the -strategies option and specify the strategy name as 
+shown in the following example:
+icc2_shell> compile_pg -strategies ring_strat
+...
+Successfully compiled PG.
+1
+The command instantiates the power plan defined by the specified strategy and checks 
+for any DRC violations created by the power plan. In a typical flow, you create the ring, 
+mesh, rail, or macro pattern, associate the pattern with a power plan strategy by using the 
+set_pg_strategy command, instantiate the pattern with the compile_pg command, and 
+then repeat the flow for the next pattern type in the power plan.
+If you specified the power plan incorrectly, or if the power plan contains an error, you can 
+remove the power plan with the compile_pg -undo command as shown in the following 
+example. The compile_pg -undo command removes only the power and ground network 
+created by the most recent compile_pg command.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+292
+
+
+===== PDF page 293 =====
+Chapter 10: Performing Power Planning
+Instantiating the Power Plan
+Feedback
+icc2_shell> compile_pg -undo
+To ignore DRC violations while creating the power network, include the -ignore_drc and 
+-ignore_via_drc options. The compile_pg -ignore_drc -ignore_via_drc command 
+creates the power network and reports DRC violations created by the power plan, but 
+does not remove power straps or vias that create DRC violations.
+Handling Design Data During Design Planning Flow
+The absence of data or inconsistent data in the design prevents the design flow from 
+proceeding further in the flow. The Early Data Check Manager allows you to check designs 
+for such issues early in the design cycle.
+The general flow is as follows:
+1. Use the set_early_data_check_policy command to define the violation handling 
+policy for data checks.
+2. Proceed with your tool flow. The tool detects and responds to violations throughout the 
+flow.
+3. Use the report_early_data_checks command to obtain a report about all violations 
+or specific data checks.
+4. Use the get_early_data_check_records command to get a Tcl collection of 
+violations that can be used in other commands.
+5. Use the write_early_data_check_config command to save the settings in a file for 
+future use.
+6. Use the remove_early_data_check_records command to clear the data in 
+preparation for another iteration.
+For more information on these commands and Early Data Check Manager, see the 
+respective man pages and the “Handling Design Data Using the Early Data Check 
+Manager” topic in the IC Compiler II Data Model User Guide.
+For design planning, you can set policies and strategy configurations for the predefined 
+checks to allow, tolerate, or repair data.
+Table 11
+Design Planning Checks, Policies, and Strategies
+Check
+Supported policies
+Description
+plan.pg.strategy_via_rule
+error, tolerate
+Checks whether the strategy 
+via rule specified in the 
+compile_pg command exists or 
+not
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+293
+
+
+===== PDF page 294 =====
+Chapter 10: Performing Power Planning
+Instantiating the Power Plan
+Feedback
+Table 11
+Design Planning Checks, Policies, and Strategies (Continued)
+Check
+Supported policies
+Description
+plan.floorplan.
+missing_layer_
+routing_direction
+error, repair
+Checks whether the routing 
+directions of metal layers are 
+missing
+plan.floorplan.core_offset
+_conflict_enclosure_rules
+error, repair, tolerate
+Checks whether the floorplan 
+core offset conflicts with 
+enclosure rules
+plan.floorplan.core_area_l
+ength_conflict_width_rules
+error, repair, tolerate
+Checks whether the floorplan 
+core area conflicts with width 
+rules
+plan.floorplan.
+missing_block_
+boundary
+error, repair
+Checks whether the block 
+boundary is missing
+In the following examples, the reports show what check was performed, what action was 
+taken, and what object is causing the issue.
+•
+Check – The check that is performed
+•
+Policy
+◦
+tolerate – The tool makes predictable and explainable assumptions to mitigate 
+the violation. No changes are made to the design or setup.
+◦
+error – The tool does not mitigate the violation, but issues an error message.
+•
+Strategy – Specifies the strategy to apply for a check.
+•
+Checked Objects – Objects causing the issue.
+Example 17
+report_early_data_checks With Tolerate Policy
+report_early_data_checks -verbose
+****************************************
+Report : report_early_data_checks
+Design : abc
+Version: T-2022.03
+Date   : Wed Mar 23 11:22:12 2022
+****************************************
+Check                                   Policy    Strategy               
+                 Checked Objects     Comment
+-------------------------------------------------------------------------
+-------
+plan.pg.strategy_via_rule               tolerate  skip_via_rule_check    
+                 abc.nlib:abc__nwcopt.design
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+294
+
+
+===== PDF page 295 =====
+Chapter 10: Performing Power Planning
+Instantiating the Power Plan
+Feedback
+-------------------------------------------------------------------------
+-------
+1
+Example 18
+report_early_data_checks With Error Policy
+report_early_data_checks -verbose
+****************************************
+Report : report_early_data_checks
+Design : abc
+Version: T-2022.03
+Date   : Wed Mar 23 11:22:12 2022
+****************************************
+Check                                   Policy    Strategy               
+                 Checked Objects     Comment
+-------------------------------------------------------------------------
+-------
+plan.pg.strategy_via_rule               error    
+ stop_compile_pg_execution               abc.nlib:abc__nwcopt.design
+-------------------------------------------------------------------------
+-------
+1
+Improving compile_pg Runtime in Large Designs
+For large designs, the compile_pg command might take a long time to insert all the vias 
+required by the power mesh. You can use the following application option to change how 
+DRC rules are applied around vias and apply partitioning to reduce runtime.
+•
+plan.pgroute.drc_check_fast_mode: Set this application option to true to enable 
+a low-effort or fast-mode DRC checking to improve runtime. Specifically, the DRC 
+checking engine skips the top and bottom layers of stacked vias and checks only the 
+layers between them.
+Application Options for PG Routing
+The PG routing commands supports additional application options to control power and 
+ground object creation and checking. Unless otherwise noted, the following descriptions 
+describe the tool behavior when the application option is true.
+Table 12
+PG Routing Application Options
+To do this
+Use this application option
+Specify how PG routing commands fix the rectangle 
+only rule violation when via is created.
+When set to true, which is the default, the tool discards 
+the via. When false, the tool tries to patch the DRC 
+violation.
+plan.pgroute.no_patch_fix_rectan
+gle_only_rule
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+295
+
+
+===== PDF page 296 =====
+Chapter 10: Performing Power Planning
+Instantiating the Power Plan
+Feedback
+Table 12
+PG Routing Application Options (Continued)
+To do this
+Use this application option
+Specify whether the create_pg_vias command should 
+consider routing blockage at the wire’s intersection - the 
+wire’s intersection is trimmed by routing blockage.
+When true, which is the default, the command 
+considers routing blockage, which results in more 
+accurate intersection for via creation. When false, 
+the command does not create any via where there is 
+routing blockage overlapping with intersection region.
+plan.pgroute.trim_by_blockage
+Specify whether to automatically color wires and cuts 
+internally before DRC checking and fixing.
+You can set this application option to one of the 
+following:
+• metal - Color PG wires based on track color
+The color is based on the 
+plan.pgroute.always_align_track_color_lay
+ers application option setting.
+When the wire width is the default width and the 
+center of the wire aligns with the track, the PG wire 
+color follows the track color. Non-default width wires 
+have opposite color of the track color.
+• cut - Color PG cuts using mask one at first and PG 
+DRC fixing engine recolors as necessary to fix any 
+DRC violations. If there is violation, the tool tries 
+mask two. If none of the masks are DRC clean, the 
+tool continues with regular PG DRC fixing.
+• none - Do not color metal or cut anything before DRC 
+checking.
+The default is metal and cut, which means that the tool 
+automatically colors metal and cut layers internally 
+before design rule checking and fixing.
+plan.pgroute.color_metal_cut_int
+ernally_for_drc
+Control whether wire color follows the track 
+color in a specified metal layer when the 
+plan.pgroute.color_metal_cut_internally_for_
+drc application option is set to metal.
+By default, all wires follow the track color on all layers.
+plan.pgroute.always_align_track_
+color_layers
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+296
+
+
+===== PDF page 297 =====
+Chapter 10: Performing Power Planning
+Instantiating the Power Plan
+Feedback
+Table 12
+PG Routing Application Options (Continued)
+To do this
+Use this application option
+Assign color mode to uncolored shapes during design 
+rule checking. This approach helps you to relax or 
+tighten the spacing requirements during checking. The 
+valid values are -1, 0, and 1.
+The default is -1, where the tool ignores any uncolored 
+shapes or treats them as a certain color during 
+checking.
+When set to 0, the design rule checker treats an 
+uncolored shape as a different color from neighboring 
+shapes.
+When set to 1, the design rule checker treats an 
+uncolored shape as the same color as neighboring 
+shapes.
+For more information, see the application option man 
+page.
+plan.pgroute.assign_drc_color_m
+ode
+Invoke the connect_pg_net command to update 
+the PG net-to-pin logical connectivity. By default, the 
+connect_pg_net command is not called.
+plan.pgroute.auto_connect_pg_net
+Create vias between new PG shapes and existing 
+shapes with a shape_type attribute of user_route. By 
+default, user_route shapes are ignored.
+plan.pgroute.connect_user_route_
+shapes
+Determine the rail width based on the PG pins of routed 
+cells in the routing area when running the compile_pg 
+command. The routing area is specified by the PG 
+strategy. By default, the tool determines the rail width 
+from cells in a design independent of cell location.
+plan.pgroute.decide_rail_width_f
+rom_routing_area
+Prevent the compile_pg command from removing 
+floating wires and vias. Use this application option in 
+designs with multiple levels of physical hierarchy to 
+ensure connectivity between physical hierarchies. By 
+default, floating wires and vias are removed.
+plan.pgroute.disable_floating_re
+moval
+Ignore DRC repair for stapling vias and do not create 
+the via. Use this application option to improve runtime 
+at the expense of additional DRC errors. By default, the 
+command tries to repair the DRC violation.
+plan.pgroute.disable_stapling_vi
+a_fixing
+Prevent the compile_pg from reevaluating Tcl variables 
+used in the PG strategy. By default, the compile_pg 
+command reevaluates all Tcl variables defined in PG 
+strategy and returns updated values for the variables.
+plan.pgroute.disable_strategy_re
+evaluation
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+297
+
+
+===== PDF page 298 =====
+Chapter 10: Performing Power Planning
+Instantiating the Power Plan
+Feedback
+Table 12
+PG Routing Application Options (Continued)
+To do this
+Use this application option
+Prevent the compile_pg command from trimming 
+dangling wires. Use this application option in designs 
+with multiple levels of physical hierarchy to ensure 
+connectivity between physical hierarchies. By default, 
+dangling wires are trimmed.
+plan.pgroute.disable_trimming
+Prevent the compile_pg command from creating vias. 
+By default, the compile_pg command creates vias.
+plan.pgroute.disable_via_creat
+ion
+Avoid DRC repair on stacked vias and removes the 
+stacked via when any via in the stack is not DRC-clean. 
+Use this application option to decrease runtime at the 
+expense of fewer stacked vias. By default, the tool 
+performs DRC repair for stacked vias which are not 
+DRC-clean.
+plan.pgroute.discard_stackvia_wi
+th_drc
+Enable the PG router commands to try all contact 
+codes specified by the set_pg_via_master_rule 
+command. Use this application option to allow the tool 
+to try additional via masters to create a DRC-clean 
+power plan at the expense of longer runtime. By 
+default, the tool selects a via master and uses that via 
+for all subsequent via insertions.
+plan.pgroute.fix_via_drc_multipl
+e_viadef
+Specify a restricted set of PG routing layers to use 
+when connecting to hard macro power pins.
+plan.pgroute.hmpin_connection_ta
+rget_layers
+Honor routing blockage inside cover cell.
+plan.pgroute.honor_cover_cell
+Honor net-based nondefault routing rule spacing rules 
+when checking DRCs on PG structures. By default, 
+nondefault routing rule spacing rules are not honored.
+plan.pgroute.honor_ndr_spacing_
+drc
+Consider existing signal routes when performing a DRC 
+check. By default, the signal routes are ignored for DRC 
+check.
+plan.pgroute.honor_signal_route_
+drc
+Consider shapes within standard cells when performing 
+DRC checks. By default, shapes within standard cells 
+are ignored.
+plan.pgroute.honor_std_cell_drc
+Load the frame view of macro, block, and standard cell 
+instances when performing DRC checking. By default, 
+the frame views are not loaded.
+plan.pgroute.load_frame_view
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+298
+
+
+===== PDF page 299 =====
+Chapter 10: Performing Power Planning
+Instantiating the Power Plan
+Feedback
+Table 12
+PG Routing Application Options (Continued)
+To do this
+Use this application option
+Define the maximum distance to consider when 
+extending a PG strap. If the distance to the target 
+extension object is greater than the specified value, 
+the extension is dropped. By default, the tool creates 
+extensions to the specified objects regardless of 
+distance.
+plan.pgroute.max_extension_dista
+nce
+Specify the maximum number of undo steps for the 
+compile_pg command. By default, the maximum 
+number of undo steps is five.
+plan.pgroute.max_undo_steps
+Specify the type of via master or ContactCode to 
+consider when inserting a via. Valid values for this 
+application option are: all, default, Vs, Vh, or Vv. See 
+the man page for more information.
+plan.pgroute.maximize_total_cut_
+area
+Create a separate alignment strap between neighboring 
+cells when the distance between the cells is greater 
+than the specified value. This application option is valid 
+when using the compile_pg command on a design with 
+a power switch or physical cell alignment pattern.
+plan.pgroute.maximum_cell_gap_fo
+r_alignment_strap
+Merge metal shapes in specified pad cell types while 
+performing DRC checks. Use this application option 
+to avoid DRC errors when the internal metal shapes 
+in pad cells are rectilinear polygons rather than 
+rectangles. Valid values are one or more of io_pad, 
+corner_pad, and flip_chip_pad. By default, the tool 
+does not merge metal shapes in pad cells.
+plan.pgroute.merge_shapes_in_pad
+_cell
+When set to true (which is the default), the 
+create_pg_vias command merges overlapping 
+shapes for via connection.
+plan.pgroute.merge_shapes_for_vi
+a_creation
+Allow the compile_pg command to create wires that 
+partially overlap the routing area boundary. By default, 
+overlapping wires are not created.
+plan.pgroute.overlap_route_bound
+ary
+When set to true, the compile_pg command creates 
+wires that partially overlap the routing area boundary 
+and that excludes the design boundary. By default, 
+overlapping wires are not created.
+plan.pgroute.overlap_route_bound
+ary_exclude_design_boundary
+Include standard cell rail and PG strap intersections for 
+snapping. By default, intersected standard cell rails are 
+not considered for snapping.
+plan.pgroute.snap_stdcell_rail
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+299
+
+
+===== PDF page 300 =====
+Chapter 10: Performing Power Planning
+Instantiating the Power Plan
+Feedback
+Table 12
+PG Routing Application Options (Continued)
+To do this
+Use this application option
+Ignore DRC checking between neighboring stapling 
+vias stacks to improve runtime. Use this application 
+option to improve runtime at the expense of possible 
+DRC errors. By default, the tool checks neighboring 
+stacked vias.
+plan.pgroute.stapling_via_fast_m
+ode
+Specify a library cell reference name to use when 
+calculating width and offset of standard cell rails. By 
+default, the tool selects the standard cell reference.
+plan.pgroute.std_rail_from_refn
+ame
+Specify a cell type (lib_cell, filler, well_tap, and 
+end_cap) on which to create vias to cell pins. Use this 
+application option to create rail-to-cell connections for 
+cells specified by create_pg_macro_conn_pattern 
+command. By default, vias are not created on pins of 
+any nonmacro cells.
+plan.pgroute.treat_cell_type_as_
+macro
+When set to true, which is the default, honor routing 
+blockages as real metal or cut shapes when performing 
+DRC checks for blockages in physical blocks, macros, 
+or standard cells. When set to false, only overlap 
+and minimum spacing rules per layer are checked for 
+routing blockages.
+plan.pgroute.treat_fat_blockage_
+as_fat_metal
+Enable the create_pg_vias command to create 
+vias between PG rails and pins of fixed standard 
+cells. In addition, use this application option 
+to create vias on PG pins of cells specified by 
+create_pg_macro_conn_pattern command. By 
+default, vias are not created on pins of any standard 
+cells.
+plan.pgroute.treat_fixed_stdcell
+_as_macro
+Write out additional debugging information messages to 
+the console.
+plan.pgroute.verbose
+Maximize the number of cuts in the via array 
+based on the specified value. Valid values are 
+force_both_enclosures_in_intersection, 
+try_both_enclosures_in_intersection, 
+try_one_enclosure_in_intersection, 
+try_cuts_in_intersection, and 
+enforce_via_rule_dimensions. By default, the 
+tool fits the entire via array bounding box into the 
+intersection.
+plan.pgroute.via_array_size_cont
+rol
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+300
+
+
+===== PDF page 301 =====
+Chapter 10: Performing Power Planning
+Instantiating the Power Plan
+Feedback
+Table 12
+PG Routing Application Options (Continued)
+To do this
+Use this application option
+Enable the PG routing commands to create vias 
+between partially overlapped PG straps or between 
+partially overlapped PG wires and macro pins. This 
+application option accepts an overlap ratio between 0 
+and 1, where a value of 1 requires that shapes must be 
+fully overlapped.
+plan.pgroute.via_site_threshold
+Specify the default tag in all PG routing commands 
+even when the -tag option is not used in PG routing 
+commands. For example, when the -tag option is not 
+specified in the create_pg_vias command, all vias 
+created have a tag value of myTag. If the compile_pg 
+PG routing command specifies a tag as secondTag, 
+then the default tag value is overwritten with secondTag 
+and the PG shapes and vias generated using the 
+compile_pg PG routing command has a tag value of 
+secondTag.
+plan.pgroute.default_tag
+Enable the create_pg_vias command to optimize the 
+track usage. It does not indicate to reduce track usage, 
+but it generates the wire closer to the same direction 
+wires in different layers. This makes the tracks closer in 
+different layers and makes future routing easier..
+plan.pgroute.optimize_track_alig
+nment
+Enable the create_pg_special_pattern 
+command to control the behavior of the 
+-insert_power_switch_alignment_straps and 
+-insert_physical_cell_alignment_straps options. 
+The number keyword in the two options indicates the 
+number of straps that connect to each pin. With this 
+option set to true, all pins are treated as one target. 
+That is, it indicates the number of straps that go through 
+the bounding box of all pins.
+plan.pgroute.treat_multiple_pins
+_as_one_target
+Enable derive_pg_mask_constraint to use new 
+algorithm to derive color of wire and via enclosure.
+plan.pgroute.derive_pg_mask_engi
+ne_version
+Enable the tool to derive net information for cut without 
+net information.
+plan.pgroute.derive_cut_net_from
+_pin
+Enable the creation of vias on 45-degree RDL 
+shapes. When this option is set to true, the PG router 
+uses rectangle shapes as input and calculates the 
+intersection area with 45-degree RDL shapes. If an 
+intersection area is a valid rectangle, the via is created.
+plan.pgroute.enable_rdl_45_sha
+pes
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+301
+
+
+===== PDF page 302 =====
+Chapter 10: Performing Power Planning
+Instantiating the Power Plan
+Feedback
+Reducing the Memory Size of the Design Database
+To reduce the memory of the design database that results in smaller peak memory when 
+loading the design database after PG insertion, you can use the following application 
+options:
+•
+plan.pgroute.use_via_matrix: Set this application option to true to enable the 
+compile_pg and create_pg_vias PG route commands to commit via_matrix objects 
+rather than individual vias to the database. This approach results in significantly fewer 
+database objects, thereby reducing the memory of the resulting database.
+When this application option is set to true, the PG routing commands analyze and 
+create via matrixes from individual vias that match a regular pattern. The result is a 
+number of via matrices and left-over individual vias, which are then committed to the 
+database.
+Note that this via matrix inference by the PG route commands might come at a slight 
+runtime increase and that the peak memory of the PG routing commands is not 
+reduced by this option.
+•
+plan.pgroute.use_shape_pattern: Set this application option to true to enable the 
+compile_pg and create_pg_strap PG route commands to commit shape_pattern 
+objects rather than individual shapes to the database. This approach results in 
+significantly fewer database objects, thereby reducing the memory of the resulting 
+database.
+When this application option is set to true, the PG routing commands analyze and 
+create shape patterns from individual shapes that match a regular pattern. The result 
+is a number of shape_pattern objects and left-over individual shapes, which are then 
+committed to the database.
+Note that this shape_pattern object inference by the PG route commands might come 
+at a slight runtime increase and that the peak memory of the PG routing commands is 
+not reduced by this option.
+•
+plan.pgroute.high_capacity_mode: Set this application option to 1 to enable high-
+capacity mode for the compile_pg and create_pg_vias PG route commands. High-
+capacity mode reduces the memory required for handling the vias.
+Set this application option to 2 to further reduce the peak memory required while 
+running the compile_pg command. The tool achieves improvements in memory usage 
+by dividing the design into smaller areas and routing these areas independently. This 
+setting is recommended only for very large designs.
+The default is 0 when this feature is disabled.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+302
+
+
+===== PDF page 303 =====
+Chapter 10: Performing Power Planning
+Pattern-Based Power Network Routing Example
+Feedback
+Pattern-Based Power Network Routing Example
+The following example is a complete pattern-based power network routing script.
+# Create the power and ground nets and connections
+create_net -power VDD
+create_net -ground VSS
+connect_pg_net -net VDD [get_pins -physical_context *VDD]
+connect_pg_net -net VSS [get_pins -physical_context *VSS]
+ 
+# Create the power and ground ring pattern
+create_pg_ring_pattern ring_pattern -horizontal_layer @hlayer \
+   -horizontal_width {@hwidth} -horizontal_spacing {@hspace} \
+   -vertical_layer @vlayer -vertical_width {@vwidth} \
+   -vertical_spacing {@vspace} -corner_bridge @cbridge \
+   -parameters {hlayer hwidth hspace
+                vlayer vwidth vspace cbridge}
+ 
+# Set the ring strategy to apply the ring_pattern
+# pattern to the core area and set the width
+# and spacing parameters
+set_pg_strategy ring_strat -core \
+   -pattern {{name: ring_pattern} {nets: {VDD VSS}}
+             {offset: {3 3}} {parameters: {M7 10 2 M8 10 2 true}}} \
+   -extension {{stop: design_boundary}}
+ 
+# Create the ring in the design
+compile_pg -strategies ring_strat
+ 
+ 
+# Define a new via rule, VIA78_3x3, for the power mesh
+set_pg_via_master_rule VIA78_3x3 -contact_code VIA78 \
+   -via_array_dimension {3 3}
+ 
+# Create the power and ground ring mesh pattern
+create_pg_mesh_pattern mesh_pattern -layers {
+   {{vertical_layer: M8} {width: 5}
+       {spacing: interleaving} {pitch: 32}}
+   {{vertical_layer: M6} {width: 2}
+       {spacing: interleaving} {pitch: 32}}
+   {{horizontal_layer: M7} {width: 5}
+       {spacing: interleaving} {pitch: 28.8}}} \
+   -via_rule {
+       {{layers: M6} {layers: M7} {via_master: default}}
+       {{layers: M8} {layers: M7} {via_master: VIA78_3x3}}}
+ 
+# Set the mesh strategy to apply the mesh_pattern
+# pattern to the core area. Extend the mesh
+# to the outermost ring
+set_pg_strategy mesh_strat -core -pattern {{pattern: mesh_pattern}
+   {nets: {VDD VSS}}} -extension {{stop: outermost_ring}}
+ 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+303
+
+
+===== PDF page 304 =====
+Chapter 10: Performing Power Planning
+Pattern-Based Power Network Routing Example
+Feedback
+# Create the mesh in the design
+compile_pg -strategies mesh_strat
+ 
+# Create the power and ground ring mesh pattern
+create_pg_mesh_pattern mesh_pattern -layers {
+   {{vertical_layer: M8} {width: @width8}
+       {spacing: interleaving} {pitch: 32}}
+   {{vertical_layer: M6} {width: @width6}
+       {spacing: interleaving} {pitch: 32}}
+   {{horizontal_layer: M7} {width: @width7}
+       {spacing: interleaving} {pitch: 28.8}}} \
+   -via_rule {
+       {{layers: M6} {layers: M7} {via_master: default}}
+       {{layers: M8} {layers: M7} {via_master: VIA78_3x3}}} \
+   -parameters {width6 width7 width8}
+ 
+# Set the mesh strategy to apply the mesh_pattern
+# pattern to the core area. Extend the mesh
+# to the outermost ring
+set_pg_strategy mesh_strat -core -pattern {
+   {pattern: mesh_pattern} {nets: {VDD VSS}}
+      {parameters: {32 28.8 32}}} \
+   -extension {{stop: outermost_ring}}
+ 
+# Create the mesh pattern in the design
+compile_pg -strategies mesh_strat
+ 
+# Create the connection pattern for macro
+# power and ground pins
+create_pg_macro_conn_pattern macro_pattern \
+   -pin_conn_type scattered_pin
+ 
+# Set the macro connection strategy to
+# apply the macro_pattern pattern to
+# the core area
+set_pg_strategy macro_strat -core \
+   -pattern {{pattern: macro_pattern}
+             {nets: {VDD VSS}}}
+ 
+# Connect the power and ground macro pins
+compile_pg -strategies macro_strat
+ 
+# Create a new 1x2 via
+set_pg_via_master_rule via16_1x2 -via_array_dimension {1 2}
+ 
+# Create the power and ground rail pattern
+create_pg_std_cell_conn_pattern rail_pattern -layers {M1}
+ 
+# Set the power and ground rail strategy
+# to apply the rail_pattern pattern to the
+# core area
+set_pg_strategy rail_strat -core \
+   -pattern {{pattern: rail_pattern} {nets: VDD VSS}}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+304
+
+
+===== PDF page 305 =====
+Chapter 10: Performing Power Planning
+PG Script Generator
+Feedback
+ 
+# Define a via strategy to insert via16_1x2 vias
+# between existing straps and the new power rails
+# specified by rail_strat strategy on the M6 layer
+set_pg_strategy_via_rule rail_rule -via_rule {
+    {{{existing: strap} {layers: M6}}
+      {strategies: rail_strat} {via_master: via16_1x2}}
+    {{intersection: undefined} {via_master: nil}}}
+ 
+# Insert the new rails
+compile_pg -strategies rail_strat -via_rule rail_rule
+PG Script Generator
+Creating a pattern-based PG network can be time-consuming due to the complex Tcl 
+syntax. To simplify the process, you can convert the configuration file that contains the 
+pattern specifications in PG syntax to a Tcl script that includes all the commands you need 
+to create the PG structure.
+To generate the PG Tcl script,
+1. Open or create the configuration file that contains your pattern-based power network 
+specifications.
+If you do not have a configuration file, use the following command to create a default 
+configuration file that includes the syntax for all the functionality available in pattern-
+based PG creation, including power strap and via configurations:
+icc2_shell> generate_pg_script -template
+2. Modify the keyword syntax and values in the configuration file to meet your power 
+network requirements.
+3. Run the generate_pg_script command, specifying the configuration file as your input 
+file:
+icc2_shell> generate_pg_script -input dp_pgConfig.txt \
+     -output pg_script.tcl
+If you do not specify the -output option, the tool creates a script file named 
+ppns_script.tcl. You can edit and reuse the Tcl script as needed.
+4. Source the Tcl script in the IC Compiler II tool:
+icc2_shell> source pg_script.tcl
+The keywords in the configuration file correspond to the keywords in the Tcl syntax. See 
+the command man pages for detailed usage.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+305
+
+
+===== PDF page 306 =====
+Chapter 10: Performing Power Planning
+PG Script Generator
+Feedback
+The following example shows an excerpt of the PG syntax in a configuration file:
+StrapConfig: PG_TOP_MESH1 {
+  # required
+  target_area: core
+  category: mesh
+  nets: "VDD VSS"
+  # optional
+  tag: M2_M3_MESH
+  blockage: macros:{ u_macro/mem1 u_macro/mem2}
+  extension: {{stop: 10}{layers: M1}}
+ 
+  layer:  M2 {
+        # required
+                widths: 0.4
+        direction: horizontal
+                spacings: interleaving
+                pitch: 7
+                # optional
+                offset:  0
+                alignTrack:  track
+                trim:  false
+ }
+  layer:  M3 {
+        # required
+                widths: 0.8
+        direction: vertical
+                spacings: 1.2
+                pitch: 8
+        # optional
+                offset: 0
+                alignTrack:  track
+                trim:  false
+  }
+}
+The following example shows the corresponding Tcl commands written out by the 
+generate_pg_script command:
+set_pg_strategy_via_rule NO_VIA  \
+    -via_rule { {{intersection: undefined}{via_master: NIL}} }
+ 
+create_pg_mesh_pattern PG_TOP_MESH1_PTRN \
+    -layers { \
+         {{horizontal_layer:M2}{width:0.4 }\
+             {spacing:interleaving}{pitch:7}\
+             {track_alignment: track}{trim: false}{offset:0}} \
+         {{vertical_layer:M3}{width:0.8 }\
+             {spacing:1.2}{pitch:8}{track_alignment: track}\
+             {trim: false}{offset:0}} \
+             }\
+ 
+    -via_rule {{intersection : all}{via_master:NIL}}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+306
+
+
+===== PDF page 307 =====
+Chapter 10: Performing Power Planning
+Manually Creating Power Straps and Vias
+Feedback
+ 
+set_pg_strategy PG_TOP_MESH1_STR \
+    -extension {{{stop: 10}{layers: M1}}} \
+    -blockage {macros:{ u_macro/mem1 u_macro/mem2}} \
+    -pattern { {name: PG_TOP_MESH1_PTRN}{nets: VDD VSS}} \
+    -core
+ 
+compile_pg -strategies PG_TOP_MESH1_STR -via_rule NO_VIA -tag M2_M3_MESH
+Manually Creating Power Straps and Vias
+For most designs, pattern-based power planning is the most effective methodology for 
+generating a power mesh. Alternatively, to create individual power straps or a power 
+mesh for a specific region of the design, use the create_pg_strap and create_pg_vias 
+commands. These commands create components of the power mesh and do not require a 
+pattern or strategy as part of the pattern-based power planning methodology.
+PG Straps
+The create_pg_strap command creates power ground straps on specified layers in a 
+specified region of the design. The command also inserts vias between the new strap 
+shapes and existing shapes. The following create_pg_strap command creates a power 
+strap with these characteristics:
+•
+The strap is created for net VDD on the ME3 layer and arranged vertically.
+•
+The center of the strap is placed at x=100 with a width of 4.
+•
+The strap extends from y=100 to y=400.
+•
+To improve runtime, no DRC is performed when the tool creates the strap.
+icc2_shell> create_pg_strap -layer ME3 -direction vertical \
+   -width 4 -net VDD -drc no_check -start 100.0 \
+   -low_end 50 -high_end 400
+PG Vias
+The create_pg_vias command inserts vias at metal intersections on adjacent layers. The 
+following examples show different applications of the create_pg_vias command:
+•
+Create vias at all intersections.
+icc2_shell> create_pg_vias -nets VDD
+Committed 288 vias.
+•
+Insert vias on the VDD net to connect layers M3 to M4, set the shape_use attribute for 
+the via as stripe, and do not perform a DRC when inserting the via.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+307
+
+
+===== PDF page 308 =====
+Chapter 10: Performing Power Planning
+Using Secondary PG Constraints
+Feedback
+icc2_shell> create_pg_vias -nets {VDD} -from_layers M3 \
+   -to_layers M4 -drc no_check -mark_as stripe
+Committed 288 vias.
+•
+Insert vias within the specified bounding box for layers from M6 to M8 and connect 
+macro pins to the PG straps.
+icc2_shell> create_pg_vias -nets VDD -drc no_check \
+   -within_bbox [get_attribute [current_block] bbox] \
+   -from_layers M6 -to_layers M8 -from_types stripe \
+   -to_types macro_pin
+•
+Create a via matrix for VDD and VSS net shapes with a shape_use attribute set 
+of stripe. Use the VIA34f via master and set the tag attribute on the via matrix to 
+pg_via_matrix.
+icc2_shell> set bbox [get_attribute [get_core_area] bbox]
+icc2_shell> create_pg_vias -nets {VDD VSS} -from_types stripe \
+   -to_types stripe -via_masters {VIA34f} -within_bbox $bbox \
+   -start {{741 735} {708 720}} -pitch {{66 30} {66 30}} \
+   -create_via_matrix -tag pg_via_matrix
+Using Secondary PG Constraints
+For designs with power domains that have the primary supplies being shutdown, but still 
+have logic that needs to operate in some power states, you can consider having dual-rail 
+cells in your design to meet this requirement. For optimal performance, these cells should 
+be placed near the secondary power straps.
+By default, the tool assumes that the secondary PG straps are available in all regions of 
+a voltage area. However, to save routing resources, you might choose to have secondary 
+PG straps available in only a subset of the voltage area.
+Secondary PG constraints help the tool to identify the location of straps that have limited 
+physical availability in the voltage area. The tool honors these constraints throughout the 
+flow.
+For more information, see the “Specifying Secondary PG Constraints” topic in the IC 
+Compiler II Multivoltage User Guide.
+Hierarchical Secondary PG Aware Placement Constraints
+The hierarchical design planning flow is used to accommodate limited physical availability 
+of secondary PG straps with less effort on the design. By using secondary PG-aware 
+placement constraints, certain secondary supplies can be planned to use less routing 
+resources.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+308
+
+
+===== PDF page 309 =====
+Chapter 10: Performing Power Planning
+Using Secondary PG Constraints
+Feedback
+Specify secondary PG placement constraints at both the individual block levels and the top 
+levels. However,
+•
+PG constraints cannot be created at top and pushed down to the blocks.
+•
+PG constraints spanning top/block boundary must be applied separately at the specific 
+levels.
+The general flow is as follows in which the secondary PG placement constraints can be 
+specified as part of this flow,
+1. Use the split_constraints and commit_block commands to create the subblocks.
+2. Create voltage area shapes by using the shape_blocks command.
+3. Create PG straps at the top level, then use the characterize_block_pg command to 
+create the PG strategies for the subblocks.
+4. Create power network as follows:
+a. Read the UPF power intent by using the load_upf command.
+b. Create the PG straps at the block level by using the compile_pg command.
+Note:
+After power planning and secondary PG placement constraints are 
+committed at the blocks and at the top level, then a second placement is 
+necessary. This places the dual-rail cells based on the secondary PG strap 
+locations.
+5. Create a new corner, estimated_corner, and optimize the top-level interface logic by 
+using the estimate_timing command.
+When you commit the constraints at the top level of the design, use the 
+commit_secondary_pg_placement_constraints -commit_subblocks command. 
+The -commit_subblocks option checks all block-level secondary PG constraints and 
+commits any uncommitted constraints. The command commits the secondary PG 
+placement constraints at both top and linked subblocks.
+To display the associated block for each constraint, use the 
+report_secondary_pg_placement_constraints -all_blocks command. 
+To check for consistency and error conditions in specific blocks, use the 
+check_secondary_pg_placement_constraints -blocks command with a list of 
+blocks.
+To define secondary PG constraints manually, use the 
+create_secondary_pg_placement_constraints command and to define secondary 
+PG constraints automatically, use the derive_secondary_pg_placement_constraints 
+command.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+309
+
+
+===== PDF page 310 =====
+Chapter 10: Performing Power Planning
+Using Secondary PG Constraints
+Feedback
+The flow to implement a design plan iteration after the initial design netlist is generated in 
+the tool topographical mode is shown in the following figure:
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+310
+
+
+===== PDF page 311 =====
+Chapter 10: Performing Power Planning
+Using Secondary PG Constraints
+Feedback
+Note:
+The load_block_constraints command that loads constraints for child 
+and top blocks is not supported by the tool. However, you can use the 
+run_block_script command to run the specified Tcl script on a set of blocks. 
+In the following example, the load_secpg_constraints.tcl script runs the 
+create_secondary_pg_placement_constraints command, which then 
+creates the relevant constraints.
+The flow to implement a design plan iteration after the partial floorplan is generated in the 
+tool topographical mode is shown in the following figure:
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+311
+
+
+===== PDF page 312 =====
+Chapter 10: Performing Power Planning
+Honoring Metal and Via Spacing Rules to Blockages
+Feedback
+Support for Abstract View
+To copy the pin information into the design view, use the following commands:
+Table 13
+Support for Abstract View
+To do this
+Use this
+To copy the secondary PG constraints between 
+design view and abstract view
+Use the create_abstract or merge_abstract 
+commands.
+To render the secondary PG constraints 
+stale after the UPF data is updated by the 
+commit_upf command
+Use the change_view and change_abstract 
+commands
+Honoring Metal and Via Spacing Rules to Blockages
+When routing near blockages, you can guide the tool to honor fat metal spacing rules 
+or via cut rules for routes and vias. Figure 103 shows some layout topologies where 
+this might be necessary. Set the plan.pgroute.treat_fat_blockage_as_fat_metal 
+application option to true as follows to honor routing blockages as real metal or cut 
+shapes when performing DRC checks for blockages in physical blocks, macros, or 
+standard cells. By default, this application option is false and the tool only checks 
+overlaps and minimum spacing rules per layer for routing blockages.
+icc2_shell> set_app_options \
+   -name plan.pgroute.treat_fat_blockage_as_fat_metal -value true
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+312
+
+
+===== PDF page 313 =====
+Chapter 10: Performing Power Planning
+Using PG Pattern Shapes
+Feedback
+Figure 103
+Minimum Spacing Violations to Blockages
+Power strap to
+routing blockage
+within macro
+VIA3 routing blockage
+to PG VIA4 spacing
+Min via spacing when
+a via is within a
+macro with nonzero
+space blockage
+Using PG Pattern Shapes
+PG pattern shapes are compact array representations of individual PG wire shapes. PG 
+pattern shapes provide an efficient method for instantiating large, regular patterns of PG 
+wire shapes in a design, reducing the size of the database. The commands in the following 
+table perform operations on PG pattern shapes as described in the following topics.
+Command
+Description
+create_pg_pattern_shapes
+Creates a pattern of PG wire shapes in a single, 
+repeatable object.
+get_shape_patterns
+Returns a collection of PG pattern shapes.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+313
+
+
+===== PDF page 314 =====
+Chapter 10: Performing Power Planning
+Using PG Pattern Shapes
+Feedback
+Command
+Description
+report_shape_patterns
+Reports information about the specified PG pattern 
+shapes in the current block.
+remove_shape_patterns
+Removes one or more PG pattern shapes from the current 
+block.
+convert_shape_patterns_to_shapes Converts PG pattern shapes to PG wire shapes.
+convert_shapes_to_shape_pattern
+Converts PG wire shapes to a PG pattern shape.
+decompose_shape_patterns
+Converts PG pattern shapes to more efficient PG pattern 
+shapes.
+Creating PG Pattern Shapes
+To create a compact array representation of PG wire shapes in a single object that you 
+can reuse throughout the block, use the create_pg_pattern_shapes command. The 
+following example creates a VSS PG pattern shape on the M1 layer. Each wire shape is 
+repeated every 0.57 um in the x-direction and every 0.48 um in the y-direction.
+icc2_shell> create_pg_pattern_shapes -layer M1 -net VSS -width 0.037 \
+     -direction vertical -start 4.788 -low_end {-0.06} -high_end {0.06} \
+     -xPitch 0.57 -yPitch 0.48
+Retrieving PG Pattern Shapes
+To retrieve all PG pattern shapes in the current block or a specific PG pattern shape, use 
+the get_shape_patterns command. The following example retrieves all the PG pattern 
+shapes connected to the VDD net.
+icc2_shell> get_shape_patterns * -of_objects [get_nets VDD]
+{PATH_PATTERN_31_0 PATH_PATTERN_31_1}
+Reporting PG Pattern Shapes
+To report information about one or more PG pattern shapes, use the 
+report_shape_patterns command. The following example reports the PG pattern 
+shapes for the VDD net.
+icc2_shell> report_shape_patterns [get_shape_patterns \
+     -of_objects [get_nets VDD]]
+Report : report_shape_patterns
+Design : blk
+...
+****************************************
+Shape_pattern     Type      Dimensions GridSize  Displacements
+-----------------------------------------------------------------------
+RECT_PATTERN_31_0 rect_pattern {5x4}    1       {250:north}x{150:east}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+314
+
+
+===== PDF page 315 =====
+Chapter 10: Performing Power Planning
+Using Via Matrixes
+Feedback
+Removing PG Pattern Shapes
+To remove one or more PG pattern shapes, use the remove_shape_patterns command. 
+Include the -verbose option to report additional information. The following example 
+removes the PG pattern shapes specified by a pattern list.
+icc2_shell> remove_shape_patterns POLYGON_PATTERN_28_* -verbose
+Removed shape_pattern POLYGON_PATTERN_28_173
+Removed shape_pattern POLYGON_PATTERN_28_174
+Converting PG Pattern Shapes to PG Wire Shapes
+To convert PG pattern shapes to individual PG wire shapes, use the 
+convert_shape_patterns_to_shapes command. The following example converts a PG 
+pattern shape named RECT_PATTERN_31_0 to four PG wire shapes.
+icc2_shell> convert_shape_patterns_to_shapes \
+     [get_shape_patterns RECT_PATTERN_31_0] \
+{RECT_31_1829 RECT_31_1830 RECT_31_1831 RECT_31_1832}
+Converting PG Wire Shapes to a PG Pattern Shape
+To convert PG wire shapes to a new PG pattern shape, use the 
+convert_shapes_to_shape_pattern command. The following example converts PG wire 
+shapes to a new PG pattern shape.
+icc2_shell> convert_shapes_to_shape_pattern [get_shapes \
+     -filter {shape_type==rect && layer_name==M1}]
+{RECT_PATTERN_31_0}
+To automatically detect shapes that can be converted to PG pattern shapes, use the 
+-layers, -region, or -shapes option with the convert_shapes_to_shape_pattern 
+command instead of listing the shapes with the shape_list argument. When you enable 
+this feature, the tool creates PG pattern shapes based on the layers, regions, or shapes 
+you specify.
+Optimizing PG Pattern Shapes
+To optimize PG pattern shapes to more efficient PG pattern shapes, use the 
+decompose_shape_patterns command. If the specified PG pattern shapes are 
+suboptimal, the tool replaces them with more efficient, nearby PG pattern shapes.
+icc2_shell> decompose_shape_patterns [get_shape_patterns]
+{RECT_PATTERN_0 RECT_PATTERN_1}
+Using Via Matrixes
+Via matrixes are compact array representations of individual via definitions. Via matrixes 
+provide an efficient method for instantiating large, regular patterns of vias in a design, 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+315
+
+
+===== PDF page 316 =====
+Chapter 10: Performing Power Planning
+Using Via Matrixes
+Feedback
+resulting in a reduction in database size and faster processing by the tool. The commands 
+in the following table perform operations on via matrixes as described in the following 
+topics.
+Command
+Description
+create_via_matrix
+Creates a via matrix with a specific via definition, pitch, 
+size, and other attributes.
+get_via_matrixes
+Retrieves all via matrixes in the current block or retrieves a 
+specific via matrix.
+report_via_matrixes
+Reports basic information for one or more via matrixes.
+edit_via_matrix
+Adds or subtracts vias from a specific region in an existing 
+via matrix.
+convert_vias_to_via_matrix
+Converts a collection of vias into a single via matrix.
+convert_via_matrixes_to_vias
+Converts a via matrix to individual vias.
+decompose_via_matrixes
+Converts existing via matrixes to more efficient via 
+matrixes.
+Inserting Via Matrixes
+Use the create_via_matrix command to create a via matrix with a specific via definition, 
+pitch, size, and other attributes. The following example creates a via matrix of size 20 by 
+30 by using the VIA56f via definition. The via matrix starts at (475, 475), uses a pitch of 
+100 microns, and connects to the VSS net.
+icc2_shell> create_via_matrix -via_def VIA56f -pitch {100 100} \
+   -size {20 30} -origin {475 475} -net VSS
+Some power planning commands, such as create_pg_vias, support options to create 
+via matrixes instead of individual vias. The following create_pg_vias command uses the 
+-create_via_matrix option to create via matrixes for VSS net intersections:
+icc2_shell> create_pg_vias -nets VSS -pitch {{100 100}} \
+   -within_bbox {{0 0} {1800 1800}} -via_masters VIA56f \
+   -create_via_matrix
+Retrieving Via Matrixes
+Use the get_via_matrixes command to retrieve all via matrixes in the current block or 
+retrieve a specific via matrix. The following example retrieves via matrixes associated with 
+the VSS net.
+icc2_shell> get_via_matrixes -of_objects [get_nets VSS]
+{VIA_MATRIX_0}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+316
+
+
+===== PDF page 317 =====
+Chapter 10: Performing Power Planning
+Using Via Matrixes
+Feedback
+Use the get_attribute command with the get_via_matrixes command to return 
+properties of the via matrix.
+icc2_shell> get_attribute [get_via_matrixes \
+   -of_objects [get_nets VSS]] number_of_columns
+7
+Reporting Via Matrixes
+Use the report_via_matrixes command to report basic information for one or more via 
+matrixes. Include the -verbose option to report additional information.
+icc2_shell> report_via_matrixes
+Via_matrix    Via_def   Origin
+---------------------------------
+VIA_MATRIX_0  VIA56f    {476 476}
+VIA_MATRIX_1  VIA56f    {576 576}
+1
+ 
+icc2_shell> report_via_matrixes -verbose
+Via_matrix    Via_def   Origin      Description
+----------------------------------------------------
+VIA_MATRIX_0  VIA56f    {476 476}   Orientation:  R0
+                                    Base Pitch:   NA
+                                    Base Size:    {1 1}
+                                    Pitch:        {100 100}
+                                    ...
+ 
+VIA_MATRIX_1  VIA56f    {576 576}   Orientation:  R0
+                                    Base Pitch:   NA
+                                    Base Size:    {1 1}
+                                    Pitch:        {100 100}
+                                    ...
+Adding and Removing Vias in a Via Matrix
+The create_via_matrix command creates via matrixes with a rectangular shape. 
+In some cases based on design requirements, matrix points within the rectangle 
+should not receive a via, or the matrix should be modified to add a missing via. Use the 
+edit_via_matrix command to add or subtract vias from a specific region in an existing 
+via matrix.
+The following example creates an “empty” via matrix by setting the initial pattern to 0 with 
+the -pattern option. Next, the edit_via_matrix command is used to add vias in the 
+region (900, 900) to (1100, 1100). The get_attribute command displays the updated 
+pattern after running the edit_via_matrix command. Note that a “1” in the pattern 
+attribute represents a via at that location, while “0” represents a location with no via.
+icc2_shell> create_via_matrix -via_def VIA56f -pitch {200 200} \
+   -size {9 9} -origin {475.565 475.565} -pattern "0" -net VSS
+{VIA_MATRIX_0}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+317
+
+
+===== PDF page 318 =====
+Chapter 10: Performing Power Planning
+Debugging Vias and PG Straps Removed Due to DRC Violations
+Feedback
+icc2_shell> get_attribute [get_via_matrixes {VIA_MATRIX_0}] pattern
+0
+icc2_shell> edit_via_matrix \
+   -add {{900 900} {1100 1100}} [get_via_matrixes]
+1
+icc2_shell> get_attribute [get_via_matrixes {VIA_MATRIX_0}] pattern
+000000000 000000000 000000000 000100000 ...
+Converting Vias to Via Matrixes
+To convert a collection of vias into a single via matrix, use the 
+convert_vias_to_via_matrix command. Note that the command does not create a via 
+matrix if the vias within a collection have a different number of rows or columns.
+icc2_shell> convert_vias_to_via_matrix [get_vias -of_objects [get_nets 
+ VDD]]
+{VIA_MATRIX_0}
+To automatically detect vias that can be converted to efficient via matrixes, use the 
+-via_defs, -region, or -vias option with the convert_vias_to_via_matrix command 
+instead of listing the vias. When you enable this feature, the tool creates via matrixes 
+based on the via definitions, regions, or vias you specify. The command can convert vias 
+into multiple via matrixes with different dimensions.
+Converting Via Matrixes into Vias
+In some cases you might need to convert a via matrix to individual vias to manage 
+specific via locations. To convert one or more via matrixes into individual vias, use the 
+convert_via_matrixes_to_vias command.
+icc2_shell> convert_via_matrixes_to_vias \
+   [get_via_matrixes {VIA_MATRIX_0 VIA_MATRIX_1 }]
+{VIA_SA_0 VIA_SA_1 ...}
+Optimizing Via Matrixes
+To convert existing via matrixes to more efficient via matrixes, use the 
+decompose_via_matrixes command. If the specified via matrixes are suboptimal, the tool 
+replaces them with more efficient, nearby via matrixes.
+icc2_shell> decompose_via_matrixes [get_via_matrixes]
+{VIA_MATRIX_0 VIA_MATRIX_1}
+Debugging Vias and PG Straps Removed Due to DRC Violations
+In some cases, the compile_pg, create_pg_strap, and create_pg_vias commands 
+might skip via insertion on shape intersections when the via creates a DRC violation. 
+These vias that are removed by the tool are known as “phantom vias” and require 
+additional analysis to determine why the via was not inserted. To assist in debugging 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+318
+
+
+===== PDF page 319 =====
+Chapter 10: Performing Power Planning
+Debugging Vias and PG Straps Removed Due to DRC Violations
+Feedback
+the missing vias, the compile_pg, create_pg_strap, and create_pg_vias commands 
+support the -show_phantom option to save information about the missing via or PG strap 
+and make that information available to the Error Browser. When this option is specified, 
+the tool writes out an EMS error database that contains location and other information 
+about the missing via or missing PG strap. Use the Error Browser in the GUI to review 
+the errors and diagnose the problem. Note that phantom vias are not reported when the 
+-ignore_drc or -ignore_via_drc option is specified.
+For PG straps, only DRC violations that are repaired by cutting part of the wire shape are 
+listed. Abutted phantom PG straps are merged and reported as part of the same error. 
+When a phantom via is created, information about the via and the DRC violation caused 
+by the via are saved. The information includes data about the top and bottom wire shapes, 
+via def, and net name. The error information shows the initial violation before fixing.
+The following figure shows a missing via error displayed in the Error Browser.
+Figure 104
+Phantom Via
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+319
+
+
+===== PDF page 320 =====
+Chapter 10: Performing Power Planning
+Merging Shapes in the PG Mesh
+Feedback
+Merging Shapes in the PG Mesh
+Some designs might contain multiple overlapping PG straps that should be merged 
+together. The merge_pg_mesh command merges shapes based on layer, net name, shape, 
+or type based on command options.
+The following example first merges PG mesh shapes for the VDD100 net, then merges 
+shapes for the VSS net.
+icc2_shell> merge_pg_mesh -nets {VDD100 VSS}
+...
+Net VSS has 4028 overlapped wires.
+Net VSS created 37 ndmshape
+Net VSS deleted 4028 ndmshape
+The following figure shows a portion of the design before and after running the 
+merge_pg_mesh command.
+Figure 105
+Before and After Merging Shapes in the PG Mesh
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+320
+
+
+===== PDF page 321 =====
+Chapter 10: Performing Power Planning
+Inserting Stapling Vias Into an Existing Power Mesh
+Feedback
+Use options with the merge_pg_mesh command to control how the shapes are merged:
+•
+Limit the merge to specific shape types. The allowed shape types are: stripe, 
+ring, macro_pin_connect, lib_cell_pin_connect, follow_pin, core_wire, and 
+user_route.
+icc2_shell> merge_pg_mesh -types {core_wire stripe}
+•
+Limit the checking to specific layers with the -layers option.
+icc2_shell> merge_pg_mesh -layers {M3 M4}
+•
+Merge only specified shapes with the -shapes option.
+icc2_shell> merge_pg_mesh \
+   -shapes {PATH_50_0 PATH_50_1 PATH_50_2 PATH_50_3}
+•
+Limit the merge to only the specified nets with the -nets option as shown in the 
+previous example.
+•
+Undo the previous merge_pg_mesh command with the -undo option.
+Inserting Stapling Vias Into an Existing Power Mesh
+By default, the compile_pg command inserts vias into the power mesh as specified by the 
+set_pg_strategy_via_rule command. However, some designs might require stapling 
+vias that are inserted between overlapping metal stripes on different design layers. To 
+insert stapling vias into a power mesh, use the create_pg_stapling_vias command. 
+The following example creates stapling vias between layers M1 and M2 throughout the 
+core area:
+icc2_shell> create_pg_stapling_vias -nets {VDD VSS} \
+   -from_layer M1 -to_layer M2 \
+   -from_shapes [get_shapes -filter "layer_name == M1"] \
+   -to_shapes [get_shapes -filter "layer_name == M2"]
+The create_pg_stapling_vias command inserts stapling vias and sets the 
+is_via_staple attribute to true on the vias inserted by the command. Create a collection 
+of stapling vias by using the get_vias command together with the is_via_staple 
+attribute as follows:
+icc2_shell> get_vias -filter is_via_staple
+{VIA_SA_0 VIA_SA_1 ...
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+321
+
+
+===== PDF page 322 =====
+Chapter 10: Performing Power Planning
+Inserting Stapling Vias Into an Existing Power Mesh
+Feedback
+The following figure shows the stapling vias created by the create_pg_stapling_vias 
+command.
+Figure 106
+Stapling Vias
+Specify options with the create_pg_stapling_vias command to control how the stapling 
+vias are inserted.
+•
+Specify a region in which to insert vias with the -regions option
+icc2_shell> set core [get_attribute [get_core_area] bbox]
+icc2_shell> create_pg_stapling_vias -regions $core -nets {VDD VSS} ...
+•
+Specify a tag name for the vias inserted by a specific create_pg_stapling_vias 
+command with the -tag option. The tag can be used as a filter with the get_vias 
+command or extracted as an attribute.
+icc2_shell> create_pg_stapling_vias -nets {VDD VSS} \
+   -from_layer ME1 -to_layer M2 \
+   -from_shapes [get_shapes -filter "layer_name == M1"] \
+   -to_shapes [get_shapes -filter "layer_name == M2"] \
+   -tag pg1
+icc2_shell> remove_vias [get_vias -filter tag==pg1]
+136
+•
+Create a via matrix of stapling vias instead of individual vias by specifying the 
+-create_via_matrix option. Other settings are the same as the previous example. 
+Note that this example creates 136 via matrixes, one for each horizontal row of 
+overlapping metal shapes on layers ME1 and ME2.
+icc2_shell> create_pg_stapling_vias \
+   -nets {VDD VSS} -from_layer ME2 -to_layer ME1 \
+   -from_shapes [get_shapes -filter "layer_name == ME2"] \
+   -to_shapes [get_shapes -filter "layer_name == ME1"] \
+   -create_via_matrix -tag pg1
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+322
+
+
+===== PDF page 323 =====
+Chapter 10: Performing Power Planning
+Inserting Stapling Vias Into an Existing Power Mesh
+Feedback
+ 
+icc2_shell> sizeof_collection [get_via_matrixes -filter tag==pg1]
+136
+•
+Specify the offset in both the x- and y-directions with the -offset {x_offset 
+y_offset} option. The x_offset value specifies the amount to shrink the layer 
+intersection in the x-direction. The y_offset value specifies the amount of vertical 
+displacement to apply.
+•
+Limit the number of vias in an inserted via array with the -max_array_size option.
+•
+Specify contact codes to use when inserting vias with the -contact_code option.
+•
+Specify custom PG via masters to form a stacked via by using the 
+set_pg_via_master_rule command and the -via_masters option with the 
+create_pg_stapling_vias command. In this case, via pitch is defined within 
+the set_pg_via_master_rule command; the -pitch option is not used with the 
+create_pg_stapling_vias command.
+icc2_shell> set_pg_via_master_rule via1_staple \
+   -contact_code via1 -via_array_dimension {2 1} \
+   -allow_multiple {5 0} -snap_reference_point {0 0}
+ 
+icc2_shell> set_pg_via_master_rule via2_staple \
+   -contact_code via2 -via_array_dimension {1 1} \
+   -allow_multiple {5 0} -snap_reference_point {0 0}
+ 
+icc2_shell> create_pg_stapling_vias -nets {VDD VSS} \
+   -from_layer ME3 -to_layer ME1 \
+   -from_shapes [get_shapes -filter "layer_name == ME3"] \
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+323
+
+
+===== PDF page 324 =====
+Chapter 10: Performing Power Planning
+Connecting Via Ladders to Power and Ground
+Feedback
+   -to_shapes [get_shapes -filter "layer_name == ME1"] \
+   -via_masters {via1_staple via2_staple}
+Figure 107 shows a via inserted by the previous command. The via1_staple and 
+via2_staple via masters are shown below the inserted via for reference.
+Figure 107
+Stapling Via With Multiple Masters
+Connecting Via Ladders to Power and Ground
+A via ladder, or via pillar, is a stacked via that starts from the pin layer and extends to 
+an upper layer where the route is connected. Via ladders reduce via resistance and can 
+improve performance and electromigration robustness.
+Use the connect_pg_via_ladders command to connect an available via ladder to a 
+specified cell and net. The following example creates a connection between the pin 
+connected to net n1 in over cell u1 and the via ladder over the same cell. The tool applies 
+the tag named via_ladder to the connection.
+icc2_shell> connect_pg_via_ladders -cells u1 -nets n1 -tag via_ladder
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+324
+
+
+===== PDF page 325 =====
+Chapter 10: Performing Power Planning
+Inserting and Connecting Power Switches
+Feedback
+Inserting and Connecting Power Switches
+In a design that contains shut-down power domains, you can insert power switches to 
+control the power within the power domain. To create a power switch ring,
+1. Create a voltage area with the create_voltage_area command.
+icc2_shell> create_voltage_area -power_domains PD1 \
+   -region {{100 100} {300 300}}
+2. Create the power switch ring with the create_power_switch_ring command.
+icc2_shell> create_power_switch_ring -power_switch inst_sw \
+   -x_pitch 20 -y_pitch 30 -orient r180 -snap_to_site_row false
+To create a power switch array,
+1. Create a voltage area with the create_voltage_area command.
+2. Define a placement pattern with the set_power_switch_placement_pattern 
+command.
+icc2_shell> set_power_switch_placement_pattern -name p1 \
+   -direction horizontal \
+   -pattern {HEAD16DM {SPACE 5} {{HEAD8DM {SPACE 5}} 3}} \
+   -connect_mode hfn -driver HEAD16DM
+3. Create the power switch array with the create_power_switch_array command.
+icc2_shell> create_power_switch_array -power_switch inst_sw \
+   -pattern p1 -x_pitch 50 -y_pitch 20 -checkerboard even \
+   -prefix "PS_"
+Options to the create_power_switch_array and create_power_switch_ring 
+commands control the spacing, orientation, naming, placement area, and other features 
+of the ring or array. The following sections describe the options available for these 
+commands.
+To create a power switch placement pattern, use the 
+set_power_switch_placement_pattern command as follows:
+icc2_shell> set_power_switch_placement_pattern -name pattern1 \
+   -driver buf1 -direction vertical \
+   -placement_type array \
+   -pattern {buf1 {SPACE 10} {buf2 {SPACE 5} 3}} \
+   -connect_mode daisy
+Options to the set_power_switch_placement_pattern command control how the 
+pattern is defined. Use the -name option to specify the name of the pattern. Use the 
+-placement_type ring | array option to specify whether the pattern applies to a power 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+325
+
+
+===== PDF page 326 =====
+Chapter 10: Performing Power Planning
+Inserting and Connecting Power Switches
+Feedback
+switch ring or array. Use the -driver option to assign a driver cell for the pattern. Use 
+the -direction horizontal | vertical option to specify the placement direction. 
+Use the -connect_mode hfn | daisy option to specify whether the power switches are 
+connected in high-fanout mode (hfn) or daisy-chain mode. Use the -pattern option to 
+specify the actual placement pattern. Use the -port_net_name option to set the net name 
+prefix for the nets in the connection pattern.
+After inserting the power switch ring or array, you can connect the control pins of the 
+power switches with the connect_power_switch command as follows:
+icc2_shell> connect_power_switch \
+   -source [get_pins u0_2/pd_switchable/sw_ctl] -mode hfn \
+   -port_name p2_sd -object_list [get_cells u0_2/.* -regexp \
+   -filter "ref_name == HEAD2X16_HVT"]
+Options to the connect_power_switch command control how the power switches are 
+connected. Use the -source option to specify the control signal within the power domain 
+for the power switch. Use the -mode hfn | daisy | fishbone option to specify the 
+connection strategy for the power switches as shown in Figure 108. Use the -port_name 
+option to specify the base name of the switch ports when a new port is created. Use 
+the -object_list option to specify the switch cells to connect. See the man page for 
+additional options.
+Figure 108
+Power Switch Fanout Configurations
+Daisy-Chain Configuration
+High-Fanout Configuration
+Fishbone Configuration
+SLEEP
+SLEEP
+SLEEP
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+326
+
+
+===== PDF page 327 =====
+Chapter 10: Performing Power Planning
+Inserting and Connecting Power Switches
+Feedback
+Power Switch Ring and Array Options
+Use the following options with the create_power_switch_array and 
+create_power_switch_ring commands to control how the power switches are inserted. 
+The options described in this section can be used with either command.
+•
+Specify the power switch strategy name with the -power_switch option if the 
+-lib_cell option is not specified. The -power_switch option uses the power switch 
+defined in the UPF file.
+icc2_shell> create_power_switch_ring -power_switch inst_sw
+•
+Specify the name of the power switch library cell with the -lib_cell option.
+icc2_shell> create_power_switch_ring -lib_cell HEAD16DM \
+   -voltage_area G/PD
+•
+Specify an instance name prefix for the switch cells with the -prefix option.
+icc2_shell> create_power_switch_ring -power_switch inst_sw \
+   -prefix POWERSWITCH_"
+icc2_shell> get_cells {*/POWERSWITCH_*}
+{G/POWERSWITCH__snps____snps_HEAD16DM_H0_1477 ...}
+•
+Define the shape or bound to place the switch cells with the -voltage_area, 
+-voltage_area_shape, or -boundary option.
+icc2_shell> create_power_switch_ring -lib_cell HEAD16DM \
+   -voltage_area G/PD
+icc2_shell> create_power_switch_ring -lib_cell HEAD16DM \
+   -voltage_area_shape {VOLTAGE_AREA_SHAPE_2}
+icc2_shell> create_power_switch_ring -power_switch inst_sw \
+   -boundary {{100 100} {200 200}}
+•
+Specify the initial offset and spacing between each power switch with the -x_pitch, 
+-y_pitch, -x_offset, and -y_offset options.
+icc2_shell> create_power_switch_ring -power_switch inst_sw \
+   -x_pitch 10 -y_pitch 10 -x_offset 20 -y_offset 20
+•
+Specify the placement pattern and orientation of the switch cells with the -pattern and 
+-orient options. In a power switch array, the same orientation is applied throughout 
+the array. In a power switch ring, switch cells placed on the top and right edges are 
+rotated accordingly.
+icc2_shell> set_power_switch_placement_pattern -placement_type ring \
+   -name pattern1 -pattern {HEAD32DM {HEAD16DM 2} {HEAD8DM 3}}
+icc2_shell> create_power_switch_ring -power_switch mult_sw \
+   -pattern pattern1 -orient r180
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+327
+
+
+===== PDF page 328 =====
+Chapter 10: Performing Power Planning
+Inserting and Connecting Power Switches
+Feedback
+The pattern is defined by the set_power_switch_placement_pattern command 
+and is replicated across the power switch ring or throughout the power switch array. 
+For power switch arrays, pattern-based power switch insertion automatically connects 
+SLEEP and ACKNOWLEDGE pins within the pattern.
+•
+Allow power switch cells to avoid snapping to site rows with the -snap_to_site_row 
+false option.
+icc2_shell> create_power_switch_ring -power_switch mult_sw \
+   -snap_to_site_row false
+Power Switch Ring Options
+Use the following options with the create_power_switch_ring command to control how 
+the power switches are inserted in a power switch ring.
+•
+Continue the pattern specified by the -pattern option and avoid restarting the 
+placement pattern on adjacent edges with the -continue_pattern option.
+icc2_shell> create_power_switch_ring -power_switch mult_sw \
+   -pattern pattern1 -continue_pattern
+•
+Specify the starting and ending points of a partial ring with the -start_point and 
+-end_point options.
+icc2_shell> create_power_switch_ring -power_switch inst_sw \
+   -start_point {100 70} -end_point {388 175} -x_pitch 20 \
+   -y_pitch 30 -orient R180
+•
+Specify the list of filler cells to be placed into gaps in the power switch ring with the 
+-filler_cells option. The tool inserts the largest possible filler cell into the gap 
+between power switch cells.
+icc2_shell> create_power_switch_ring -power_switch mult_sw \
+   -filler_cells {FILL8 FILL4 FILL2} -snap_to_site_row false
+•
+Specify the corner library cell name and orientation to use when placing 
+cells at the inner (concave) and outer (convex) corners of the ring with the 
+-inner_corner_cell, -inner_corner_cell_orient, -outer_corner_cell, and 
+-outer_corner_cell_orient options.
+icc2_shell> create_power_switch_ring -power_switch inst_sw \
+   -inner_corner_cell {*/HEAD16DM} -outer_corner_cell {*/HEAD16DM}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+328
+
+
+===== PDF page 329 =====
+Chapter 10: Performing Power Planning
+Inserting and Connecting Power Switches
+Feedback
+•
+Specify the library cell to be inserted along vertical edges with the 
+-vertical_lib_cell, -vertical_lib_cell_orient, and -vertical_filler_cells 
+options.
+icc2_shell> create_power_switch_ring -power_switch inst_sw \
+   -vertical_lib_cell HEAD16DM -vertical_filler_cells FILL8 \
+   -vertical_lib_cell_orient R0
+•
+Specify a boundary along which to insert power switch cells with the -through_points 
+option.
+icc2_shell> create_power_switch_ring -power_switch inst_sw \
+   -through_points {{100 100} {500 100} {500 300}}
+•
+Specify the total number of power switches to be inserted and evenly distributed with 
+the -switch_number option.
+icc2_shell> create_power_switch_ring -power_switch inst_sw \
+   -switch_number 5
+Power Switch Array Options
+Use the following options with the create_power_switch_array command to control how 
+the power switches are inserted in a power switch array.
+•
+Place power switches based on site rows instead of y-offset and y-pitch with the 
+-siterow_offset and -siterow_pitch options.
+icc2_shell> create_power_switch_array -voltage_area InstDecode/PD \
+   -power_switch InstDecode/inst_sw -x_pitch 10 -siterow_pitch 5 \
+   -siterow_offset 2
+•
+Create a checkerboard placement pattern with the -checkerboard even or 
+-checkerboard odd option. A checkerboard pattern has alternating empty row and 
+column locations in the array The even argument specifies that the tool places a switch 
+cell in the lower-left corner position of the array; the odd argument specifies that this 
+location is left open.
+icc2_shell> set_power_switch_placement_pattern -name pattern2 \
+   -direction horizontal \
+   -pattern {HEAD16DM {SPACE 5} {{HEAD8DM {SPACE 5}} 3}} \
+   -connect_mode hfn -driver HEAD16DM
+icc2_shell> create_power_switch_array -power_switch inst_sw \
+   -pattern pattern2 -x_pitch 50 -y_pitch 20 -checkerboard even \
+   -prefix "POWERSWITCH_"
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+329
+
+
+===== PDF page 330 =====
+Chapter 10: Performing Power Planning
+Inserting and Connecting Power Switches
+Feedback
+•
+Specify the vertical power and ground wires with which to align the power switches with 
+either the -pg_straps or -pg_strategy option.
+icc2_shell> create_power_switch_array -power_switch mult_sw \
+   -pg_straps [get_shapes -of VDD -filter "layer_name==M8"] \
+   -y_pitch 10
+If needed, use the -align_marker option together with the -pg_straps or 
+-pg_strategy option to control the horizontal offset of the power switch cells to the 
+wires. Otherwise, the wires are aligned to corresponding power switch pins.
+•
+Specify the starting point of a uniform power switch grid for disjointed voltage area 
+regions with the -offset_start{x y} option.
+•
+Specify the search pitch with the -fine_grid_pitch and -search_range options 
+to place the power switch when it cannot be inserted in the original location. The 
+tool searches for a location within the specified pitch and places the power switch 
+successfully in that location. The first number in the -search_range option specifies 
+the number of grid points in the x-axis. The second number is for the y-axis. Both 
+of these values should be integers. The -fine_grid_pitch option specifies the 
+distance from one grid to another and it accepts float values. The combination of 
+-fine_grid_pitch and -search_range options forms an array grid as possible 
+search locations.
+icc2_shell> create_power_switch_array -power_switch Multiplier/mult_sw 
+ \
+   -x_pitch 20.0 -y_pitch 20.0 -fine_grid_pitch {4.0 2.8} 
+ -search_range {3 2}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+330
+
+
+===== PDF page 331 =====
+Chapter 10: Performing Power Planning
+Trimming the Power and Ground Mesh
+Feedback
+Setting Resistance Values for Power Switch Cells
+To set resistance values for power switch cells, use the 
+plan.pna.power_switch_resistance application option and specify pairs of instance 
+names and resistance values.
+The following example sets a resistance value of 10 ohms on cell HEAD2X16_HVT and a 
+resistance value of 15 ohms on cell HEAD2X16_LVT.
+icc2_shell> set_app_options -name plan.pna.power_switch_resistance \
+   -value {{HEAD2X16_HVT 10} {HEAD2X16_LVT 20}}
+Alternatively, you can set the resistance attribute directly on cell instances. The following 
+example sets the power_switch_resistance attribute to specify a resistance value of 
+10 ohms on instances of switch cell SWITCH_1 and a resistance value of 20 ohms on 
+instances of switch cell SWITCH_2.
+icc2_shell> set_attribute {$switch_cell_1} \
+   -name power_switch_resistance -value 10
+icc2_shell> set_attribute {$switch_cell_2} \
+   -name power_switch_resistance -value 20
+Note that the attribute has a higher priority than the application option.
+Trimming the Power and Ground Mesh
+Your power plan might contain protruding or dangling shapes after creating the power 
+mesh. To remove these extra shapes, use the trim_pg_mesh command. The command 
+trims all power and ground routes up to the closest via metal enclosure on the same layer 
+for the same net. Figure 109 shows a section of a design before and after running the 
+trim_pg_mesh command.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+331
+
+
+===== PDF page 332 =====
+Chapter 10: Performing Power Planning
+Trimming the Power and Ground Mesh
+Feedback
+Figure 109
+PG Mesh Segment Before and After Trimming
+Use options with the trim_pg_mesh command to control how the mesh is trimmed.
+•
+Trim only the specified net names or layers with the -nets and -layers options. You 
+can also use the -shapes option and specify a collection of net shapes. The following 
+two commands are equivalent.
+icc2_shell> trim_pg_mesh -nets {VDD} -layers {M5}
+icc2_shell> trim_pg_mesh \
+   -shapes [get_shapes -filter "layer_name==M5 && owner.name==VDD"]
+•
+Trim only nets of the specified type, including ring, stripe, lib_cell_pin_connect, 
+macro_pin_connect, and macro_conn.
+icc2_shell> trim_pg_mesh -types {ring stripe}
+•
+Trim the net to the wire boundary (default) or the via boundary with the -trim_to 
+target_wire | via option.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+332
+
+
+===== PDF page 333 =====
+Chapter 10: Performing Power Planning
+Checking Power Network Integrity
+Feedback
+icc2_shell> trim_pg_mesh -trim_to target_wire # left image
+icc2_shell> trim_pg_mesh -trim_to via         # right image
+Figure 110
+Trim to Wire and Trim to Via
+Checking Power Network Integrity
+The IC Compiler II tool supports commands to identify missing vias, check the connectivity 
+of the power ground network, and verify DRC compliance. The following sections describe 
+the commands used to perform power network validation.
+Checking for Missing Vias
+Use the check_pg_missing_vias command to check for missing vias between 
+overlapping regions of different metal layers. The command writes information to the 
+console and to an error database. Use the error browser to view the errors in the error 
+database. The following example checks the current design for missing vias.
+icc2_shell> check_pg_missing_vias -nets VDD
+Check net VDD vias...
+Number of missing vias on VIA3 layer: 30
+Number of missing vias on VIA4 layer: 60
+Number of missing vias on VIA5 layer: 40
+Total number of missing vias: 130
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+333
+
+
+===== PDF page 334 =====
+Chapter 10: Performing Power Planning
+Checking Power Network Integrity
+Feedback
+Options to the check_pg_missing_vias command control how the check is performed.
+•
+Specify a file that contains the bottommost and topmost metal layers to check, the 
+via pitch, and whether to check stacked vias, vias on macro pins, and vias on parallel 
+routes with the -via_rule_file option.
+icc2_shell> check_pg_missing_vias -nets VDD -via_rule_file viaRule.txt
+An example via rule file is as follows. Note that the (#) character and comments 
+following the character are for reference only and are not allowed in the file.
+viaRule1 {
+  bottom_layer: METAL  # Bottom metal layer to check
+  top_layer:    METAL6 # Top metal layer to check
+  stack_via:    true   # Enable/disable stacked via check
+  parallel:     false  # (Optional) Enable/disable via check
+                       #   between parallel wires
+  macro_pin:    true   # (Optional) Enable/disable via check
+                       #   to macro and power switch pins
+  pitch:        10     # (Optional) Specifies the via pitch
+                       #   for parallel wires
+}
+•
+Write a report that contains the layer and location of each missing via with the 
+-output_file option.
+icc2_shell> check_pg_missing_vias -nets VDD -output_file viacheck.rpt
+Check net VDD vias...
+Number of missing vias on VIA5 layer: 72
+Total number of missing vias: 72
+...
+icc2_shell> sh cat viacheck.rpt
+Total number of missing vias: 72
+1: Missing via of net VDD on layer VIA5
+  bbox: {1773.06, 1573.06}, {1778.06, 1578.06}
+2: Missing via of net VDD on layer VIA5
+  bbox: {1773.06, 364.565}, {1778.06, 374.565}
+...
+•
+Write out the default via rules file to defaultViaRule.txt with the 
+-write_default_via_rule_file option.
+icc2_shell> check_pg_missing_vias -nets VDD \
+   -write_default_via_rule_file
+Successfully write default via rule to defaultViaRule.txt
+After writing the defaultViaRule.txt file, you can modify it and load the file with the 
+-via_rule_file option to create a custom via check rule file.
+•
+Ignore shielding routes with the -ignore_shield_route option.
+Note that shield routes have the shape_use attribute set to shield_route.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+334
+
+
+===== PDF page 335 =====
+Chapter 10: Performing Power Planning
+Checking Power Network Integrity
+Feedback
+•
+Avoid reporting an error if the via site is smaller than the minimum contact code for the 
+layer with the -ignore_small_intersections option.
+•
+Avoid reporting an error if the error location is covered by a routing blockage with the 
+-honor_routing_blockage option.
+Checking Power Network Connectivity
+Use the check_pg_connectivity command to perform a detailed connectivity check and 
+ensure that each block, macro, pad, and standard cell is connected to the power ground 
+network as shown in the following example:
+icc2_shell> check_pg_connectivity
+Loading cell instances...
+Number of Standard Cells: 16590
+Number of Macro Cells: 4
+Number of IO Pad Cells: 893
+Number of Blocks: 4
+Loading P/G wires and vias...
+Number of VDD Wires: 4359
+Number of VDD Vias: 263425
+Number of VDD Terminals: 0
+...
+**************Verify net VDD connectivity*****************
+Number of floating wires: 0
+Number of floating vias: 0
+Number of floating std cells: 3633
+...
+Use options with the check_pg_connectivity command to control how the check is 
+performed.
+•
+Use the -nets option to limit the check to a specific collection of power and ground 
+nets.
+icc2_shell> check_pg_connectivity -nets {VDD VSS}
+•
+Use the -write_connectivity_file option to write out the results of the connectivity 
+check to a text file.
+icc2_shell> check_pg_connectivity -write_connectivity_file conn.txt
+ 
+icc2_shell> sh head conn.txt
+*****************************************************************
+**********Net VDD Connectivity Stats**************************
+*****************************************************************
+ 
+Number of disjoint networks: 369
+...
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+335
+
+
+===== PDF page 336 =====
+Chapter 10: Performing Power Planning
+Checking Power Network Integrity
+Feedback
+•
+Use the -check_macro_pins one | all | none option to check the power ground 
+connections to macro cells. The one argument checks for at least one connection, the 
+all argument specifies that all power ground pins must be connected, and the none 
+argument disables this check.
+icc2_shell> check_pg_connectivity -check_macro_pins none
+...
+Number of Macro Cells: 0
+•
+Use the -check_block_pins one | all | none option to check the power ground 
+connection for block pins. The one, all, and none arguments have the same meaning 
+as the arguments of the -check_macro_pins option.
+icc2_shell> check_pg_connectivity -check_block_pins all
+•
+Use the -check_pad_pins one | all | none option to check the power ground 
+connection for pad pins. The one, all, and none arguments have the same meaning 
+as the arguments of the -check_macro_pins option.
+icc2_shell> check_pg_connectivity -check_pad_pins all
+•
+Use the -check_std_cell_pins one | all | none option to enable or disable 
+power ground network checking for standard cells. The one, all, and none arguments 
+have the same meaning as the arguments of the -check_macro_pins option.
+icc2_shell> check_pg_connectivity -check_std_cell_pins all
+By default, the check_pg_connectivity command does not consider 
+all terminals as potential power sources. To change the default behavior 
+and enable the tool to consider all terminals as power sources, set the 
+plan.pgcheck.treat_terminal_as_voltage_source application option to true.
+To create a collection of floating objects in the power network, save the value returned 
+by the check_pg_connectivity command to a variable. The following example runs 
+the check_pg_connectivity command, saves the collection of floating objects to the 
+floating_objects variable, and selects the floating objects in the GUI.
+icc2_shell> set floating_objects [check_pg_connectivity]
+Loading cell instances...
+Number of Standard Cells: 9392
+...
+icc2_shell> change_selection $floating_objects
+The check_pg_connectivity command uses the must_join_group attribute on power 
+and ground terminals to determine if external connections exist between the terminals. 
+If the must_join_group attribute is defined for any power or ground terminal, the 
+check_pg_connectivity command assumes that terminals with the same attribute 
+setting are externally connected. The following example reduces the number of floating 
+VSS terminals to 0 by setting the must_join_group attribute on the terminals.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+336
+
+
+===== PDF page 337 =====
+Chapter 10: Performing Power Planning
+Checking Power Network Integrity
+Feedback
+icc2_shell> check_pg_connectivity -nets VSS
+...
+Number of VSS Terminals: 234
+...
+  Number of floating terminals: 233
+...
+ 
+icc2_shell> set vss_terminals [get_terminals -of_objects [get_ports VSS]]
+icc2_shell> set_attribute $vss_terminals must_join_group vss_group
+ 
+icc2_shell> check_pg_connectivity -nets VSS
+Number of VSS Terminals: 234
+...
+  Number of floating terminals: 0
+...
+Validating DRC in the Power Network
+To check the DRC compliance of routing objects related to the power and ground network, 
+use the check_pg_drc command. For all PG nets, the command checks for DRC 
+violations with respect to the following related objects:
+•
+Pins of nets of any type, including pins that are unassigned
+•
+Routing blockages and keepouts that might restrict power ground routing
+•
+Metal and via routing shapes that are not assigned to any net
+•
+Routing objects associated with other power ground nets that are not connected to the 
+current net being evaluated
+•
+Routing objects of clock nets
+The following example uses the check_pg_drc command to verify DRC compliance 
+for objects affected by the VDD power net. The command writes out a text report and a 
+database that you can review by using the error browser in the GUI.
+icc2_shell> check_pg_drc -nets VDD
+Total number of errors found: 4375008
+   1406 shorts on CO
+   25082 shorts on M1
+...
+Description of the errors can be seen in
+gui error set "DRC_report_by_check_pg_drc"
+You can use multiple threads to shorten the runtime for the check_pg_drc command. 
+Use the set_host_options -max_cores n command to set the maximum number of 
+processing cores to use when checking power ground DRC.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+337
+
+
+===== PDF page 338 =====
+Chapter 10: Performing Power Planning
+Checking Power Network Integrity
+Feedback
+The check_pg_drc command supports options to control which PG nets and which area 
+of the design the tool checks for DRC violations. This command does not check objects of 
+non-PG nets.
+•
+Use the -nets option to limit the checking to a specified collection of power and ground 
+nets.
+•
+Use the -ignore_clock_nets true option to skip checking of routing objects for clock 
+nets.
+•
+Use the -coordinates option to limit the check to a specified bounding box.
+•
+Use the -bottom_layer and -top_layer options to limit the check to a specified 
+range of layers.
+•
+Use the -no_gui option to skip writing the error browser database for the GUI.
+•
+Use the -output option to write out a text version of the DRC check result to a file.
+•
+Use the -load_routing_of_all_nets option to check the existing routing shapes and 
+vias of all PG nets.
+For example, if spacing between a PG-net-routing-shape and a routing-shape 
+of signal net is less than it is required by a rule, an error is reported only if the 
+-load_routing_of_all_nets option is true. But a similar error is never reported if the 
+two shapes are assigned to signal nets.
+•
+Use the -check_detail_route_shapes option to check the routing shapes and vias of 
+PG nets that have the detail_route usage attribute set; if this option is not specified, 
+the check_pg_drc command ignores such shapes.
+A short example of the DRC text file is as follows:
+=================
+Error type:      insufficient space between two same-net via-cuts
+Violated rule:   Cut-Min_Spacing-Rule
+Layer:           VIA5
+Minimal spacing: 0.07
+Actual  spacing: 0.05(south - north)
+Spacing box:     {3408.42 1571.75} {3408.46 1571.8}
+Via #1:          box = {3408.41 1571.7} {3408.46 1571.75}
+                      net = VDD
+Via #2:          box = {3408.42 1571.8} {3408.47 1571.85}
+                 net = VDD
+=================
+Error type:      illegal overlap of net-shapes
+...
+You can review the errors reported by the check_pg_drc command in the GUI. Select 
+Error > Error Browser in the GUI, and select DRC_report_by_check_pg_drc as the Data 
+Name. The tool loads the DRC data in the Error Browser.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+338
+
+
+===== PDF page 339 =====
+Chapter 10: Performing Power Planning
+Analyzing the Power Plan
+Feedback
+By default, power network routing ignores signal routes during DRC checking to maximize 
+performance. To enable the compile_pg, create_pg_strap and create_pg_vias 
+commands to validate the DRC correctness of power straps and vias with respect to signal 
+routes, set the plan.pgroute.honor_signal_route_drc application option to true as 
+follows:
+icc2_shell> set_app_options -name plan.pgroute.honor_signal_route_drc \
+    -value true
+plan.pgroute.honor_signal_route_drc true
+PG Design Checker Rules
+For the latest list of PG design checker rules, see the Synopsys®  Technology File and 
+Routing Rules Reference Manual on SolvNetPlus.
+Analyzing the Power Plan
+The IC Compiler II tool supports commands to insert virtual power pads and analyze the 
+quality of the power network. The following sections describe the commands used to set 
+up and use power network analysis (PNA).
+Mapping and Reporting IR Drop
+The analyze_power_plan command performs different types of analysis on the power 
+plan during design planning. To perform a simple power analysis on your design,
+1. Read in the parasitic model data file and set the parasitic parameters.
+icc2_shell> read_parasitic_tech -tlup max.tluplus \
+   -layermap layermap.map
+icc2_shell> set_parasitic_parameters -late_spec max.tluplus
+2. Ensure that the PG nets are associated with the PG network.
+icc2_shell> resolve_pg_nets
+icc2_shell> connect_pg_net -automatic
+3. Create virtual pad locations for power and ground.
+icc2_shell> set_virtual_pad -net VDD -coordinate {1000.0 1000.0}
+icc2_shell> set_virtual_pad -net VSS -coordinate {1000.0 1000.0}
+Alternatively, read a file that contains the virtual pad locations by using the 
+read_virtual_pad_file command as described in Using Virtual Pad Files. You can 
+also use the existing power pads in the design as pad locations by referencing them 
+with the -pad_references option to the analyze_power_plan command as shown in 
+the following step.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+339
+
+
+===== PDF page 340 =====
+Chapter 10: Performing Power Planning
+Analyzing the Power Plan
+Feedback
+4. Run power analysis and specify the total power budget.
+icc2_shell> analyze_power_plan -nets {VDD VSS} -power_budget 1000
+If your design contains existing power pads, specify the references to the power pads 
+with the -pad_references option as follows. This option accepts a list of power net 
+name and cell reference pairs with the format net_name:pad_reference_name.
+icc2_shell> analyze_power_plan -nets {VDD VSS} -power_budget 1000 \
+   -voltage 1.5 -pad_references {VDD:VDD_NS VSS:VSS_NS}
+The command generates detailed report files containing instance power values for 
+each cell instance together with resistance and voltage drop values for wires in the 
+power plan.
+icc2_shell> ls pna_output
+leon3mp.VDD.icc2.pna   leon3mp.VSS.icc2.pna
+leon3mp.VDD.power      leon3mp.VSS.power
+leon3mp.VDD.pw_hl.pna  leon3mp.VSS.pw_hl.pna
+The command also writes a summary report to the console as follows:
+Primary Net : VDD Secondary Net: VDDS VDDS_MIB
+Primary Net : VSS Secondary Net:
+Number of Standard Cells: 59303
+Number of Macro Cells: 76
+Number of IO Pad Cells: 345
+...
+Percentage of routing tracks used by P/G nets
+=======================================
+ layer |    Shape |  Spacing |    Total
+=======================================
+...
+    M3 |   2.441% |   0.784% |   3.225%
+    M4 |   0.676% |   0.256% |   0.932%
+    M5 |   2.837% |   0.934% |   3.771%
+    M6 |  41.621% |  19.352% |  60.974%
+    M7 |  33.194% |  20.903% |  54.098%
+    M8 |   0.382% |   0.043% |   0.425%
+    M9 |   0.435% |   0.007% |   0.442%
+Number of VDD Wires: 22197
+...
+Total virtual grid current : 75.077 mA
+Total current: 666.667 mA
+...
+Number of extracted resistors: 658947
+Number of all nodes: 519143
+Number of pad nodes: 80
+Number of current sink nodes: 99032
+Number of internal nodes: 519063
+Pad (687.500 289.777) on Layer M9 Supplies 3.728 mA Current
+Pad (669.000 299.600) on Layer M8 Supplies 5.384 mA Current
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+340
+
+
+===== PDF page 341 =====
+Chapter 10: Performing Power Planning
+Analyzing the Power Plan
+Feedback
+...
+Maximum IR Drop for Net VDD: 115.480 mV at (2372.000 2763.830)
+   on layer M6
+...
+Maximum IR Drop for Net VSS: 69.161 mV at (1805.500 1183.448)
+    on layer M6
+The tool reports the amount of current supplied by each virtual pad, the total current in 
+the power grid, the total current for each metal layer, the point of maximum IR drop, and 
+the percentage of routing tracks used by PG nets. The PNA Voltage Drop map panel is 
+populated and the map is displayed on the layout as shown in the following figure. Move 
+the pointer over the map overlay to view the voltage drop, resistance, and current values 
+at that point in the layout.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+341
+
+
+===== PDF page 342 =====
+Chapter 10: Performing Power Planning
+Analyzing the Power Plan
+Feedback
+Figure 111
+PNA Voltage Drop
+Using Virtual Pad Files
+For designs that do not have power pads, use the set_virtual_pad command 
+to create virtual pads in the design. You can save pad locations to a file by using 
+the write_virtual_pad_file command and re-create the virtual pads with the 
+read_virtual_pad_file command. The virtual pad file contains a list of coordinates for 
+virtual power pads for power network analysis. The following example writes the virtual 
+pad locations to a file named pads.txt, removes all virtual pads, and reads in the pads.txt 
+file to re-create the pads.
+icc2_shell> write_virtual_pad_file pads.txt
+Writing the virtual pad file pads.txt successfully
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+342
+
+
+===== PDF page 343 =====
+Chapter 10: Performing Power Planning
+Analyzing the Power Plan
+Feedback
+ 
+icc2_shell> remove_virtual_pads -all
+Removing all virtual pads
+ 
+icc2_shell> read_virtual_pad_file pads.txt
+Added 4 virtual pads
+The file contains the PG net name followed by the pad locations for the net as shown 
+in the following example. The auto keyword specifies that the layer is assigned 
+automatically.
+icc2_shell> sh cat pads.txt
+VDD
+1033.275 1860.740 auto
+352.915 1116.020 auto
+VSS
+1033.275 1860.740 auto
+352.915 1116.020 auto
+Reporting Track Utilization
+By default, the analyze_power_plan command analyzes the IR drop and reports the track 
+utilization in the design. To skip IR drop analysis and only report track utilization, specify 
+the -report_track_utilization_only option as shown in the following example.
+icc2_shell> analyze_power_plan -report_track_utilization_only
+Percentage of routing tracks used by P/G nets
+=======================================
+ layer |    Shape |  Spacing |    Total
+=======================================
+...
+    M5 |   2.837% |   0.934% |   3.771%
+    M6 |  41.621% |  19.352% |  60.974%
+    M7 |  33.194% |  20.903% |  54.098%
+    M8 |   0.382% |   0.043% |   0.425%
+    M9 |   0.435% |   0.007% |   0.442%
+Specifying a Minimum Layer for Analysis
+The analyze_power_plan command analyzes all metal layers for IR drop. You 
+can reduce runtime, at the cost of reduced accuracy, by limiting analysis to only 
+upper-level metal layers. To specify the lowest layer for power analysis, set the 
+plan.pna.ignore_objects_below_layer application option to the metal layer name as 
+shown in the following example.
+icc2_shell> set_app_options -name plan.pna.ignore_objects_below_layer \
+   -value M5
+In this example, power network analysis analyzes only metal layers M5 and higher. By 
+default, this application option is set to "" and power network analysis considers all metal 
+layers.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+343
+
+
+===== PDF page 344 =====
+Chapter 10: Performing Power Planning
+Performing Distributed Power Network Routing
+Feedback
+Performing Distributed Power Network Routing
+The IC Compiler II tool supports commands to characterize and write out the current 
+power network strategy and pattern settings, then generate the power network through 
+distributed processing. Distributed power network routing reduces the runtime needed to 
+create a power network for your design.
+Preparing for Distributed Power Network Routing
+To perform distributed power network routing, you must write out the current 
+power plan constraints with the characterize_block_pg command and use the 
+run_block_compile_pg command to create the power plan by using a distributed 
+computing network.
+The following example writes out the current strategy and pattern settings and defines a 
+script to be run by the run_block_compile_pg command.
+icc2_shell> characterize_block_pg -compile_pg_script pg_script.tcl
+...
+Characterize block PG constraints.
+Characterize PG constraints for block I_ORCA_TOP/I_PCI_TOP in script
+  ./pgroute_output/PCI_TOP_pg.tcl.
+...
+Characterize top-level PG constraints.
+..
+Characterize PG constraints for top-level design ORCA in script
+   ./pgroute_output/ORCA_pg.tcl.
+Create PG mapping file ./pgroute_output/pg_mapfile.
+The characterize_block_pg command writes a power plan script for each 
+reference block. Each script contains commands such as create_pg_mesh_pattern, 
+create_pg_ring_pattern, and so on to create the power ground connection 
+patterns. The scripts also contain set_pg_strategy commands to associate the 
+patterns with different areas of the design, and set_pg_via_master_rule and 
+set_pg_strategy_via_rule commands to define rules to create vias.
+If the design contains custom via defs created with the create_via_def command, the 
+characterize_block_pg command writes out the create_via_def commands into each 
+block PG creation script to re-create the custom via defs at the block level.
+If you specified the -compile_pg_script pg_script option, the tool writes out a map 
+file that associates the power planning scripts with the reference blocks. The pg_script 
+file can contain setup commands and application options for creating the power ground 
+routing, but it should not contain via master rules, patterns, strategies, or strategy via rule 
+commands. During distributed power network creation, the map file is associated with the 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+344
+
+
+===== PDF page 345 =====
+Chapter 10: Performing Power Planning
+Performing Distributed Power Network Routing
+Feedback
+design by using the set_constraint_mapping_file command. In this example, the map 
+file written by the characterize_block_pg commands is as follows:
+ORCA         PG_CONSTRAINT  ./ORCA_pg.tcl
+BLENDER_0    PG_CONSTRAINT  ./BLENDER_0_pg.tcl
+BLENDER_1    PG_CONSTRAINT  ./BLENDER_1_pg.tcl
+ 
+ORCA         COMPILE_PG     ./copy_pg_script.tcl
+BLENDER_0    COMPILE_PG     ./copy_pg_script.tcl
+BLENDER_1    COMPILE_PG     ./copy_pg_script.tcl
+Performing Distributed Power Network Routing
+After generating the power plan constraint files, use the run_block_compile_pg 
+command to create the power plan by using distributed processing. To create the power 
+plan,
+1. Assign the map file with the set_constraint_mapping_file command.
+icc2_shell> set_constraint_mapping_file pgout/pg_mapfile
+2. Set the host options for distributed processing with the set_host_options command.
+icc2_shell> set_host_options -name block_script host_settings
+3. Run distributed power planning with the run_block_compile_pg command.
+icc2_shell> run_block_compile_pg -host_options block_script
+...
+Create PG for blocks : BLENDER_0 BLENDER_1
+...
+found instance I_ORCA_TOP/I_BLENDER_0 for design BLENDER_0
+...
+Submitting job for block BLENDER_0 ...
+...
+All tasks created.
+...
+Successfully ran distributed PG creation.
+1
+The run_block_compile_pg command uses distributed processing to create the power 
+plan. If you omit the -host_options option, the run_block_compile_pg command 
+process each block sequentially.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+345

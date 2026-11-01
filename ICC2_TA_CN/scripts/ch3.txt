@@ -1,0 +1,1807 @@
+
+
+===== PAGE 71 =====
+3-1
+3
+Constraining Timing Paths
+3
+A timing path is a point-to-point sequence through a design that starts at a register clock pin 
+or an input port, passes through combinational logic elements, and ends at a register data 
+input pin or an output port. 
+The following topics provide information about timing paths and tasks related to constraining 
+timing paths: 
+•
+Timing Paths and Path Groups
+•
+Creating Path Groups
+•
+Path Delay Analysis for the Same Launch and Capture Clock
+•
+Path Delay Analysis for Different Launch and Capture Clocks
+•
+Introduction to Input and Output Delays
+•
+Setting Input and Output Delays for Ports
+•
+Specifying Timing Exceptions
+•
+Specifying False Path Exceptions
+•
+Specifying Maximum and Minimum Path Delay Exceptions
+•
+Specifying Multicycle Path Exceptions
+•
+Specifying Path Timing Margin Exceptions
+•
+Specifying Exceptions Efficiently
+
+
+===== PAGE 72 =====
+Chapter 3: Constraining Timing Paths
+3-2
+IC Compiler™ II Timing Analysis User Guide
+M-2016.12-SP4
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4
+•
+Order of Precedence for Exceptions
+•
+Disabling Timing Paths Within Lower-Level Blocks
+•
+Using Case Analysis
+•
+Disabling Timing Arcs
+•
+Enabling Preset and Clear Timing
+•
+Introduction to Data-to-Data Checks
+•
+Specifying Data-to-Data Checks
+•
+Enabling Library-Based Data Checks
+•
+Introduction to Clock-Gating Checks
+•
+Specifying Clock-Gating Checks
+
+
+===== PAGE 73 =====
+Chapter 3: Constraining Timing Paths
+Timing Paths and Path Groups
+3-3
+Chapter 3: Constraining Timing Paths
+Timing Paths and Path Groups
+3-3
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4
+Timing Paths and Path Groups
+The IC Compiler II tool analyzes and optimizes timing paths in the design. Each path has a 
+•
+Startpoint, where data is launched. 
+The startpoint of a path is a clock pin of a sequential element or an input port of the 
+design. The arrival of an active clock edge at a startpoint launches data through the path. 
+An input port can be considered a startpoint due to the arrival of data launched by an 
+external source. 
+•
+Endpoint, where the data is captured after it traverses through combinational logic. 
+The endpoint of a path is a data input pin of a sequential element or an output port of the 
+design. The arrival of an active clock edge at the clock input of the capture device 
+captures data at the end of the path. An output port can be considered an endpoint due 
+to the external capture of the data leaving the output port. 
+The following figure shows an example of a design and its timing paths. 
+Figure 3-1
+Timing Path Types
+Each path starts at a data launch point, passes through some combinational logic, and ends 
+at a data capture point: 
+•
+Path 1 starts at an input port and ends at the data input of a sequential element. 
+•
+Path 2 starts at the clock pin of a sequential element and ends at the data input of a 
+sequential element. 
+•
+Path 3 starts at the clock pin of a sequential element and ends at an output port. 
+•
+Path 4 starts at an input port and ends at an output port. 
+Logic
+Path 1
+Path 2
+Path 3
+Path 4
+A
+CLK
+Z
+Logic
+D
+Q
+Logic
+D
+Q
+Logic
+
+
+===== PAGE 74 =====
+Chapter 3: Constraining Timing Paths
+Creating Path Groups
+3-4
+IC Compiler™ II Timing Analysis User Guide
+M-2016.12-SP4
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4
+Each path in the design has an associated timing slack. The slack is a time value that can 
+be positive, zero, or negative. The single path having the worst slack is called the critical 
+path. This is the path that has the most negative slack, or if there are no timing violations, 
+the one with the smallest slack among all paths in the design. 
+The tool organizes timing paths into groups, and performs timing analysis and optimization 
+separately for each group. By default, there is one path group for each clock in the design. 
+All timing paths clocked by a given clock at the path endpoint belong to the path group for 
+that clock. 
+The tool also creates a path group called **default** (including the asterisks). The **default** 
+group contains any paths that cannot be categorized by the clock used at the path endpoint, 
+such as feedthrough and asynchronous paths. 
+All timing paths within a path group are optimized for timing together, starting with the critical 
+path. 
+ All path groups have the same weight by default, and paths within a group are optimized 
+and reported separately from other path groups. Within each path group, the tool optimizes 
+and improves the timing of the critical path until another paths in the group becomes more 
+critical.
+Creating Path Groups
+To change the paths in a path groups, you can use the group_path command as follows:
+•
+Create a new path group and specify its name by using the -name option.
+•
+Assign paths to an existing path group and specify the existing path group name by using 
+the -name option.
+•
+Move paths from their current path group to the default path group they belong by using 
+the -default option.
+To identify the timing paths, use one or more of the following methods:
+•
+Specify the startpoint of the path by using the -from, -rise_from, or -fall_from option
+•
+Specify one or more throughpoints of the path by using the -through, -rise_through, 
+or -fall_through option one or more times
+•
+Specify the endpoint of the path by using the -to, -rise_to, or -fall_to option
+You can influence how optimization handles the path group as follows:
+•
+Change the weight of the path group by using the -weight option.
+•
+Specify a critical range to identify critical paths for optimization by using the 
+-critical_range option. 
+
+
+===== PAGE 75 =====
+Chapter 3: Constraining Timing Paths
+Path Delay Analysis for the Same Launch and Capture Clock
+3-5
+Chapter 3: Constraining Timing Paths
+Path Delay Analysis for the Same Launch and Capture Clock
+3-5
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4
+The tool works on all critical paths within the range specified by the -critical_range 
+option, starting from the most critical path.
+The following example creates a path group named slct that has weight of 2.5, a critical 
+range of 5, and consisting of all the timing paths starting from the register named slct_reg. It 
+then adds the timing paths starting from the input port named slct_nxt to this path group. 
+However, it removes the paths that start at the input port named slct_nxt and go through 
+both the pins named U29/A and U54/Y from this group and returns these paths to their 
+default path group. 
+icc2_shell> group_path -name slct -weight 2.5 -critical_range 5 \
+-from [get_cells slct_reg]
+icc2_shell> group_path -name slct -from [get_ports slct_nxt]
+icc2_shell> group_path -default [get_ports slct_nxt] \
+ -through [get_pin U29/A]  -through [get_pin U54/Y]
+To report path group information, use the report_path_groups command and to remove 
+path groups, use the remove_path_groups command. 
+Path Delay Analysis for the Same Launch and Capture Clock
+By default, the tool checks for data arrival at the next capture clock edge following the launch 
+event. For a single-clock design, launch occurs on a clock edge and capture occurs at the 
+next clock edge. 
+The following figure shows how the tool determines the setup and hold constraints for a path 
+that is launched and captured by the same clock, which has a period of 10. 
+
+
+===== PAGE 76 =====
+Chapter 3: Constraining Timing Paths
+Path Delay Analysis for the Same Launch and Capture Clock
+3-6
+IC Compiler™ II Timing Analysis User Guide
+M-2016.12-SP4
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4
+Figure 3-2
+Setup and Hold Analysis for the Same Launch and Capture Clock
+During timing analysis the tool performs 
+•
+A setup check to verify that the data launched from FF1 at time 0 arrives at the D input 
+of FF2 in time to meet the setup requirements of the capture edge at time 10. 
+If the data takes too long to arrive and it does not meet the data setup requirements, the 
+tool reports a setup violation. 
+•
+A hold check to verify that the data launched from FF1 at time 0 does not arrive too early 
+at FF2, before the previous data at FF2 has met the hold requirements. 
+If the data arrives too early, the tool reports a hold violation.
+When calculating the delays along the launch and capture paths, the tool includes the 
+delays due to the effects of the clock network, such as clock source latency, network latency, 
+and clock uncertainty. 
+Combinational
+logic
+Hold
+D
+Q
+D
+Q
+FF1
+FF2
+CLK
+Setup
+20
+10
+0
+30
+Launch delay
+Clock at launch
+ flip-flop (FF1)
+Clock at capture
+ flip-flop (FF2)
+Capture delay
+
+
+===== PAGE 77 =====
+Chapter 3: Constraining Timing Paths
+Path Delay Analysis for Different Launch and Capture Clocks
+3-7
+Chapter 3: Constraining Timing Paths
+Path Delay Analysis for Different Launch and Capture Clocks
+3-7
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4
+Path Delay Analysis for Different Launch and Capture Clocks
+For a design with multiple clocks, by default, the tool assumes that all clocks are 
+synchronous to each other, with a fixed phase relationship. During timing analysis, for paths 
+where the launch and capture clocks are different, it considers the nearest possible capture 
+clock edge that can occur after the launch clock edge and determines the most restrictive 
+setup and hold requirements for the path. 
+The following figure shows a path that is launched and captured by two different clocks. 
+Figure 3-3
+Path That is Launched and Captured by Different Clocks
+The clocks in this example, CLK1 and CLK2, are created with the following commands:
+icc2_shell> create_clock -period 10 -waveform {0 5} CLK1
+icc2_shell> create_clock -period 25 -waveform {5 12.5} CLK2
+Setup Analysis for Different Launch and Capture Clocks
+When the launch and capture clock are different, the tool looks at the relationship between 
+the active edges of the launch and capture clocks over a number of repeating cycles that is 
+the least common multiple of the two clock periods. For each capture edge at the destination 
+flip-flop, the tool assumes that the corresponding launch edge is the nearest source clock 
+edge occurring before the capture edge. 
+In the following figure, there are two launch and capture edge combinations that the tool 
+considers. They are
+•
+The capture edge at time=5 and the nearest preceding launch edge is at time=0, which 
+is labeled Setup 1. 
+•
+The capture edge at time=30 and the nearest preceding launch edge is at time=20, 
+which is labeled Setup 2. 
+D
+Q
+D
+Q
+FF1
+FF2
+CLK1
+CLK2
+Combinational
+logic
+Launch delay
+Capture delay
+
+
+===== PAGE 78 =====
+Chapter 3: Constraining Timing Paths
+Path Delay Analysis for Different Launch and Capture Clocks
+3-8
+IC Compiler™ II Timing Analysis User Guide
+M-2016.12-SP4
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4
+Figure 3-4
+Setup Analysis for Different Launch and Capture Clock
+The source clock edge at time=30 occurs at the same time as the capture edge, not earlier, 
+so it is not considered the corresponding launch edge. 
+Setup 1 allows less time between launch and capture. Therefore, it is the more restrictive 
+constraint and determines the maximum allowed delay for the path, which is 5 for this 
+example. 
+Hold Analysis for Different Launch and Capture Clocks
+The hold relationships checked by the tool are based on the clock edges adjacent to those 
+used to determine the setup relationships. To determine the most restrictive hold 
+relationship, the tool considers all valid setup relationships, including both Setup 1 and 
+Setup 2 in the following figure. 
+Setup 1
+20
+10
+0
+30
+40
+25
+15
+5
+35
+50
+45
+Setup 2
+Clock at launch
+ flip-flop (CLK1)
+Clock at capture
+ flip-flop (CLK2)
+
+
+===== PAGE 79 =====
+Chapter 3: Constraining Timing Paths
+Path Delay Analysis for Different Launch and Capture Clocks
+3-9
+Chapter 3: Constraining Timing Paths
+Path Delay Analysis for Different Launch and Capture Clocks
+3-9
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4
+Figure 3-5
+Hold Analysis for Different Launch and Capture Clock
+For each setup relationship, the tool performs two different hold checks: 
+•
+The data launched by the setup launch edge must not be captured by the previous 
+capture edge. 
+•
+The data launched by the next launch edge must not be captured by the setup capture 
+edge. 
+For the setup relationship labeled Setup 1, the corresponding two hold checks are labeled 
+Hold1a and Hold1b. Similarly, for the setup relationship labeled Setup 2, the two hold checks 
+are labeled Hold2a and Hold2b. 
+Of these hold checks, the most restrictive is the one where the capture edge occurs latest 
+relative to the launch edge, which is Hold 2b. Therefore, Hold 2b determines the minimum 
+allowed delay for this path, which is 0. 
+Hold 2b
+Hold 2a
+Hold 1a
+Hold 1b
+Setup 2
+launch edge
+Setup 2
+capture edge
+Setup 2
+Setup 1
+launch edge
+20
+10
+0
+30
+40
+25
+15
+5
+35
+50
+45
+Clock at launch
+ flip-flop (CLK1)
+Clock at capture
+ flip-flop (CLK2)
+Setup 1
+Setup 1
+capture edge
+
+
+===== PAGE 80 =====
+Chapter 3: Constraining Timing Paths
+Introduction to Input and Output Delays
+3-10
+IC Compiler™ II Timing Analysis User Guide
+M-2016.12-SP4
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4
+Introduction to Input and Output Delays
+To analyze a timing path, both the startpoint and endpoint of the path must be constrained. 
+However, by default, the tool does not know the data arrival times at input ports and the data 
+required times at output ports. Therefore, to constraint input and output ports, you must 
+specify this information. 
+In the following figure, the data arriving at the input port named A of the block named BlockA 
+is launched by an external sequential device. 
+Figure 3-6
+External Input Delay
+To constrain the input port A, use the set_input_delay command and specify 
+•
+The clock that launches the data at the external sequential device 
+•
+The delay for the data to arrive at the input port after it is launched
+Logic
+A
+CLK
+Z
+Logic
+D
+Q
+Logic
+D
+Q
+Logic
+D
+Q
+Input delay
+Path 1
+Logic
+BlockA
+
+
+===== PAGE 81 =====
+Chapter 3: Constraining Timing Paths
+Setting Input and Output Delays for Ports
+3-11
+Chapter 3: Constraining Timing Paths
+Setting Input and Output Delays for Ports
+3-11
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4
+In the following figure, the data leaving the output port named Z of the block named BlockA 
+is captured by an external sequential device. 
+Figure 3-7
+External Output Delay
+To constrain the output port Z, use the set_output_delay command and specify
+•
+The clock that captures the data at the external sequential device 
+•
+The delay for the data to arrive at the external sequential device after it leaves port Z
+Setting Input and Output Delays for Ports
+To constrain an input or output port by specifying the external delay outside the port, use the 
+set_input_delay or set_output_delay command. You can also use these commands to 
+apply an input or output delay on a pin within the block, thereby making that pin a startpoint 
+or endpoint of a timing path.
+When you use the set_input_delay or set_input_delay command, you must specify the 
+following information:
+•
+The input or output delay value
+•
+The ports or pins that you are constraining
+Logic
+A
+CLK
+Z
+Logic
+D
+Q
+Logic
+D
+Q
+Logic
+D
+Q
+CLK
+Output delay
+Path 3
+Logic
+BlockA
+
+
+===== PAGE 82 =====
+Chapter 3: Constraining Timing Paths
+Setting Input and Output Delays for Ports
+3-12
+IC Compiler™ II Timing Analysis User Guide
+M-2016.12-SP4
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4
+For a more accurate timing analysis, specify a related clock by using one of the following two 
+methods:
+•
+Specify the -clock option with the name of the reference clock
+When you specify the -clock option, by default, the tool
+❍
+Assumes the input or output delay is relative to the rising edge of the clock. To specify 
+that the delay is relative to its falling edge, use the -clock_fall option with the 
+-clock option. 
+❍
+Adds the source and network latencies specified for the reference clock to the launch 
+or capture path associated with the input or output delay. 
+To specify that the source and network latencies of the reference clock are already 
+included in the input or output delay, use the -source_latency_included and 
+-network_latency_included options. If the reference clock is a propagated clock, 
+the -network_latency_included option is ignored.
+•
+Specify the -reference_pin option with a pin or port on the reference clock network
+When you specify the -reference_pin option, by default, the tool
+❍
+Uses all the clocks that reach the reference pin to constrain the ports. To select a 
+specific clock, use the -clock option with the -reference_pin option.
+❍
+Adds the source and network latencies specified for the for any ideal clocks that 
+reach the reference pin, to the corresponding launch or capture path associated with 
+the input or output delay,
+However, for any propagated clocks that reach the reference pin, tool adds the 
+source delay specified for that clock and the propagated clock network delay up to the 
+reference pin to the corresponding launch or capture path associated with the input 
+or output delay. 
+If you do not specify a relative clock, the tool derives a new clock based on the clocks of the 
+current block. 
+When you use the set_input_delay or set_output_delay command, you can specify 
+that the delay:
+•
+Is only for a rise or fall transition by using the -rise or -fall option. 
+By default, the tool uses the delay for both the rise and fall transition at the input or output 
+port.
+•
+Is only for the longest or shortest path by using the -max or -min option. 
+By default, the tool uses the delay is for both the longest and shortest paths.
+•
+Is with respect to a level-sensitive latch by using the -level_sensitive option. 
+
+
+===== PAGE 83 =====
+Chapter 3: Constraining Timing Paths
+Setting Input and Output Delays for Ports
+3-13
+Chapter 3: Constraining Timing Paths
+Setting Input and Output Delays for Ports
+3-13
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4
+By default, the tool assumes the timing paths associated with the input or output delay 
+are launched or captured by an edge-sensitive flip-flop.
+•
+Should not overwrite any existing input or output delay settings by using the -add_delay 
+option.
+Use this option to specify different input or output delays with respect to different 
+reference clocks, for the same port.
+For designs with multiple scenarios, by default, the input or output delay applies only to the 
+current scenario. To specify the input or output delay for 
+•
+All the scenarios of specific modes, use the -modes option.
+•
+All the scenarios of specific corners and the current mode, use the -corners option.
+•
+All the scenarios of specific modes and corners, use the -modes and -corners options
+•
+Specific scenarios, use the -scenarios option.
+When you use this option, you cannot use the -modes or -corners options.
+To remove input or output delays from ports, use the remove_input_delay or 
+remove_output_delay command.
+The following figure shows the external paths for one input and output of a block, and the 
+delays associate with those external paths. 
+Figure 3-8
+External Delays for an Input and Output Port
+The following commands constrain the input named IN1 by setting an input delay of 4.5 with 
+respect to the clock named CLK1 and an input delay of 2.3 with respect to the clock named 
+CLK2: 
+icc2_shell> set_input_delay 4.5 -clock CLK1 [get_ports IN1]
+icc2_shell> set_input_delay 2.3 -clock CLK2 [get_ports IN1] \
+ -add_delay
+Block
+CLK1
+CLK2
+IN1
+CLK1
+4.5
+2.3
+4.3
+Logic
+Logic
+IN2
+OUT1
+OUT2
+OUT3
+
+
+===== PAGE 84 =====
+Chapter 3: Constraining Timing Paths
+Setting Input and Output Delays for Ports
+3-14
+IC Compiler™ II Timing Analysis User Guide
+M-2016.12-SP4
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4
+The following command constrains the output named OUT1 by setting an output delay of 4.3 
+with respect to the clock named CLK1: 
+icc2_shell> set_input_delay 4.3 -clock CLK1 [get_ports OUT1]
+Considering the Effect of Delays Through Driving Cells
+If you constrain an input or inout port using the set_driving_cell command, as shown in 
+the following example, the tool includes the load-dependent value of the external driving-cell 
+delay in the timing paths that begin at the port, as shown in the figure. 
+icc2_shell> set_driving_cell -lib_cell AND2 -from_pin A [get_ports I1] 
+Figure 3-9
+Delay Through the Driving Cell
+To prevent this delay from being counted twice, estimate the load-dependent delay of the 
+driving cell, then subtract that amount from the input delay you specify on the port.
+Effect of Input Delay on Clock Ports
+The tool considers the input delay on clock source ports or pins as source latency if the clock 
+is propagated. The input delay can be relative to no clock, or to the clock of that source. The 
+source latency value is added to the clock network delay to determine total latency.
+Do not set an input delay on all input ports, as shown in the following example: 
+icc2_shell> set_input_delay 2 -clock CLK [all_inputs]
+Instead, set in input delay on all inputs excluding the clock ports, as shown in the following 
+example:
+icc2_shell>set_input_delay 2 -clock CLK \ 
+       [remove_from_collection [all_inputs] [get_ports CLK]]
+Block_A
+I1
+Z
+AND2
+A
+B
+Delay through the driving cell
+
+
+===== PAGE 85 =====
+Chapter 3: Constraining Timing Paths
+Specifying Timing Exceptions
+3-15
+Chapter 3: Constraining Timing Paths
+Specifying Timing Exceptions
+3-15
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4
+Use the set_clock_latency command with the -source option to define the actual source 
+latency, if any.
+Specifying Timing Exceptions
+The IC Compiler II tool allows you to set the following types of timing exceptions: 
+•
+False paths, which identifies paths that do not need to be analyzed for timing.
+To do so, use the set_false_path command, as described in Specifying False Path 
+Exceptions. 
+•
+Minimum and maximum delay values, which sets minimum and maximum path delay 
+requirements between specified startpoints and endpoints. 
+To do so, use the set_max_delay and  set_min_delay commands, as described in 
+Specifying Maximum and Minimum Path Delay Exceptions
+•
+Multicycle paths, which overrides the default single cycle requirement by setting the 
+number of clock cycles required for the specified paths. 
+To do so, use the set_multicycle_path command, as described in Specifying 
+Multicycle Path Exceptions
+•
+Path timing margins, which tightens or loosens the timing requirement for the specified 
+paths by a specified amount.
+To do so, use the set_path_margin command, as described in Specifying Path Timing 
+Margin Exceptions
+Each timing exception command can apply to a single path or to a group of related paths, 
+such as all paths from one clock domain to another, or all paths that pass through a specified 
+point in the design. 
+To report all the timing exceptions that have been applied to a design, use the 
+report_exceptions command. 
+To restore a path to its default before timing exceptions were applied, use the reset_paths 
+command or the -reset_path option of each timing exception command. 
+Specifying False Path Exceptions
+A false path is a path that does not need to be analyzed for timing. For example, a path can 
+exist between two multiplexed logic blocks that are never selected at the same time, so that 
+path is not valid for timing analysis. Specifying such paths as false paths prevents the tool 
+from spending time analyzing timing paths that would not occur in the real design. 
+
+
+===== PAGE 86 =====
+Chapter 3: Constraining Timing Paths
+Specifying False Path Exceptions
+3-16
+IC Compiler™ II Timing Analysis User Guide
+M-2016.12-SP4
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4
+To define timing paths as false paths, use the set_false_path command. When you do so, 
+you must specify the paths you want to set as a false paths by using one or more of the 
+following methods:
+•
+Specify the startpoint of the path by using the -from, -rise_from, or -fall_from option
+Valid startpoints are 
+❍
+Clocks
+If you specify a clock, timing paths starting from all the sequential cells and primary 
+ports constrained by that clock are set as false paths.
+❍
+Sequential cells
+❍
+Clock pins of a sequential cells
+❍
+Data pins of a latches
+❍
+Input or inout ports
+❍
+Pins with an input delay settings
+•
+Specify one or more throughpoints of the path by using the -through, -rise_through, 
+or -fall_through option one or more times
+Valid throughpoints are
+❍
+Pins
+❍
+Ports
+❍
+Cells
+❍
+Nets
+If all paths going through a pin are false paths, using the set_disable_timing to 
+disable a timing arc of that pin is more efficient than using the set_false_path 
+-through command.
+•
+Specify the endpoint of the path by using the -to, -rise_to, or -fall_to option
+Valid endpoints are
+❍
+Clocks
+If you specify a clock, timing paths ending at all the sequential cells and primary ports 
+constrained by that clock are set as false paths.
+❍
+Sequential cells
+❍
+Data pins of a sequential cells
+❍
+Output or inout ports
+
+
+===== PAGE 87 =====
+Chapter 3: Constraining Timing Paths
+Specifying Maximum and Minimum Path Delay Exceptions
+3-17
+Chapter 3: Constraining Timing Paths
+Specifying Maximum and Minimum Path Delay Exceptions
+3-17
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4
+❍
+Pins with an output delay settings
+Optionally, you can limit the false-path setting to
+•
+Setup or hold analysis only by using the -setup or -hold options.
+By default, the false-path setting applies to both setup and hold analysis.
+•
+Rise or fall analysis only by using the -rise or -fall options.
+By default, the false-path setting applies to both rise and fall analysis.
+To remove a false path setting, use the set_false_path -reset_path or  reset_paths 
+command.
+The following example shows how to set a very specific path, which starting from a register 
+clock pin, going through several pins, and ending at a register data pin, as a false path:
+icc2_shell> set_false_path -from [get_pins reg2/CP] \
+  -through [get_pins U31/Z] -through [get_pins U15/Z] \ 
+  -to [get_pins reg7/D] 
+The following example shows how to set all timing paths between two clocks, ck1 and ck2, 
+as false paths: 
+icc2_shell> set_false_path -from [get_clocks ck1] \
+          -to [get_clocks ck2]
+icc2_shell> set_false_path -from [get_clocks ck2] \
+          -to [get_clocks ck1]
+For this example, an alternative is to use the set_clock_groups command to exclude all 
+paths between clocks ck1 and ck2 from timing analysis. 
+Specifying Maximum and Minimum Path Delay Exceptions
+By default, the tool calculates the maximum and minimum allowable path delays by 
+considering the launch and capture clock edge times. To override the default maximum or 
+minimum allowable path delay with your own specific delay constraint, use the 
+set_max_delay or set_min_delay command. You can also use these commands to 
+constrain a purely combinational timing path that is not constrained by a clock.
+When use the set_max_delay or set_min_delay command, you must specify 
+•
+The maximum or minimum delay value
+•
+The path you want to constrain by using one or more of the following methods:
+❍
+Specify the startpoint of the path by using the -from, -rise_from, or -fall_from 
+option.
+
+
+===== PAGE 88 =====
+Chapter 3: Constraining Timing Paths
+Specifying Maximum and Minimum Path Delay Exceptions
+3-18
+IC Compiler™ II Timing Analysis User Guide
+M-2016.12-SP4
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4
+Valid startpoints are 
+■
+Clocks
+If you specify a clock, timing paths starting from all the sequential cells and 
+primary ports constrained by that clock are set as false paths.
+■
+Sequential cells
+■
+Clock pins of a sequential cells
+■
+Data pins of a latches
+■
+Input or inout ports
+■
+Pins with an input delay settings
+❍
+Specify one or more throughpoints of the path by using the -through, 
+-rise_through, or -fall_through option one or more times.
+Valid throughpoints are
+■
+Pins
+■
+Ports
+■
+Cells
+■
+Nets
+❍
+Specify the endpoint of the path by using the -to, -rise_to, or -fall_to option.
+Valid endpoints are
+■
+Clocks
+If you specify a clock, timing paths ending at all the sequential cells and primary 
+ports constrained by that clock are set as false paths.
+■
+Sequential cells
+■
+Data pins of a sequential cells
+■
+Output or inout ports
+■
+Pins with an output delay settings
+Optionally, you can limit the maximum or minimum path delay setting to
+•
+Setup or hold analysis only by using the -setup or -hold options.
+By default, it applies to both setup and hold analysis.
+•
+Rise or fall analysis only by using the -rise or -fall options.
+By default, it applies to both rise and fall analysis.
+
+
+===== PAGE 89 =====
+Chapter 3: Constraining Timing Paths
+Specifying Multicycle Path Exceptions
+3-19
+Chapter 3: Constraining Timing Paths
+Specifying Multicycle Path Exceptions
+3-19
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4
+If the startpoint or endpoint of the path for which you applied the set_max_delay or 
+set_min_delay command is constrained by a clock, the tool uses the clock latencies of the 
+startpoint and endpoint during timing analysis. To ignore the clock latencies of the startpoint 
+and endpoint, use the -ignore_clock_latency option.
+To remove a maximum or minimum path delay setting, use the -reset_path option of the 
+set_max_delay or set_min_delay command or use the  reset_paths command.
+The following example sets a maximum path delay between registers REGA and REGB to 
+12 and minimum path delay to 2: 
+icc2_shell> set_max_delay 12.0 \
+          -from [get_cells REGA] -to [get_cells REGB] 
+icc2_shell> set_min_delay 2.0 \
+          -from [get_cells REGA] -to [get_cells REGB] 
+Specifying Multicycle Path Exceptions
+If the number of clock cycles required to propagate data from the start to the end of a path 
+is more than the single cycle requirement used by the tool, you can specify additional clock 
+cycles for the path by using the set_multicycle_path command. Then, the tool calculates 
+the setup or hold constraint according to the specified number of cycles. 
+When use the set_multicycle_path command, you must specify 
+•
+The number of clock cycles you want to allocate for the path.
+If the launch and capture clocks for the path are different clocks, specify if the number of 
+clock cycles are based on the launch or capture clock by using the -start or -end 
+options. By default, the tool moves the setup check relative to the capture clock, and the 
+hold check relative to the launch clock.
+•
+The path you want to constrain by using one or more of the following methods:
+❍
+Specify the startpoint of the path by using the -from, -rise_from, or -fall_from 
+option.
+Valid startpoints are 
+■
+Clocks
+If you specify a clock, timing paths starting from all the sequential cells and 
+primary ports constrained by that clock are set as false paths.
+■
+Sequential cells
+■
+Clock pins of a sequential cells
+■
+Data pins of a latches
+
+
+===== PAGE 90 =====
+Chapter 3: Constraining Timing Paths
+Specifying Multicycle Path Exceptions
+3-20
+IC Compiler™ II Timing Analysis User Guide
+M-2016.12-SP4
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4
+■
+Input or inout ports
+■
+Pins with an input delay settings
+❍
+Specify one or more throughpoints of the path by using the -through, 
+-rise_through, or -fall_through option one or more times.
+Valid throughpoints are
+■
+Pins
+■
+Ports
+■
+Cells
+■
+Nets
+❍
+Specify the endpoint of the path by using the -to, -rise_to, or -fall_to option.
+Valid endpoints are
+■
+Clocks
+If you specify a clock, timing paths ending at all the sequential cells and primary 
+ports constrained by that clock are set as false paths.
+■
+Sequential cells
+■
+Data pins of a sequential cells
+■
+Output or inout ports
+■
+Pins with an output delay settings
+Optionally, you can limit the multicycle path setting to
+•
+Setup or hold analysis only by using the -setup or -hold options.
+By default, it applies to both setup and hold analysis.
+The tool interprets the -setup and -hold values in the set_multicycle_path 
+command differently. The integer value for the -setup argument specifies the number of 
+clock cycles for the multicycle path. In the absence of a timing exception, the default is 
+1. The integer value for the -hold argument specifies the number of clock cycles to 
+move the capture edge backward with respect to the default position, relative to the valid 
+setup relationship. The default is 0. 
+•
+Rise or fall analysis only by using the -rise or -fall options.
+By default, it applies to both rise and fall analysis.
+To remove a multicycle path setting, use the set_multicycle_path -reset_path or  
+reset_paths command.
+
+
+===== PAGE 91 =====
+Chapter 3: Constraining Timing Paths
+Specifying Multicycle Path Exceptions
+3-21
+Chapter 3: Constraining Timing Paths
+Specifying Multicycle Path Exceptions
+3-21
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4
+Specifying the Correct Number of Multicycles for Hold Analysis 
+The following example shows how to determine the correct number of cycles required for 
+hold analysis, when you know the number of cycles required for setup analysis.
+In this example, the timing path between registers named Reg4 to Reg5 is designed to take 
+two clock cycles. By default, the tool assumes single-cycle timing for all paths. Therefore, 
+you need to specify a timing exception for this path by using the following command: 
+To set the multicycle path for this block, use the following command: 
+icc2_shell> set_multicycle_path -setup 2 \
+          -from [get_cells Reg4] -to [get_cells Reg5] 
+This command specifies that the path takes two clock cycles, establishing the new setup 
+relationship as shown in the following figure. The second capture edge following the launch 
+edge becomes the applicable edge for the end of the path. 
+Figure 3-10
+Multicycle Path Setup
+Changing the setup relationship implicitly changes the hold relationship as well because all 
+hold relationships are based on the valid setup relationships. The tool verifies that the data 
+launched by the setup launch edge is not captured by the previous capture edge. The new 
+hold relationship is shown in the following figure. 
+CLKReg4
+CLKReg5
+Default setup 
+relationship
+New setup relationship with 
+multicycle path setting
+icc2_shell> set_multicycle_path -setup 2 \
+          -from [get_cells Reg4] -to [get_cells Reg5] 
+
+
+===== PAGE 92 =====
+Chapter 3: Constraining Timing Paths
+Specifying Multicycle Path Exceptions
+3-22
+IC Compiler™ II Timing Analysis User Guide
+M-2016.12-SP4
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4
+Figure 3-11
+Multicycle Path Hold Based on New Setup
+The hold relationship shown in this figure is probably not the correct relationship for the 
+design. If Reg4 does not need to hold the data beyond the first clock edge, you need to 
+specify a multicycle hold timing exception, as shown by the following commands: 
+icc2_shell> set_multicycle_path -setup 2 \
+          -from [get_cells Reg4] -to [get_cells Reg5] 
+icc2_shell> set_multicycle_path -hold 1 \
+          -from [get_cells Reg4] -to [get_cells Reg5] 
+The following figure shows the setup and hold relationships set correctly with these two 
+set_multicycle_path commands. The second set_multicycle_path command moves 
+the capture edge of the hold relationship backward by one clock cycle, from the dashed-line 
+arrow to the solid-line arrow. 
+Figure 3-12
+Multicycle Path Hold Set Correctly
+CLKReg4
+CLKReg5
+Setup
+Hold
+icc2_shell> set_multicycle_path -setup 2 \
+          -from [get_cells Reg4] -to [get_cells Reg5] 
+CLKReg4
+CLKReg5
+Setup
+Hold
+icc2_shell> set_multicycle_path -setup 2 \
+          -from [get_cells Reg4] -to [get_cells Reg5] 
+icc2_shell> set_multicycle_path -hold 1 \
+          -from [get_cells Reg4] -to [get_cells Reg5] 
+
+
+===== PAGE 93 =====
+Chapter 3: Constraining Timing Paths
+Specifying Path Timing Margin Exceptions
+3-23
+Chapter 3: Constraining Timing Paths
+Specifying Path Timing Margin Exceptions
+3-23
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4
+The tool determines the number of hold cycles as follows: 
+(hold cycles) = (setup option value) – 1 – (hold option value)
+By default, the hold cycles = 1 – 1 – 0 = 0. For this example the hold cycles = 2 – 1 – 1 = 0, 
+which gives the default hold behavior.
+Specifying Path Timing Margin Exceptions
+You can make the timing check of a specified path less or more restrictive by a given amount 
+of time by using the set_path_margin command. 
+When use the set_path_margin command, you must specify 
+•
+The margin value
+A positive value results in a more restrictive or tighter check. A negative value results in 
+a less restrictive or looser check.
+•
+The path you want to constrain by using one or more of the following methods:
+❍
+Specify the startpoint of the path by using the -from, -rise_from, or -fall_from 
+option.
+Valid startpoints are 
+■
+Clocks
+If you specify a clock, timing paths starting from all the sequential cells and 
+primary ports constrained by that clock are set as false paths.
+■
+Sequential cells
+■
+Clock pins of a sequential cells
+■
+Data pins of a latches
+■
+Input or inout ports
+■
+Pins with an input delay settings
+❍
+Specify one or more throughpoints of the path by using the -through, 
+-rise_through, or -fall_through option one or more times.
+Valid throughpoints are
+■
+Pins
+■
+Ports
+
+
+===== PAGE 94 =====
+Chapter 3: Constraining Timing Paths
+Specifying Exceptions Efficiently
+3-24
+IC Compiler™ II Timing Analysis User Guide
+M-2016.12-SP4
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4
+■
+Cells
+■
+Nets
+❍
+Specify the endpoint of the path by using the -to, -rise_to, or -fall_to option.
+Valid endpoints are
+■
+Clocks
+If you specify a clock, timing paths ending at all the sequential cells and primary 
+ports constrained by that clock are set as false paths.
+■
+Sequential cells
+■
+Data pins of a sequential cells
+■
+Output or inout ports
+■
+Pins with an output delay settings
+Optionally, you can limit the path margin setting to
+•
+Setup or hold analysis only by using the -setup or -hold options.
+By default, it applies to both setup and hold analysis.
+•
+Rise or fall analysis only by using the -rise or -fall options.
+By default, it applies to both rise and fall analysis.
+To remove a path margin setting, use the set_path_margin -reset_path command.
+The following example makes all setup checks from cell Reg4 to cell Reg5 more restrictive 
+by 1.2 time units. 
+icc2_shell> set_path_margin 1.2 \
+   -from [get_cells Reg4] -to [get_cells Reg5]
+The specified margin applies to a timing check in addition to any minimum-delay, 
+maximum-delay, and multicycle path exceptions set on the same paths. A false path 
+exception applied to the same path has priority over a path timing margin exception, causing 
+the margin setting to be ignored.
+Specifying Exceptions Efficiently
+In many cases, you can specify the exception paths many different ways. To reduce the 
+runtime during timing analysis, use the following guidelines when specifying exception:
+•
+Look at the root cause that makes the exceptions necessary and find the simplest way 
+to control the timing analysis for the affected paths. 
+
+
+===== PAGE 95 =====
+Chapter 3: Constraining Timing Paths
+Specifying Exceptions Efficiently
+3-25
+Chapter 3: Constraining Timing Paths
+Specifying Exceptions Efficiently
+3-25
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4
+•
+Before using false paths, consider 
+❍
+Set a case analysis by using the set_case_analysis command.
+❍
+Declaring an exclusive relationship between clocks by using the set_clock_groups 
+command.
+❍
+Disabling analysis of part of the design by using the set_disable_timing 
+command. 
+These alternatives can be more efficient than using the set_false_path command. 
+•
+If you must set false paths, avoid specifying a large number of paths using the -through 
+option or wildcards. 
+For example, consider the circuit shown in the following figure. The three 16-bit registers are 
+clocked by three different clocks. Each register represents 16 flip-flops. Register REG2 is 
+only used for test purposes, so all paths from REG2 to REG3 are false paths during normal 
+operation of the circuit. 
+Figure 3-13
+Multiplexed Register Paths
+To ignore the timing from REG2 to REG3, you can use any of the following methods:
+•
+Use case analysis to consider the case when the test enable signal is 0. 
+•
+Set an exclusive relationship between the CLK1 and CLK2 clock domains. 
+D
+Q
+D
+Q
+0
+1
+D
+Q
+CLK1
+CLK2
+CLK3
+16
+16
+16
+TEST_ENABLE
+REG1
+REG2
+REG3
+
+
+===== PAGE 96 =====
+Chapter 3: Constraining Timing Paths
+Order of Precedence for Exceptions
+3-26
+IC Compiler™ II Timing Analysis User Guide
+M-2016.12-SP4
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4
+•
+Declare the paths between clock domains CLK2 and CLK3 to be false. 
+icc2_shell> set_false_path \ 
+          -from [get_clocks CLK2] -to [get_clocks CLK3] 
+This method is an efficient way to specify the false paths because the tool only needs to 
+keep track of the specified clock domains. It does not have to keep track of exceptions 
+on registers, pins, nets, and so on. 
+•
+Declare the 16 individual paths from REG2 to REG3 to be false. 
+icc2_shell> set_false_path -from [get_pins REG2[0]/CP] \
+          -to [get_pins REG3[0]/D] 
+icc2_shell> set_false_path -from [get_pins REG2[1]/CP] \
+          -to [get_pins REG3[1]/D] 
+icc2_shell> ...
+This method is less efficient because the tool must keep track of timing exceptions for 16 
+different paths. 
+•
+Declare all paths from REG2 to REG3 to be false. 
+icc2_shell> set_false_path -from [get_pins REG2[*]/CP] \
+          -to [get_pins REG3[*]/D] 
+This method is even less efficient because the tool must keep track of paths from each 
+clock pin of REG2 to each data pin of REG3, a total of 256 paths. 
+•
+Declare all paths from REG2 to be false. 
+icc2_shell> set_false_path -from [get_pins REG2[*]/CP] 
+This method is similar to the previous one. The tool must keep track of all paths 
+originating from each clock pin of REG2, a total of 256 paths. 
+Order of Precedence for Exceptions
+For every timing path in a given block, the tool identifies all the timing exceptions that are 
+applicable for that path. If multiple timing exceptions are applicable for a particular path, the 
+exception used for that path depends on
+•
+The type of exception specified, as described in Precedence Based on Exception Type
+•
+The path specification methods used when setting the exception, as described in 
+Precedence Based on Path Specification
+
+
+===== PAGE 97 =====
+Chapter 3: Constraining Timing Paths
+Order of Precedence for Exceptions
+3-27
+Chapter 3: Constraining Timing Paths
+Order of Precedence for Exceptions
+3-27
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4
+Precedence Based on Exception Type
+The following pairs of timing exception types are not considered to be in conflict, so both 
+settings can be valid for a path:
+•
+Two set_false_path settings
+•
+set_min_delay and set_max_delay settings
+•
+set_multicycle_path -setup and -hold settings
+•
+set_path_margin and set_min_delay, set_max_delay, or set_multicycle_path 
+settings
+In case of conflicts, the timing exception types have the following order of priority, from 
+highest to lowest: 
+1. set_false_path settings
+2. set_max_delay and set_min_delay settings
+3. set_multicycle_path settings
+For example, if you declare a path to be false and also set its maximum delay to some value, 
+the false path declaration has priority. The maximum delay setting is ignored. 
+Precedence Based on Path Specification
+A timing exception on more specific object, such as pin or port, take precedence over the 
+same type of exceptions applied to a more general object, such as a clock. 
+The various path specification methods have the following order of priority, from highest to 
+lowest: 
+1. -from pin, -rise_from pin, -fall_from pin settings
+2. -to pin, -rise_to pin, -fall_to pin settings
+3. -through, -rise_through, -fall_through settings
+4. -from clock, -rise_from clock, -fall_from clock settings
+5. -to clock, -rise_to clock, -fall_to clock settings
+
+
+===== PAGE 98 =====
+Chapter 3: Constraining Timing Paths
+Order of Precedence for Exceptions
+3-28
+IC Compiler™ II Timing Analysis User Guide
+M-2016.12-SP4
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4
+Here are some possible path specification combinations, listed in order of priority from 
+highest to lowest, according to the preceding priority rules:
+1. -from pin -to pin 
+2. -from pin -to clock 
+3. -from pin 
+4. -from clock -to pin 
+5. -to pin 
+6. -from clock -to clock 
+7. -from clock 
+8. -to clock 
+For example, assume you set the following exceptions: 
+icc2_shell> set_max_delay 12 -from [get_clocks CLK1]   
+icc2_shell> set_max_delay 15 -from [get_clocks CLK1] -to [get_clocks 
+CLK2]
+The first command sets the maximum delay of all paths starting from CLK1. However, the 
+second command is more specific, so it overrides the first command for paths starting at 
+CLK1 and ending at CLK2. 
+Example on the Order of Precedence of Exceptions
+Assume the following exception settings on a block that has four clocks named clkA, clkB, 
+clkC, and clkD:
+icc2_shell> set_false_path \ 
+          -from [get_clocks clkB] -to [get_clocks clkC] 
+icc2_shell> set_multicycle_path  2 \
+          -from [get_clocks clkA] -to [get_clocks clkC] 
+icc2_shell> set_multicycle_path 3 -to [get_pins Reg53/D]
+icc2_shell> set_multicycle_path 3 -from [get_pins Reg24/CK]
+For a timing path that begins at Reg24 cell, which is clocked by clkB clock, and ends at 
+Reg32 cell, which is clocked by clkD clock, only the following exception is applicable:
+icc2_shell> set_multicycle_path 3 -from [get_pins Reg24/CK]
+
+
+===== PAGE 99 =====
+Chapter 3: Constraining Timing Paths
+Disabling Timing Paths Within Lower-Level Blocks
+3-29
+Chapter 3: Constraining Timing Paths
+Disabling Timing Paths Within Lower-Level Blocks
+3-29
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4
+However, for a timing path that begins at Reg24 cell, which is clocked by clkB clock, and 
+ends at cell Reg11 cell, which is clocked by clkC clock, the following two exceptions are 
+applicable:
+icc2_shell> set_false_path \ 
+          -from [get_clocks clkB] -to [get_clocks clkC] 
+icc2_shell> set_multicycle_path 3 -from [get_pins Reg24/CK]
+In this case, the set_false_path command has priority over the set_multicycle_path 
+command, so the tool uses the false-path exception for this path.
+For a timing path that begins at Reg61 cell, which is clocked by clkA clock, and ends at 
+Reg53 cell, which is clocked by clkC clock, the following two exceptions are applicable:
+icc2_shell> set_multicycle_path  2 \
+          -from [get_clocks clkA] -to [get_clocks clkC] 
+icc2_shell> set_multicycle_path 3 -to [get_pins Reg53/D]
+In this case, there are two  set_multicycle_path commands with different path 
+specifications, so the tool uses the more specific path specification, which is the multicycle 
+path setting to the D pin of the Reg53 cell.
+Disabling Timing Paths Within Lower-Level Blocks
+For designs with hierarchy, you can disable timing paths that are entirely within lower-level 
+blocks for timing analysis and optimization by using the 
+set_timing_paths_disabled_blocks command. 
+To disable the timing paths entirely within
+•
+Specific subblocks, use the -blocks option
+•
+All subblocks, use the -all_sub_blocks option
+To restore the disabled timing paths within subblocks, use the 
+remove_timing_paths_disabled_blocks command.
+Using Case Analysis
+Case analysis lets you perform timing analysis using logic constants or logic transitions on 
+ports or pins to limit the signals propagated through the design. 
+If you set a case analysis with
+•
+A logic constant, the tool disables paths where the constant is propagated. 
+
+
+===== PAGE 100 =====
+Chapter 3: Constraining Timing Paths
+Using Case Analysis
+3-30
+IC Compiler™ II Timing Analysis User Guide
+M-2016.12-SP4
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4
+To do so, use the set_case_analysis 0 or set_case_analysis 1 command, as 
+shown in the following example: 
+icc2_shell> set_case_analysis 0 [get_ports TEST_EN]
+•
+A logic transition, either rising or falling, the tool eliminates certain paths by limiting the 
+transitions considered during analysis.
+To do so, use the set_case_analysis rising or set_case_analysis falling 
+command, as shown in the following example:
+icc2_shell> set_case_analysis rising [get_ports RESET]
+In addition, the tool treats the following as case analysis values also: 
+•
+Cell pins that are connected to tie-high or tie-low cells
+•
+Cell pins that are unconnected, which the tool ties to constant values
+You can control case analysis by using the following commands or application option 
+settings:
+•
+Propagate case analysis values through clock-gating cells by setting the 
+time.case_analysis_propagate_through_icg application option to true.
+By default, the tool stops propagating case analysis values at clock-gating cells.
+•
+Propagate case analysis values through sequential cells by setting the 
+time.case_analysis_sequential_propagation application option to always.
+By default, this application option is set to never and the tool stops propagating case 
+analysis values at sequential cells.
+•
+Disable the propagation of logic constants except for those set with the 
+set_case_analysis command by setting the 
+time.disable_case_analysis_ti_hi_lo  application option to true.
+By default, the tool propagates all logic constants.
+•
+Disable the propagation of all case analysis values by setting the 
+time.disable_case_analysis  application option to true.
+By default, the tool propagates all case analysis values.
+•
+Remove specific case analysis values by using the remove_case_analysis command.
+To report 
+•
+Case analysis values, use the report_case_analysis command. 
+•
+Timing arcs that have been disabled by various causes, including case analysis, use the 
+report_disable_timing command. 
+
+
+===== PAGE 101 =====
+Chapter 3: Constraining Timing Paths
+Disabling Timing Arcs
+3-31
+Chapter 3: Constraining Timing Paths
+Disabling Timing Arcs
+3-31
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4
+The following example disables the timing path going through pins B and Z of the multiplexer 
+named U15 shown in Figure 3-14 by specifying a case analysis setting of 0 on the input port 
+named TEST_EN:
+icc2_shell> set_case_analysis 0 [get_ports TEST_EN]
+Figure 3-14
+Using Constants to Disable Timing Arcs
+Disabling Timing Arcs
+You can disable a timing path by disabling a net or cell timing arc on that path using the 
+set_disable_timing command. You can disable the timing arcs of
+•
+Leaf-level cells or library cells
+When you do so, by default, all timing arcs to the output of the cell are disabled. To 
+disable a specific timing arc of the cell, use the -to and -from options.
+For example, the following commands disable all timing arcs to the output of library cell 
+named AND3 and the timing arc from pin A2 to pin ZN of the cell instance named U17:
+icc2_shell> set_disable_timing my_lib/AND3
+icc2_shell> set_disable_timing {U17} -from A2 -to ZN
+•
+Leaf-level-cell pins, library-cell pins, or ports
+When you do so, all timing arcs to and from the pin or port are disable. However, you 
+cannot disable a specific arcs by using the -to and -from options.
+For example, the following command disable all timing arcs to and from the leaf-cell pins 
+named U37/A2 and U51/Z:
+icc2_shell> set_disable_timing {U37/A U51/Z}
+When you disable the timing arcs of a cell or cell pin, the tool applies a size-only attribute 
+setting on the corresponding cell, which prevents that cell from being removed during 
+optimization. However, it can be resized during optimization. 
+A
+B
+Sel
+Z
+ B to Z timing arc is disabled
+ 0
+ U15
+TEST_E
+
+
+===== PAGE 102 =====
+Chapter 3: Constraining Timing Paths
+Enabling Preset and Clear Timing
+3-32
+IC Compiler™ II Timing Analysis User Guide
+M-2016.12-SP4
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4
+To report all timing arcs that are disabled in a block, including those disabled by the 
+set_disable_timing command, use the report_disable_timing  command.
+Enabling Preset and Clear Timing
+By default, the tool does not analyze timing paths that go through the asynchronous preset 
+or clear input of a flip-flop and ends at the Q output of the flip-flop. To enable timing analysis 
+and optimization on these paths, set the time.enable_preset_clear_arcs application 
+option to true.
+icc2_shell> set_app_options -name time.enable_preset_clear_arcs \
+    -value true 
+Introduction to Data-to-Data Checks
+The tool can perform setup and hold checking between two data signals, neither of which is 
+defined to be a clock, at any two pins in the design. A timing constraint between two data 
+(nonclock) signals is called a nonsequential constraint. This feature can be useful for 
+checking the following types of timing constraints: 
+•
+Constraints on handshaking interface logic
+•
+Constraints on asynchronous or self-timed circuit interfaces
+•
+Constraints on signals with unusual clock waveforms that cannot be easily specified with 
+the create_clock command
+•
+Constraints on skew between bus lines
+•
+Recovery and removal constraints between asynchronous preset and clear input pins
+You can define such checks by using the set_data_check command, or they can be 
+defined in the reference library as nonsequential constraints. You should use data checks 
+only in situations such as those described previously. Data checks should not be considered 
+a replacement for ordinary sequential checking.
+The following figure shows a simple example of a cell that has a nonsequential constraint. 
+The cell has two data inputs, D1 and D2. The rising edge of D2 is the active edge that might 
+be used to latch data at D1. Pin D1 is called the constrained pin and pin D2 is called the 
+related pin. 
+
+
+===== PAGE 103 =====
+Chapter 3: Constraining Timing Paths
+Introduction to Data-to-Data Checks
+3-33
+Chapter 3: Constraining Timing Paths
+Introduction to Data-to-Data Checks
+3-33
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4
+Figure 3-15
+Simple Data Check Example
+In this example, the signal at D1 must be stable for a certain setup time before the active 
+edge. It must also be stable for a certain hold time after the active edge. If these 
+nonsequential constraints are not already defined for the library cell, you can define them in 
+the tool with the set_data_check command.
+Data checks are nonsequential, so they do not break timing paths. In the following figure, the 
+data check between pins D1 and D2 does not interrupt the timing paths shown by the 
+dashed-line arrows. If you define the signal at D2 as a clock, the check is sequential and the 
+paths is terminated at D1. 
+Figure 3-16
+Timing Paths Not Broken by Data Checks
+In a data check, signals arriving at a constrained pin or related pin can come from different 
+clock domains. The tool checks the signal paths separately and puts them into different 
+clock groups, just like in ordinary sequential checks. 
+Setup
+Hold
+D2
+D1
+D1
+D2
+Constrained pin
+Related pin
+D2
+D1
+Data
+D
+Q
+D
+Q
+check
+D
+Q
+ff1
+ff2
+ff3
+Combinational
+
+
+===== PAGE 104 =====
+Chapter 3: Constraining Timing Paths
+Specifying Data-to-Data Checks
+3-34
+IC Compiler™ II Timing Analysis User Guide
+M-2016.12-SP4
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4
+Specifying Data-to-Data Checks
+To specify that data-to-data checks be performed between two data pins, use the 
+set_data_check command as follows:
+•
+To specify a pin or port as the related pin, use the -from, -rise_from, or -fall_from 
+option. 
+•
+To specify a pin or port as the constrained pin, use the -to, -rise_to, or -fall_to 
+option.
+•
+To specify that the data check value be for setup only or hold only, use the -setup option 
+or -hold option. Otherwise, the value applies to both setup and hold.
+•
+To specify the name of a single clock that launches the signal for the related pin, use the 
+-clock option.
+To remove data checks set with the set_data_check command, use the 
+remove_data_check command. 
+Examples of Data Checks
+In the following figure, the signal at D1 must be stable for a certain setup time before the 
+active edge. It must also be stable for a certain hold time after the active edge.
+Figure 3-17
+Data Check on Rising Edge
+To define these data checks, use the following commands: 
+icc2_shell> set_data_check -rise_from D2 -to D1 -setup 3.5 
+icc2_shell> set_data_check -rise_from D2 -to D1 -hold 6.0 
+In the following figure, the data checks apply to both rising and falling edges on the related 
+pin.
+Setup
+Hold
+D2
+D1
+D1
+D2
+Constrained pin
+Related pin
+
+
+===== PAGE 105 =====
+Chapter 3: Constraining Timing Paths
+Enabling Library-Based Data Checks
+3-35
+Chapter 3: Constraining Timing Paths
+Enabling Library-Based Data Checks
+3-35
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4
+Figure 3-18
+Data Checks on Rising and Falling Edges
+To define these data checks, use the following commands:
+icc2_shell> set_data_check -from D2 -to D1 -setup 3.5 
+icc2_shell> set_data_check -from D2 -to D1 -hold 6.0 
+You can define a no-change data check by specifying only a setup check from the rising 
+edge and a hold check from the falling edge, by using the following commands: 
+icc2_shell> set_data_check -rise_from D2 -to D1 -setup 3.5
+icc2_shell> set_data_check -fall_from D2 -to D1 -hold 3.0
+The tool interprets this as a no-change check on a positive-going pulse. The resulting timing 
+check is shown in the following figure. 
+Figure 3-19
+No-Change Data Check
+Enabling Library-Based Data Checks
+To specify that the tool perform data checking for any cell that has nonsequential timing 
+constraints defined in the library cell, if the signal at the related pin is not defined to be a 
+clock, set the time.enable_non_sequential_checks application option to true, as shown 
+in the following example:
+icc2_shell> set_app_options -name time.enable_non_sequential_checks \
+    -value true 
+D2
+D1
+D1
+D2
+Constrained pin
+Related pin
+Setup
+Hold
+Setup
+Hold
+D2
+D1
+D1
+D2
+Constrained pin
+Related pin
+
+
+===== PAGE 106 =====
+Chapter 3: Constraining Timing Paths
+Introduction to Clock-Gating Checks
+3-36
+IC Compiler™ II Timing Analysis User Guide
+M-2016.12-SP4
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4
+The variable is set to false by default. 
+Note:   
+This behavior is different from that of PrimeTime, which always honors nonsequential arc 
+checks. 
+If the signal at the related pin is defined as a clock, the tool ignores the library-defined 
+nonsequential timing constraints. 
+In the cell library, the nonsequential constraints are defined for a cell by specifying a related 
+pin and by assigning the following timing_type attributes to the constrained pin: 
+•
+non_seq_setup_rising
+•
+non_seq_setup_falling
+•
+non_seq_hold_rising
+•
+non_seq_hold_falling
+For more information on defining nonsequential constraints in the library, see the Library 
+Compiler documentation. 
+Using nonsequential constraints defined in the library cell results in a more accurate 
+analysis than using the set_data_check command because the setup and hold times can 
+be made sensitive to the slew of the constrained pin and the related pin. The 
+set_data_check command is not sensitive to slew. 
+The remove_data_check command does not remove data checks defined in library cells.
+Introduction to Clock-Gating Checks
+A gated clock signal occurs when a clock network contains logic other than inverters or 
+buffers. The tool does not automatically check setup and hold violations on the gating 
+signals of clock-gated cells. Therefore, it is possible for these signals to undergo transitions 
+while clock pulses are passing through the gating cells, which can lead to both clipped and 
+spurious clock pulses. 
+The following figure shows examples of distorted clock waveforms that can be caused by 
+invalid changes on the clock-gating inputs in the absence of clock-gating checks.
+
+
+===== PAGE 107 =====
+Chapter 3: Constraining Timing Paths
+Introduction to Clock-Gating Checks
+3-37
+Chapter 3: Constraining Timing Paths
+Introduction to Clock-Gating Checks
+3-37
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4
+Figure 3-20
+Distorted Clock Waveforms
+To control the transition of the gating signal, you can specify a set and hold margin with 
+respect to the clock by using the for the set_clock_gating_check command. 
+The following figure shows a clock gating check performed on a gating element that is an 
+AND or NAND gate.
+Figure 3-21
+Clock-Gating Checks for AND and NAND Gates
+CLOCK
+GATE
+D
+Q 
+D
+Q 
+CLOCK
+GATE
+GATED_CLOCK
+GATED_CLOCK
+Clipped clock pulse
+GATE
+GATED_CLOCK
+Spurious clock pulse
+No-change
+interval
+CLOCK
+GATE
+D
+Q 
+D
+Q 
+CLOCK
+GATE
+Setup margin
+Hold margin
+GATED_CLOCK
+No-change interval
+
+
+===== PAGE 108 =====
+Chapter 3: Constraining Timing Paths
+Specifying Clock-Gating Checks
+3-38
+IC Compiler™ II Timing Analysis User Guide
+M-2016.12-SP4
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4
+The following figure, shows a clock gating check performed on a gating element that is an 
+OR or NOR gate.
+Figure 3-22
+Clock Gating Checks for OR and NOR Gates
+Specifying Clock-Gating Checks
+To specify a clock gating check, use the set_clock_gating_check command.
+When you use this command, by default, the tool
+•
+Performs the clock gating check on all the clock gating elements of the current block.
+To limit the check to a specific cell, clock, or the transitive fanout of a port or pin, specify 
+the required objects.
+•
+Uses a setup and hold value of zero. To set a specific setup or hold value, use the 
+-setup or -hold options.
+•
+Constraints both the rising and falling edges of the gating signal.
+To control only the rising or falling edge, use the -rise or -fall options.
+•
+Determines whether to use the high or low level of the clock to constrain the gating 
+signal, based on the gating logic.
+If the gating cell is:
+❍
+An AND or NAND gate, the tool performs the check on the high level of the clock.
+❍
+An OR or NOR gates, the tool performs the check on the high level of the clock
+N_CLOCK
+GATE
+D
+Q 
+D
+Q 
+N_CLOCK
+GATE
+Setup margin
+Hold margin
+GATED_CLOCK
+No-change interval
+N_CLOCK
+D
+Q 
+D
+Q 
+
+
+===== PAGE 109 =====
+Chapter 3: Constraining Timing Paths
+Specifying Clock-Gating Checks
+3-39
+Chapter 3: Constraining Timing Paths
+Specifying Clock-Gating Checks
+3-39
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4
+❍
+Any other gate, the tool does not perform the check, unless you specify which level of 
+the clock to use.
+To specify which level of the clock to perform the check, use the -high or -low. option. 
+The tool handles clock-gating checks like other timing constraints and tries to adjust the 
+delays of the logic driving the gating inputs to avoid setup and hold violations. During 
+optimization, the tool can only size cells with clock-gating checks. 
+Clock-gating checks can be performed only between a clock signal and a nonclock signal, 
+not between two clock signals or between two nonclock signals.
+To remove clock-gating checks, use the remove_clock_gating_check command. 
+You can disable clock-gating checks on specific cells and pins by using the 
+set_disable_clock_gating_check command to list the cells and pins you want the tool to 
+ignore. To cancel the effect of this command, use the 
+remove_disable_clock_gating_check command. 
+The following example shows how to specify a setup requirement of 0.2 and a hold 
+requirement of 0.4 on all gates in the clock network of CLK1.
+icc2_shell> set_clock_gating_check -setup 0.2 -hold 0.4 CLK1
+
+
+===== PAGE 110 =====
+Chapter 3: Constraining Timing Paths
+Specifying Clock-Gating Checks
+3-40
+IC Compiler™ II Timing Analysis User Guide
+M-2016.12-SP4
+IC Compiler™ II Timing Analysis User Guide
+Version M-2016.12-SP4

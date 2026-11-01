@@ -1,0 +1,1252 @@
+
+
+===== PDF page 143 =====
+Feedback
+7
+Creating a 3DIC Design
+In a 3DIC design, two or more die are directly stacked vertically to create a complete 
+design or system that contains multiple dies. In a 2.5D IC design, one or more die are 
+mounted on an interposer; the interposer also connects the die to each other and to the 
+package. The interposer can be manufactured from various materials including silicon or 
+glass.
+Figure 53
+Complex 3DIC Design
+The IC Compiler II tool supports a 3DIC flow and commands to create designs that contain 
+multiple dies. The die can be placed separately on a silicon interposer or stacked upon 
+each other and connected with through-silicon vias (TSV). The tool supports commands 
+to place the die, create the connections between the different die, and validate the 3DIC 
+design.
+The topics in this section describe a flow used to create a 2.5D design. The term “active 
+die” is used to describe the logic, memory, RF, or other die that contain active devices. The 
+interposer is the silicon die which mounts and connects the active die and is not required 
+to contain active components or logic.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+143
+
+
+===== PDF page 144 =====
+Chapter 7: Creating a 3DIC Design
+ 
+Feedback
+The flow for creating a 2.5D design with active die placed separately on a passive silicon 
+interposer is shown in the following figure.
+Figure 54
+3DIC Flow for 2.5D Design
+ 
+Prepare designs for the active die
+Create the interposer library and design
+Create the top-level design
+Create the interposer power grid
+Route the interposer
+ 
+For more details, see the following topics:
+•
+Preparing Libraries for a 3D IC Design
+•
+Preparing the Designs for the Active Die
+•
+Creating the Silicon Interposer Design
+•
+Reading and Writing Bump Cell and TSV Locations Using CSV Files
+•
+Bump Planning Using CSV Files
+•
+Creating the Top-Level Design
+•
+Creating Virtual Blocks
+•
+Creating the Power and Ground Meshes for the Interposer
+•
+Routing the Interposer
+•
+3DIC Glossary of Terms
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+144
+
+
+===== PDF page 145 =====
+Chapter 7: Creating a 3DIC Design
+Preparing Libraries for a 3D IC Design
+Feedback
+Preparing Libraries for a 3D IC Design
+A 3DIC design contains multiple subdesigns, and each subdesign can reference unique 
+libraries and use a different technology. The libraries might have different scale factors; 
+however, these libraries need to be used together in the complete 3DIC design. The IC 
+Compiler II tool provides application options to support libraries with different scale factors.
+To set the scaling factor for a library used in a 3DIC design, specify the 
+design.session_scale_factor application option before the first design library is 
+opened or created. The scale factors for the various libraries in a 3DIC design must be a 
+multiple of scale factors of all the libraries. For example, if the lib1 library has a scale factor 
+of 4000 and the lib2 library has a scale factor of 10000, the application option must be set 
+to the least common multiple (20000) or an even multiple of 20000. By default, this option 
+is not set. If you open a library with a different scale factor, the command issues an error 
+message and exits. The following example sets a scale factor of 20000.
+icc2_shell> set_app_options -name design.session_scale_factor \
+   -value 20000
+The tool also supports half-node scaling of libraries in a 3DIC design. The half-node scale 
+factor of a library is specified by the half_node_scale_factor attribute on the library. 
+If the design.is_3dic_mode application option is set to true on the top design, the 
+coordinates in the library are scaled by the half_node_scale_factor setting when the 
+library is read.
+Preparing the Designs for the Active Die
+Begin the 2.5D flow by creating the individual active die to be placed on the silicon 
+interposer or on one another. Each active die has an initial floorplan and contains bump 
+cells that are used to connect the active die to the silicon interposer or to another active 
+die.
+The following simplified flow can be used as a guideline to prepare each active die. These 
+steps are similar to those used to create a flip-chip design, see Creating Arrays of Bump 
+Cells for more information. It is not necessary to create a fully placed design, since the 
+critical pieces of information for placing the active die on interposer are the bump cell 
+locations and the active die size.
+1. Read the netlist with the read_verilog command.
+icc2_shell> read_verilog logic.v
+2. Initialize the floorplan with the initialize_floorplan command or by reading the 
+DEF file with the read_def command.
+icc2_shell> read_def logic.def
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+145
+
+
+===== PDF page 146 =====
+Chapter 7: Creating a 3DIC Design
+Creating the Silicon Interposer Design
+Feedback
+3. Instantiate and place the bump cells with the create_bump_array command.
+icc2_shell> create_bump_array -lib_cell BUMP -name BUMP_RING \
+   -delta {225 225} -bbox {{100 100} {4000 4000}}
+Alternatively, place existing bump cells with the read_aif command.
+Similar to a flip-chip design, the bump cell locations are derived from one of the following 
+sources:
+•
+A DEF file
+•
+An AIF file
+•
+The create_bump_array command
+The RDL routes from pad cell to bump cell can be created during a later design stage.
+Creating the Silicon Interposer Design
+To create the silicon interposer design, you must create the design library for the silicon 
+interposer, create the interposer netlist, initialize the floorplan, and create the power and 
+ground connections.
+To create the interposer design,
+1. Create the design library for the interposer, use the create_lib command as follows:
+icc2_shell> create_lib interposer.ndm -technology interposer.tf \
+   -ref_libs {c4_bump.nlib front_ubump.nlib physicalonly.nlib ...}
+2. Create an empty netlist for the interposer and read it with the read_verilog command.
+icc2_shell> sh cat interposer.v
+module interposer (dummypin);
+input dummypin;
+endmodule
+icc2_shell> read_verilog interposer.v
+The following example uses an empty interposer netlist. The top-level netlist contains 
+the connections. The IC Compiler II tool automatically updates the interposer netlist 
+with ports and all connections and creates feedthroughs as needed.
+3. Initialize the floorplan for the interposer.
+icc2_shell> initialize_floorplan -control_type die \
+   -boundary {{0 0} {15000 10000}}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+146
+
+
+===== PDF page 147 =====
+Chapter 7: Creating a 3DIC Design
+Creating the Silicon Interposer Design
+Feedback
+4. Create the bump arrays to connect the signal and power pads of the package to the 
+interposer with the create_bump_array command.
+icc2_shell> create_bump_array -lib_cell C4_BUMP \
+   -name C4_logic_SIGNAL_B -origin {500 500} -delta {190 190} \
+   -repeat {74 3}
+...
+5. Create through-silicon vias (TSVs) for each of the bump cells added in the previous 
+step with the derive_3d_interface command.
+icc2_shell> derive_3d_interface -from [get_cells C4_logic_SIGNAL_B*] \
+   -to_object_ref [get_via_defs -tech [get_techs *] VIAB1] \
+   -name_prefix VIAB1_C4_logic_SIGNAL_B
+...
+The derive_3d_interface command creates new 3DIC structures based on the 
+properties of existing structures in the design. The following figure shows the TSV cells 
+created by the previous command.
+Figure 55
+TSV Cells Created by derive_3d_interface
+6. Create matching types for signals, power, and ground nets for RDL routing.
+icc2_shell> create_matching_type \
+   -name Signal [all_connected [get_nets *SIGNAL*]]
+After performing these steps, the tool creates the interposer floorplan as shown in the 
+following figure. The bump cells around the periphery connect to signal bumps on the 
+active dies. The two bump arrays in the center connect to power and ground for the two 
+active dies.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+147
+
+
+===== PDF page 148 =====
+Chapter 7: Creating a 3DIC Design
+Reading and Writing Bump Cell and TSV Locations Using CSV Files
+Feedback
+Figure 56
+Interposer Floorplan
+Reading and Writing Bump Cell and TSV Locations Using CSV 
+Files
+Instead of setting placement constraints and matching types to place and connect bump 
+cells and through-silicon vias (TSVs), you can specify location and connection information 
+by using one or more comma-separated values (CSV) files. Use the read_design_io 
+command to read the placement and connection information from the CSV file and place 
+the cells on the interposer. Use the write_design_io command to write out the location 
+information to a CSV file.
+The following example writes out the locations of the bump cells and TSVs in the current 
+design.
+icc2_shell> write_design_io -file_name bump_tsv_locations.csv
+icc2_shell> sh cat bump_tsv_locations.csv
+Reference_name,C4_inst,Ubump_inst,TSV_inst,X_origin,Y_origin,
+  Orientation,Port_name,Net_name,Comments
+C4_BUMP,C4_logic_SIGNAL_B_0_0,,,500,500,R0,,C4_logic_SIGNAL_B_0_0_net,
+C4_BUMP,C4_logic_SIGNAL_B_0_1,,,690,500,R0,,C4_logic_SIGNAL_B_0_1_net,
+C4_BUMP,C4_logic_SIGNAL_B_0_2,,,880,500,R0,,C4_logic_SIGNAL_B_0_2_net,
+...
+VIAB1,,,VIAB1_C4_mem_VSS_4_0,11165,5725,R0,,,
+VIAB1,,,VIAB1_C4_mem_VSS_4_1,11465,5725,R0,,,
+VIAB1,,,VIAB1_C4_mem_VSS_4_2,11765,5725,R0,,,
+...
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+148
+
+
+===== PDF page 149 =====
+Chapter 7: Creating a 3DIC Design
+Reading and Writing Bump Cell and TSV Locations Using CSV Files
+Feedback
+The CSV file contains a header row and a row of data for each cell instance. The following 
+list shows a description for each field and the default name for the field in the column 
+header:
+•
+Cell reference name (Reference_name)
+•
+C4-bump instance name (C4_inst)
+•
+U-bump instance name (Ubump_inst)
+•
+TSV instance name (TSV_inst)
+•
+X-origin (X_origin)
+•
+Y-origin (Y_origin)
+•
+Cell orientation (Orientation)
+•
+Port name (Port_name)
+•
+Net name (Net_name)
+•
+Comments (Comments)
+You can specify multiple input files and provide different fields in each file. Not all fields are 
+required for each cell instance or connection. The header row is required and describes 
+the keyword for each column. After the header row, each row describes a cell instance 
+or a connection. Cell rows specify the cell instance name, reference name, location, and 
+orientation of the cell. Connection rows specify connections between terminals, and port 
+rows are used to create a port.
+If a cell instance does not exist, the tool creates the specified cell instance. By default, the 
+tool performs the following checks when creating new cell instances:
+•
+Cells of the same type cannot overlap.
+•
+A C4-bump cell can overlap an existing u-bump cell, TSV, or standard cell.
+•
+A u-bump cell can overlap an existing C4-bump cell, TSV, or standard cell.
+•
+A TSV can overlap an existing C4-bump cell or u-bump cell.
+To disable checking, use the -overlap_check none option. To prevent any overlaps, use 
+the -overlap_check strict option.
+If the cell instance already exists, it is moved to the specified location. If the cell instance 
+overlaps an existing instance, it is skipped. The tool issues warning messages when 
+reading an invalid row and skips the row.
+By default, if a port does not exist, the tool ignores it. To create the port instead, use the 
+-create_ports option.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+149
+
+
+===== PDF page 150 =====
+Chapter 7: Creating a 3DIC Design
+Reading and Writing Bump Cell and TSV Locations Using CSV Files
+Feedback
+By default, if a port or net already exists, it retains the current setting of its port_type or 
+net_type attribute. To set this attribute to power for specific ports or nets, use the -power 
+option. To set this attribute to ground for specific ports or nets, use the -ground option. If 
+the ports or nets specified in these options do not exist, the tool creates them.
+If your CSV file contains custom column names, create a map file with a list of custom 
+column names and standard column names, then specify the map file with the -map_file 
+option. Each line in the map file contains the comma-separated custom column name and 
+corresponding standard column name as shown in the following example.
+custom_reference_name,Reference_name
+custom_C4_instance_name,C4_inst
+...
+In the following example, the locations_mapped.csv file uses custom column names and 
+the mapfile.txt file contains the list of custom column names and the standard column 
+names.
+icc2_shell> sh head mapfile.txt
+re,Reference_name
+c4,C4_inst
+ub,Ubump_inst
+ts,TSV_inst
+...
+ 
+icc2_shell> sh head locations_mapped.csv
+re,c4,ub,ts,x_,y_,or,po,ne,co
+C4_BUMP,C4_logic_SIGNAL_B_0_0,,,500,500,R0,,,
+C4_BUMP,C4_logic_SIGNAL_B_0_1,,,690,500,R0,,,
+...
+ 
+icc2_shell> read_design_io -file_name locations_mapped.csv \
+   -map_file mapfile.txt
+...
+1
+Use other options with the read_design_io command to control how the CSV file is read.
+•
+Specify a delimiter character with the -delimiter_char option.
+icc2_shell> sh head location_splat.csv
+Reference_name!C4_inst!Ubump_inst!TSV_inst!X_origin!...
+C4_BUMP!C4_logic_SIGNAL_B_0_0!!!500!500!R0!!!
+C4_BUMP!C4_logic_SIGNAL_B_0_1!!!690!500!R0!!!
+C4_BUMP!C4_logic_SIGNAL_B_0_2!!!880!500!R0!!!
+...
+ 
+icc2_shell> read_design_io -file_name location_splat.csv \
+   -delimiter_char !
+1
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+150
+
+
+===== PDF page 151 =====
+Chapter 7: Creating a 3DIC Design
+Reading and Writing Bump Cell and TSV Locations Using CSV Files
+Feedback
+•
+Specify a C4-bump reference name with the -c4_ref_name option.
+•
+Specify a TSV reference name with the -tsv_ref_name option.
+•
+Specify a u-bump reference name with the -ubump_ref_name option.
+•
+Specify the die origin and orientation.
+By default, the tool uses the lower-left corner of the die as its origin and assumes no 
+rotation (R0 orientation). To specify the origin coordinates, use the -die_origin option. 
+To specify the die orientation, use the -die_orientation option. Valid values are R0, 
+R90, R180, R270, MX, MXR90, MY, and MYR90.
+•
+Specify the cell origin location.
+By default, the coordinates specified for the cell origin are interpreted as the lower-
+left corner of the cell. To interpret the coordinates as the cell center instead, use the 
+-cell_origin_type center option.
+•
+Specify the length unit used in the CSV file.
+By default, the command assumes the x-coordinate and y-coordinate in the CSV file 
+use the design library length units. If the CSV file uses a different length unit, specify 
+a multiplier with the -units option. The command divides the values in the CSV file 
+by the specified value to determine the length in microns. The multiplier must be an 
+integer value greater than or equal to one.
+•
+Specify a comment character with the -comment_char option.
+Use options with the write_design_io command to control how the CSV file is written:
+•
+Specify the objects to write to the output file.
+By default, the command writes all C4-bump cells, u-bump cells, and TSVs to the 
+output file. To modify the objects written to the output file, use one of the following 
+options:
+◦
+-contents: Output only a single object type. Supported types are c4, ubump, or 
+tsv.
+◦
+-objects: Output only the specified objects. The specified objects must be C4-
+bump cells, u-bump cells, or TSVs.
+◦
+-within: Output only the C4-bump cells, u-bump cells, and TSVs that are within the 
+specified bounding box.
+•
+Specify the cell origin location.
+By default, the command uses the lower-left corner of a cell as its origin. To use the cell 
+center instead, use the -cell_origin_type center option. When you use this option, 
+the tool calculates the cell center based on its bounding box.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+151
+
+
+===== PDF page 152 =====
+Chapter 7: Creating a 3DIC Design
+Bump Planning Using CSV Files
+Feedback
+•
+Specify the length unit used in the CSV file.
+By default, the command writes the x-coordinate and y-coordinate to the CSV file using 
+the design library length units. To use a different length unit, specify a multiplier with the 
+-units option. The command multiplies the values in microns by the specified value 
+and writes this value to the CSV file. The multiplier must be an integer value greater 
+than or equal to one.
+•
+Specify the data fields to write to the CSV file by placing a list of field names in a file 
+and referencing the file with the -columns_file option.
+icc2_shell> sh cat c4_columns.csv
+Reference_name,C4_inst,X_origin,Y_origin
+ 
+icc2_shell> write_design_io -file_name c4bumps.csv \
+   -columns_file c4_columns.csv -contents c4
+Parsing columns file c4_columns.csv
+ 
+icc2_shell> sh head c4bumps.csv
+Reference_name,C4_inst,X_origin,Y_origin
+C4_BUMP,C4_logic_SIGNAL_B_0_0,500,500
+...
+Bump Planning Using CSV Files
+Bump planning using the concepts of bump patterns, regions and pseudo bumps offers a 
+way to rapidly develop 3DIC designs.
+Bump planning uses the write_design_io -pseudo_bumps command to save bump 
+regions and pseudo bump data on disk in ASCII format in the form of a CSV file. You 
+can then read this data in a new session by using the read_design_io -pseudo_bumps 
+command. For example, the following command writes out the bump information to 
+ABC.csv file.
+icc2_shell> write_design_io -pseudo_bumps -file_name ABC.csv
+In the following example, the tool reads the bump information from the ABC.csv file.
+icc2_shell> read_design_io -pseudo_bumps -file_name ABC.csv
+The CSV file that is generated has a defined set of columns that captures the bump 
+information.
+Table 4
+Bump Section Columns in the CSV File
+Column Name Description
+Name
+Name of the bump region
+This is a mandatory column and a value is a must for this column
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+152
+
+
+===== PDF page 153 =====
+Chapter 7: Creating a 3DIC Design
+Bump Planning Using CSV Files
+Feedback
+Table 4
+Bump Section Columns in the CSV File (Continued)
+Column Name Description
+Boundary
+List of X- and Y- coordinate pairs
+This is a mandatory column and a value is a must for this column
+Pitch_X
+List of cyclical distances between i’th and (i+1)th columns
+This is a mandatory column and a value is a must for this column
+Pitch_Y
+List of cyclical distances between i’th and (i+1)th columns
+This is a mandatory column and a value is a must for this column
+Pattern_offse
+t_X
+Delta-X from ll of the bump region to the start of the pattern
+Pattern_offse
+t_Y
+Delta-Y from ll of the bump region to the start of the pattern
+Row_stagge
+r_X
+List of cyclical distances for delta-X for start of a row
+Column_stagg
+er_Y
+List of cyclical distances for delta-Y for start of a column
+Orientation
+The orientation of the bump
+Valid values are: R0, R90, R180, R270, MX, MXR90, MY, MYR90
+A blank field defaults to R0
+Bump_shape
+Default shape of pseudobumps in the region, unless overridden by an individual 
+pseudobump
+Valid values are: triangle, square, pentagon, hexagon, septagon, octagon, circle
+Optional column and the default is octagon
+Bump_radius
+Default radius of pseudobumps in the region, unless overridden by an individual 
+pseudobump
+This is a mandatory column and a value is a must for this column
+Is_backside
+Whether the bump region is on the back-side
+Optional column and the default is false
+Port_pattern
+The 2D pattern of port names which the pseudobumps are connected to
+Net_pattern
+The 2D pattern of net names which the pseudobumps are connected to
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+153
+
+
+===== PDF page 154 =====
+Chapter 7: Creating a 3DIC Design
+Bump Planning Using CSV Files
+Feedback
+Table 5
+Pseudobump Section Columns in the CSV File
+Column Name Description
+Region_name
+Name of the region in which this pseudo-bump resides
+X_origin
+Y_origin
+Location of the center of the bump
+Row
+The row index number, starting from the bottom at 0 and increases in value as it 
+goes up
+Column
+The column index number, starting from the bottom at 0 and increases in value 
+as it goes up
+Net_name
+Name of the net connected to the bump
+Port_name
+Name of the top-level logical port that the pseudobump is connected to
+Shape
+Valid values are: triangle, square, pentagon, hexagon, septagon, octagon, circle
+If unspecified, it defaults to the value specified for the corresponding region
+Radius
+Radius value in units that you specify
+If unspecified, it defaults to the value specified for the corresponding region
+Is_hole
+Valid values are: true or false
+If unspecified, it defaults to false
+Is_probe_pad
+Valid values are: true or false
+If unspecified, it defaults to false
+Is_dummy
+Valid values are: true or false
+If unspecified, it defaults to false
+Is_default
+Valid values are: true or false
+If unspecified, it defaults to false
+Figure 57
+Example - Bump Planning CSV File
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+154
+
+
+===== PDF page 155 =====
+Chapter 7: Creating a 3DIC Design
+Bump Planning Using CSV Files
+Feedback
+To add new columns to the CSV file other than default columns mentioned in the 
+preceding tables, the steps are as follows:
+1. Define the column (that is, the user attribute)
+The user attribute can be one of the following types: Boolean, double, float, int, or 
+string. For string type, the value of attribute must not contain any comma (,).
+In the following example, a new column called “my_bump_details” is added to the CSV 
+file:
+icc2_shell> define_user_attribute -type string -classes cell 
+ -name my_bump_details
+2. Save the bump details to a CSV file
+icc2_shell> write_design_io -file_name ABC.csv -attribute 
+ {my_bump_details}
+To restore the bump planning data in a new session, the steps are as follows:
+1. Define the user attribute
+The user attribute can be one of the following types: Boolean, double, float, int, or 
+string. For string type, the value of attribute must not contain any comma (,).
+In the following example, a new attribute called “my_bump_details” is defined:
+icc2_shell> define_user_attribute -type string -classes cell 
+ -name my_bump_details
+2. Read the design from the CSV file
+icc2_shell> read_design_io -file_name input.csv -attribute 
+ {my_bump_details}
+The tool reads only those user attributes that are defined. If undefined, then those 
+attributes are ignored.
+Bump and Pseudo Bump ECO Using CSV Files
+You can compare the bump floorplan changes to a design by using the 
+compare_design_io command. This command uses two CSV files with the I/O elements 
+of the various versions of a design as input, compares them, and generates the 
+differences. These differences are displayed either in the GUI as a user table or written 
+out to a CSV file. You can then read this data from the ECO CSV file in a new session by 
+using the read_design_io -eco command. For example, the following command reads 
+the ECO bump information from the DEF.csv file.
+icc2_shell> read_design_io -eco -file_name DEF.csv
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+155
+
+
+===== PDF page 156 =====
+Chapter 7: Creating a 3DIC Design
+Creating the Top-Level Design
+Feedback
+The read_design_io -eco command reads only ECO CSV files for real bumps and 
+pseudo bumps. If you specify the -eco option with a non ECO design CSV file or specify 
+a bump or pseudo bump ECO CSV file without specifying the -eco option, the command 
+issues an error. When you use the -pseudo_bumps option along with the -eco option, the 
+reader command treats the specified file as a pseudo bump ECO file generated by the 
+compare_design_io command and parses it. For example, to parse a pseudo bump ECO 
+CSV file,
+icc2_shell> compare_design_io -pseudo_bumps -golden orig.csv -v2 new.csv 
+ -output bump_planning_eco.csv
+icc2_shell> read_design_io -pseudo_bumps -eco -file_name 
+ bump_planning_eco.csv
+If you use the -continue_on_error option with the read_design_io command, it ignores 
+rows that have warnings and process the valid rows. The -continue_on_error option is 
+applicable to both bump and pseudo bump CSV files.
+The following guidelines apply to reading bump ECO CSV files:
+•
+Only one ECO file can be specified via the -file_name_list option.
+•
+There must be a current design when the command is run.
+•
+read_design_io -eco supports undo and redo operations.
+•
+To summarize, the following cannot be specified with the -eco option:
+◦
+-map_file
+◦
+-comment_char
+◦
+-units
+Creating the Top-Level Design
+A 3DIC design contains two or more active dies and a silicon interposer; the active dies 
+and silicon interposer are instantiated into a top-level design. The top-level design also 
+contains connections between the package, silicon interposer, and active dies as well as 
+ports that represent connections to the package.
+Note that the top-level design specifies only the physical and logical connectivity between 
+the actual dies and the interposer; the top-level design is never actually manufactured in 
+silicon.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+156
+
+
+===== PDF page 157 =====
+Chapter 7: Creating a 3DIC Design
+Creating the Top-Level Design
+Feedback
+Using the top-level design, you can
+•
+Specify the coordinates and orientation of the dies on the silicon interposer
+•
+Copy or mirror bumps between the interposer and the dies
+•
+Perform 3D-physical and logical design checks of the entire system
+•
+Assign bumps to signals based on the shortest paths
+The following top-level Verilog netlist, which contains two die instances and an interposer 
+instance, is used in the following example.
+module top (resetn , clk , pllref , ...);
+input resetn ;
+input clk ;
+input pllref ;
+...
+leon3mp_chip logic_die_inst (.resetn(resetn), ...);
+mem mem_die_inst (.sa(sa), .sd(sd), ...);
+interposer interposer_inst ();
+endmodule
+To create a top-level design that contains the active dies and interposer,
+1. Create the design library to contain the top-level design.
+icc2_shell> create_lib top.ndm -technology top.tf \
+   -ref_libs {mem.ndm leon3mp.ndm interposer.ndm}
+Because the top-level design has references to the active dies and the silicon 
+interposer, the reference libraries must include the silicon interposer library and the 
+library for each active die.
+2. Read the Verilog netlist for the top-level design.
+icc2_shell> read_verilog top.v
+3. Initialize the floorplan.
+icc2_shell> initialize_floorplan -boundary {{0 0} {15000 10000}}
+4. Change the design_type attribute on the current block to 3dic.
+icc2_shell> set_attribute [current_block] design_type 3dic
+5. Place the interposer and active dies with the set_cell_location command. Note 
+the -z_offset option that specifies the relative z-location for the interposer and active 
+dies.
+icc2_shell> set_cell_location interposer_inst \
+   -coordinates {0 0} -z_offset 0 -orientation N
+icc2_shell> set_cell_location logic_die_inst \
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+157
+
+
+===== PDF page 158 =====
+Chapter 7: Creating a 3DIC Design
+Creating the Top-Level Design
+Feedback
+   -coordinates {2500 2600} -z_offset 1 -orientation FN
+icc2_shell> set_cell_location mem_die_inst \
+   -coordinates {10300 3000} -z_offset 1 -orientation FN
+6. Confirm the placement of the interposer and active dies with the 
+report_3d_chip_placement command.
+icc2_shell> report_3d_chip_placement -all
+---------------------------------------------------------------------
+chip_name        stack_z  location     orientation  scaling_factor
+------------------------------------------------------------------
+logic_die_inst   1        (2500 2600)  FN           1
+mem_die_inst     1        (10300 3000) FN           1
+interposer_inst  0        (0 0)        N            1
+---------------------------------------------------------------------
+To review the z-ordering of the active dies and interposer, you can also query the 
+z_order attribute on the die instances. Alternatively, click the Layers tab in the View 
+Settings panel to view the z-order (Z level) setting associated with each die instance as 
+shown in the following figure.
+Figure 58
+Z-Order in View Settings Panel
+7. (Optional) Determine if there are any overlaps between the active dies by using the 
+check_3d_design command with the -chip_placement option.
+icc2_shell> check_3d_design -chip_placement
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+158
+
+
+===== PDF page 159 =====
+Chapter 7: Creating a 3DIC Design
+Creating the Top-Level Design
+Feedback
+8. Save the design, save the library, and close the library.
+icc2_shell> save_block
+icc2_shell> save_lib
+icc2_shell> close_lib
+9. Reopen the library.
+icc2_shell> open_lib top.ndm -ref_libs_for_edit
+10. Ensure the blocks are editable by using the set_editability command.
+icc2_shell> set_editability \
+   -blocks leon3mp_chip.ndm:leon3mp_chip.design
+icc2_shell> set_editability -blocks mem.ndm:mem.design
+icc2_shell> set_editability -blocks siip.ndm:interposer.design
+11. Create bump cells on the interposer by copying the bump cell locations from the two 
+active dies.
+icc2_shell> create_3d_mirror_bumps -from mem_die_inst \
+   -to si_interposer_inst -ref_cell BUMP -prefix mem
+icc2_shell> create_3d_mirror_bumps -from logic_die_inst \
+   -to si_interposer_inst -ref_cell UBUMP -prefix logic
+When the source and target dies are stacked vertically, this command copies and 
+places bump cells, bump clusters, and bond pads from the source die to the target die. 
+The tool also supports 3DIC flows that copy the bump locations from the interposer to 
+the dies.
+If you are creating mirror bump cells for the pins of hard macro cells, use the -pins 
+option with the create_3d_mirror_bumps command to specify the hard macro pins.
+12. (Optional) Create logical connections between the bump cells or pseudo bumps on the 
+interposer added in the previous step and the bump cells on the active dies with the 
+propagate_3d_connections command.
+icc2_shell> propagate_3d_connections
+Created 215 new nets after inter-chip nets splitting.
+Propagate 67 nets.
+If you do not want to allow port punching, use the -no_port_punching option. To 
+specify the port name of newly created ports, use the -port_name_prefix option. 
+Use the -set_terminals_for_updated_ports to set terminals for any ports that are 
+updated. For all the available command options, see the propagate_3d_connections 
+command man page.
+13. Create matching types on the interposer.
+icc2_shell> current_design si_interposer
+{siip.ndm:si_interposer.design}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+159
+
+
+===== PDF page 160 =====
+Chapter 7: Creating a 3DIC Design
+Creating the Top-Level Design
+Feedback
+ 
+icc2_shell> add_to_matching_type Signal [get_cells *ubump*]
+1
+...
+ 
+icc2_shell> create_matching_type -name Power [get_pins *VDD_CORE*/PAD]
+{Power}
+...
+14. Create matching types at the top level.
+icc2_shell> current_design top
+icc2_shell> create_matching_type \
+   -name Signal { logic_die_inst/test_so ...}
+icc2_shell> add_to_matching_type Signal { si_interposer_inst/a1 ...}
+icc2_shell> add_to_matching_type Signal { mem_die_inst/sa[14] ...}
+15. Copy the matching types of cells, pins, and terminals to other pins with the 
+propagate_3d_matching_types command.
+icc2_shell> propagate_3d_matching_types
+==============================================================
+Matching types to be propagated from si_interposer_inst to 
+ mem_die_inst:
+{ 'Signal' 'Power' 'Ground' }
+==============================================================
+...
+After copying the matching types, you can use the report_matching_types command 
+to display the matching types assigned by the propagate_3d_matching_types 
+command.
+16. Assign connections between the bump cells or pseudo bumps and nearest driver cells 
+with the assign_3d_interchip_nets command.
+icc2_shell> assign_3d_interchip_nets
+...
+Doing assignment between chip logic_die_inst and
+  si_interposer_inst.
+Successfully assigned 149 nets between chip logic_die_inst and
+  si_interposer_inst.
+...
+Doing assignment between chip si_interposer_inst and Package.
+Successfully assigned 149 nets between chip si_interposer_inst
+  and Package.
+The assign_3d_interchip_nets command logically connects TSV, bump cells, and 
+pseudo bumps to nets, creates ports and nets in the interposer based on the top-level 
+connectivity, creates feedthroughs for signals that connect the package to the dies, and 
+creates die-to-die net connections in the interposer.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+160
+
+
+===== PDF page 161 =====
+Chapter 7: Creating a 3DIC Design
+Creating Virtual Blocks
+Feedback
+If the design contains multiple bump cells for the same interchip net, use the 
+-set_port_terminals incremental | all option to resolve ambiguity, allow the 
+tool to choose the preferred connection, and avoid creating an overlapping port. The 
+tool sets the preferred_pin attribute on the port when assigning the connection; 
+use the get_attribute command to review the assignment. The incremental 
+argument sets the preferred_pin attribute only on ports without the attribute 
+assignment. The all argument resets and reassigns the preferred pin attribute settings 
+for all ports. Similarly, the command supports logical connection between pseudo 
+bumps and drivers. Use the -bump_regions and -pseudo_bumps options to specify 
+pseudo bumps that are to be considered for logical connection propagation. Use the 
+-no_port_punching option to not allow port punching. If you want to include the 
+PG nets to assign, use the -include_pg_nets option. To specify the port name of 
+newly created ports, use the -port_name_prefix option. To know more about all the 
+available command options, see the assign_3d_interchip_nets command man 
+page.
+Creating Virtual Blocks
+A 3DIC design contains capacitance due to cross-coupling between two dies; 
+this capacitance affects nets at the top-level. To capture this capacitance, tools 
+such as StarRC extract the parasitic capacitance and store it in a virtual interface 
+block that is added to the design database. Before extracting the capacitance with 
+StarRC, the virtual interface block must be created in the IC Compiler II tool with the 
+create_3d_virtual_blocks command.
+The virtual interface block contains the ports, nets, shapes, and vias at the 
+interfaces between two stacked dies and between a die and the interposer. The 
+create_3d_virtual_blocks command supports options to modify the netlist and connect 
+the interface information, or only add the interface information without connecting it to the 
+existing blocks as shown in the following examples.
+•
+Create a virtual interface block between the mem_inst block and the interposer_inst 
+block and copy four layers from mem_inst and two layers from interposer_inst.
+icc2_shell> create_3d_virtual_blocks \
+   -blocks {{mem_inst:4} {interposer_inst:2}}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+161
+
+
+===== PDF page 162 =====
+Chapter 7: Creating a 3DIC Design
+Creating the Power and Ground Meshes for the Interposer
+Feedback
+•
+Create a virtual interface block between the mem_inst block and the logic_inst block 
+and copy four layers from both blocks.
+icc2_shell> create_3d_virtual_blocks \
+   -blocks { logic_inst mem_inst} -layers 4
+•
+Create virtual interface blocks between all dies and the interposer based on the z-
+offset attribute setting for the block. The virtual interface blocks are connected to the 
+top-level netlist.
+icc2_shell> create_3d_virtual_blocks -in_netlist
+Creating the Power and Ground Meshes for the Interposer
+The silicon interposer mounts the active dies and provides connections between them. In 
+addition to signals, power and ground are routed through the interposer to provide power 
+to the active dies. To provide adequate power and minimize IR drop, you should create a 
+power mesh inside the interposer to efficiently distribute power from the package to the 
+dies.
+Silicon interposers connect to the package through C4 bumps on the back side, then 
+distribute power to the microbumps on the front side which connect to flip-chip bumps on 
+the die. A power mesh on the intermediate routing layers of the interposer helps minimize 
+potential IR drop due to additional routing on the interposer. Standard IC Compiler II power 
+planning commands are used to create the power meshes on the interposer.
+To create a power mesh on interposer for each active die,
+1. Create the mesh pattern by using the create_pg_mesh_pattern command.
+icc2_shell> create_pg_mesh_pattern mesh1 \
+            -layers {{{vertical_layer: M4} {width: 12} \
+             {spacing:88} {pitch: 200} {offset: 65}} \
+             {{horizontal_layer: M3} {width: 12} \
+             {spacing:88} {pitch: 200} {offset: 40}}}
+2. Create the PG strategy to associate the pattern with the region of the interposer 
+beneath the active die.
+icc2_shell> set_pg_strategy strat1 \
+   -pattern {{name: mesh1} {nets: VDD_mem VSS_mem}} \
+   -polygon {{11060 3800} {12095 6755}}
+3. Instantiate the power plan with the compile_pg command.
+icc2_shell> compile_pg -strategies strat1
+4. Repeat the preceding steps for each active die.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+162
+
+
+===== PDF page 163 =====
+Chapter 7: Creating a 3DIC Design
+Routing the Interposer
+Feedback
+Routing the Interposer
+After placing bump cells on the silicon interposer, creating through-silicon vias (TSVs), and 
+creating a power grid beneath the active die instances, the interposer can be routed. The 
+IC Compiler II tool supports the following methods for creating routes on the interposer: 
+routing with Zroute, routing with the RDL router, and combining both routing methods.
+Before routing the interposer, you can specify a route plan to place vias and nets. The 
+route plan uses a pattern file that contains constraints and other data used to create and 
+place the vias and route guides. You can also modify the pattern file and add additional 
+routing rules, such as routing bumps to pre-placed vias and specifying point-to-point 
+routing connections, as described in Creating a Route Plan.
+Creating a Route Plan
+When routing the interposer for high-bandwidth memory designs, you 
+typically want finer control over placing the vias and nets. To do this, use the 
+create_interposer_routeplan command to create a route plan. The command 
+analyzes an interposer design containing pre-placed and preassigned frontside and 
+(optionally) backside bumps. Based on the configuration of the bumps, the command 
+creates and places vias that connect to the bumps to a second layer for routing and 
+creates routing guidance in the form of wire stub pre-routes (route guides). The command 
+also routes the center section between the bump arrays.
+The route guides are used by the RDL router to complete complex routing paths. The 
+placed bump vias and route guides are collectively known as a route plan. The goals of 
+the route plan are to optimize routing and meet specified routing requirements during the 
+routing step.
+The create_interposer_routeplan command supports the following interposer style 
+modes: default, single_hbm (for high-bandwidth memory designs), and fpga (for FPGA 
+designs). By default, the command inserts vias only. To insert vias and route guides, 
+specify single_hbm or fpga with the -interposer_style option.
+The tool processes different types of pattern files based on the interposer style you 
+choose. The pattern file contains the constraints and other data used to create and place 
+the vias and route guides.
+You can specify additional routing guidance by modifying the pattern file. For example, you 
+can
+•
+Create vias between bump cells and metal layers on the interposer
+•
+Specify via definitions, via locations, a single via or a stacked via, and via spacing rules
+•
+Route wire stubs to other wire stubs and vias (point-to-point routing)
+•
+Route pre-placed landing vias to bumps
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+163
+
+
+===== PDF page 164 =====
+Chapter 7: Creating a 3DIC Design
+Routing the Interposer
+Feedback
+The pattern file is an ASCII file containing constraints and directives to drive the 
+create_interposer_routeplan command. It contains one or more sections, where 
+each section begins with a keyword followed by a pair of curly brackets. Constraints are 
+specified inside the curly brackets. The tool uses a default pattern file unless you modify 
+the file with new constraints and specify the updated file with the -pattern_file option.
+To see a single_hbm interposer style pattern file, see Pattern File Example.
+The following example creates single vias between the RDL routing layer and the top 
+metal layer for all bump cells.
+icc2_shell> create_interposer_routeplan -pattern_file interposer.pat
+Routing High-Bandwidth Memory Designs
+3DIC interposer designs support high-bandwidth memory, a high-performance RAM 
+interface that uses stacked RAMs. High-bandwidth memory designs are often paired with 
+CPUs or GPUs on a silicon interposer die. These designs move memory closer to the 
+processor using a wider data pipeline, which speeds up data throughput, reduces the 
+amount of power necessary to drive a signal, and reduces RC delay.
+Interposer designs that incorporate high-bandwidth memory have specific, detailed 
+physical design requirements for routing that are more stringent than other interposer 
+configurations. These requirements include:
+•
+High-density routing, often with track utilization rate nearing 100%
+•
+Limited number of routing layers (often two)
+•
+Highly parallel bus routing
+•
+Length matching for critical data signals
+•
+Coaxial shielding
+The following routing strategy is beneficial for routing high-bandwidth memory designs. 
+Use this strategy for high-density, high-bandwidth memory designs only.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+164
+
+
+===== PDF page 165 =====
+Chapter 7: Creating a 3DIC Design
+Routing the Interposer
+Feedback
+•
+Routing bumps to landing vias
+You can direct the router to search for the closest via on the same net as 
+a bump and connect the bump to the via, as shown in the following figure: 
+Vias that touch a bump are considered connected and do not need to be routed unless 
+there are DRC violations between the bump and via.
+•
+Point-to-point routing
+After routing bumps to landing vias, you can specify point-to-point connections to route 
+between bumps, landing vias, and wire stubs by providing the following information in a 
+route plan file before routing:
+#netName #layer #point1_x #point1_y #point2_x #point2_y
+The route plan file specifies the net to be routed, the connection points, and the target 
+routing layer for the point-to-point connections.
+The connection points must meet the following requirements:
+◦
+The points must fall inside the same net shapes, such as wire, via, or pin shapes.
+◦
+For wire shapes, the point must be exactly at the endpoint of the wire. However, the 
+router does not necessarily connect to pins and vias exactly at the point specified in 
+the file.
+◦
+The points must be on the minimum grid.
+◦
+The points must be on coordinates that do not have DRC violations, meaning 
+that when routing a wire to the specified point, there are no DRC violations with 
+neighboring shapes. Routing pairs with DRC violations are left unrouted.
+In the following example, the RDL router routes the Net1 net from point (10.5, 15.0) to 
+point (20.5, 20.0) on the AP layer:
+Net1 AP 10.5 15.0 20.5 20.0
+The following example routes the interposer for a high-bandwidth memory design:
+### Open the floorplanned interposer block
+ 
+open_lib interposer_floorplan
+open_block interposer
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+165
+
+
+===== PDF page 166 =====
+Chapter 7: Creating a 3DIC Design
+Routing the Interposer
+Feedback
+ 
+### Set the design style to a 3DIC interposer
+ 
+set_app_options -name flip_chip.route.design_style \
+   -value 3dic_interposer
+ 
+### Create the interposer RDL vias and route guides (routeplanning)
+### Set the style to HBM and specify the pattern constraint file
+ 
+create_interposer_routeplan -interposer_style single_hbm \
+   -pattern_file HBM_pattern.txt
+ 
+### Define the HBM channel signals to be routed
+ 
+set net_all "DQa24 DMa2 DMa3 DQa16 DQa27 DQa26 DQa25 DQa20 \
+   DQa21 RDQSa0_t DQa28 DQa29 DERRa0 RDQSa0_c DQa18 DQa19 DQa17 \
+   RDa1 DQa22 DQa23 DBIa3 DQa31 DQa30 DBIa2 DMe2 DQe25 DMe3 \
+   RDQSe0_t DQe18 DQe19 DQe16 DERRe0 DQe26 DQe27 DQe24 DQe17 \
+   DQe30 DQe23 DQe21 DQe20 RDQSe0_c DQe31 DQe29 DQe28 RDe1 DBIe2 \
+   DQe22 DBIe3"
+ 
+### Define the routing rules
+ 
+set fc_route_layer_m4 {M4 AP}
+set fc_route_space_m4 {M4 2.96 AP 3}
+set fc_route_width_m4 {M4 1.6 AP 5}
+ 
+set fc_route_layer_m2 {M2 AP}
+set fc_route_space_m2 {M2 2.96 AP 3}
+set fc_route_width_m2 {M2 1.6 AP 5}
+ 
+create_routing_rule rdlrule_m4 -widths $fc_route_width_m4 \
+   -spacings $fc_route_space_m4
+create_routing_rule rdlrule_m2 -widths $fc_route_width_m2 \
+   -spacings $fc_route_space_m2
+ 
+set_routing_rule [get_nets $net_m2] -rule rdlrule_m2
+set_routing_rule [get_nets $net_m4] -rule rdlrule_m4
+ 
+### Set the shape type for pre-placed vias to user_route
+### to preserve vias until the routing stage
+ 
+set_attribute [get_vias *] shape_use user_route
+ 
+set_app_options -name flip_chip.route.connect_via_center \
+   -value true
+ 
+### Specify bump-to-via routing and route the
+### RDL layer
+ 
+set_app_options -name flip_chip.route.bump_via_landing_mode \
+   -value true
+ 
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+166
+
+
+===== PDF page 167 =====
+Chapter 7: Creating a 3DIC Design
+Routing the Interposer
+Feedback
+### Route the nets
+### Use the -coordinates option to speed up routing by
+### routing inside the specified region only
+ 
+route_3d_rdl -nets [get_nets $net_all]  -layer AP \
+  -coordinates {{12300 11980} {12515 18814}}
+ 
+### Set the options for via-to-stub routing on the lower layers
+ 
+set_app_options -name flip_chip.route.bump_via_landing_mode \
+  -value false
+ 
+### Specify the point-to-point connection file created by the
+### route plan command for the first layer (M2)
+ 
+set_app_options \
+   -name flip_chip.route.point_to_point_connection_file_name \
+   -value hbm_p2p.txtM2
+ 
+### Route the via-to-stub nets on the specified layer (M2)
+ 
+route_3d_rdl -nets [get_nets $net_m2] -layer M2 \
+  -coordinates {{12300 11980} {12515 18814}}
+ 
+### Set the point-to-point connection file created by the route
+### plan command for the second layer (M4)
+ 
+set_app_options \
+   -name flip_chip.route.point_to_point_connection_file_name \
+   -value hbm_p2p.txtM4
+ 
+### Route the via-to-stub nets on the specified layer (M4)
+ 
+route_3d_rdl -nets [get_nets $net_m4] -layer M4 \
+   -coordinates {{12300 11980} {12515 18814}}
+Routing With a Combined Zroute and RDL Router Flow
+If routing on the M1-Mn layers does not require the special configurations needed for 
+high-bandwidth memory designs and if connections to through-silicon via (TSV) pins are 
+needed, route the interposer with a combined Zroute and RDL router flow.
+To route the interposer with Zroute and the RDL router,
+1. Create the interposer RDL vias (route planning in the default mode).
+icc2_shell> create_interposer_routeplan -pattern_file via_pattern.txt
+icc2_shell> set_attribute [get_vias *] shape_use user_route
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+167
+
+
+===== PDF page 168 =====
+Chapter 7: Creating a 3DIC Design
+Routing the Interposer
+Feedback
+2. Create the routing rules. In this example, AP is the RDL metal layer and MB is the 
+backside metal layer.
+icc2_shell> create_routing_rule Wide \
+   -widths {AP 5 MB 5 M1 2 M2 2 M3 2 M4 2}
+{Wide}
+icc2_shell> set_routing_rule $nets -rule Wide
+3. Route the bumps to landing vias on the RDL layer.
+icc2_shell> set_app_options -name 
+ flip_chip.route.bump_via_landing_mode \
+   -value true
+icc2_shell> route_3d_rdl -nets $nets -layer AP
+icc2_shell> set_app_options -name 
+ flip_chip.route.bump_via_landing_mode \
+   -value false
+4. Route the M1-Mn layer nets on the interposer with the route_group command.
+icc2_shell> set_ignored_layers -min_routing_layer M1 
+ -max_routing_layer M4
+icc2_shell> route_group -nets $nets
+5. (If needed) Route the nets on backside layer.
+icc2_shell> route_3d_rdl -nets $nets -layer MB
+Pattern File Example
+The following example shows a single_hbm pattern file. The pattern file contains one 
+or more sections, where each section begins with a keyword followed by one or more 
+constraints specified inside a pair of curly brackets. You can modify the pattern file to 
+specify additional routing rules by adding constraints (keywords and values).
+config {
+{via_def 0 VIA3AP_1cut}
+}
+exception {
+{hbm_bump_array_box {5194.670 4225.350} {6337.725 4362.85}
+{9119.675 4387.700} {10357.175 4525.2}}
+{hbm_right_array_routing_layer M3}
+(hbm_left_array_routing_layer M2}
+{hbm_wire_width 1.8}
+{hbm_wire_spacing 3.5}
+{hbm_channel_direction horizontal}
+{hbm_mid_shielding HBM_VSS}
+{hbm_middle_turn_offset 72.0}
+{hbm_boundary_stub_corners auto_align}
+{hbm_via_bump_abutment false}
+{hbm_rdl_via_offset 0}
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+168
+
+
+===== PDF page 169 =====
+Chapter 7: Creating a 3DIC Design
+Routing the Interposer
+Feedback
+{hbm_stub_alignment_type staggered_before}
+}
+Creating RDL Net Shields in High-Bandwidth Memory Designs
+You can shield nets on the same layer (known as side-wall shielding) or shield nets above 
+and below the layer (known as coaxial shielding). Coaxial shielding provides better signal 
+isolation than side-wall shielding, but it uses more routing resources. It is best to use a 
+combination of side-wall shields and coaxial shields in high-bandwidth memory designs. In 
+this flow, the create_interposer_routeplan command creates wire stubs (route guides) 
+and leaves as much space for shielding wires as possible.
+To create RDL routes and shield the routes for a high-bandwidth memory design,
+1. Set the flip_chip.route.shielding_net application option to define the shielding 
+net connection.
+icc2_shell> set_app_options -name flip_chip.route.shielding_net \
+   -value VSS
+2. Create the routing rule.
+icc2_shell> create_routing_rule rdlrule -widths {MRDL 6 M9 5}
+3. Assign the routing rule to the RDL nets.
+icc2_shell> set_routing_rule $rdl_nets -rule rdlrule
+4. Route the RDL nets.
+icc2_shell> route_3d_rdl -layer {MRDL} -nets $rdl_nets
+5. Create the routing rule and specify the shield spacing and shield widths.
+icc2_shell> create_routing_rule shieldrule -shield_spacings {M9 2} \
+   -shield_widths {M9 5} -widths {MRDL 6 M9 5}
+6. Assign the routing rule to the RDL nets.
+icc2_shell> set_routing_rule $rdl_nets -rule shieldrule
+7. Create the RDL net shields.
+icc2_shell> create_rdl_shields -layers {M9} -reference_layer {MRDL} \
+   -offset {8} -nets $rdlnets
+To speed up routing by routing only within a specific region, use the -coordinates 
+option and specify a list of rectangles.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+169
+
+
+===== PDF page 170 =====
+Chapter 7: Creating a 3DIC Design
+3DIC Glossary of Terms
+Feedback
+3DIC Glossary of Terms
+The following terminologies and conventions are used in 3DIC design:
+•
+Interposer: The specialized silicon die that provides connections to the package and 
+mounts for the dies. The passive interposer typically contains no logic, but does contain 
+TSVs, C4 bumps, microbumps, and routing.
+•
+Active dies: The dies that contact the interposer, face down, using flip-chip technology.
+•
+Front side: The top side of a silicon die. The front side is opposite the substrate and 
+device layers where most of the standard cell metal routing is performed.
+•
+Back side: The bottom side of a silicon die. The bottom side contains the substrate and 
+device layers where the back metal layers are created.
+•
+Through-silicon via: A via that connects the back-side metal through the substrate with 
+the device layers to the front-side metal. TSVs are required on the silicon interposer to 
+propagate the signals from the package substrate through the interposer to the dies.
+•
+Microbump: A back-side or front-side cell with a single pin. The cell contains the RDL 
+metal and passivation opening for external contact. The microbump can be used for 
+signal and power and ground connections to another die.
+•
+C4 bump: A back-side or front-side cell with a single pin used for a connection to the 
+package. The cell contains the back-side metal and passivation opening for external 
+contact. C4 bumps are used for signal and power and ground connections to the 
+package.
+C4 stands for Controlled Collapse Chip Connect.
+IC Compiler™ II Design Planning User Guide
+V-2023.12
+170
