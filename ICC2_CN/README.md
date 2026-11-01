@@ -10,7 +10,7 @@
 
 ```
 ICC2_CN/
-├── main.tex              # 主文件（XeLaTeX）
+├── main.tex / ICC2_CN.pdf  # 主文件与编译产物（XeLaTeX）
 ├── preamble.tex          # 宏包、双语标题、提示框、Tcl 代码样式
 ├── chapters/
 │   ├── 00_preface.tex    # 前言（已译）
@@ -49,16 +49,18 @@ ICC2_CN/
 需安装 TeX 发行版（TeX Live / MiKTeX），并确保可用 **XeLaTeX**。
 
 ```bat
-cd "d:\IC Design\VLSI\ICC2_UG_CN"
+cd "d:\IC Design\VLSI\ICC2_CN"
 build.bat
 ```
 
 或手动：
 
 ```bat
-xelatex -interaction=nonstopmode main.tex
-xelatex -interaction=nonstopmode main.tex
+xelatex -interaction=nonstopmode -jobname=ICC2_CN main.tex
+xelatex -interaction=nonstopmode -jobname=ICC2_CN main.tex
 ```
+
+产物为 `ICC2_CN.pdf`（与文件夹名一致，对应封面 *IC Compiler II Implementation User Guide*）。
 
 ### 字体
 

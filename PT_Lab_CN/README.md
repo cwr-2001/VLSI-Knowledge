@@ -10,7 +10,7 @@
 
 ```
 PT_Lab_CN/
-├── main.tex              # 主文件（XeLaTeX）
+├── main.tex / PT_Lab_CN.pdf  # 主文件与编译产物
 ├── preamble.tex          # 宏包、提示框、Tcl 代码样式
 ├── chapters/
 │   ├── 00_copyright.tex
@@ -50,6 +50,8 @@ build.bat
 ```
 
 需安装 TeX 发行版并可用 **XeLaTeX**。字体默认 `SimSun` / `Microsoft YaHei` / `FangSong`。
+
+产物为 `PT_Lab_CN.pdf`（与文件夹名一致，对应封面 *PrimeTime Workshop Lab Guide*）。
 
 ## 翻译约定
 
