@@ -12,3 +12,5 @@ build.bat
 ```
 
 需要 XeLaTeX 与 Windows 字体 SimSun / Microsoft YaHei / FangSong。
+
+产物为 `ICC2_DP_CN.pdf`（与文件夹名一致，对应封面 *IC Compiler II Design Planning User Guide*）。

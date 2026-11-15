@@ -26,3 +26,5 @@ ICC2_TA_CN/
 cd "d:\IC Design\VLSI\ICC2_TA_CN"
 build.bat
 ```
+
+产物为 `ICC2_TA_CN.pdf`（与文件夹名一致，对应封面 *IC Compiler II Timing Analysis User Guide*）。
